@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/EditorBeatmap.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Lists;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+
+namespace osu.Game.Screens.Edit
+{
+    public partial class EditorBeatmap : TransactionalCommitComponent, IBeatmap, IBeatSnapProvider
+    {
+        /// &lt;summary&gt;
+        /// Will become &lt;c&gt;true&lt;/c&gt; when a new update is queued, and &lt;c&gt;false&lt;/c&gt; when all updates have been applied.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is intended to be used to avoid performing operations (like playback of samples)
+        /// while mutating hitobjects.
+        /// &lt;/remarks&gt;
+        public IBindable&lt;bool&gt; UpdateInProgress =&gt; updateInProgress;
+
+        private readonly BindableBool updateInProgress = new BindableBool();
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; is added to this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public event Action&lt;HitObject&gt; HitObjectAdded;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; is removed from this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public event Action&lt;HitObject&gt; HitObjectRemoved;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; is updated.
+        /// &lt;/summary&gt;
+        public event Action&lt;HitObject&gt; HitObjectUpdated;
+
+        /// &lt;summary&gt;
+        /// Invoked after any state changes occurred which triggered a beatmap reprocess via an &lt;see cref=&quot;IBeatmapProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Beatmap processing may change the order of hitobjects. This event gives external components a chance to handle any changes
+        /// not covered by the &lt;see cref=&quot;HitObjectAdded&quot;/&gt; / &lt;see cref=&quot;HitObjectUpdated&quot;/&gt; / &lt;see cref=&quot;HitObjectRemoved&quot;/&gt; events.
+        /// &lt;/remarks&gt;
+        public event Action BeatmapReprocessed;
+
+        /// &lt;summary&gt;
+        /// All currently selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        public readonly BindableList&lt;HitObject&gt; SelectedHitObjects = new BindableList&lt;HitObject&gt;();
+
+        /// &lt;summary&gt;
+        /// The current placement. Null if there&#39;s no active placement.
+        /// &lt;/summary&gt;
+        public readonly Bindable&lt;HitObject&gt; PlacementObject = new Bindable&lt;HitObject&gt;();
+
+        private readonly BeatmapInfo beatmapInfo;
+        public readonly IBeatmap PlayableBeatmap;
+
+        /// &lt;summary&gt;
+        /// Whether at least one timing control point is present and providing timing information.
+        /// &lt;/summary&gt;
+        public IBindable&lt;bool&gt; HasTiming =&gt; hasTiming;
+
+        private readonly Bindable&lt;bool&gt; hasTiming = new Bindable&lt;bool&gt;();
+
+        [CanBeNull]
+        public readonly EditorBeatmapSkin BeatmapSkin;
+
+        public readonly Storyboard Storyboard;
+
+        [Resolved]
+        private BindableBeatDivisor beatDivisor { get; set; }
+
+        [Resolved]
+        private EditorClock editorClock { get; set; }
+
+        public BindableInt PreviewTime { get; }
+
+        private readonly IBeatmapProcessor beatmapProcessor;
+
+        private readonly Dictionary&lt;HitObject, Bindable&lt;double&gt;&gt; startTimeBindables = new Dictionary&lt;HitObject, Bindable&lt;double&gt;&gt;();
+
+        public EditorBeatmap(IBeatmap playableBeatmap, ISkin beatmapSkin = null, Storyboard storyboard = null, BeatmapInfo beatmapInfo = null)
+        {
+            PlayableBeatmap = playableBeatmap;
+            PlayableBeatmap.ControlPointInfo = ConvertControlPoints(PlayableBeatmap.ControlPointInfo);
+
+            this.beatmapInfo = beatmapInfo ?? playableBeatmap.BeatmapInfo;
+
+            if (beatmapSkin is LegacyBeatmapSkin skin)
+                BeatmapSkin = new EditorBeatmapSkin(this, skin);
+
+            Storyboard = storyboard ?? new Storyboard();
+            Storyboard.Beatmap = this;
+            Storyboard.BeatmapInfo = this.beatmapInfo;
+
+            beatmapProcessor = new EditorBeatmapProcessor(this, playableBeatmap.BeatmapInfo.Ruleset.CreateInstance());
+
+            foreach (var obj in HitObjects)
+                trackStartTime(obj);
+
+            Breaks = new BindableList&lt;BreakPeriod&gt;(playableBeatmap.Breaks);
+            Breaks.BindCollectionChanged((_, _) =&gt;
+            {
+                playableBeatmap.Breaks.Clear();
+                playableBeatmap.Breaks.AddRange(Breaks);
+            });
+
+            Bookmarks = new BindableList&lt;int&gt;(playableBeatmap.Bookmarks);
+            Bookmarks.BindCollectionChanged((_, _) =&gt;
+            {
+                BeginChange();
+                playableBeatmap.Bookmarks = Bookmarks.OrderBy(x =&gt; x).Distinct().ToArray();
+                EndChange();
+            });
+
+            SliderVelocityPresets = new BindableList&lt;double&gt;(playableBeatmap.SliderVelocityPresets);
+            SliderVelocityPresets.BindCollectionChanged((_, _) =&gt;
+            {
+                BeginChange();
+                playableBeatmap.SliderVelocityPresets = SliderVelocityPresets.OrderBy(x =&gt; x).Distinct().ToArray();
+                EndChange();
+            });
+
+            PreviewTime = new BindableInt(BeatmapInfo.Metadata.PreviewTime);
+            PreviewTime.BindValueChanged(s =&gt;
+            {
+                BeginChange();
+                BeatmapInfo.Metadata.PreviewTime = s.NewValue;
+                EndChange();
+            });
+
+            BeatmapVersion = PlayableBeatmap.BeatmapVersion;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts a &lt;see cref=&quot;ControlPointInfo&quot;/&gt; such that the resultant &lt;see cref=&quot;ControlPointInfo&quot;/&gt; is non-legacy.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;incoming&quot;&gt;The &lt;see cref=&quot;ControlPointInfo&quot;/&gt; to convert.&lt;/param&gt;
+        /// &lt;returns&gt;The non-legacy &lt;see cref=&quot;ControlPointInfo&quot;/&gt;. &lt;paramref name=&quot;incoming&quot;/&gt; is returned if already non-legacy.&lt;/returns&gt;
+        public static ControlPointInfo ConvertControlPoints(ControlPointInfo incoming)
+        {
+            // ensure we are not working with legacy control points.
+            // if we leave the legacy points around they will be applied over any local changes on
+            // ApplyDefaults calls. this should eventually be removed once the default logic is moved to the decoder/converter.
+            if (!(incoming is LegacyControlPointInfo))
+                return incoming;
+
+            var newControlPoints = new ControlPointInfo();
+
+            foreach (var controlPoint in incoming.AllControlPoints)
+            {
+                switch (controlPoint)
+                {
+                    case DifficultyControlPoint:
+                    case SampleControlPoint:
+                        // skip legacy types.
+                        continue;
+
+                    default:
+                        newControlPoints.Add(controlPoint.Time, controlPoint);
+                        break;
+                }
+            }
+
+            return newControlPoints;
+        }
+
+        public BeatmapInfo BeatmapInfo
+        {
+            get =&gt; beatmapInfo;
+            set =&gt; throw new InvalidOperationException($&quot;Can&#39;t set {nameof(BeatmapInfo)} on {nameof(EditorBeatmap)}&quot;);
+        }
+
+        public BeatmapMetadata Metadata =&gt; beatmapInfo.Metadata;
+
+        public BeatmapDifficulty Difficulty
+        {
+            get =&gt; PlayableBeatmap.Difficulty;
+            set =&gt; PlayableBeatmap.Difficulty = value;
+        }
+
+        public ControlPointInfo ControlPointInfo
+        {
+            get =&gt; PlayableBeatmap.ControlPointInfo;
+            set =&gt; PlayableBeatmap.ControlPointInfo = value;
+        }
+
+        public readonly BindableList&lt;BreakPeriod&gt; Breaks;
+
+        SortedList&lt;BreakPeriod&gt; IBeatmap.Breaks
+        {
+            get =&gt; PlayableBeatmap.Breaks;
+            set =&gt; PlayableBeatmap.Breaks = value;
+        }
+
+        public double TotalBreakTime =&gt; PlayableBeatmap.TotalBreakTime;
+
+        public IReadOnlyList&lt;HitObject&gt; HitObjects =&gt; PlayableBeatmap.HitObjects;
+
+        public IEnumerable&lt;BeatmapStatistic&gt; GetStatistics() =&gt; PlayableBeatmap.GetStatistics();
+
+        public double GetMostCommonBeatLength() =&gt; PlayableBeatmap.GetMostCommonBeatLength();
+
+        public double AudioLeadIn
+        {
+            get =&gt; PlayableBeatmap.AudioLeadIn;
+            set =&gt; PlayableBeatmap.AudioLeadIn = value;
+        }
+
+        public float StackLeniency
+        {
+            get =&gt; PlayableBeatmap.StackLeniency;
+            set =&gt; PlayableBeatmap.StackLeniency = value;
+        }
+
+        public bool SpecialStyle
+        {
+            get =&gt; PlayableBeatmap.SpecialStyle;
+            set =&gt; PlayableBeatmap.SpecialStyle = value;
+        }
+
+        public bool LetterboxInBreaks
+        {
+            get =&gt; PlayableBeatmap.LetterboxInBreaks;
+            set =&gt; PlayableBeatmap.LetterboxInBreaks = value;
+        }
+
+        public bool WidescreenStoryboard
+        {
+            get =&gt; PlayableBeatmap.WidescreenStoryboard;
+            set =&gt; PlayableBeatmap.WidescreenStoryboard = value;
+        }
+
+        public bool EpilepsyWarning
+        {
+            get =&gt; PlayableBeatmap.EpilepsyWarning;
+            set =&gt; PlayableBeatmap.EpilepsyWarning = value;
+        }
+
+        public bool SamplesMatchPlaybackRate
+        {
+            get =&gt; PlayableBeatmap.SamplesMatchPlaybackRate;
+            set =&gt; PlayableBeatmap.SamplesMatchPlaybackRate = value;
+        }
+
+        public double DistanceSpacing
+        {
+            get =&gt; PlayableBeatmap.DistanceSpacing;
+            set =&gt; PlayableBeatmap.DistanceSpacing = value;
+        }
+
+        public int GridSize
+        {
+            get =&gt; PlayableBeatmap.GridSize;
+            set =&gt; PlayableBeatmap.GridSize = value;
+        }
+
+        public double TimelineZoom
+        {
+            get =&gt; PlayableBeatmap.TimelineZoom;
+            set =&gt; PlayableBeatmap.TimelineZoom = value;
+        }
+
+        public CountdownType Countdown
+        {
+            get =&gt; PlayableBeatmap.Countdown;
+            set =&gt; PlayableBeatmap.Countdown = value;
+        }
+
+        public int CountdownOffset
+        {
+            get =&gt; PlayableBeatmap.CountdownOffset;
+            set =&gt; PlayableBeatmap.CountdownOffset = value;
+        }
+
+        public readonly BindableList&lt;int&gt; Bookmarks;
+
+        int[] IBeatmap.Bookmarks
+        {
+            get =&gt; PlayableBeatmap.Bookmarks;
+            set =&gt; PlayableBeatmap.Bookmarks = value;
+        }
+
+        public readonly BindableList&lt;double&gt; SliderVelocityPresets;
+
+        double[] IBeatmap.SliderVelocityPresets
+        {
+            get =&gt; PlayableBeatmap.SliderVelocityPresets;
+            set =&gt; PlayableBeatmap.SliderVelocityPresets = value;
+        }
+
+        public int BeatmapVersion { get; set; }
+
+        public IBeatmap Clone() =&gt; (EditorBeatmap)MemberwiseClone();
+
+        private IList mutableHitObjects =&gt; (IList)PlayableBeatmap.HitObjects;
+
+        private readonly List&lt;HitObject&gt; batchPendingInserts = new List&lt;HitObject&gt;();
+
+        private readonly List&lt;HitObject&gt; batchPendingDeletes = new List&lt;HitObject&gt;();
+
+        private readonly HashSet&lt;HitObject&gt; batchPendingUpdates = new HashSet&lt;HitObject&gt;();
+
+        /// &lt;summary&gt;
+        /// Perform the provided action on every selected hitobject.
+        /// Changes will be grouped as one history action.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Note that this incurs a full state save, and as such requires the entire beatmap to be encoded, etc.
+        /// Very frequent use of this method (e.g. once a frame) is most discouraged.
+        /// If there is need to do so, use local precondition checks to eliminate changes that are known to be no-ops.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;action&quot;&gt;The action to perform.&lt;/param&gt;
+        public void PerformOnSelection(Action&lt;HitObject&gt; action)
+        {
+            if (SelectedHitObjects.Count == 0)
+                return;
+
+            BeginChange();
+
+            foreach (var h in SelectedHitObjects)
+            {
+                action(h);
+                Update(h);
+            }
+
+            EndChange();
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a collection of &lt;see cref=&quot;HitObject&quot;/&gt;s to this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObjects&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt;s to add.&lt;/param&gt;
+        public void AddRange(IEnumerable&lt;HitObject&gt; hitObjects)
+        {
+            BeginChange();
+            foreach (var h in hitObjects)
+                Add(h);
+            EndChange();
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a &lt;see cref=&quot;HitObject&quot;/&gt; to this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to add.&lt;/param&gt;
+        public void Add(HitObject hitObject)
+        {
+            // Preserve existing sorting order in the beatmap
+            int insertionIndex = findInsertionIndex(PlayableBeatmap.HitObjects, hitObject.StartTime);
+            Insert(insertionIndex + 1, hitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Inserts a &lt;see cref=&quot;HitObject&quot;/&gt; into this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// It is the invoker&#39;s responsibility to make sure that &lt;see cref=&quot;HitObject&quot;/&gt; sorting order is maintained.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;index&quot;&gt;The index to insert the &lt;see cref=&quot;HitObject&quot;/&gt; at.&lt;/param&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to insert.&lt;/param&gt;
+        public void Insert(int index, HitObject hitObject)
+        {
+            trackStartTime(hitObject);
+
+            mutableHitObjects.Insert(index, hitObject);
+
+            BeginChange();
+            batchPendingInserts.Add(hitObject);
+            EndChange();
+        }
+
+        /// &lt;summary&gt;
+        /// Updates a &lt;see cref=&quot;HitObject&quot;/&gt;, invoking &lt;see cref=&quot;HitObject.ApplyDefaults&quot;/&gt; and re-processing the beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to update.&lt;/param&gt;
+        public void Update([NotNull] HitObject hitObject)
+        {
+            // updates are debounced regardless of whether a batch is active.
+            batchPendingUpdates.Add(hitObject);
+
+            updateInProgress.Value = true;
+        }
+
+        /// &lt;summary&gt;
+        /// Update all hit objects with potentially changed difficulty or control point data.
+        /// &lt;/summary&gt;
+        public void UpdateAllHitObjects()
+        {
+            foreach (var h in HitObjects)
+                batchPendingUpdates.Add(h);
+
+            updateInProgress.Value = true;
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a &lt;see cref=&quot;HitObject&quot;/&gt; from this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to remove.&lt;/param&gt;
+        /// &lt;returns&gt;True if the &lt;see cref=&quot;HitObject&quot;/&gt; has been removed, false otherwise.&lt;/returns&gt;
+        public bool Remove(HitObject hitObject)
+        {
+            int index = FindIndex(hitObject);
+
+            if (index == -1)
+                return false;
+
+            RemoveAt(index);
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a collection of &lt;see cref=&quot;HitObject&quot;/&gt;s to this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObjects&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt;s to remove.&lt;/param&gt;
+        public void RemoveRange(IEnumerable&lt;HitObject&gt; hitObjects)
+        {
+            BeginChange();
+            foreach (var h in hitObjects)
+                Remove(h);
+            EndChange();
+        }
+
+        /// &lt;summary&gt;
+        /// Finds the index of a &lt;see cref=&quot;HitObject&quot;/&gt; in this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to search for.&lt;/param&gt;
+        /// &lt;returns&gt;The index of &lt;paramref name=&quot;hitObject&quot;/&gt;.&lt;/returns&gt;
+        public int FindIndex(HitObject hitObject) =&gt; mutableHitObjects.IndexOf(hitObject);
+
+        /// &lt;summary&gt;
+        /// Removes a &lt;see cref=&quot;HitObject&quot;/&gt; at an index in this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;index&quot;&gt;The index of the &lt;see cref=&quot;HitObject&quot;/&gt; to remove.&lt;/param&gt;
+        public void RemoveAt(int index)
+        {
+            HitObject hitObject = (HitObject)mutableHitObjects[index]!;
+
+            mutableHitObjects.RemoveAt(index);
+
+            var bindable = startTimeBindables[hitObject];
+            bindable.UnbindAll();
+            startTimeBindables.Remove(hitObject);
+
+            BeginChange();
+            batchPendingDeletes.Add(hitObject);
+            EndChange();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (batchPendingUpdates.Count &gt; 0)
+                UpdateState();
+
+            hasTiming.Value = !ReferenceEquals(ControlPointInfo.TimingPointAt(editorClock.CurrentTime), TimingControlPoint.DEFAULT);
+        }
+
+        protected override void UpdateState()
+        {
+            if (batchPendingUpdates.Count == 0 &amp;&amp; batchPendingDeletes.Count == 0 &amp;&amp; batchPendingInserts.Count == 0)
+                return;
+
+            // if the user is doing edits to this beatmaps via this flow, we better bump the beatmap version
+            // because the beatmap encoder can only output this specific beatmap version anyway,
+            // so *not* bumping it could lead to results that look misleading at best.
+            BeatmapVersion = LegacyBeatmapEncoder.FIRST_LAZER_VERSION;
+            beatmapProcessor.PreProcess();
+
+            foreach (var h in batchPendingDeletes) processHitObject(h);
+            foreach (var h in batchPendingInserts) processHitObject(h);
+            foreach (var h in batchPendingUpdates) processHitObject(h);
+
+            beatmapProcessor.PostProcess();
+
+            BeatmapReprocessed?.Invoke();
+
+            // callbacks may modify the lists so let&#39;s be safe about it
+            var deletes = batchPendingDeletes.ToArray();
+            batchPendingDeletes.Clear();
+
+            var inserts = batchPendingInserts.ToArray();
+            batchPendingInserts.Clear();
+
+            var updates = batchPendingUpdates.ToArray();
+            batchPendingUpdates.Clear();
+
+            foreach (var h in deletes) SelectedHitObjects.Remove(h);
+
+            foreach (var h in deletes) HitObjectRemoved?.Invoke(h);
+            foreach (var h in inserts) HitObjectAdded?.Invoke(h);
+            foreach (var h in updates) HitObjectUpdated?.Invoke(h);
+
+            updateInProgress.Value = false;
+        }
+
+        /// &lt;summary&gt;
+        /// Clears all &lt;see cref=&quot;HitObjects&quot;/&gt; from this &lt;see cref=&quot;EditorBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void Clear() =&gt; RemoveRange(HitObjects.ToArray());
+
+        private void processHitObject(HitObject hitObject) =&gt; hitObject.ApplyDefaults(ControlPointInfo, PlayableBeatmap.Difficulty);
+
+        private void trackStartTime(HitObject hitObject)
+        {
+            startTimeBindables[hitObject] = hitObject.StartTimeBindable.GetBoundCopy();
+            startTimeBindables[hitObject].ValueChanged += _ =&gt;
+            {
+                // For now we&#39;ll remove and re-add the hitobject. This is not optimal and can be improved if required.
+                mutableHitObjects.Remove(hitObject);
+
+                int insertionIndex = findInsertionIndex(PlayableBeatmap.HitObjects, hitObject.StartTime);
+                mutableHitObjects.Insert(insertionIndex + 1, hitObject);
+
+                Update(hitObject);
+            };
+        }
+
+        private int findInsertionIndex(IReadOnlyList&lt;HitObject&gt; list, double startTime)
+        {
+            for (int i = 0; i &lt; list.Count; i++)
+            {
+                if (list[i].StartTime &gt; startTime)
+                    return i - 1;
+            }
+
+            return list.Count - 1;
+        }
+
+        public double SnapTime(double time, double? referenceTime) =&gt; ControlPointInfo.GetClosestSnappedTime(time, BeatDivisor, referenceTime);
+
+        /// &lt;summary&gt;
+        /// Snaps every hit object&#39;s start time (and end time when applicable) to the current snap divisor.
+        /// &lt;/summary&gt;
+        public void SnapAllHitObjectsToCurrentDivisor()
+        {
+            if (HitObjects.Count == 0)
+                return;
+
+            BeginChange();
+
+            foreach (var hitObject in HitObjects.ToArray())
+            {
+                double oldStart = hitObject.StartTime;
+                double oldEnd = hitObject.GetEndTime();
+
+                double newStart = SnapTime(oldStart, null);
+                double newEnd = Math.Max(newStart + GetBeatLengthAtTime(newStart), SnapTime(oldEnd, newStart));
+
+                hitObject.StartTime = newStart;
+
+                switch (hitObject)
+                {
+                    // Sliders and juice streams: end time comes from path length and velocity, so scale slider velocity to match the snapped duration.
+                    case IHasPathWithRepeats and IHasSliderVelocity sv:
+                    {
+                        double oldDuration = oldEnd - oldStart;
+                        double newDurationTarget = newEnd - newStart;
+
+                        if (oldDuration &gt; 0)
+                            sv.SliderVelocityMultiplier *= oldDuration / newDurationTarget;
+
+                        break;
+                    }
+
+                    // Long notes with a real duration (spinners, hold notes, swells, etc.).
+                    case IHasDuration hasDuration:
+                        hasDuration.Duration = newEnd - newStart;
+                        break;
+                }
+            }
+
+            UpdateAllHitObjects();
+
+            EndChange();
+        }
+
+        public double GetBeatLengthAtTime(double referenceTime) =&gt; ControlPointInfo.TimingPointAt(referenceTime).BeatLength / BeatDivisor;
+
+        public int BeatDivisor =&gt; beatDivisor?.Value ?? 1;
+
+        protected override void Dispose(bool isDisposing)
+        {
+            BeatmapSkin?.Dispose();
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,52,36,68,1],[38,9,38,77,1],[67,9,67,100,1],[72,9,72,89,1],[80,45,80,54,1],[82,9,82,74,1],[90,51,90,55,1],[90,56,90,60,1],[93,43,93,47,1],[93,48,93,52,1],[95,42,95,46,1],[99,9,99,133,1],[101,9,101,143,1],[102,9,102,10,1],[103,13,103,47,1],[104,13,104,103,1],[106,13,106,75,1],[108,13,108,55,1],[109,17,109,65,1],[111,13,111,57,1],[112,13,112,39,1],[113,13,113,55,1],[115,13,115,119,1],[117,13,117,20,1],[117,22,117,29,1],[117,30,117,32,1],[117,33,117,43,1],[118,17,118,37,1],[120,13,120,76,1],[121,13,122,13,1],[122,13,122,14,1],[122,14,123,17,1],[123,17,123,48,1],[123,48,124,17,1],[124,17,124,57,1],[124,57,125,13,1],[125,13,125,14,1],[125,14,125,16,1],[127,13,127,74,1],[128,13,129,13,1],[129,13,129,14,1],[129,14,130,17,1],[130,17,130,31,1],[130,31,131,17,1],[131,17,131,68,1],[131,68,131,69,1],[131,69,131,92,1],[131,92,132,17,1],[132,17,132,29,1],[132,29,133,13,1],[133,13,133,14,1],[133,14,133,16,1],[135,13,135,101,1],[136,13,137,13,1],[137,13,137,14,1],[137,14,138,17,1],[138,17,138,31,1],[138,31,139,17,1],[139,17,139,92,1],[139,92,139,93,1],[139,93,139,116,1],[139,116,140,17,1],[140,17,140,29,1],[140,29,141,13,1],[141,13,141,14,1],[141,14,141,16,1],[143,13,143,77,1],[144,13,145,13,1],[145,13,145,14,1],[145,14,146,17,1],[146,17,146,31,1],[146,31,147,17,1],[147,17,147,63,1],[147,63,148,17,1],[148,17,148,29,1],[148,29,149,13,1],[149,13,149,14,1],[149,14,149,16,1],[151,13,151,61,1],[152,9,152,10,1],[160,9,160,10,1],[164,13,164,55,1],[165,17,165,33,1],[167,13,167,59,1],[169,13,169,20,1],[169,22,169,38,1],[169,39,169,41,1],[169,42,169,67,1],[170,13,170,14,1],[171,17,171,38,1],[176,25,176,34,1],[179,25,179,79,1],[180,25,180,31,1],[182,13,182,14,1],[184,13,184,37,1],[185,9,185,10,1],[189,20,189,31,1],[190,20,190,118,1],[193,44,193,64,1],[197,20,197,46,1],[198,20,198,54,1],[203,20,203,52,1],[204,20,204,60,1],[211,20,211,42,1],[212,20,212,50,0],[215,41,215,71,1],[217,55,217,81,1],[219,65,219,96,0],[221,52,221,93,0],[225,20,225,47,1],[226,20,226,55,1],[231,20,231,49,1],[232,20,232,57,1],[237,20,237,48,0],[238,20,238,56,1],[243,20,243,53,0],[244,20,244,61,1],[249,20,249,56,0],[250,20,250,64,1],[255,20,255,51,0],[256,20,256,59,1],[261,20,261,60,0],[262,20,262,68,1],[267,20,267,51,0],[268,20,268,59,1],[273,20,273,44,0],[274,20,274,52,1],[279,20,279,48,0],[280,20,280,56,1],[285,20,285,45,0],[286,20,286,53,1],[291,20,291,51,0],[292,20,292,59,1],[299,20,299,45,0],[300,20,300,53,1],[307,20,307,57,0],[308,20,308,65,1],[311,37,311,41,1],[311,42,311,46,1],[313,36,313,68,1],[315,44,315,77,1],[317,9,317,86,1],[319,9,319,86,1],[321,9,321,92,1],[334,9,334,10,1],[335,13,335,47,1],[336,17,336,24,1],[338,13,338,27,1],[340,13,340,20,1],[340,22,340,27,1],[340,28,340,30,1],[340,31,340,49,1],[341,13,341,14,1],[342,17,342,27,1],[343,17,343,27,1],[344,13,344,14,1],[346,13,346,25,1],[347,9,347,10,1],[354,9,354,10,1],[355,13,355,27,1],[356,13,356,20,1],[356,22,356,27,1],[356,28,356,30,1],[356,31,356,41,1],[357,17,357,24,1],[358,13,358,25,1],[359,9,359,10,1],[366,9,366,10,1],[368,13,368,102,1],[369,13,369,51,1],[370,9,370,10,1],[381,9,381,10,1],[382,13,382,39,1],[384,13,384,56,1],[386,13,386,27,1],[387,13,387,48,1],[388,13,388,25,1],[389,9,389,10,1],[396,9,396,10,1],[398,13,398,48,1],[400,13,400,43,1],[401,9,401,10,1],[407,9,407,10,1],[408,13,408,20,1],[408,22,408,27,1],[408,28,408,30,1],[408,31,408,41,1],[409,17,409,44,1],[411,13,411,43,1],[412,9,412,10,1],[420,9,420,10,1],[421,13,421,46,1],[423,13,423,29,1],[424,17,424,30,1],[426,13,426,29,1],[427,13,427,25,1],[428,9,428,10,1],[435,9,435,10,1],[436,13,436,27,1],[437,13,437,20,1],[437,22,437,27,1],[437,28,437,30,1],[437,31,437,41,1],[438,17,438,27,1],[439,13,439,25,1],[440,9,440,10,1],[447,54,447,90,1],[454,9,454,10,1],[455,13,455,72,1],[457,13,457,47,1],[459,13,459,58,1],[460,13,460,34,1],[461,13,461,50,1],[463,13,463,27,1],[464,13,464,48,1],[465,13,465,25,1],[466,9,466,10,1],[469,9,469,10,1],[470,13,470,27,1],[472,13,472,47,1],[473,17,473,31,1],[475,13,475,133,1],[476,9,476,10,1],[479,9,479,10,1],[480,13,480,116,1],[481,17,481,24,1],[486,13,486,71,1],[487,13,487,43,1],[489,13,489,20,1],[489,22,489,27,1],[489,28,489,30,1],[489,31,489,50,1],[489,52,489,72,1],[490,13,490,20,1],[490,22,490,27,1],[490,28,490,30,1],[490,31,490,50,1],[490,52,490,72,1],[491,13,491,20,1],[491,22,491,27,1],[491,28,491,30,1],[491,31,491,50,1],[491,52,491,72,1],[493,13,493,44,1],[495,13,495,42,1],[498,13,498,57,1],[499,13,499,41,1],[501,13,501,57,1],[502,13,502,41,1],[504,13,504,57,1],[505,13,505,41,1],[507,13,507,20,1],[507,22,507,27,1],[507,28,507,30,1],[507,31,507,38,1],[507,40,507,69,1],[509,13,509,20,1],[509,22,509,27,1],[509,28,509,30,1],[509,31,509,38,1],[509,40,509,68,1],[510,13,510,20,1],[510,22,510,27,1],[510,28,510,30,1],[510,31,510,38,1],[510,40,510,66,1],[511,13,511,20,1],[511,22,511,27,1],[511,28,511,30,1],[511,31,511,38,1],[511,40,511,68,1],[513,13,513,44,1],[514,9,514,10,1],[519,32,519,65,1],[521,63,521,132,1],[524,9,524,10,1],[525,13,525,88,1],[526,13,527,13,1],[527,13,527,14,1],[527,14,529,17,1],[529,17,529,53,1],[529,53,531,17,1],[531,17,531,106,1],[531,106,532,17,1],[532,17,532,73,1],[532,73,534,17,1],[534,17,534,35,1],[534,35,535,13,1],[535,13,535,14,1],[535,14,535,15,1],[536,9,536,10,1],[539,9,539,10,1],[540,18,540,27,1],[540,29,540,43,1],[540,45,540,48,1],[541,13,541,14,1],[542,17,542,51,1],[543,21,543,34,1],[544,13,544,14,1],[546,13,546,35,1],[547,9,547,10,1],[549,71,549,143,1],[555,9,555,10,1],[556,13,556,39,1],[557,17,557,24,1],[559,13,559,27,1],[561,13,561,20,1],[561,22,561,35,1],[561,36,561,38,1],[561,39,561,59,1],[562,13,562,14,1],[563,17,563,55,1],[564,17,564,56,1],[566,17,566,60,1],[567,17,567,112,1],[569,17,569,48,1],[571,17,571,35,1],[575,21,575,22,1],[576,25,576,64,1],[577,25,577,70,1],[579,25,579,45,1],[580,29,580,92,1],[582,25,582,31,1],[587,25,587,66,1],[588,25,588,31,1],[590,13,590,14,1],[592,13,592,35,1],[594,13,594,25,1],[595,9,595,10,1],[597,68,597,138,1],[599,35,599,58,1],[602,9,602,10,1],[603,13,603,36,1],[604,13,604,39,1],[605,9,605,10,1]]);
+    </script>
+  </body>
+</html>
