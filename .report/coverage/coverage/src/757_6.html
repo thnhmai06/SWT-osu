@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModRelax.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Localisation;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.Replays;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Play;
+using static osu.Game.Input.Handlers.ReplayInputHandler;
+
+namespace osu.Game.Rulesets.Osu.Mods
+{
+    public class OsuModRelax : ModRelax, IUpdatableByPlayfield, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;, IApplicableToPlayer, IHasNoTimedInputs
+    {
+        public override LocalisableString Description =&gt; @&quot;You don&#39;t need to click. Give your clicking/tapping fingers a break from the heat of things.&quot;;
+
+        public override Type[] IncompatibleMods =&gt;
+            base.IncompatibleMods.Concat(new[] { typeof(OsuModAutopilot), typeof(OsuModMagnetised), typeof(OsuModAlternate), typeof(OsuModSingleTap) }).ToArray();
+
+        /// &lt;summary&gt;
+        /// How early before a hitobject&#39;s start time to trigger a hit.
+        /// &lt;/summary&gt;
+        public const float RELAX_LENIENCY = 12;
+
+        private bool isDownState;
+        private bool wasLeft;
+
+        private OsuInputManager osuInputManager = null!;
+
+        private ReplayState&lt;OsuAction&gt; state = null!;
+        private double lastStateChangeTime;
+
+        private DrawableOsuRuleset ruleset = null!;
+        private IPressHandler pressHandler = null!;
+
+        private bool hasReplay;
+        private bool legacyReplay;
+
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
+        {
+            ruleset = (DrawableOsuRuleset)drawableRuleset;
+
+            // grab the input manager for future use.
+            osuInputManager = ruleset.KeyBindingInputManager;
+        }
+
+        public void ApplyToPlayer(Player player)
+        {
+            if (osuInputManager.ReplayInputHandler != null)
+            {
+                hasReplay = true;
+
+                Debug.Assert(ruleset.ReplayScore != null);
+                legacyReplay = ruleset.ReplayScore.ScoreInfo.IsLegacyScore;
+
+                pressHandler = legacyReplay ? new LegacyReplayPressHandler(this) : new PressHandler(this);
+
+                return;
+            }
+
+            pressHandler = new PressHandler(this);
+            osuInputManager.AllowGameplayInputs = false;
+        }
+
+        public void Update(Playfield playfield)
+        {
+            if (hasReplay &amp;&amp; !legacyReplay)
+                return;
+
+            bool requiresHold = false;
+            bool requiresHit = false;
+
+            double time = playfield.Clock.CurrentTime;
+
+            foreach (var h in playfield.HitObjectContainer.AliveObjects.OfType&lt;DrawableOsuHitObject&gt;())
+            {
+                // we are not yet close enough to the object.
+                if (time &lt; h.HitObject.StartTime - RELAX_LENIENCY)
+                    break;
+
+                // already hit or beyond the hittable end time.
+                if (h.IsHit || (h.HitObject is IHasDuration hasEnd &amp;&amp; time &gt; hasEnd.EndTime))
+                    continue;
+
+                switch (h)
+                {
+                    case DrawableHitCircle circle:
+                        handleHitCircle(circle);
+                        break;
+
+                    case DrawableSlider slider:
+                        // Handles cases like &quot;2B&quot; beatmaps, where sliders may be overlapping and simply holding is not enough.
+                        if (!slider.HeadCircle.IsHit)
+                            handleHitCircle(slider.HeadCircle);
+
+                        requiresHold |= slider.SliderInputManager.IsMouseInFollowArea(slider.Tracking.Value);
+                        break;
+
+                    case DrawableSpinner spinner:
+                        requiresHold |= spinner.HitObject.SpinsRequired &gt; 0;
+                        break;
+                }
+            }
+
+            if (requiresHit)
+            {
+                changeState(false);
+                changeState(true);
+            }
+
+            if (requiresHold)
+                changeState(true);
+            else if (isDownState &amp;&amp; time - lastStateChangeTime &gt; AutoGenerator.KEY_UP_DELAY)
+                changeState(false);
+
+            void handleHitCircle(DrawableHitCircle circle)
+            {
+                if (!circle.HitArea.IsHovered)
+                    return;
+
+                Debug.Assert(circle.HitObject.HitWindows != null);
+                requiresHit |= circle.HitObject.HitWindows.CanBeHit(time - circle.HitObject.StartTime);
+            }
+
+            void changeState(bool down)
+            {
+                if (isDownState == down)
+                    return;
+
+                isDownState = down;
+                lastStateChangeTime = time;
+
+                state = new ReplayState&lt;OsuAction&gt;
+                {
+                    PressedActions = new List&lt;OsuAction&gt;()
+                };
+
+                if (down)
+                {
+                    pressHandler.HandlePress(wasLeft);
+                    wasLeft = !wasLeft;
+                }
+                else
+                {
+                    pressHandler.HandleRelease(wasLeft);
+                }
+            }
+        }
+
+        private interface IPressHandler
+        {
+            void HandlePress(bool wasLeft);
+            void HandleRelease(bool wasLeft);
+        }
+
+        private class PressHandler : IPressHandler
+        {
+            private readonly OsuModRelax mod;
+
+            public PressHandler(OsuModRelax mod)
+            {
+                this.mod = mod;
+            }
+
+            public void HandlePress(bool wasLeft)
+            {
+                mod.state.PressedActions.Add(wasLeft ? OsuAction.LeftButton : OsuAction.RightButton);
+                mod.state.Apply(mod.osuInputManager.CurrentState, mod.osuInputManager);
+            }
+
+            public void HandleRelease(bool wasLeft)
+            {
+                mod.state.Apply(mod.osuInputManager.CurrentState, mod.osuInputManager);
+            }
+        }
+
+        // legacy replays do not contain key-presses with Relax mod, so they need to be triggered by themselves.
+        private class LegacyReplayPressHandler : IPressHandler
+        {
+            private readonly OsuModRelax mod;
+
+            public LegacyReplayPressHandler(OsuModRelax mod)
+            {
+                this.mod = mod;
+            }
+
+            public void HandlePress(bool wasLeft)
+            {
+                mod.osuInputManager.KeyBindingContainer.TriggerPressed(wasLeft ? OsuAction.LeftButton : OsuAction.RightButton);
+            }
+
+            public void HandleRelease(bool wasLeft)
+            {
+                // this intentionally releases right when `wasLeft` is true because `wasLeft` is set at point of press and not at point of release
+                mod.osuInputManager.KeyBindingContainer.TriggerReleased(wasLeft ? OsuAction.RightButton : OsuAction.LeftButton);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,58,23,153,0],[26,13,26,162,0],[36,9,36,57,1],[38,9,38,54,1],[41,9,41,52,1],[42,9,42,52,1],[48,9,48,10,0],[49,13,49,59,0],[52,13,52,62,0],[53,9,53,10,0],[56,9,56,10,0],[57,13,57,60,0],[58,13,58,14,0],[59,17,59,34,0],[61,17,61,59,0],[62,17,62,76,0],[64,17,64,107,0],[66,17,66,24,0],[69,13,69,51,0],[70,13,70,57,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,44,0],[76,17,76,24,0],[78,13,78,39,0],[79,13,79,38,0],[81,13,81,55,0],[83,13,83,20,0],[83,22,83,27,0],[83,28,83,30,0],[83,31,83,103,0],[84,13,84,14,0],[86,17,86,67,0],[87,21,87,27,0],[90,17,90,94,0],[91,21,91,30,0],[93,17,93,27,0],[96,25,96,49,0],[97,25,97,31,0],[101,25,101,54,0],[102,29,102,64,0],[104,25,104,110,0],[105,25,105,31,0],[108,25,108,77,0],[109,25,109,31,0],[111,13,111,14,0],[113,13,113,29,0],[114,13,114,14,0],[115,17,115,36,0],[116,17,116,35,0],[117,13,117,14,0],[119,13,119,30,0],[120,17,120,35,0],[121,18,121,93,0],[122,17,122,36,0],[125,13,125,14,0],[126,17,126,47,0],[127,21,127,28,0],[129,17,129,67,0],[130,17,130,104,0],[131,13,131,14,0],[134,13,134,14,0],[135,17,135,41,0],[136,21,136,28,0],[138,17,138,36,0],[139,17,139,44,0],[141,17,144,19,0],[146,17,146,26,0],[147,17,147,18,0],[148,21,148,55,0],[149,21,149,40,0],[150,17,150,18,0],[152,17,152,18,0],[153,21,153,57,0],[154,17,154,18,0],[155,13,155,14,0],[156,9,156,10,0],[168,13,168,49,0],[169,13,169,14,0],[170,17,170,32,0],[171,13,171,14,0],[174,13,174,14,0],[175,17,175,102,0],[176,17,176,88,0],[177,13,177,14,0],[180,13,180,14,0],[181,17,181,88,0],[182,13,182,14,0],[190,13,190,61,0],[191,13,191,14,0],[192,17,192,32,0],[193,13,193,14,0],[196,13,196,14,0],[197,17,197,128,0],[198,13,198,14,0],[201,13,201,14,0],[203,17,203,129,0],[204,13,204,14,0]]);
+    </script>
+  </body>
+</html>

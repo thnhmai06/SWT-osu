@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Checks/CheckTimeDistanceEquality.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Edit.Checks.Components;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Objects;
+
+namespace osu.Game.Rulesets.Osu.Edit.Checks
+{
+    public class CheckTimeDistanceEquality : ICheck
+    {
+        /// &lt;summary&gt;
+        /// Two objects this many ms apart or more are skipped. (200 BPM 2/1)
+        /// &lt;/summary&gt;
+        private const double pattern_lifetime = 600;
+
+        /// &lt;summary&gt;
+        /// Two objects this distance apart or less are skipped.
+        /// &lt;/summary&gt;
+        private const double stack_leniency = 12;
+
+        /// &lt;summary&gt;
+        /// How long an observation is relevant for comparison. (120 BPM 8/1)
+        /// &lt;/summary&gt;
+        private const double observation_lifetime = 4000;
+
+        /// &lt;summary&gt;
+        /// How different two delta times can be to still be compared. (240 BPM 1/16)
+        /// &lt;/summary&gt;
+        private const double similar_time_leniency = 16;
+
+        /// &lt;summary&gt;
+        /// How many pixels are subtracted from the difference between current and expected distance.
+        /// &lt;/summary&gt;
+        private const double distance_leniency_absolute_warning = 10;
+
+        /// &lt;summary&gt;
+        /// How much of the current distance that the difference can make out.
+        /// &lt;/summary&gt;
+        private const double distance_leniency_percent_warning = 0.15;
+
+        private const double distance_leniency_absolute_problem = 20;
+        private const double distance_leniency_percent_problem = 0.3;
+
+        public CheckMetadata Metadata { get; } = new CheckMetadata(CheckCategory.Spread, &quot;Object too close or far away from previous&quot;);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
+        {
+            new IssueTemplateIrregularSpacingProblem(this),
+            new IssueTemplateIrregularSpacingWarning(this)
+        };
+
+        /// &lt;summary&gt;
+        /// Represents an observation of the time and distance between two objects.
+        /// &lt;/summary&gt;
+        private readonly struct ObservedTimeDistance
+        {
+            public readonly double ObservationTime;
+            public readonly double DeltaTime;
+            public readonly double Distance;
+
+            public ObservedTimeDistance(double observationTime, double deltaTime, double distance)
+            {
+                ObservationTime = observationTime;
+                DeltaTime = deltaTime;
+                Distance = distance;
+            }
+        }
+
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            if (context.InterpretedDifficulty &gt; DifficultyRating.Normal)
+                yield break;
+
+            var prevObservedTimeDistances = new List&lt;ObservedTimeDistance&gt;();
+            var hitObjects = context.CurrentDifficulty.Playable.HitObjects;
+
+            for (int i = 0; i &lt; hitObjects.Count - 1; ++i)
+            {
+                if (!(hitObjects[i] is OsuHitObject hitObject) || hitObject is Spinner)
+                    continue;
+
+                if (!(hitObjects[i + 1] is OsuHitObject nextHitObject) || nextHitObject is Spinner)
+                    continue;
+
+                double deltaTime = nextHitObject.StartTime - hitObject.GetEndTime();
+
+                // Ignore objects that are far enough apart in time to not be considered the same pattern.
+                if (deltaTime &gt; pattern_lifetime)
+                    continue;
+
+                // Relying on FastInvSqrt is probably good enough here. We&#39;ll be taking the difference between distances later, hence square not being sufficient.
+                float distance = (hitObject.StackedEndPosition - nextHitObject.StackedPosition).LengthFast;
+
+                // Ignore stacks and half-stacks, as these are close enough to where they can&#39;t be confused for being time-distanced.
+                if (distance &lt; stack_leniency)
+                    continue;
+
+                var observedTimeDistance = new ObservedTimeDistance(nextHitObject.StartTime, deltaTime, distance);
+                double expectedDistance = getExpectedDistance(prevObservedTimeDistances, observedTimeDistance);
+
+                if (expectedDistance == 0)
+                {
+                    // There was nothing relevant to compare to.
+                    prevObservedTimeDistances.Add(observedTimeDistance);
+                    continue;
+                }
+
+                if ((Math.Abs(expectedDistance - distance) - distance_leniency_absolute_problem) / distance &gt; distance_leniency_percent_problem)
+                    yield return new IssueTemplateIrregularSpacingProblem(this).Create(expectedDistance, distance, hitObject, nextHitObject);
+                else if ((Math.Abs(expectedDistance - distance) - distance_leniency_absolute_warning) / distance &gt; distance_leniency_percent_warning)
+                    yield return new IssueTemplateIrregularSpacingWarning(this).Create(expectedDistance, distance, hitObject, nextHitObject);
+                else
+                {
+                    // We use `else` here to prevent issues from cascading; an object spaced too far could cause regular spacing to be considered &quot;too short&quot; otherwise.
+                    prevObservedTimeDistances.Add(observedTimeDistance);
+                }
+            }
+        }
+
+        private double getExpectedDistance(IEnumerable&lt;ObservedTimeDistance&gt; prevObservedTimeDistances, ObservedTimeDistance observedTimeDistance)
+        {
+            int observations = prevObservedTimeDistances.Count();
+
+            int count = 0;
+            double sum = 0;
+
+            // Looping this in reverse allows us to break before going through all elements, as we&#39;re only interested in the most recent ones.
+            for (int i = observations - 1; i &gt;= 0; --i)
+            {
+                var prevObservedTimeDistance = prevObservedTimeDistances.ElementAt(i);
+
+                // Only consider observations within the last few seconds - this allows the map to build spacing up/down over time, but prevents it from being too sudden.
+                if (observedTimeDistance.ObservationTime - prevObservedTimeDistance.ObservationTime &gt; observation_lifetime)
+                    break;
+
+                // Only consider observations which have a similar time difference - this leniency allows handling of multi-BPM maps which speed up/down slowly.
+                if (Math.Abs(observedTimeDistance.DeltaTime - prevObservedTimeDistance.DeltaTime) &gt; similar_time_leniency)
+                    break;
+
+                count += 1;
+                sum += prevObservedTimeDistance.Distance / Math.Max(prevObservedTimeDistance.DeltaTime, 1);
+            }
+
+            return sum / Math.Max(count, 1) * observedTimeDistance.DeltaTime;
+        }
+
+        public abstract class IssueTemplateIrregularSpacing : IssueTemplate
+        {
+            protected IssueTemplateIrregularSpacing(ICheck check, IssueType issueType)
+                : base(check, issueType, &quot;Expected {0:0} px spacing like previous objects, currently {1:0}.&quot;)
+            {
+            }
+
+            public Issue Create(double expected, double actual, params HitObject[] hitObjects) =&gt; new Issue(hitObjects, this, expected, actual);
+        }
+
+        public class IssueTemplateIrregularSpacingProblem : IssueTemplateIrregularSpacing
+        {
+            public IssueTemplateIrregularSpacingProblem(ICheck check)
+                : base(check, IssueType.Problem)
+            {
+            }
+        }
+
+        public class IssueTemplateIrregularSpacingWarning : IssueTemplateIrregularSpacing
+        {
+            public IssueTemplateIrregularSpacingWarning(ICheck check)
+                : base(check, IssueType.Warning)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,41,50,45,0],[50,50,50,135,1],[52,64,56,10,0],[68,13,68,14,1],[69,17,69,51,1],[70,17,70,39,1],[71,17,71,37,1],[72,13,72,14,1],[76,9,76,10,1],[77,13,77,73,1],[78,17,78,29,1],[80,13,80,78,1],[81,13,81,76,1],[83,18,83,27,1],[83,29,83,53,1],[83,55,83,58,1],[84,13,84,14,1],[85,17,85,88,1],[86,21,86,30,1],[88,17,88,100,1],[89,21,89,30,1],[91,17,91,85,1],[94,17,94,50,1],[95,21,95,30,1],[98,17,98,108,1],[101,17,101,47,1],[102,21,102,30,1],[104,17,104,115,1],[105,17,105,112,1],[107,17,107,43,1],[108,17,108,18,1],[110,21,110,73,1],[111,21,111,30,1],[114,17,114,145,1],[115,21,115,142,1],[116,22,116,150,1],[117,21,117,142,1],[119,17,119,18,1],[121,21,121,73,1],[122,17,122,18,1],[123,13,123,14,1],[124,9,124,10,1],[127,9,127,10,1],[128,13,128,66,1],[130,13,130,27,1],[131,13,131,28,1],[134,18,134,42,1],[134,44,134,50,1],[134,52,134,55,1],[135,13,135,14,1],[136,17,136,87,1],[139,17,139,124,1],[140,21,140,27,1],[143,17,143,123,1],[144,21,144,27,1],[146,17,146,28,1],[147,17,147,108,1],[148,13,148,14,1],[150,13,150,78,1],[151,9,151,10,1],[156,19,156,110,1],[157,13,157,14,1],[158,13,158,14,1],[160,99,160,144,1],[166,19,166,49,1],[167,13,167,14,1],[168,13,168,14,1],[174,19,174,49,1],[175,13,175,14,1],[176,13,176,14,1]]);
+    </script>
+  </body>
+</html>

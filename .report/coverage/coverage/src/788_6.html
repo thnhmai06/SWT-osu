@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/SpinnerSpinHistory.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+
+namespace osu.Game.Rulesets.Osu.Objects.Drawables
+{
+    /// &lt;summary&gt;
+    /// Stores the spinning history of a single spinner.&lt;br /&gt;
+    /// Instants of movement deltas may be added or removed from this in order to calculate the total rotation for the spinner.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// A single, full rotation of the spinner is defined as a 360-degree rotation of the spinner, starting from 0, going in a single direction.&lt;br /&gt;
+    /// &lt;/remarks&gt;
+    /// &lt;example&gt;
+    /// If the player spins 90-degrees clockwise, then changes direction, they need to spin 90-degrees counter-clockwise to return to 0
+    /// and then continue rotating the spinner for another 360-degrees in the same direction.
+    /// &lt;/example&gt;
+    public class SpinnerSpinHistory
+    {
+        /// &lt;summary&gt;
+        /// The sum of all complete spins and any current partial spin, in degrees.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is the final scoring value.
+        /// &lt;/remarks&gt;
+        public float TotalRotation =&gt; 360 * completedSpins.Count + currentSpinMaxRotation;
+
+        private readonly Stack&lt;CompletedSpin&gt; completedSpins = new Stack&lt;CompletedSpin&gt;();
+
+        /// &lt;summary&gt;
+        /// The total accumulated (absolute) rotation.
+        /// &lt;/summary&gt;
+        private float totalAccumulatedRotation;
+
+        private float totalAccumulatedRotationAtLastCompletion;
+
+        /// &lt;summary&gt;
+        /// For the current spin, represents the maximum absolute rotation (from 0..360) achieved by the user.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is used to report &lt;see cref=&quot;TotalRotation&quot;/&gt; in the case a user spins backwards.
+        /// Basically it allows us to not reduce the total rotation in such a case.
+        ///
+        /// This also stops spinner &quot;cheese&quot; where a user may rapidly change directions and cause an increase
+        /// in rotations.
+        /// &lt;/remarks&gt;
+        private float currentSpinMaxRotation;
+
+        /// &lt;summary&gt;
+        /// The current spin, from -360..360.
+        /// &lt;/summary&gt;
+        private float currentSpinRotation =&gt; totalAccumulatedRotation - totalAccumulatedRotationAtLastCompletion;
+
+        private double lastReportTime = double.NegativeInfinity;
+
+        /// &lt;summary&gt;
+        /// Report a delta update based on user input.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;currentTime&quot;&gt;The current time.&lt;/param&gt;
+        /// &lt;param name=&quot;delta&quot;&gt;The delta of the angle moved through since the last report.&lt;/param&gt;
+        public void ReportDelta(double currentTime, float delta)
+        {
+            if (delta == 0)
+                return;
+
+            // Importantly, outside of tests the max delta entering here is 180 degrees.
+            // If it wasn&#39;t for tests, we could add this line:
+            //
+            // Debug.Assert(Math.Abs(delta) &lt; 180);
+            //
+            // For this to be 101% correct, we need to add the ability for important frames to be
+            // created based on gameplay intrinsics (ie. there should be one frame for any spinner delta 90 &lt; n &lt; 180 degrees).
+            //
+            // But this can come later.
+
+            totalAccumulatedRotation += delta;
+
+            if (currentTime &gt;= lastReportTime)
+            {
+                currentSpinMaxRotation = Math.Max(currentSpinMaxRotation, Math.Abs(currentSpinRotation));
+
+                // Handle the case where the user has completed another spin.
+                // Note that this does could be an `if` rather than `while` if the above assertion held true.
+                // It is a `while` loop to handle tests which throw larger values at this method.
+                while (currentSpinMaxRotation &gt;= 360)
+                {
+                    int direction = Math.Sign(currentSpinRotation);
+
+                    completedSpins.Push(new CompletedSpin(currentTime, direction));
+
+                    // Incrementing the last completion point will cause `currentSpinRotation` to
+                    // hold the remaining spin that needs to be considered.
+                    totalAccumulatedRotationAtLastCompletion += direction * 360;
+
+                    // Reset the current max as we are entering a new spin.
+                    // Importantly, carry over the remainder (which is now stored in `currentSpinRotation`).
+                    currentSpinMaxRotation = Math.Abs(currentSpinRotation);
+                }
+            }
+            else
+            {
+                // When rewinding, the main thing we care about is getting `totalAbsoluteRotationsAtLastCompletion`
+                // to the correct value. We can used the stored history for this.
+                while (completedSpins.TryPeek(out var segment) &amp;&amp; segment.CompletionTime &gt; currentTime)
+                {
+                    completedSpins.Pop();
+                    totalAccumulatedRotationAtLastCompletion -= segment.Direction * 360;
+                }
+
+                // This is a best effort. We may not have enough data to match this 1:1, but that&#39;s okay.
+                // We know that the player is somewhere in a spin.
+                // In the worst case, this will be lower than expected, and recover in forward playback.
+                currentSpinMaxRotation = Math.Abs(currentSpinRotation);
+            }
+
+            lastReportTime = currentTime;
+        }
+
+        /// &lt;summary&gt;
+        /// Represents a single completed spin.
+        /// &lt;/summary&gt;
+        private class CompletedSpin
+        {
+            /// &lt;summary&gt;
+            /// The time at which this spin completion occurred.
+            /// &lt;/summary&gt;
+            public readonly double CompletionTime;
+
+            /// &lt;summary&gt;
+            /// The direction this spin completed in.
+            /// &lt;/summary&gt;
+            public readonly int Direction;
+
+            public CompletedSpin(double completionTime, int direction)
+            {
+                Debug.Assert(direction == -1 || direction == 1);
+
+                CompletionTime = completionTime;
+                Direction = direction;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,39,29,90,1],[31,9,31,91,1],[55,46,55,113,1],[57,9,57,65,1],[65,9,65,10,1],[66,13,66,28,1],[67,17,67,24,1],[79,13,79,47,1],[81,13,81,47,1],[82,13,82,14,1],[83,17,83,106,1],[88,17,88,54,1],[89,17,89,18,1],[90,21,90,68,1],[92,21,92,84,1],[96,21,96,81,1],[100,21,100,76,1],[101,17,101,18,1],[102,13,102,14,1],[104,13,104,14,1],[107,17,107,104,1],[108,17,108,18,1],[109,21,109,42,1],[110,21,110,89,1],[111,17,111,18,1],[116,17,116,72,1],[117,13,117,14,1],[119,13,119,42,1],[120,9,120,10,1],[137,13,137,71,1],[138,13,138,14,1],[139,17,139,65,1],[141,17,141,49,1],[142,17,142,39,1],[143,13,143,14,1]]);
+    </script>
+  </body>
+</html>

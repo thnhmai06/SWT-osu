@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/PreciseMovementPopover.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Input.Events;
+using osu.Game.Extensions;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Screens.Edit;
+using osu.Game.Utils;
+using osuTK;
+
+namespace osu.Game.Rulesets.Osu.Edit
+{
+    public partial class PreciseMovementPopover : OsuPopover
+    {
+        [Resolved]
+        private EditorBeatmap editorBeatmap { get; set; } = null!;
+
+        private readonly Dictionary&lt;HitObject, Vector2&gt; initialPositions = new Dictionary&lt;HitObject, Vector2&gt;();
+        private RectangleF initialSurroundingQuad;
+
+        private BindableNumber&lt;float&gt; xBindable = null!;
+        private BindableNumber&lt;float&gt; yBindable = null!;
+
+        private FormSliderBar&lt;float&gt; xInput { get; set; } = null!;
+        private OsuCheckbox relativeCheckbox = null!;
+
+        public PreciseMovementPopover()
+        {
+            AllowableAnchors = new[] { Anchor.CentreLeft, Anchor.CentreRight };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Child = new FillFlowContainer
+            {
+                Width = 220,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(5),
+                Children = new Drawable[]
+                {
+                    xInput = new FormSliderBar&lt;float&gt;
+                    {
+                        Caption = &quot;X&quot;,
+                        Current = xBindable = new BindableNumber&lt;float&gt;
+                        {
+                            Precision = 1,
+                        },
+                        TabbableContentContainer = this
+                    },
+                    new FormSliderBar&lt;float&gt;
+                    {
+                        Caption = &quot;Y&quot;,
+                        Current = yBindable = new BindableNumber&lt;float&gt;
+                        {
+                            Precision = 1,
+                        },
+                        TabbableContentContainer = this
+                    },
+                    relativeCheckbox = new OsuCheckbox(false)
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        LabelText = &quot;Relative movement&quot;
+                    }
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            ScheduleAfterChildren(() =&gt; xInput.TakeFocus());
+        }
+
+        protected override void PopIn()
+        {
+            base.PopIn();
+            editorBeatmap.BeginChange();
+            initialPositions.AddRange(editorBeatmap.SelectedHitObjects.Where(ho =&gt; ho is not Spinner).Select(ho =&gt; new KeyValuePair&lt;HitObject, Vector2&gt;(ho, ((IHasPosition)ho).Position)));
+            initialSurroundingQuad = GeometryUtils.GetSurroundingQuad(initialPositions.Keys.Cast&lt;IHasPosition&gt;()).AABBFloat;
+
+            Debug.Assert(initialPositions.Count &gt; 0);
+
+            if (initialPositions.Count &gt; 1)
+            {
+                relativeCheckbox.Current.Value = true;
+                relativeCheckbox.Current.Disabled = true;
+            }
+
+            relativeCheckbox.Current.BindValueChanged(_ =&gt; relativeChanged(), true);
+            xBindable.BindValueChanged(_ =&gt; applyPosition());
+            yBindable.BindValueChanged(_ =&gt; applyPosition());
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+            if (IsLoaded) editorBeatmap.EndChange();
+        }
+
+        private void relativeChanged()
+        {
+            // reset bindable bounds to something that is guaranteed to be larger than any previous value.
+            // this prevents crashes that can happen in the middle of changing the bounds, as updating both bound ends at the same is not atomic -
+            // if the old and new bounds are disjoint, assigning X first can produce a situation where MinValue &gt; MaxValue.
+            (xBindable.MinValue, xBindable.MaxValue) = (float.MinValue, float.MaxValue);
+            (yBindable.MinValue, yBindable.MaxValue) = (float.MinValue, float.MaxValue);
+
+            float previousX = xBindable.Value;
+            float previousY = yBindable.Value;
+
+            if (relativeCheckbox.Current.Value)
+            {
+                xBindable.MinValue = 0 - Math.Max(initialSurroundingQuad.TopLeft.X, 0);
+                xBindable.MaxValue = OsuPlayfield.BASE_SIZE.X - Math.Min(initialSurroundingQuad.BottomRight.X, OsuPlayfield.BASE_SIZE.X);
+
+                yBindable.MinValue = 0 - Math.Max(initialSurroundingQuad.TopLeft.Y, 0);
+                yBindable.MaxValue = OsuPlayfield.BASE_SIZE.Y - Math.Min(initialSurroundingQuad.BottomRight.Y, OsuPlayfield.BASE_SIZE.Y);
+
+                xBindable.Default = yBindable.Default = 0;
+
+                if (initialPositions.Count == 1)
+                {
+                    var initialPosition = initialPositions.Single().Value;
+                    xBindable.Value = previousX - initialPosition.X;
+                    yBindable.Value = previousY - initialPosition.Y;
+                }
+            }
+            else
+            {
+                Debug.Assert(initialPositions.Count == 1);
+                var initialPosition = initialPositions.Single().Value;
+
+                var quadRelativeToPosition = new RectangleF(initialSurroundingQuad.Location - initialPosition, initialSurroundingQuad.Size);
+
+                if (initialSurroundingQuad.Width &lt; OsuPlayfield.BASE_SIZE.X)
+                {
+                    xBindable.MinValue = 0 - quadRelativeToPosition.TopLeft.X;
+                    xBindable.MaxValue = OsuPlayfield.BASE_SIZE.X - quadRelativeToPosition.BottomRight.X;
+                }
+                else
+                    xBindable.MinValue = xBindable.MaxValue = initialPosition.X;
+
+                if (initialSurroundingQuad.Height &lt; OsuPlayfield.BASE_SIZE.Y)
+                {
+                    yBindable.MinValue = 0 - quadRelativeToPosition.TopLeft.Y;
+                    yBindable.MaxValue = OsuPlayfield.BASE_SIZE.Y - quadRelativeToPosition.BottomRight.Y;
+                }
+                else
+                    yBindable.MinValue = yBindable.MaxValue = initialPosition.Y;
+
+                xBindable.Default = initialPosition.X;
+                yBindable.Default = initialPosition.Y;
+
+                xBindable.Value = xBindable.Default + previousX;
+                yBindable.Value = yBindable.Default + previousY;
+            }
+        }
+
+        private void applyPosition()
+        {
+            // can happen if popover is dismissed by a keyboard key press while dragging UI controls
+            // it doesn&#39;t cause a crash, but it looks wrong
+            if (!editorBeatmap.TransactionActive)
+                return;
+
+            editorBeatmap.PerformOnSelection(ho =&gt;
+            {
+                if (!initialPositions.TryGetValue(ho, out var initialPosition))
+                    return;
+
+                var pos = new Vector2(xBindable.Value, yBindable.Value);
+                if (relativeCheckbox.Current.Value)
+                    ((IHasPosition)ho).Position = initialPosition + pos;
+                else
+                    ((IHasPosition)ho).Position = pos;
+            });
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Action == GlobalAction.Select &amp;&amp; !e.Repeat)
+            {
+                this.HidePopover();
+                return true;
+            }
+
+            return base.OnPressed(e);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,47,32,51,0],[32,52,32,56,0],[32,61,32,66,0],[34,9,34,113,0],[37,9,37,57,0],[38,9,38,57,0],[40,47,40,51,0],[40,52,40,56,0],[40,61,40,66,0],[41,9,41,54,0],[43,9,43,40,0],[44,9,44,10,0],[45,13,45,80,0],[46,9,46,10,0],[50,9,50,10,0],[51,13,82,15,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,33,0],[89,13,89,41,0],[89,41,89,59,0],[89,59,89,61,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,26,0],[95,13,95,41,0],[96,13,96,84,0],[96,84,96,101,0],[96,101,96,116,0],[96,116,96,185,0],[96,185,96,188,0],[97,13,97,125,0],[99,13,99,54,0],[101,13,101,44,0],[102,13,102,14,0],[103,17,103,55,0],[104,17,104,58,0],[105,13,105,14,0],[107,13,107,60,0],[107,60,107,77,0],[107,77,107,85,0],[108,13,108,45,0],[108,45,108,60,0],[108,60,108,62,0],[109,13,109,45,0],[109,45,109,60,0],[109,60,109,62,0],[110,9,110,10,0],[113,9,113,10,0],[114,13,114,27,0],[115,13,115,26,0],[115,27,115,53,0],[116,9,116,10,0],[119,9,119,10,0],[123,13,123,89,0],[124,13,124,89,0],[126,13,126,47,0],[127,13,127,47,0],[129,13,129,48,0],[130,13,130,14,0],[131,17,131,88,0],[132,17,132,138,0],[134,17,134,88,0],[135,17,135,138,0],[137,17,137,59,0],[139,17,139,49,0],[140,17,140,18,0],[141,21,141,75,0],[142,21,142,69,0],[143,21,143,69,0],[144,17,144,18,0],[145,13,145,14,0],[147,13,147,14,0],[148,17,148,59,0],[149,17,149,71,0],[151,17,151,141,0],[153,17,153,77,0],[154,17,154,18,0],[155,21,155,79,0],[156,21,156,106,0],[157,17,157,18,0],[159,21,159,81,0],[161,17,161,78,0],[162,17,162,18,0],[163,21,163,79,0],[164,21,164,106,0],[165,17,165,18,0],[167,21,167,81,0],[169,17,169,55,0],[170,17,170,55,0],[172,17,172,65,0],[173,17,173,65,0],[174,13,174,14,0],[175,9,175,10,0],[178,9,178,10,0],[181,13,181,50,0],[182,17,182,24,0],[184,13,185,13,0],[185,13,185,14,0],[185,14,186,17,0],[186,17,186,80,0],[186,80,187,21,0],[187,21,187,28,0],[187,28,189,17,0],[189,17,189,73,0],[189,73,190,17,0],[190,17,190,52,0],[190,52,191,21,0],[191,21,191,73,0],[191,73,193,21,0],[193,21,193,55,0],[193,55,194,13,0],[194,13,194,14,0],[194,14,194,16,0],[195,9,195,10,0],[198,9,198,10,0],[199,13,199,62,0],[200,13,200,14,0],[201,17,201,36,0],[202,17,202,29,0],[205,13,205,38,0],[206,9,206,10,0]]);
+    </script>
+  </body>
+</html>

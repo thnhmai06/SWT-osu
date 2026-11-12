@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/UI/OsuResumeOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Rulesets.Osu.UI.Cursor;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Play;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Osu.UI
+{
+    public partial class OsuResumeOverlay : ResumeOverlay
+    {
+        private Container cursorScaleContainer = null!;
+        private OsuClickToResumeCursor clickToResumeCursor = null!;
+
+        private OsuCursorContainer? localCursorContainer;
+
+        public override CursorContainer? LocalCursor =&gt; State.Value == Visibility.Visible ? localCursorContainer : null;
+
+        protected override LocalisableString Message =&gt; &quot;Click the orange cursor to resume&quot;;
+
+        [Resolved]
+        private DrawableRuleset? drawableRuleset { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            OsuResumeOverlayInputBlocker? inputBlocker = null;
+
+            var drawableOsuRuleset = (DrawableOsuRuleset?)drawableRuleset;
+
+            if (drawableOsuRuleset != null)
+            {
+                var osuPlayfield = drawableOsuRuleset.Playfield;
+                osuPlayfield.AttachResumeOverlayInputBlocker(inputBlocker = new OsuResumeOverlayInputBlocker());
+            }
+
+            Add(cursorScaleContainer = new Container
+            {
+                Child = clickToResumeCursor = new OsuClickToResumeCursor
+                {
+                    ResumeRequested = action =&gt;
+                    {
+                        // since the user had to press a button to tap the resume cursor,
+                        // block that press event from potentially reaching a hit circle that&#39;s behind the cursor.
+                        // we cannot do this from OsuClickToResumeCursor directly since we&#39;re in a different input manager tree than the gameplay one,
+                        // so we rely on a dedicated input blocking component that&#39;s implanted in there to do that for us.
+                        // note this only matters when the user didn&#39;t pause while they were holding the same key that they are resuming with.
+                        if (inputBlocker != null &amp;&amp; !drawableOsuRuleset.AsNonNull().KeyBindingInputManager.PressedActions.Contains(action))
+                            inputBlocker.BlockNextPress = true;
+
+                        Resume();
+                    }
+                }
+            });
+        }
+
+        protected override void PopIn()
+        {
+            // Can&#39;t display if the cursor is outside the window.
+            if (GameplayCursor.LastFrameState == Visibility.Hidden || drawableRuleset?.Contains(GameplayCursor.ActiveCursor.ScreenSpaceDrawQuad.Centre) == false)
+            {
+                Resume();
+                return;
+            }
+
+            base.PopIn();
+
+            GameplayCursor.ActiveCursor.Hide();
+            cursorScaleContainer.Position = ToLocalSpace(GameplayCursor.ActiveCursor.ScreenSpaceDrawQuad.Centre);
+            clickToResumeCursor.Appear();
+
+            if (localCursorContainer == null)
+                Add(localCursorContainer = new OsuCursorContainer());
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            localCursorContainer?.Expire();
+            localCursorContainer = null;
+            GameplayCursor?.ActiveCursor.Show();
+        }
+
+        protected override bool OnHover(HoverEvent e) =&gt; true;
+
+        public partial class OsuClickToResumeCursor : OsuCursor, IKeyBindingHandler&lt;OsuAction&gt;
+        {
+            public override bool HandlePositionalInput =&gt; true;
+
+            public Action&lt;OsuAction&gt;? ResumeRequested;
+            private Container scaleTransitionContainer = null!;
+
+            public OsuClickToResumeCursor()
+            {
+                RelativePositionAxes = Axes.Both;
+            }
+
+            protected override Container CreateCursorContent() =&gt; scaleTransitionContainer = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Origin = Anchor.Centre,
+                Anchor = Anchor.Centre,
+                Child = base.CreateCursorContent(),
+            };
+
+            protected override float CalculateCursorScale() =&gt;
+                // Force minimum cursor size so it&#39;s easily clickable
+                Math.Max(1f, base.CalculateCursorScale());
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                updateColour();
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                updateColour();
+                base.OnHoverLost(e);
+            }
+
+            public bool OnPressed(KeyBindingPressEvent&lt;OsuAction&gt; e)
+            {
+                switch (e.Action)
+                {
+                    case OsuAction.LeftButton:
+                    case OsuAction.RightButton:
+                        if (!IsHovered)
+                            return false;
+
+                        scaleTransitionContainer.ScaleTo(2, TRANSITION_TIME, Easing.OutQuint);
+                        ResumeRequested?.Invoke(e.Action);
+                        return true;
+                }
+
+                return false;
+            }
+
+            public void OnReleased(KeyBindingReleaseEvent&lt;OsuAction&gt; e)
+            {
+            }
+
+            public void Appear() =&gt; Schedule(() =&gt;
+            {
+                updateColour();
+
+                // importantly, we perform the scale transition on an underlying container rather than the whole cursor
+                // to prevent attempts of abuse by the scale change in the cursor&#39;s hitbox (see: https://github.com/ppy/osu/issues/26477).
+                scaleTransitionContainer.ScaleTo(4).Then().ScaleTo(1, 1000, Easing.OutQuint);
+            });
+
+            private void updateColour()
+            {
+                this.FadeColour(IsHovered ? Color4.White : Color4.Orange, 400, Easing.OutQuint);
+            }
+        }
+
+        public partial class OsuResumeOverlayInputBlocker : Drawable, IKeyBindingHandler&lt;OsuAction&gt;
+        {
+            public bool BlockNextPress;
+
+            public OsuResumeOverlayInputBlocker()
+            {
+                RelativeSizeAxes = Axes.Both;
+                Depth = float.MinValue;
+            }
+
+            public bool OnPressed(KeyBindingPressEvent&lt;OsuAction&gt; e)
+            {
+                bool block = BlockNextPress;
+                BlockNextPress = false;
+                return block;
+            }
+
+            public void OnReleased(KeyBindingReleaseEvent&lt;OsuAction&gt; e)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,56,0],[23,9,23,68,0],[27,57,27,120,0],[29,57,29,92,0],[32,52,32,56,0],[32,57,32,61,0],[36,9,36,10,0],[37,13,37,63,0],[39,13,39,75,0],[41,13,41,44,0],[42,13,42,14,0],[43,17,43,65,0],[44,17,44,113,0],[45,13,45,14,0],[47,13,52,21,0],[52,21,52,22,0],[52,22,58,25,0],[58,25,58,140,0],[58,140,59,29,0],[59,29,59,64,0],[59,64,61,25,0],[61,25,61,34,0],[61,34,62,21,0],[62,21,62,22,0],[62,22,64,16,0],[65,9,65,10,0],[68,9,68,10,0],[70,13,70,162,0],[71,13,71,14,0],[72,17,72,26,0],[73,17,73,24,0],[76,13,76,26,0],[78,13,78,48,0],[79,13,79,114,0],[80,13,80,42,0],[82,13,82,46,0],[83,17,83,70,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,27,0],[90,13,90,44,0],[91,13,91,41,0],[92,13,92,49,0],[93,9,93,10,0],[95,58,95,62,0],[99,59,99,63,0],[102,13,102,64,0],[104,13,104,44,0],[105,13,105,14,0],[106,17,106,50,0],[107,13,107,14,0],[109,67,115,14,0],[119,17,119,58,0],[122,13,122,14,0],[123,17,123,32,0],[124,17,124,40,0],[125,13,125,14,0],[128,13,128,14,0],[129,17,129,32,0],[130,17,130,37,0],[131,13,131,14,0],[134,13,134,14,0],[135,17,135,34,0],[139,25,139,40,0],[140,29,140,42,0],[142,25,142,95,0],[143,25,143,59,0],[144,25,144,37,0],[147,17,147,30,0],[148,13,148,14,0],[151,13,151,14,0],[152,13,152,14,0],[154,37,155,13,0],[155,13,155,14,0],[155,14,156,17,0],[156,17,156,32,0],[156,32,160,17,0],[160,17,160,94,0],[160,94,161,13,0],[161,13,161,14,0],[161,14,161,15,0],[164,13,164,14,0],[165,17,165,97,0],[166,13,166,14,0],[173,13,173,50,0],[174,13,174,14,0],[175,17,175,46,0],[176,17,176,40,0],[177,13,177,14,0],[180,13,180,14,0],[181,17,181,45,0],[182,17,182,40,0],[183,17,183,30,0],[184,13,184,14,0],[187,13,187,14,0],[188,13,188,14,0]]);
+    </script>
+  </body>
+</html>

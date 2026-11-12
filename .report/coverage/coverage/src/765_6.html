@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModTargetPractice.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Overlays.Settings;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Beatmaps;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.Osu.Utils;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Osu.Mods
+{
+    public class OsuModTargetPractice : ModWithVisibilityAdjustment, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;,
+                                        IApplicableToHealthProcessor, IApplicableToDifficulty, IApplicableFailOverride, IHasSeed, IHidesApproachCircles
+    {
+        public override string Name =&gt; &quot;Target Practice&quot;;
+        public override string Acronym =&gt; &quot;TP&quot;;
+        public override ModType Type =&gt; ModType.Conversion;
+        public override IconUsage? Icon =&gt; OsuIcon.ModTargetPractice;
+        public override LocalisableString Description =&gt; @&quot;Practice keeping up with the beat of the song.&quot;;
+
+        public override Type[] IncompatibleMods =&gt; base.IncompatibleMods.Concat(new[]
+        {
+            typeof(IRequiresApproachCircles),
+            typeof(OsuModRandom),
+            typeof(OsuModSpunOut),
+            typeof(OsuModStrictTracking),
+            typeof(OsuModSuddenDeath),
+            typeof(OsuModDepth),
+            typeof(OsuModDifficultyAdjust),
+        }).ToArray();
+
+        [SettingSource(&quot;Seed&quot;, &quot;Use a custom seed instead of a random one&quot;, SettingControlType = typeof(SettingsNumberBox))]
+        public Bindable&lt;int?&gt; Seed { get; } = new Bindable&lt;int?&gt;();
+
+        [SettingSource(&quot;Metronome ticks&quot;, &quot;Whether a metronome beat should play in the background&quot;)]
+        public Bindable&lt;bool&gt; Metronome { get; } = new BindableBool(true);
+
+        #region Constants
+
+        /// &lt;summary&gt;
+        /// Jump distance for circles in the last combo
+        /// &lt;/summary&gt;
+        private const float max_base_distance = 333f;
+
+        /// &lt;summary&gt;
+        /// The maximum allowed jump distance after multipliers are applied
+        /// &lt;/summary&gt;
+        private const float distance_cap = 380f;
+
+        /// &lt;summary&gt;
+        /// The extent of rotation towards playfield centre when a circle is near the edge
+        /// &lt;/summary&gt;
+        private const float edge_rotation_multiplier = 0.75f;
+
+        /// &lt;summary&gt;
+        /// Number of recent circles to check for overlap
+        /// &lt;/summary&gt;
+        private const int overlap_check_count = 5;
+
+        /// &lt;summary&gt;
+        /// Duration of the undimming animation
+        /// &lt;/summary&gt;
+        private const double undim_duration = 96;
+
+        /// &lt;summary&gt;
+        /// Acceptable difference for timing comparisons
+        /// &lt;/summary&gt;
+        private const double timing_precision = 1;
+
+        #endregion
+
+        #region Private Fields
+
+        private ControlPointInfo controlPointInfo = null!;
+
+        #endregion
+
+        #region Sudden Death (IApplicableFailOverride)
+
+        public bool PerformFail() =&gt; true;
+
+        public bool RestartOnFail =&gt; false;
+
+        public void ApplyToHealthProcessor(HealthProcessor healthProcessor)
+        {
+            // Sudden death
+            healthProcessor.FailConditions += (_, result)
+                =&gt; result.Type.AffectsCombo()
+                   &amp;&amp; !result.IsHit;
+        }
+
+        #endregion
+
+        #region Reduce AR (IApplicableToDifficulty)
+
+        public void ApplyToDifficulty(BeatmapDifficulty difficulty)
+        {
+            // Decrease AR to increase preempt time
+            difficulty.ApproachRate *= 0.5f;
+        }
+
+        #endregion
+
+        #region Circle Transforms (ModWithVisibilityAdjustment)
+
+        protected override void ApplyIncreasedVisibilityState(DrawableHitObject drawable, ArmedState state)
+        {
+        }
+
+        protected override void ApplyNormalVisibilityState(DrawableHitObject drawable, ArmedState state)
+        {
+            if (!(drawable is DrawableHitCircle circle)) return;
+
+            double startTime = circle.HitObject.StartTime;
+            double preempt = circle.HitObject.TimePreempt;
+
+            using (circle.BeginAbsoluteSequence(startTime - preempt))
+            {
+                // initial state
+                circle.ScaleTo(0.5f)
+                      .FadeColour(OsuColour.Gray(0.5f));
+
+                // scale to final size
+                circle.ScaleTo(1f, preempt);
+
+                // Remove approach circles
+                circle.ApproachCircle.Hide();
+            }
+
+            using (circle.BeginAbsoluteSequence(startTime - controlPointInfo.TimingPointAt(startTime).BeatLength - undim_duration))
+                circle.FadeColour(Color4.White, undim_duration);
+        }
+
+        #endregion
+
+        #region Beatmap Generation (IApplicableToBeatmap)
+
+        public override void ApplyToBeatmap(IBeatmap beatmap)
+        {
+            Seed.Value ??= RNG.Next();
+
+            var rng = new Random(Seed.Value.Value);
+
+            var osuBeatmap = (OsuBeatmap)beatmap;
+
+            if (osuBeatmap.HitObjects.Count == 0) return;
+
+            controlPointInfo = osuBeatmap.ControlPointInfo;
+
+            var originalHitObjects = osuBeatmap.HitObjects.OrderBy(x =&gt; x.StartTime).ToList();
+            var hitObjects = generateBeats(osuBeatmap, originalHitObjects)
+                             .Select(beat =&gt;
+                             {
+                                 var newCircle = new HitCircle();
+                                 newCircle.ApplyDefaults(controlPointInfo, osuBeatmap.Difficulty);
+                                 newCircle.StartTime = beat;
+                                 return (OsuHitObject)newCircle;
+                             }).ToList();
+
+            addHitSamples(hitObjects, originalHitObjects);
+
+            fixComboInfo(hitObjects, originalHitObjects);
+
+            randomizeCirclePos(hitObjects, rng);
+
+            osuBeatmap.HitObjects = hitObjects;
+
+            base.ApplyToBeatmap(beatmap);
+        }
+
+        private IEnumerable&lt;double&gt; generateBeats(IBeatmap beatmap, IReadOnlyCollection&lt;OsuHitObject&gt; originalHitObjects)
+        {
+            double startTime = beatmap.HitObjects.First().StartTime;
+            double endTime = beatmap.GetLastObjectTime();
+
+            var beats = beatmap.ControlPointInfo.TimingPoints
+                               // Ignore timing points after endTime
+                               .Where(timingPoint =&gt; !definitelyBigger(timingPoint.Time, endTime))
+                               // Generate the beats
+                               .SelectMany(timingPoint =&gt; getBeatsForTimingPoint(timingPoint, endTime))
+                               // Remove beats before startTime
+                               .Where(beat =&gt; almostBigger(beat, startTime))
+                               // Remove beats during breaks
+                               .Where(beat =&gt; !isInsideBreakPeriod(originalHitObjects, beatmap.Breaks, beat))
+                               .ToList();
+
+            // Remove beats that are too close to the next one (e.g. due to timing point changes)
+            for (int i = beats.Count - 2; i &gt;= 0; i--)
+            {
+                double beat = beats[i];
+
+                if (!definitelyBigger(beats[i + 1] - beat, beatmap.ControlPointInfo.TimingPointAt(beat).BeatLength / 2))
+                    beats.RemoveAt(i);
+            }
+
+            return beats;
+        }
+
+        private void addHitSamples(IEnumerable&lt;OsuHitObject&gt; hitObjects, List&lt;OsuHitObject&gt; originalHitObjects)
+        {
+            foreach (var obj in hitObjects)
+            {
+                var samples = getSamplesAtTime(originalHitObjects, obj.StartTime);
+
+                // If samples aren&#39;t available at the exact start time of the object,
+                // use samples (without additions) in the closest original hit object instead
+                obj.Samples = samples ?? getClosestHitObject(originalHitObjects, obj.StartTime).Samples.Where(s =&gt; !HitSampleInfo.ALL_ADDITIONS.Contains(s.Name)).ToList();
+            }
+        }
+
+        private void fixComboInfo(List&lt;OsuHitObject&gt; hitObjects, List&lt;OsuHitObject&gt; originalHitObjects)
+        {
+            // Copy combo indices from an original object at the same time or from the closest preceding object
+            // (Objects lying between two combos are assumed to belong to the preceding combo)
+            hitObjects.ForEach(newObj =&gt;
+            {
+                var closestOrigObj = originalHitObjects.FindLast(y =&gt; almostBigger(newObj.StartTime, y.StartTime));
+
+                // It shouldn&#39;t be possible for closestOrigObj to be null
+                // But if it is, obj should be in the first combo
+                newObj.ComboIndex = closestOrigObj?.ComboIndex ?? 0;
+            });
+
+            // The copied combo indices may not be continuous if the original map starts and ends a combo in between beats
+            // e.g. A stream with each object starting a new combo
+            // So combo indices need to be reprocessed to ensure continuity
+            // Other kinds of combo info are also added in the process
+            var combos = hitObjects.GroupBy(x =&gt; x.ComboIndex).ToList();
+
+            for (int i = 0; i &lt; combos.Count; i++)
+            {
+                var group = combos[i].ToList();
+                group.First().NewCombo = true;
+                group.Last().LastInCombo = true;
+
+                for (int j = 0; j &lt; group.Count; j++)
+                {
+                    var x = group[j];
+                    x.ComboIndex = i;
+                    x.IndexInCurrentCombo = j;
+                }
+            }
+        }
+
+        private void randomizeCirclePos(IReadOnlyList&lt;OsuHitObject&gt; hitObjects, Random rng)
+        {
+            if (hitObjects.Count == 0) return;
+
+            float nextSingle(float max = 1f) =&gt; (float)(rng.NextDouble() * max);
+
+            const float two_pi = MathF.PI * 2;
+
+            float direction = two_pi * nextSingle();
+            int maxComboIndex = hitObjects.Last().ComboIndex;
+
+            for (int i = 0; i &lt; hitObjects.Count; i++)
+            {
+                var obj = hitObjects[i];
+                var lastPos = i == 0
+                    ? Vector2.Divide(OsuPlayfield.BASE_SIZE, 2)
+                    : hitObjects[i - 1].Position;
+
+                float distance = maxComboIndex == 0
+                    ? (float)obj.Radius
+                    : mapRange(obj.ComboIndex, 0, maxComboIndex, (float)obj.Radius, max_base_distance);
+                if (obj.NewCombo) distance *= 1.5f;
+                if (obj.Kiai) distance *= 1.2f;
+                distance = Math.Min(distance_cap, distance);
+
+                // Attempt to place the circle at a place that does not overlap with previous ones
+
+                int tryCount = 0;
+
+                // for checking overlap
+                var precedingObjects = hitObjects.SkipLast(hitObjects.Count - i).TakeLast(overlap_check_count).ToList();
+
+                do
+                {
+                    if (tryCount &gt; 0) direction = two_pi * nextSingle();
+
+                    var relativePos = new Vector2(
+                        distance * MathF.Cos(direction),
+                        distance * MathF.Sin(direction)
+                    );
+                    // Rotate the new circle away from playfield border
+                    relativePos = OsuHitObjectGenerationUtils.RotateAwayFromEdge(lastPos, relativePos, edge_rotation_multiplier);
+                    direction = MathF.Atan2(relativePos.Y, relativePos.X);
+
+                    var newPosition = Vector2.Add(lastPos, relativePos);
+
+                    obj.Position = newPosition;
+
+                    clampToPlayfield(obj);
+
+                    tryCount++;
+                    if (tryCount % 10 == 0) distance *= 0.9f;
+                } while (distance &gt;= obj.Radius * 2 &amp;&amp; checkForOverlap(precedingObjects, obj));
+
+                if (obj.LastInCombo)
+                    direction = two_pi * nextSingle();
+                else
+                    direction += distance / distance_cap * (nextSingle() * two_pi - MathF.PI);
+            }
+        }
+
+        #endregion
+
+        #region Metronome (IApplicableToDrawableRuleset)
+
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
+        {
+            if (Metronome.Value)
+                drawableRuleset.Overlays.Add(new MetronomeBeat(drawableRuleset.Beatmap.HitObjects.First().StartTime));
+        }
+
+        #endregion
+
+        #region Helper Subroutines
+
+        /// &lt;summary&gt;
+        /// Check if a given time is inside a &lt;see cref=&quot;BreakPeriod&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The given time is also considered to be inside a break if it is earlier than the
+        /// start time of the first original hit object after the break.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;originalHitObjects&quot;&gt;Hit objects order by time.&lt;/param&gt;
+        /// &lt;param name=&quot;breaks&quot;&gt;The breaks of the beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to be checked.&lt;/param&gt;=
+        private bool isInsideBreakPeriod(IReadOnlyCollection&lt;OsuHitObject&gt; originalHitObjects, IEnumerable&lt;BreakPeriod&gt; breaks, double time)
+        {
+            return breaks.Any(breakPeriod =&gt;
+            {
+                OsuHitObject? firstObjAfterBreak = originalHitObjects.FirstOrDefault(obj =&gt; almostBigger(obj.StartTime, breakPeriod.EndTime));
+
+                return almostBigger(time, breakPeriod.StartTime)
+                       // There should never really be a break section with no objects after it, but we&#39;ve seen crashes from users with malformed beatmaps,
+                       // so it&#39;s best to guard against this.
+                       &amp;&amp; (firstObjAfterBreak == null || definitelyBigger(firstObjAfterBreak.StartTime, time));
+            });
+        }
+
+        private IEnumerable&lt;double&gt; getBeatsForTimingPoint(TimingControlPoint timingPoint, double mapEndTime)
+        {
+            var beats = new List&lt;double&gt;();
+            int i = 0;
+            double currentTime = timingPoint.Time;
+
+            while (!definitelyBigger(currentTime, mapEndTime) &amp;&amp; ReferenceEquals(controlPointInfo.TimingPointAt(currentTime), timingPoint))
+            {
+                beats.Add(Math.Floor(currentTime));
+                i++;
+                currentTime = timingPoint.Time + i * timingPoint.BeatLength;
+            }
+
+            return beats;
+        }
+
+        private OsuHitObject getClosestHitObject(List&lt;OsuHitObject&gt; hitObjects, double time)
+        {
+            int precedingIndex = hitObjects.FindLastIndex(h =&gt; h.StartTime &lt; time);
+
+            if (precedingIndex == hitObjects.Count - 1) return hitObjects[precedingIndex];
+
+            // return the closest preceding/succeeding hit object, whoever is closer in time
+            return hitObjects[precedingIndex + 1].StartTime - time &lt; time - hitObjects[precedingIndex].StartTime
+                ? hitObjects[precedingIndex + 1]
+                : hitObjects[precedingIndex];
+        }
+
+        /// &lt;summary&gt;
+        /// Get samples (if any) for a specific point in time.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Samples will be returned if a hit circle or a slider node exists at that point of time.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;hitObjects&quot;&gt;The list of hit objects in a beatmap, ordered by StartTime&lt;/param&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The point in time to get samples for&lt;/param&gt;
+        /// &lt;returns&gt;Hit samples&lt;/returns&gt;
+        private IList&lt;HitSampleInfo&gt;? getSamplesAtTime(IEnumerable&lt;OsuHitObject&gt; hitObjects, double time)
+        {
+            // Get a hit object that
+            //   either has StartTime equal to the target time
+            //   or has a repeat node at the target time
+            var sampleObj = hitObjects.FirstOrDefault(hitObject =&gt;
+            {
+                if (almostEquals(time, hitObject.StartTime))
+                    return true;
+
+                if (!(hitObject is IHasRepeats s))
+                    return false;
+                // If time is outside the duration of the IHasRepeats,
+                // then this hitObject isn&#39;t the one we want
+                if (!almostBigger(time, hitObject.StartTime)
+                    || !almostBigger(s.EndTime, time))
+                    return false;
+
+                return nodeIndexFromTime(s, time - hitObject.StartTime) != -1;
+            });
+            if (sampleObj == null) return null;
+
+            IList&lt;HitSampleInfo&gt; samples;
+
+            if (sampleObj is IHasRepeats slider)
+                samples = slider.NodeSamples[nodeIndexFromTime(slider, time - sampleObj.StartTime)];
+            else
+                samples = sampleObj.Samples;
+
+            return samples;
+        }
+
+        /// &lt;summary&gt;
+        /// Get the repeat node at a point in time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;curve&quot;&gt;The slider.&lt;/param&gt;
+        /// &lt;param name=&quot;timeSinceStart&quot;&gt;The time since the start time of the slider.&lt;/param&gt;
+        /// &lt;returns&gt;Index of the node. -1 if there isn&#39;t a node at the specific time.&lt;/returns&gt;
+        private int nodeIndexFromTime(IHasRepeats curve, double timeSinceStart)
+        {
+            double spanDuration = curve.Duration / curve.SpanCount();
+            double nodeIndex = timeSinceStart / spanDuration;
+
+            if (almostEquals(nodeIndex, Math.Round(nodeIndex)))
+                return (int)Math.Round(nodeIndex);
+
+            return -1;
+        }
+
+        private bool checkForOverlap(IEnumerable&lt;OsuHitObject&gt; objectsToCheck, OsuHitObject target)
+        {
+            return objectsToCheck.Any(h =&gt; Vector2.Distance(h.Position, target.Position) &lt; target.Radius * 2);
+        }
+
+        /// &lt;summary&gt;
+        /// Move the hit object into playfield, taking its radius into account.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;obj&quot;&gt;The hit object to be clamped.&lt;/param&gt;
+        private void clampToPlayfield(OsuHitObject obj)
+        {
+            var position = obj.Position;
+            float radius = (float)obj.Radius;
+
+            if (position.Y &lt; radius)
+                position.Y = radius;
+            else if (position.Y &gt; OsuPlayfield.BASE_SIZE.Y - radius)
+                position.Y = OsuPlayfield.BASE_SIZE.Y - radius;
+
+            if (position.X &lt; radius)
+                position.X = radius;
+            else if (position.X &gt; OsuPlayfield.BASE_SIZE.X - radius)
+                position.X = OsuPlayfield.BASE_SIZE.X - radius;
+
+            obj.Position = position;
+        }
+
+        /// &lt;summary&gt;
+        /// Re-maps a number from one range to another.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;value&quot;&gt;The number to be re-mapped.&lt;/param&gt;
+        /// &lt;param name=&quot;fromLow&quot;&gt;Beginning of the original range.&lt;/param&gt;
+        /// &lt;param name=&quot;fromHigh&quot;&gt;End of the original range.&lt;/param&gt;
+        /// &lt;param name=&quot;toLow&quot;&gt;Beginning of the new range.&lt;/param&gt;
+        /// &lt;param name=&quot;toHigh&quot;&gt;End of the new range.&lt;/param&gt;
+        /// &lt;returns&gt;The re-mapped number.&lt;/returns&gt;
+        private static float mapRange(float value, float fromLow, float fromHigh, float toLow, float toHigh)
+        {
+            return (value - fromLow) * (toHigh - toLow) / (fromHigh - fromLow) + toLow;
+        }
+
+        private static bool almostBigger(double value1, double value2)
+        {
+            return Precision.AlmostBigger(value1, value2, timing_precision);
+        }
+
+        private static bool definitelyBigger(double value1, double value2)
+        {
+            return Precision.DefinitelyBigger(value1, value2, timing_precision);
+        }
+
+        private static bool almostEquals(double value1, double value2)
+        {
+            return Precision.AlmostEquals(value1, value2, timing_precision);
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,40,37,57,0],[38,43,38,47,0],[39,41,39,59,1],[40,44,40,69,0],[41,58,41,107,0],[43,52,52,21,0],[55,38,55,42,0],[55,47,55,67,1],[58,43,58,47,0],[58,52,58,74,1],[96,9,96,59,1],[102,38,102,42,0],[104,38,104,43,0],[107,9,107,10,0],[109,13,110,20,0],[110,20,111,36,0],[111,36,111,37,0],[112,9,112,10,0],[119,9,119,10,0],[121,13,121,45,0],[122,9,122,10,0],[129,9,129,10,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,57,0],[134,58,134,65,0],[136,13,136,59,0],[137,13,137,59,0],[139,13,139,70,0],[140,13,140,14,0],[142,17,143,57,0],[146,17,146,45,0],[149,17,149,46,0],[150,13,150,14,0],[152,13,152,132,0],[153,17,153,65,0],[154,9,154,10,0],[161,9,161,10,0],[162,13,162,39,0],[164,13,164,52,0],[166,13,166,50,0],[168,13,168,50,0],[168,51,168,58,0],[170,13,170,60,0],[172,13,172,73,0],[172,73,172,84,0],[172,84,172,95,0],[173,13,175,30,0],[175,30,175,31,0],[175,31,176,34,0],[176,34,176,66,0],[176,66,177,34,0],[177,34,177,99,0],[177,99,178,34,0],[178,34,178,61,0],[178,61,179,34,0],[179,34,179,65,0],[179,65,180,30,0],[180,30,180,31,0],[180,31,180,42,0],[182,13,182,59,0],[184,13,184,58,0],[186,13,186,49,0],[188,13,188,48,0],[190,13,190,42,0],[191,9,191,10,0],[194,9,194,10,0],[195,13,195,69,0],[196,13,196,58,0],[198,13,200,54,0],[200,54,200,98,0],[200,98,202,59,0],[202,59,202,103,0],[202,103,204,47,0],[204,47,204,76,0],[204,76,206,47,0],[206,47,206,109,0],[206,109,207,42,0],[210,18,210,41,0],[210,43,210,49,0],[210,51,210,54,0],[211,13,211,14,0],[212,17,212,40,0],[214,17,214,121,0],[215,21,215,39,0],[216,13,216,14,0],[218,13,218,26,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,20,0],[223,22,223,29,0],[223,30,223,32,0],[223,33,223,43,0],[224,13,224,14,0],[225,17,225,83,0],[229,17,229,116,0],[229,116,229,161,0],[229,161,229,172,0],[230,13,230,14,0],[231,9,231,10,0],[234,9,234,10,0],[237,13,238,13,0],[238,13,238,14,0],[238,14,239,17,0],[239,17,239,71,0],[239,71,239,114,0],[239,114,239,116,0],[239,116,243,17,0],[243,17,243,69,0],[243,69,244,13,0],[244,13,244,14,0],[244,14,244,16,0],[250,13,250,50,0],[250,50,250,62,0],[250,62,250,73,0],[252,18,252,27,0],[252,29,252,45,0],[252,47,252,50,0],[253,13,253,14,0],[254,17,254,48,0],[255,17,255,47,0],[256,17,256,49,0],[258,22,258,31,0],[258,33,258,48,0],[258,50,258,53,0],[259,17,259,18,0],[260,21,260,38,0],[261,21,261,38,0],[262,21,262,47,0],[263,17,263,18,0],[264,13,264,14,0],[265,9,265,10,0],[268,9,268,10,0],[269,13,269,39,0],[269,40,269,47,0],[271,49,271,80,0],[275,13,275,53,0],[276,13,276,62,0],[278,18,278,27,0],[278,29,278,49,0],[278,51,278,54,0],[279,13,279,14,0],[280,17,280,41,0],[281,17,283,50,0],[285,17,287,104,0],[288,17,288,34,0],[288,35,288,52,0],[289,17,289,30,0],[289,31,289,48,0],[290,17,290,61,0],[294,17,294,34,0],[297,17,297,121,0],[300,17,300,18,0],[301,21,301,38,0],[301,39,301,73,0],[303,21,306,23,0],[308,21,308,130,0],[309,21,309,75,0],[311,21,311,73,0],[313,21,313,48,0],[315,21,315,43,0],[317,21,317,32,0],[318,21,318,44,0],[318,45,318,62,0],[319,17,319,18,0],[319,19,319,96,0],[321,17,321,37,0],[322,21,322,55,0],[324,21,324,95,0],[325,13,325,14,0],[326,9,326,10,0],[333,9,333,10,0],[334,13,334,33,0],[335,17,335,119,0],[336,9,336,10,0],[353,9,353,10,0],[354,13,355,13,0],[355,13,355,14,0],[355,14,356,17,0],[356,17,356,93,0],[356,93,356,141,0],[356,141,356,143,0],[356,143,358,17,0],[358,17,361,112,0],[361,112,362,13,0],[362,13,362,14,0],[362,14,362,16,0],[363,9,363,10,0],[366,9,366,10,0],[367,13,367,44,0],[368,13,368,23,0],[369,13,369,51,0],[371,13,371,140,0],[372,13,372,14,0],[373,17,373,52,0],[374,17,374,21,0],[375,17,375,77,0],[376,13,376,14,0],[378,13,378,26,0],[379,9,379,10,0],[382,9,382,10,0],[383,13,383,64,0],[383,64,383,82,0],[383,82,383,84,0],[385,13,385,56,0],[385,57,385,91,0],[388,13,390,46,0],[391,9,391,10,0],[403,9,403,10,0],[407,13,408,13,0],[408,13,408,14,0],[408,14,409,17,0],[409,17,409,61,0],[409,61,410,21,0],[410,21,410,33,0],[410,33,412,17,0],[412,17,412,51,0],[412,51,413,21,0],[413,21,413,34,0],[413,34,416,17,0],[416,17,417,55,0],[417,55,418,21,0],[418,21,418,34,0],[418,34,420,17,0],[420,17,420,79,0],[420,79,421,13,0],[421,13,421,14,0],[421,14,421,16,0],[422,13,422,35,0],[422,36,422,48,0],[426,13,426,49,0],[427,17,427,101,0],[429,17,429,45,0],[431,13,431,28,0],[432,9,432,10,0],[441,9,441,10,0],[442,13,442,70,0],[443,13,443,62,0],[445,13,445,64,0],[446,17,446,51,0],[448,13,448,23,0],[449,9,449,10,0],[452,9,452,10,0],[453,13,453,44,0],[453,44,453,109,0],[453,109,453,111,0],[454,9,454,10,0],[461,9,461,10,0],[462,13,462,41,0],[463,13,463,46,0],[465,13,465,37,0],[466,17,466,37,0],[467,18,467,69,0],[468,17,468,64,0],[470,13,470,37,0],[471,17,471,37,0],[472,18,472,69,0],[473,17,473,64,0],[475,13,475,37,0],[476,9,476,10,0],[488,9,488,10,0],[489,13,489,88,0],[490,9,490,10,0],[493,9,493,10,0],[494,13,494,77,0],[495,9,495,10,0],[498,9,498,10,0],[499,13,499,81,0],[500,9,500,10,0],[503,9,503,10,0],[504,13,504,77,0],[505,9,505,10,0]]);
+    </script>
+  </body>
+</html>

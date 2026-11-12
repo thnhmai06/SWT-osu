@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModDepth.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.UI;
+using osuTK;
+
+namespace osu.Game.Rulesets.Osu.Mods
+{
+    public class OsuModDepth : ModWithVisibilityAdjustment, IUpdatableByPlayfield, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;
+    {
+        public override string Name =&gt; &quot;Depth&quot;;
+        public override string Acronym =&gt; &quot;DP&quot;;
+        public override IconUsage? Icon =&gt; OsuIcon.ModDepth;
+        public override ModType Type =&gt; ModType.Fun;
+        public override LocalisableString Description =&gt; &quot;3D. Almost.&quot;;
+        public override Type[] IncompatibleMods =&gt; base.IncompatibleMods.Concat(new[] { typeof(OsuModAutoplay), typeof(OsuModMagnetised), typeof(OsuModRepel), typeof(OsuModFreezeFrame), typeof(ModWithVisibilityAdjustment) }).ToArray();
+
+        private static readonly Vector3 camera_position = new Vector3(OsuPlayfield.BASE_SIZE.X * 0.5f, OsuPlayfield.BASE_SIZE.Y * 0.5f, -200);
+        private readonly float sliderMinDepth = depthForScale(1.5f); // Depth at which slider&#39;s scale will be 1.5f
+
+        [SettingSource(&quot;Maximum depth&quot;, &quot;How far away objects appear.&quot;, 0)]
+        public BindableFloat MaxDepth { get; } = new BindableFloat(100)
+        {
+            Precision = 10,
+            MinValue = 50,
+            MaxValue = 200
+        };
+
+        [SettingSource(&quot;Show Approach Circles&quot;, &quot;Whether approach circles should be visible.&quot;, 1)]
+        public BindableBool ShowApproachCircles { get; } = new BindableBool(true);
+
+        protected override void ApplyIncreasedVisibilityState(DrawableHitObject hitObject, ArmedState state) =&gt; applyTransform(hitObject, state);
+
+        protected override void ApplyNormalVisibilityState(DrawableHitObject hitObject, ArmedState state) =&gt; applyTransform(hitObject, state);
+
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
+        {
+            // Hide follow points as they won&#39;t make any sense.
+            // Judgements can potentially be turned on in a future where they display at a position relative to their drawable counterpart.
+            (drawableRuleset.Playfield as OsuPlayfield)?.FollowPoints.Hide();
+        }
+
+        private void applyTransform(DrawableHitObject drawable, ArmedState state)
+        {
+            switch (drawable)
+            {
+                case DrawableHitCircle circle:
+                    if (!ShowApproachCircles.Value)
+                    {
+                        var hitObject = (OsuHitObject)drawable.HitObject;
+                        double appearTime = hitObject.StartTime - hitObject.TimePreempt;
+
+                        using (circle.BeginAbsoluteSequence(appearTime))
+                            circle.ApproachCircle.Hide();
+                    }
+
+                    break;
+            }
+        }
+
+        public void Update(Playfield playfield)
+        {
+            double time = playfield.Time.Current;
+
+            foreach (var entry in playfield.HitObjectContainer.AliveEntries)
+            {
+                var drawable = entry.Value;
+
+                switch (drawable)
+                {
+                    case DrawableHitCircle circle:
+                        processHitObject(time, circle);
+                        break;
+
+                    case DrawableSlider slider:
+                        processSlider(time, slider);
+                        break;
+                }
+            }
+        }
+
+        private void processHitObject(double time, DrawableOsuHitObject drawable)
+        {
+            var hitObject = drawable.HitObject;
+
+            // Circles are always moving at the constant speed. They&#39;ll fade out before reaching the camera even at extreme conditions (AR 11, max depth).
+            double speed = MaxDepth.Value / hitObject.TimePreempt;
+            double appearTime = hitObject.StartTime - hitObject.TimePreempt;
+            float z = MaxDepth.Value - (float)((Math.Max(time, appearTime) - appearTime) * speed);
+
+            float scale = scaleForDepth(z);
+            drawable.Position = toPlayfieldPosition(scale, hitObject.StackedPosition);
+            drawable.Scale = new Vector2(scale);
+        }
+
+        private void processSlider(double time, DrawableSlider drawableSlider)
+        {
+            var hitObject = drawableSlider.HitObject;
+
+            double baseSpeed = MaxDepth.Value / hitObject.TimePreempt;
+            double appearTime = hitObject.StartTime - hitObject.TimePreempt;
+
+            // Allow slider to move at a constant speed if its scale at the end time will be lower than 1.5f
+            float zEnd = MaxDepth.Value - (float)((Math.Max(hitObject.StartTime + hitObject.Duration, appearTime) - appearTime) * baseSpeed);
+
+            if (zEnd &gt; sliderMinDepth)
+            {
+                processHitObject(time, drawableSlider);
+                return;
+            }
+
+            double offsetAfterStartTime = hitObject.Duration + 500;
+            double slowSpeed = Math.Min(-sliderMinDepth / offsetAfterStartTime, baseSpeed);
+
+            double decelerationTime = hitObject.TimePreempt * 0.2;
+            float decelerationDistance = (float)(decelerationTime * (baseSpeed + slowSpeed) * 0.5);
+
+            float z;
+
+            if (time &lt; hitObject.StartTime - decelerationTime)
+            {
+                float fullDistance = decelerationDistance + (float)(baseSpeed * (hitObject.TimePreempt - decelerationTime));
+                z = fullDistance - (float)((Math.Max(time, appearTime) - appearTime) * baseSpeed);
+            }
+            else if (time &lt; hitObject.StartTime)
+            {
+                double timeOffset = time - (hitObject.StartTime - decelerationTime);
+                double deceleration = (slowSpeed - baseSpeed) / decelerationTime;
+                z = decelerationDistance - (float)(baseSpeed * timeOffset + deceleration * timeOffset * timeOffset * 0.5);
+            }
+            else
+            {
+                double endTime = hitObject.StartTime + offsetAfterStartTime;
+                z = -(float)((Math.Min(time, endTime) - hitObject.StartTime) * slowSpeed);
+            }
+
+            float scale = scaleForDepth(z);
+            drawableSlider.Position = toPlayfieldPosition(scale, hitObject.StackedPosition);
+            drawableSlider.Scale = new Vector2(scale);
+        }
+
+        private static float scaleForDepth(float depth) =&gt; -camera_position.Z / Math.Max(1f, depth - camera_position.Z);
+
+        private static float depthForScale(float scale) =&gt; -camera_position.Z / scale + camera_position.Z;
+
+        private static Vector2 toPlayfieldPosition(float scale, Vector2 positionAtZeroDepth)
+        {
+            return (positionAtZeroDepth - camera_position.Xy) * scale + camera_position.Xy;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,40,23,47,0],[24,43,24,47,0],[25,44,25,60,0],[26,41,26,52,0],[27,58,27,71,0],[28,52,28,235,0],[30,9,30,143,1],[31,9,31,69,1],[34,41,34,45,0],[34,50,39,10,1],[42,51,42,55,0],[42,60,42,82,1],[44,113,44,145,0],[46,110,46,142,0],[49,9,49,10,0],[52,13,52,78,0],[53,9,53,10,0],[56,9,56,10,0],[57,13,57,30,0],[60,21,60,52,0],[61,21,61,22,0],[62,25,62,74,0],[63,25,63,89,0],[65,25,65,73,0],[66,29,66,58,0],[67,21,67,22,0],[69,21,69,27,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,50,0],[77,13,77,20,0],[77,22,77,31,0],[77,32,77,34,0],[77,35,77,76,0],[78,13,78,14,0],[79,17,79,44,0],[81,17,81,34,0],[84,25,84,56,0],[85,25,85,31,0],[88,25,88,53,0],[89,25,89,31,0],[91,13,91,14,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,48,0],[99,13,99,67,0],[100,13,100,77,0],[101,13,101,99,0],[103,13,103,44,0],[104,13,104,87,0],[105,13,105,49,0],[106,9,106,10,0],[109,9,109,10,0],[110,13,110,54,0],[112,13,112,71,0],[113,13,113,77,0],[116,13,116,142,0],[118,13,118,39,0],[119,13,119,14,0],[120,17,120,56,0],[121,17,121,24,0],[124,13,124,68,0],[125,13,125,92,0],[127,13,127,67,0],[128,13,128,100,0],[132,13,132,63,0],[133,13,133,14,0],[134,17,134,125,0],[135,17,135,99,0],[136,13,136,14,0],[137,18,137,49,0],[138,13,138,14,0],[139,17,139,85,0],[140,17,140,82,0],[141,17,141,123,0],[142,13,142,14,0],[144,13,144,14,0],[145,17,145,77,0],[146,17,146,91,0],[147,13,147,14,0],[149,13,149,44,0],[150,13,150,93,0],[151,13,151,55,0],[152,9,152,10,0],[154,60,154,120,0],[156,60,156,106,1],[159,9,159,10,0],[160,13,160,92,0],[161,9,161,10,0]]);
+    </script>
+  </body>
+</html>

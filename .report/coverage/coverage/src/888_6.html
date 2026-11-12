@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/UI/Cursor/CursorTrail.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Rendering.Vertices;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Shaders.Types;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Graphics.Visualisation;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Framework.Timing;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Graphics.ES30;
+
+namespace osu.Game.Rulesets.Osu.UI.Cursor
+{
+    [DrawVisualiserHidden]
+    public partial class CursorTrail : Drawable, IRequireHighFrequencyMousePosition
+    {
+        private const int max_sprites = 2048;
+
+        /// &lt;summary&gt;
+        /// An exponentiating factor to ease the trail fade.
+        /// &lt;/summary&gt;
+        protected virtual float FadeExponent =&gt; 1.7f;
+
+        /// &lt;summary&gt;
+        /// The scale used on creation of a new trail part.
+        /// &lt;/summary&gt;
+        public Vector2 NewPartScale { get; set; } = Vector2.One;
+
+        /// &lt;summary&gt;
+        /// The rotation (in degrees) to apply to trail parts when &lt;see cref=&quot;AllowPartRotation&quot;/&gt; is &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        public float PartRotation { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether to rotate trail parts based on the value of &lt;see cref=&quot;PartRotation&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected bool AllowPartRotation { get; set; }
+
+        private Vector2 cursorScale = Vector2.One;
+
+        public Vector2 CursorScale
+        {
+            get =&gt; cursorScale;
+            set
+            {
+                cursorScale = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The trail part texture origin.
+        /// &lt;/summary&gt;
+        protected Anchor TrailOrigin
+        {
+            get =&gt; trailOrigin;
+            set
+            {
+                trailOrigin = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
+
+        private readonly TrailPart[] parts = new TrailPart[max_sprites];
+        private Anchor trailOrigin = Anchor.Centre;
+        private int currentIndex;
+        private IShader shader;
+        private double timeOffset;
+        private float time;
+
+        public CursorTrail()
+        {
+            // as we are currently very dependent on having a running clock, let&#39;s make our own clock for the time being.
+            Clock = new FramedClock();
+
+            RelativeSizeAxes = Axes.Both;
+
+            for (int i = 0; i &lt; max_sprites; i++)
+            {
+                // -1 signals that the part is unusable, and should not be drawn
+                parts[i].InvalidationID = -1;
+            }
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IRenderer renderer, ShaderManager shaders)
+        {
+            texture ??= renderer.WhitePixel;
+            shader = shaders.Load(@&quot;CursorTrail&quot;, FragmentShaderDescriptor.TEXTURE);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            resetTime();
+        }
+
+        private Texture texture;
+
+        public Texture Texture
+        {
+            get =&gt; texture;
+            set
+            {
+                if (texture == value)
+                    return;
+
+                texture = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The amount of time to fade the cursor trail pieces.
+        /// &lt;/summary&gt;
+        protected virtual double FadeDuration =&gt; 300;
+
+        public override bool IsPresent =&gt; true;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            Invalidate(Invalidation.DrawNode);
+
+            const int fade_clock_reset_threshold = 1000000;
+
+            time = (float)((Time.Current - timeOffset) / FadeDuration);
+            if (time &gt; fade_clock_reset_threshold)
+                resetTime();
+        }
+
+        private void resetTime()
+        {
+            for (int i = 0; i &lt; parts.Length; ++i)
+            {
+                parts[i].Time -= time;
+
+                if (parts[i].InvalidationID != -1)
+                    ++parts[i].InvalidationID;
+            }
+
+            time = 0;
+            timeOffset = Time.Current;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether to interpolate mouse movements and add trail pieces at intermediate points.
+        /// &lt;/summary&gt;
+        protected virtual bool InterpolateMovements =&gt; true;
+
+        protected virtual float IntervalMultiplier =&gt; 1.0f;
+        protected virtual bool AvoidDrawingNearCursor =&gt; false;
+
+        private Vector2? lastPosition;
+        private readonly InputResampler resampler = new InputResampler();
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            AddTrail(e.ScreenSpaceMousePosition);
+            return base.OnMouseMove(e);
+        }
+
+        protected void AddTrail(Vector2 position)
+        {
+            position = ToLocalSpace(position);
+
+            if (InterpolateMovements)
+            {
+                if (!lastPosition.HasValue)
+                {
+                    lastPosition = position;
+                    resampler.AddPosition(lastPosition.Value);
+                    return;
+                }
+
+                foreach (Vector2 pos2 in resampler.AddPosition(position))
+                {
+                    Trace.Assert(lastPosition.HasValue);
+
+                    Vector2 pos1 = lastPosition.Value;
+                    Vector2 diff = pos2 - pos1;
+                    float distance = diff.Length;
+                    Vector2 direction = diff / distance;
+
+                    float interval = Texture.DisplayWidth * CursorScale.X / 2.5f * IntervalMultiplier;
+                    float stopAt = distance - (AvoidDrawingNearCursor ? interval : 0);
+
+                    for (float d = interval; d &lt; stopAt; d += interval)
+                    {
+                        lastPosition = pos1 + direction * d;
+                        addPart(lastPosition.Value);
+                    }
+                }
+            }
+            else
+            {
+                lastPosition = position;
+                addPart(lastPosition.Value);
+            }
+        }
+
+        private void addPart(Vector2 localSpacePosition)
+        {
+            parts[currentIndex].Position = localSpacePosition;
+            parts[currentIndex].Time = time + 1;
+            parts[currentIndex].Scale = NewPartScale;
+            ++parts[currentIndex].InvalidationID;
+
+            currentIndex = (currentIndex + 1) % max_sprites;
+        }
+
+        protected override DrawNode CreateDrawNode() =&gt; new TrailDrawNode(this);
+
+        private struct TrailPart
+        {
+            public Vector2 Position;
+            public float Time;
+            public Vector2 Scale;
+            public long InvalidationID;
+        }
+
+        private class TrailDrawNode : DrawNode
+        {
+            protected new CursorTrail Source =&gt; (CursorTrail)base.Source;
+
+            private IShader shader;
+            private Texture texture;
+
+            private float time;
+            private float fadeExponent;
+            private float angle;
+            private Vector2 cursorScale;
+
+            private readonly TrailPart[] parts = new TrailPart[max_sprites];
+            private Vector2 originPosition;
+
+            private IVertexBatch&lt;TexturedTrailVertex&gt; vertexBatch;
+
+            public TrailDrawNode(CursorTrail source)
+                : base(source)
+            {
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                shader = Source.shader;
+                texture = Source.texture;
+                time = Source.time;
+                fadeExponent = Source.FadeExponent;
+                angle = Source.AllowPartRotation ? float.DegreesToRadians(Source.PartRotation) : 0;
+                cursorScale = Source.cursorScale;
+
+                originPosition = Vector2.Zero;
+
+                if (Source.TrailOrigin.HasFlag(Anchor.x1))
+                    originPosition.X = 0.5f;
+                else if (Source.TrailOrigin.HasFlag(Anchor.x2))
+                    originPosition.X = 1f;
+
+                if (Source.TrailOrigin.HasFlag(Anchor.y1))
+                    originPosition.Y = 0.5f;
+                else if (Source.TrailOrigin.HasFlag(Anchor.y2))
+                    originPosition.Y = 1f;
+
+                Source.parts.CopyTo(parts, 0);
+            }
+
+            private IUniformBuffer&lt;CursorTrailParameters&gt; cursorTrailParameters;
+
+            protected override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                vertexBatch ??= renderer.CreateQuadBatch&lt;TexturedTrailVertex&gt;(max_sprites, 1);
+
+                cursorTrailParameters ??= renderer.CreateUniformBuffer&lt;CursorTrailParameters&gt;();
+                cursorTrailParameters.Data = cursorTrailParameters.Data with
+                {
+                    FadeClock = time,
+                    FadeExponent = fadeExponent
+                };
+
+                shader.Bind();
+                shader.BindUniformBlock(&quot;m_CursorTrailParameters&quot;, cursorTrailParameters);
+
+                texture.Bind();
+
+                RectangleF textureRect = texture.GetTextureRect();
+
+                renderer.PushLocalMatrix(DrawInfo.Matrix);
+
+                float sin = MathF.Sin(angle);
+                float cos = MathF.Cos(angle);
+
+                foreach (var part in parts)
+                {
+                    if (part.InvalidationID == -1)
+                        continue;
+
+                    if (time - part.Time &gt;= 1)
+                        continue;
+
+                    vertexBatch.Add(new TexturedTrailVertex
+                    {
+                        Position = rotateAround(
+                            new Vector2(
+                                part.Position.X - texture.DisplayWidth * originPosition.X * part.Scale.X * cursorScale.X,
+                                part.Position.Y + texture.DisplayHeight * (1 - originPosition.Y) * part.Scale.Y * cursorScale.Y),
+                            part.Position, sin, cos),
+                        TexturePosition = textureRect.BottomLeft,
+                        TextureRect = new Vector4(0, 0, 1, 1),
+                        Colour = DrawColourInfo.Colour.BottomLeft.Linear,
+                        Time = part.Time
+                    });
+
+                    vertexBatch.Add(new TexturedTrailVertex
+                    {
+                        Position = rotateAround(
+                            new Vector2(
+                                part.Position.X + texture.DisplayWidth * (1 - originPosition.X) * part.Scale.X * cursorScale.X,
+                                part.Position.Y + texture.DisplayHeight * (1 - originPosition.Y) * part.Scale.Y * cursorScale.Y),
+                            part.Position, sin, cos),
+                        TexturePosition = textureRect.BottomRight,
+                        TextureRect = new Vector4(0, 0, 1, 1),
+                        Colour = DrawColourInfo.Colour.BottomRight.Linear,
+                        Time = part.Time
+                    });
+
+                    vertexBatch.Add(new TexturedTrailVertex
+                    {
+                        Position = rotateAround(
+                            new Vector2(
+                                part.Position.X + texture.DisplayWidth * (1 - originPosition.X) * part.Scale.X * cursorScale.X,
+                                part.Position.Y - texture.DisplayHeight * originPosition.Y * part.Scale.Y * cursorScale.Y),
+                            part.Position, sin, cos),
+                        TexturePosition = textureRect.TopRight,
+                        TextureRect = new Vector4(0, 0, 1, 1),
+                        Colour = DrawColourInfo.Colour.TopRight.Linear,
+                        Time = part.Time
+                    });
+
+                    vertexBatch.Add(new TexturedTrailVertex
+                    {
+                        Position = rotateAround(
+                            new Vector2(
+                                part.Position.X - texture.DisplayWidth * originPosition.X * part.Scale.X * cursorScale.X,
+                                part.Position.Y - texture.DisplayHeight * originPosition.Y * part.Scale.Y * cursorScale.Y),
+                            part.Position, sin, cos),
+                        TexturePosition = textureRect.TopLeft,
+                        TextureRect = new Vector4(0, 0, 1, 1),
+                        Colour = DrawColourInfo.Colour.TopLeft.Linear,
+                        Time = part.Time
+                    });
+                }
+
+                renderer.PopLocalMatrix();
+
+                vertexBatch.Draw();
+                shader.Unbind();
+            }
+
+            private static Vector2 rotateAround(Vector2 input, Vector2 origin, float sin, float cos)
+            {
+                float xTranslated = input.X - origin.X;
+                float yTranslated = input.Y - origin.Y;
+
+                return new Vector2(xTranslated * cos - yTranslated * sin, xTranslated * sin + yTranslated * cos) + origin;
+            }
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                vertexBatch?.Dispose();
+                cursorTrailParameters?.Dispose();
+            }
+
+            [StructLayout(LayoutKind.Sequential, Pack = 1)]
+            private record struct CursorTrailParameters
+            {
+                public UniformFloat FadeClock;
+                public UniformFloat FadeExponent;
+                private readonly UniformPadding8 pad1;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct TexturedTrailVertex : IEquatable&lt;TexturedTrailVertex&gt;, IVertex
+        {
+            [VertexMember(2, VertexAttribPointerType.Float)]
+            public Vector2 Position;
+
+            [VertexMember(4, VertexAttribPointerType.Float)]
+            public Color4 Colour;
+
+            [VertexMember(2, VertexAttribPointerType.Float)]
+            public Vector2 TexturePosition;
+
+            [VertexMember(4, VertexAttribPointerType.Float)]
+            public Vector4 TextureRect;
+
+            [VertexMember(1, VertexAttribPointerType.Float)]
+            public float Time;
+
+            public bool Equals(TexturedTrailVertex other)
+            {
+                return Position.Equals(other.Position)
+                       &amp;&amp; TexturePosition.Equals(other.TexturePosition)
+                       &amp;&amp; Colour.Equals(other.Colour)
+                       &amp;&amp; Time.Equals(other.Time);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,49,35,53,0],[40,39,40,43,0],[40,44,40,48,0],[40,53,40,64,0],[45,37,45,41,0],[45,42,45,46,0],[50,44,50,48,0],[50,49,50,53,0],[52,9,52,51,0],[56,20,56,31,0],[58,13,58,14,0],[59,17,59,37,0],[60,17,60,51,0],[61,13,61,14,0],[69,20,69,31,0],[71,13,71,14,0],[72,17,72,37,0],[73,17,73,51,0],[74,13,74,14,0],[77,9,77,73,0],[78,9,78,52,0],[84,9,84,29,0],[85,9,85,10,0],[87,13,87,39,0],[89,13,89,42,0],[91,18,91,27,0],[91,29,91,44,0],[91,46,91,49,0],[92,13,92,14,0],[94,17,94,46,0],[95,13,95,14,0],[96,9,96,10,0],[100,9,100,10,0],[101,13,101,45,0],[102,13,102,85,0],[103,9,103,10,0],[106,9,106,10,0],[107,13,107,33,0],[108,13,108,25,0],[109,9,109,10,0],[115,20,115,27,0],[117,13,117,14,0],[118,17,118,38,0],[119,21,119,28,0],[121,17,121,33,0],[122,17,122,51,0],[123,13,123,14,0],[129,50,129,53,0],[131,43,131,47,0],[134,9,134,10,0],[135,13,135,27,0],[137,13,137,47,0],[141,13,141,72,0],[142,13,142,51,0],[143,17,143,29,0],[144,9,144,10,0],[147,9,147,10,0],[148,18,148,27,0],[148,29,148,45,0],[148,47,148,50,0],[149,13,149,14,0],[150,17,150,39,0],[152,17,152,51,0],[153,21,153,47,0],[154,13,154,14,0],[156,13,156,22,0],[157,13,157,39,0],[158,9,158,10,0],[163,56,163,60,0],[165,55,165,59,0],[166,58,166,63,0],[169,9,169,74,0],[171,82,171,86,0],[174,9,174,10,0],[175,13,175,50,0],[176,13,176,40,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,47,0],[183,13,183,38,0],[184,13,184,14,0],[185,17,185,44,0],[186,17,186,18,0],[187,21,187,45,0],[188,21,188,63,0],[189,21,189,28,0],[192,17,192,24,0],[192,26,192,38,0],[192,39,192,41,0],[192,42,192,73,0],[193,17,193,18,0],[194,21,194,57,0],[196,21,196,55,0],[197,21,197,48,0],[198,21,198,50,0],[199,21,199,57,0],[201,21,201,103,0],[202,21,202,87,0],[204,26,204,44,0],[204,46,204,56,0],[204,58,204,71,0],[205,21,205,22,0],[206,25,206,61,0],[207,25,207,53,0],[208,21,208,22,0],[209,17,209,18,0],[210,13,210,14,0],[212,13,212,14,0],[213,17,213,41,0],[214,17,214,45,0],[215,13,215,14,0],[216,9,216,10,0],[219,9,219,10,0],[220,13,220,63,0],[221,13,221,49,0],[222,13,222,54,0],[223,13,223,50,0],[225,13,225,61,0],[226,9,226,10,0],[228,57,228,80,0],[240,49,240,73,0],[250,13,250,77,0],[256,19,256,31,0],[257,13,257,14,0],[258,13,258,14,0],[261,13,261,14,0],[262,17,262,35,0],[264,17,264,40,0],[265,17,265,42,0],[266,17,266,36,0],[267,17,267,52,0],[268,17,268,100,0],[269,17,269,50,0],[271,17,271,47,0],[273,17,273,59,0],[274,21,274,45,0],[275,22,275,64,0],[276,21,276,43,0],[278,17,278,59,0],[279,21,279,45,0],[280,22,280,64,0],[281,21,281,43,0],[283,17,283,47,0],[284,13,284,14,0],[289,13,289,14,0],[290,17,290,37,0],[292,17,292,95,0],[294,17,294,97,0],[295,17,299,19,0],[301,17,301,31,0],[302,17,302,91,0],[304,17,304,32,0],[306,17,306,67,0],[308,17,308,59,0],[310,17,310,46,0],[311,17,311,46,0],[313,17,313,24,0],[313,26,313,34,0],[313,35,313,37,0],[313,38,313,43,0],[314,17,314,18,0],[315,21,315,51,0],[316,25,316,34,0],[318,21,318,47,0],[319,25,319,34,0],[321,21,332,24,0],[334,21,345,24,0],[347,21,358,24,0],[360,21,371,24,0],[372,17,372,18,0],[374,17,374,43,0],[376,17,376,36,0],[377,17,377,33,0],[378,13,378,14,0],[381,13,381,14,0],[382,17,382,56,0],[383,17,383,56,0],[385,17,385,123,0],[386,13,386,14,0],[389,13,389,14,0],[390,17,390,43,0],[392,17,392,40,0],[393,17,393,50,0],[394,13,394,14,0],[424,13,424,14,0],[425,17,428,51,0],[429,13,429,14,0]]);
+    </script>
+  </body>
+</html>
