@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/HitCircleCompositionTool.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/Evaluators/Aim/FlowAimEvaluator.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,33 +11,134 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Sprites;
-using osu.Game.Graphics;
-using osu.Game.Localisation.Osu;
-using osu.Game.Rulesets.Edit;
-using osu.Game.Rulesets.Edit.Tools;
-using osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles;
+using System;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Osu.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Osu.Objects;
+using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Edit
+namespace osu.Game.Rulesets.Osu.Difficulty.Evaluators.Aim
 {
-    public class HitCircleCompositionTool : CompositionTool&lt;OsuAction&gt;
+    public static class FlowAimEvaluator
     {
-        public HitCircleCompositionTool()
-            : base(OsuEditorStrings.HitCircleTool)
+        /// &lt;summary&gt;
+        /// Evaluates difficulty of &quot;flow aim&quot; - aiming pattern where player doesn&#39;t stop their cursor on every object and instead &quot;flows&quot; through them.
+        /// &lt;/summary&gt;
+        public static double EvaluateDifficultyOf(DifficultyHitObject current, bool withSliderTravelDistance)
         {
-            Action = OsuAction.EditorHitCircleTool;
+            var osuCurrObj = (OsuDifficultyHitObject)current;
+            var osuLastObj = (OsuDifficultyHitObject)current.Previous();
+
+            if (current.BaseObject is Spinner || current.Index &lt;= 1 || osuLastObj.BaseObject is Spinner)
+                return 0;
+
+            const double velocity_change_multiplier = 0.52;
+
+            var osuLastLastObj = (OsuDifficultyHitObject)current.Previous(1);
+
+            double currDistance = withSliderTravelDistance ? osuCurrObj.LazyJumpDistance : osuCurrObj.JumpDistance;
+            double prevDistance = withSliderTravelDistance ? osuLastObj.LazyJumpDistance : osuLastObj.JumpDistance;
+
+            double currVelocity = currDistance / osuCurrObj.AdjustedDeltaTime;
+
+            if (osuLastObj.BaseObject is Slider &amp;&amp; withSliderTravelDistance)
+            {
+                // If the last object is a slider, then we extend the travel velocity through the slider into the current object.
+                double sliderDistance = osuLastObj.LazyTravelDistance + osuCurrObj.LazyJumpDistance;
+                currVelocity = Math.Max(currVelocity, sliderDistance / osuCurrObj.AdjustedDeltaTime);
+            }
+
+            double prevVelocity = prevDistance / osuLastObj.AdjustedDeltaTime;
+
+            double flowDifficulty = currVelocity;
+
+            // Apply high circle size bonus to the base velocity.
+            // We use reduced CS bonus here because the bonus was made for an evaluator with a different d/t scaling
+            flowDifficulty *= Math.Sqrt(osuCurrObj.SmallCircleBonus);
+
+            // Rhythm changes are harder to flow
+            flowDifficulty *= 1 + Math.Min(0.25,
+                DiffUtils.Pow((Math.Max(osuCurrObj.AdjustedDeltaTime, osuLastObj.AdjustedDeltaTime) - Math.Min(osuCurrObj.AdjustedDeltaTime, osuLastObj.AdjustedDeltaTime)) / 50, 4));
+
+            if (osuCurrObj.Angle != null &amp;&amp; osuLastObj.Angle != null)
+            {
+                double angleDifference = Math.Abs(osuCurrObj.Angle.Value - osuLastObj.Angle.Value);
+                double angleDifferenceAdjusted = Math.Sin(angleDifference / 2) * 180.0;
+                double angularVelocity = angleDifferenceAdjusted / (osuCurrObj.AdjustedDeltaTime * 0.1);
+
+                // Low angular velocity flow (angles are consistent) is easier to follow than erratic flow
+                flowDifficulty *= 0.8 + Math.Sqrt(angularVelocity / 270.0);
+            }
+
+            // If all three notes are overlapping - don&#39;t reward bonuses as you don&#39;t have to do additional movement
+            double overlappedNotesWeight = 1;
+
+            if (current.Index &gt; 2)
+            {
+                double o1 = calculateOverlapFactor(osuCurrObj, osuLastObj);
+                double o2 = calculateOverlapFactor(osuCurrObj, osuLastLastObj);
+                double o3 = calculateOverlapFactor(osuLastObj, osuLastLastObj);
+
+                overlappedNotesWeight = 1 - o1 * o2 * o3;
+            }
+
+            if (osuCurrObj.Angle != null)
+            {
+                // Acute angles are also hard to flow
+                flowDifficulty += currVelocity *
+                                  SnapAimEvaluator.CalcAngleAcuteness(osuCurrObj.Angle.Value) *
+                                  overlappedNotesWeight;
+            }
+
+            if (Math.Max(prevVelocity, currVelocity) != 0)
+            {
+                if (withSliderTravelDistance)
+                {
+                    currVelocity = currDistance / osuCurrObj.AdjustedDeltaTime;
+                }
+
+                // Scale with ratio of difference compared to 0.5 * max dist.
+                double distRatio = DiffUtils.Smoothstep(Math.Abs(prevVelocity - currVelocity) / Math.Max(prevVelocity, currVelocity), 0, 1);
+
+                // Reward for % distance up to 125 / strainTime for overlaps where velocity is still changing.
+                double overlapVelocityBuff = Math.Min(OsuDifficultyHitObject.NORMALISED_DIAMETER * 1.25 / Math.Min(osuCurrObj.AdjustedDeltaTime, osuLastObj.AdjustedDeltaTime),
+                    Math.Abs(prevVelocity - currVelocity));
+
+                flowDifficulty += overlapVelocityBuff *
+                                  distRatio *
+                                  overlappedNotesWeight *
+                                  velocity_change_multiplier;
+            }
+
+            if (osuCurrObj.BaseObject is Slider &amp;&amp; withSliderTravelDistance)
+            {
+                // Include slider velocity to make velocity more consistent with snap
+                flowDifficulty += osuCurrObj.TravelDistance / osuCurrObj.TravelTime;
+            }
+
+            // Final velocity is being raised to a power because flow difficulty scales harder with both high distance and time, and we want to account for that
+            flowDifficulty = DiffUtils.Pow(flowDifficulty, 1.45);
+
+            // Reduce difficulty for low spacing since spacing below radius is always to be flowed
+            return flowDifficulty * DiffUtils.Smootherstep(currDistance, 0, OsuDifficultyHitObject.NORMALISED_RADIUS);
         }
 
-        public override Drawable CreateIcon() =&gt; new SpriteIcon { Icon = OsuIcon.EditorHitCircle };
+        private static double calculateOverlapFactor(OsuDifficultyHitObject first, OsuDifficultyHitObject second)
+        {
+            var firstBase = (OsuHitObject)first.BaseObject;
+            var secondBase = (OsuHitObject)second.BaseObject;
+            double objectRadius = firstBase.Radius;
 
-        public override HitObjectPlacementBlueprint CreatePlacementBlueprint() =&gt; new HitCirclePlacementBlueprint();
+            double distance = Vector2.Distance(firstBase.StackedPosition, secondBase.StackedPosition);
+            return Math.Clamp(1 - DiffUtils.Pow(Math.Max(distance - objectRadius, 0) / objectRadius, 2), 0, 1);
+        }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[17,15,17,51,0],[18,9,18,10,0],[19,13,19,52,0],[20,9,20,10,0],[22,50,22,99,0],[24,83,24,116,0]]);
+      highlightRanges([[19,9,19,10,1],[20,13,20,62,1],[21,13,21,73,1],[23,13,23,105,1],[24,17,24,26,1],[28,13,28,78,1],[30,13,30,116,1],[31,13,31,116,1],[33,13,33,79,1],[35,13,35,77,1],[36,13,36,14,1],[38,17,38,101,1],[39,17,39,102,1],[40,13,40,14,1],[42,13,42,79,1],[44,13,44,50,1],[48,13,48,70,1],[51,13,52,183,1],[54,13,54,70,1],[55,13,55,14,1],[56,17,56,100,1],[57,17,57,88,1],[58,17,58,105,1],[61,17,61,76,1],[62,13,62,14,1],[65,13,65,46,1],[67,13,67,35,1],[68,13,68,14,1],[69,17,69,76,1],[70,17,70,80,1],[71,17,71,80,1],[73,17,73,58,1],[74,13,74,14,1],[76,13,76,42,1],[77,13,77,14,1],[79,17,81,57,1],[82,13,82,14,1],[84,13,84,59,1],[85,13,85,14,1],[86,17,86,46,1],[87,17,87,18,1],[88,21,88,80,1],[89,17,89,18,1],[92,17,92,141,1],[95,17,96,60,1],[98,17,101,62,1],[102,13,102,14,1],[104,13,104,77,1],[105,13,105,14,1],[107,17,107,85,1],[108,13,108,14,1],[111,13,111,66,1],[114,13,114,119,1],[115,9,115,10,1],[118,9,118,10,1],[119,13,119,60,1],[120,13,120,62,1],[121,13,121,52,1],[123,13,123,103,1],[124,13,124,112,1],[125,9,125,10,1]]);
     </script>
   </body>
 </html>

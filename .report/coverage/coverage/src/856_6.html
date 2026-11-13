@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Default/SpinnerRotationTracker.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Replays/OsuAutoGeneratorBase.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,139 +11,129 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System;
-using System.Diagnostics;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Extensions.ObjectExtensions;
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Framework.Input.Events;
-using osu.Framework.Utils;
-using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
-using osu.Game.Screens.Play;
 using osuTK;
+using osu.Game.Beatmaps;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Replays;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.Replays;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Default
+namespace osu.Game.Rulesets.Osu.Replays
 {
-    public partial class SpinnerRotationTracker : CircularContainer
+    public abstract class OsuAutoGeneratorBase : AutoGenerator
     {
-        public override bool IsPresent =&gt; true; // handle input when hidden
-
-        private readonly DrawableSpinner drawableSpinner;
-
-        private Vector2? mousePosition;
-        private float? lastAngle;
-
-        private float currentRotation;
-        private bool rotationTransferred;
-
-        [Resolved(canBeNull: true)]
-        private IGameplayClock? gameplayClock { get; set; }
-
-        public SpinnerRotationTracker(DrawableSpinner drawableSpinner)
-        {
-            this.drawableSpinner = drawableSpinner;
-            drawableSpinner.HitObjectApplied += resetState;
-
-            RelativeSizeAxes = Axes.Both;
-        }
-
-        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
-
-        public bool Tracking { get; set; }
+        #region Constants
 
         /// &lt;summary&gt;
-        /// Whether the spinning is spinning at a reasonable speed to be considered visually spinning.
+        /// Constants (for spinners).
         /// &lt;/summary&gt;
-        public readonly BindableBool IsSpinning = new BindableBool();
+        protected static readonly Vector2 SPINNER_CENTRE = OsuPlayfield.BASE_SIZE / 2;
 
-        /// &lt;summary&gt;
-        /// Whether currently in the correct time range to allow spinning.
-        /// &lt;/summary&gt;
-        public bool IsSpinnableTime =&gt; drawableSpinner.HitObject.StartTime &lt;= Time.Current &amp;&amp; drawableSpinner.HitObject.EndTime &gt; Time.Current;
+        public const float SPIN_RADIUS = 50;
 
-        protected override bool OnMouseMove(MouseMoveEvent e)
+        #endregion
+
+        #region Construction / Initialisation
+
+        protected Replay Replay;
+        protected List&lt;ReplayFrame&gt; Frames =&gt; Replay.Frames;
+        private readonly IReadOnlyList&lt;IApplicableToRate&gt; timeAffectingMods;
+
+        protected OsuAutoGeneratorBase(IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods)
+            : base(beatmap)
         {
-            mousePosition = Parent!.ToLocalSpace(e.ScreenSpaceMousePosition);
-            return base.OnMouseMove(e);
+            Replay = new Replay();
+
+            timeAffectingMods = mods.OfType&lt;IApplicableToRate&gt;().ToList();
         }
 
-        protected override void Update()
-        {
-            base.Update();
+        #endregion
 
-            if (mousePosition is Vector2 pos)
-            {
-                float thisAngle = -float.RadiansToDegrees(MathF.Atan2(pos.X - DrawSize.X / 2, pos.Y - DrawSize.Y / 2));
-                float delta = lastAngle == null ? 0 : thisAngle - lastAngle.Value;
-
-                // Normalise the delta to -180 .. 180
-                if (delta &gt; 180) delta -= 360;
-                if (delta &lt; -180) delta += 360;
-
-                if (Tracking)
-                    AddRotation(delta);
-
-                lastAngle = thisAngle;
-            }
-
-            IsSpinning.Value = IsSpinnableTime &amp;&amp; Math.Abs(currentRotation - Rotation) &gt; 10f;
-            Rotation = (float)Interpolation.Damp(Rotation, currentRotation, 0.99, Math.Abs(Time.Elapsed));
-        }
+        #region Utilities
 
         /// &lt;summary&gt;
-        /// Rotate the disc by the provided angle (in addition to any existing rotation).
+        /// Returns the real duration of time between &lt;paramref name=&quot;startTime&quot;/&gt; and &lt;paramref name=&quot;endTime&quot;/&gt;
+        /// after applying rate-affecting mods.
         /// &lt;/summary&gt;
         /// &lt;remarks&gt;
-        /// Will be a no-op if not a valid time to spin.
+        /// This method should only be used when &lt;paramref name=&quot;startTime&quot;/&gt; and &lt;paramref name=&quot;endTime&quot;/&gt; are very close.
+        /// That is because the track rate might be changing with time,
+        /// and the method used here is a rough instantaneous approximation.
         /// &lt;/remarks&gt;
-        /// &lt;param name=&quot;delta&quot;&gt;The delta angle.&lt;/param&gt;
-        public void AddRotation(float delta)
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time of the time delta, in original track time.&lt;/param&gt;
+        /// &lt;param name=&quot;endTime&quot;&gt;The end time of the time delta, in original track time.&lt;/param&gt;
+        protected double ApplyModsToTimeDelta(double startTime, double endTime)
         {
-            if (!IsSpinnableTime)
-                return;
+            double delta = endTime - startTime;
 
-            if (!rotationTransferred)
+            foreach (var mod in timeAffectingMods)
+                delta /= mod.ApplyToRate(startTime);
+
+            return delta;
+        }
+
+        protected double ApplyModsToRate(double time, double rate)
+        {
+            foreach (var mod in timeAffectingMods)
+                rate = mod.ApplyToRate(time, rate);
+            return rate;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the interval after which the next &lt;see cref=&quot;ReplayFrame&quot;/&gt; should be generated,
+        /// in milliseconds.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time of the previous frame.&lt;/param&gt;
+        protected double GetFrameDelay(double time)
+            =&gt; ApplyModsToRate(time, 1000.0 / 60);
+
+        private class ReplayFrameComparer : IComparer&lt;ReplayFrame&gt;
+        {
+            public int Compare(ReplayFrame? f1, ReplayFrame? f2)
             {
-                currentRotation = Rotation;
-                rotationTransferred = true;
+                ArgumentNullException.ThrowIfNull(f1);
+                ArgumentNullException.ThrowIfNull(f2);
+
+                return f1.Time.CompareTo(f2.Time);
+            }
+        }
+
+        private static readonly IComparer&lt;ReplayFrame&gt; replay_frame_comparer = new ReplayFrameComparer();
+
+        protected int FindInsertionIndex(ReplayFrame frame)
+        {
+            int index = Frames.BinarySearch(frame, replay_frame_comparer);
+
+            if (index &lt; 0)
+            {
+                index = ~index;
+            }
+            else
+            {
+                // Go to the first index which is actually bigger
+                while (index &lt; Frames.Count &amp;&amp; frame.Time == Frames[index].Time)
+                {
+                    ++index;
+                }
             }
 
-            Debug.Assert(Math.Abs(delta) &lt;= 180);
-
-            double rate = gameplayClock?.GetTrueGameplayRate() ?? Clock.Rate;
-            delta = (float)(delta * Math.Abs(rate));
-
-            currentRotation += delta;
-            drawableSpinner.Result.History.ReportDelta(Time.Current, delta);
+            return index;
         }
 
-        private void resetState(DrawableHitObject obj)
-        {
-            Tracking = false;
-            IsSpinning.Value = false;
-            mousePosition = null;
-            lastAngle = null;
-            currentRotation = 0;
-            Rotation = 0;
-            rotationTransferred = false;
-        }
+        protected void AddFrameToReplay(ReplayFrame frame) =&gt; Frames.Insert(FindInsertionIndex(frame), frame);
 
-        protected override void Dispose(bool isDisposing)
-        {
-            base.Dispose(isDisposing);
+        protected static Vector2 CirclePosition(double t, double radius) =&gt; new Vector2((float)(Math.Cos(t) * radius), (float)(Math.Sin(t) * radius));
 
-            if (drawableSpinner.IsNotNull())
-                drawableSpinner.HitObjectApplied -= resetState;
-        }
+        #endregion
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[22,43,22,47,0],[33,49,33,53,0],[33,54,33,58,0],[35,9,35,71,0],[36,9,36,10,0],[37,13,37,52,0],[38,13,38,60,0],[40,13,40,42,0],[41,9,41,10,0],[43,82,43,86,0],[45,32,45,36,0],[45,37,45,41,0],[50,9,50,70,0],[55,40,55,143,0],[58,9,58,10,0],[59,13,59,78,0],[60,13,60,40,0],[61,9,61,10,0],[64,9,64,10,0],[65,13,65,27,0],[67,13,67,46,0],[68,13,68,14,0],[69,17,69,120,0],[70,17,70,83,0],[73,17,73,33,0],[73,34,73,47,0],[74,17,74,34,0],[74,35,74,48,0],[76,17,76,30,0],[77,21,77,40,0],[79,17,79,39,0],[80,13,80,14,0],[82,13,82,94,0],[83,13,83,107,0],[84,9,84,10,0],[94,9,94,10,0],[95,13,95,34,0],[96,17,96,24,0],[98,13,98,38,0],[99,13,99,14,0],[100,17,100,44,0],[101,17,101,44,0],[102,13,102,14,0],[104,13,104,50,0],[106,13,106,78,0],[107,13,107,53,0],[109,13,109,38,0],[110,13,110,77,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,30,0],[116,13,116,38,0],[117,13,117,34,0],[118,13,118,30,0],[119,13,119,33,0],[120,13,120,26,0],[121,13,121,41,0],[122,9,122,10,0],[125,9,125,10,0],[126,13,126,39,0],[128,13,128,45,0],[129,17,129,64,0],[130,9,130,10,0]]);
+      highlightRanges([[23,9,23,87,1],[32,47,32,60,1],[36,15,36,28,1],[37,9,37,10,1],[38,13,38,35,1],[40,13,40,75,1],[41,9,41,10,1],[59,9,59,10,1],[60,13,60,48,1],[62,13,62,20,1],[62,22,62,29,0],[62,30,62,32,1],[62,33,62,50,1],[63,17,63,53,0],[65,13,65,26,1],[66,9,66,10,1],[69,9,69,10,1],[70,13,70,20,1],[70,22,70,29,0],[70,30,70,32,1],[70,33,70,50,1],[71,17,71,52,0],[72,13,72,25,1],[73,9,73,10,1],[81,16,81,50,1],[86,13,86,14,1],[87,17,87,55,1],[88,17,88,55,1],[90,17,90,51,1],[91,13,91,14,1],[94,9,94,106,1],[97,9,97,10,1],[98,13,98,75,1],[100,13,100,27,1],[101,13,101,14,1],[102,17,102,32,1],[103,13,103,14,1],[105,13,105,14,0],[107,17,107,81,0],[108,17,108,18,0],[109,21,109,29,0],[110,17,110,18,0],[111,13,111,14,0],[113,13,113,26,1],[114,9,114,10,1],[116,63,116,110,1],[118,77,118,150,1]]);
     </script>
   </body>
 </html>

@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/TransformToolboxGroup.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Blueprints/GridPlacementBlueprint.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,130 +11,149 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System.Linq;
 using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Input.Bindings;
 using osu.Framework.Input.Events;
-using osu.Game.Input.Bindings;
 using osu.Game.Rulesets.Edit;
-using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Screens.Edit;
-using osu.Game.Screens.Edit.Components;
-using osu.Game.Screens.Edit.Compose.Components;
 using osuTK;
+using osuTK.Input;
 
-namespace osu.Game.Rulesets.Osu.Edit
+namespace osu.Game.Rulesets.Osu.Edit.Blueprints
 {
-    public partial class TransformToolboxGroup : EditorToolboxGroup, IKeyBindingHandler&lt;GlobalAction&gt;
+    public partial class GridPlacementBlueprint : PlacementBlueprint
     {
-        private readonly BindableList&lt;HitObject&gt; selectedHitObjects = new BindableList&lt;HitObject&gt;();
-        private readonly BindableBool canMove = new BindableBool();
-        private readonly AggregateBindable&lt;bool&gt; canRotate = new AggregateBindable&lt;bool&gt;((x, y) =&gt; x || y);
-        private readonly AggregateBindable&lt;bool&gt; canScale = new AggregateBindable&lt;bool&gt;((x, y) =&gt; x || y);
+        [Resolved]
+        private OsuHitObjectComposer? hitObjectComposer { get; set; }
 
-        private EditorToolButton moveButton = null!;
-        private EditorToolButton rotateButton = null!;
-        private EditorToolButton scaleButton = null!;
-
-        public SelectionRotationHandler RotationHandler { get; init; } = null!;
-        public OsuSelectionScaleHandler ScaleHandler { get; init; } = null!;
-
-        public OsuGridToolboxGroup GridToolbox { get; init; } = null!;
-
-        public TransformToolboxGroup()
-            : base(&quot;transform&quot;)
-        {
-        }
+        private OsuGridToolboxGroup gridToolboxGroup = null!;
+        private Vector2 originalOrigin;
+        private float originalSpacing;
+        private float originalRotation;
 
         [BackgroundDependencyLoader]
-        private void load(EditorBeatmap editorBeatmap)
+        private void load(OsuGridToolboxGroup gridToolboxGroup)
         {
-            Child = new FillFlowContainer
-            {
-                RelativeSizeAxes = Axes.X,
-                AutoSizeAxes = Axes.Y,
-                Spacing = new Vector2(5),
-                Children = new Drawable[]
-                {
-                    moveButton = new EditorToolButton(&quot;Move&quot;,
-                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.ArrowsAlt },
-                        () =&gt; new PreciseMovementPopover()),
-                    rotateButton = new EditorToolButton(&quot;Rotate&quot;,
-                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.Undo },
-                        () =&gt; new PreciseRotationPopover(RotationHandler, GridToolbox)),
-                    scaleButton = new EditorToolButton(&quot;Scale&quot;,
-                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.ExpandArrowsAlt },
-                        () =&gt; new PreciseScalePopover(ScaleHandler, GridToolbox))
-                }
-            };
-
-            selectedHitObjects.BindTo(editorBeatmap.SelectedHitObjects);
+            this.gridToolboxGroup = gridToolboxGroup;
+            originalOrigin = gridToolboxGroup.StartPosition.Value;
+            originalSpacing = gridToolboxGroup.GridLineSpacing.Value;
+            originalRotation = gridToolboxGroup.GridLinesRotation.Value;
         }
 
-        protected override void LoadComplete()
+        public override void EndPlacement(bool commit)
         {
-            base.LoadComplete();
+            if (!commit &amp;&amp; PlacementActive != PlacementState.Finished)
+                resetGridState();
 
-            selectedHitObjects.BindCollectionChanged((_, _) =&gt; canMove.Value = selectedHitObjects.Any(ho =&gt; ho is not Spinner), true);
+            base.EndPlacement(commit);
 
-            canRotate.AddSource(RotationHandler.CanRotateAroundPlayfieldOrigin);
-            canRotate.AddSource(RotationHandler.CanRotateAroundSelectionOrigin);
-
-            canScale.AddSource(ScaleHandler.CanScaleX);
-            canScale.AddSource(ScaleHandler.CanScaleY);
-            canScale.AddSource(ScaleHandler.CanScaleFromPlayfieldOrigin);
-
-            // bindings to `Enabled` on the buttons are decoupled on purpose
-            // due to the weird `OsuButton` behaviour of resetting `Enabled` to `false` when `Action` is set.
-            canMove.BindValueChanged(move =&gt; moveButton.Enabled.Value = move.NewValue, true);
-            canRotate.Result.BindValueChanged(rotate =&gt; rotateButton.Enabled.Value = rotate.NewValue, true);
-            canScale.Result.BindValueChanged(scale =&gt; scaleButton.Enabled.Value = scale.NewValue, true);
+            // You typically only place the grid once, so we switch back to the last tool after placement -
+            // but only if the tool hasn&#39;t changed from under us (which is possible, as external tool changes will commit any ongoing placements, including this one)
+            if (commit &amp;&amp; hitObjectComposer?.BlueprintContainer.CurrentTool is GridFromPointsTool)
+                hitObjectComposer.SetLastTool();
         }
 
-        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        protected override bool OnClick(ClickEvent e)
         {
-            if (e.Repeat) return false;
-
-            switch (e.Action)
+            if (e.Button == MouseButton.Left)
             {
-                case GlobalAction.EditorToggleMoveControl:
+                switch (PlacementActive)
                 {
-                    moveButton.TriggerClick();
-                    return true;
-                }
+                    case PlacementState.Waiting:
+                        BeginPlacement(true);
+                        return true;
 
-                case GlobalAction.EditorToggleRotateControl:
-                {
-                    if (!RotationHandler.OperationInProgress.Value || rotateButton.Selected.Value)
-                        rotateButton.TriggerClick();
-                    return true;
-                }
-
-                case GlobalAction.EditorToggleScaleControl:
-                {
-                    if (!ScaleHandler.OperationInProgress.Value || scaleButton.Selected.Value)
-                        scaleButton.TriggerClick();
-                    return true;
+                    case PlacementState.Active:
+                        EndPlacement(true);
+                        return true;
                 }
             }
 
-            return false;
+            return base.OnClick(e);
         }
 
-        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        protected override bool OnMouseDown(MouseDownEvent e)
         {
+            if (e.Button == MouseButton.Right)
+            {
+                // Reset the grid to the default values.
+                gridToolboxGroup.StartPosition.Value = gridToolboxGroup.StartPosition.Default;
+                gridToolboxGroup.GridLineSpacing.Value = gridToolboxGroup.GridLineSpacing.Default;
+                if (!gridToolboxGroup.GridLinesRotation.Disabled)
+                    gridToolboxGroup.GridLinesRotation.Value = gridToolboxGroup.GridLinesRotation.Default;
+                EndPlacement(true);
+                return true;
+            }
+
+            return base.OnMouseDown(e);
+        }
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (e.Button == MouseButton.Left)
+            {
+                BeginPlacement(true);
+                return true;
+            }
+
+            return base.OnDragStart(e);
+        }
+
+        protected override void OnDragEnd(DragEndEvent e)
+        {
+            if (PlacementActive == PlacementState.Active)
+                EndPlacement(true);
+
+            base.OnDragEnd(e);
+        }
+
+        public override SnapResult UpdateTimeAndPosition(Vector2 screenSpacePosition, double fallbackTime)
+        {
+            if (State.Value == Visibility.Hidden)
+                return new SnapResult(screenSpacePosition, fallbackTime);
+
+            var result = hitObjectComposer?.TrySnapToNearbyObjects(screenSpacePosition) ?? new SnapResult(screenSpacePosition, fallbackTime);
+
+            var pos = ToLocalSpace(result.ScreenSpacePosition);
+
+            if (PlacementActive != PlacementState.Active)
+                gridToolboxGroup.StartPosition.Value = pos;
+            else
+            {
+                // Default to the original spacing and rotation if the distance is too small.
+                if (Vector2.Distance(gridToolboxGroup.StartPosition.Value, pos) &lt; 2)
+                {
+                    gridToolboxGroup.GridLineSpacing.Value = originalSpacing;
+                    if (!gridToolboxGroup.GridLinesRotation.Disabled)
+                        gridToolboxGroup.GridLinesRotation.Value = originalRotation;
+                }
+                else
+                {
+                    gridToolboxGroup.SetGridFromPoints(gridToolboxGroup.StartPosition.Value, pos);
+                }
+            }
+
+            return result;
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+            resetGridState();
+        }
+
+        private void resetGridState()
+        {
+            gridToolboxGroup.StartPosition.Value = originalOrigin;
+            gridToolboxGroup.GridLineSpacing.Value = originalSpacing;
+            if (!gridToolboxGroup.GridLinesRotation.Disabled)
+                gridToolboxGroup.GridLinesRotation.Value = originalRotation;
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[25,9,25,101,0],[26,9,26,68,0],[27,9,27,100,0],[27,100,27,106,0],[27,106,27,108,0],[28,9,28,99,0],[28,99,28,105,0],[28,105,28,107,0],[30,9,30,53,0],[31,9,31,55,0],[32,9,32,54,0],[34,59,34,63,0],[34,64,34,69,0],[34,74,34,79,0],[35,56,35,60,0],[35,61,35,66,0],[35,71,35,76,0],[37,50,37,54,0],[37,55,37,60,0],[37,65,37,70,0],[40,15,40,32,0],[41,9,41,10,0],[42,9,42,10,0],[46,9,46,10,0],[47,13,55,31,0],[55,31,55,84,0],[55,84,56,31,0],[56,31,56,59,0],[56,59,58,31,0],[58,31,58,79,0],[58,79,59,31,0],[59,31,59,87,0],[59,87,61,31,0],[61,31,61,90,0],[61,90,62,31,0],[62,31,62,81,0],[62,81,64,15,0],[66,13,66,73,0],[67,9,67,10,0],[70,9,70,10,0],[71,13,71,33,0],[73,13,73,64,0],[73,64,73,109,0],[73,109,73,126,0],[73,126,73,127,0],[73,127,73,135,0],[75,13,75,81,0],[76,13,76,81,0],[78,13,78,56,0],[79,13,79,56,0],[80,13,80,74,0],[84,13,84,46,0],[84,46,84,86,0],[84,86,84,94,0],[85,13,85,57,0],[85,57,85,101,0],[85,101,85,109,0],[86,13,86,55,0],[86,55,86,97,0],[86,97,86,105,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,91,26,0],[91,27,91,40,0],[93,13,93,30,0],[96,17,96,18,0],[97,21,97,47,0],[98,21,98,33,0],[102,17,102,18,0],[103,21,103,99,0],[104,25,104,53,0],[105,21,105,33,0],[109,17,109,18,0],[110,21,110,95,0],[111,25,111,52,0],[112,21,112,33,0],[116,13,116,26,0],[117,9,117,10,0],[120,9,120,10,0],[121,9,121,10,0]]);
+      highlightRanges([[16,59,16,63,0],[16,64,16,68,0],[18,9,18,62,0],[25,9,25,10,0],[26,13,26,54,0],[27,13,27,67,0],[28,13,28,70,0],[29,13,29,73,0],[30,9,30,10,0],[33,9,33,10,0],[34,13,34,71,0],[35,17,35,34,0],[37,13,37,39,0],[41,13,41,99,0],[42,17,42,49,0],[43,9,43,10,0],[46,9,46,10,0],[47,13,47,46,0],[48,13,48,14,0],[49,17,49,41,0],[52,25,52,46,0],[53,25,53,37,0],[56,25,56,44,0],[57,25,57,37,0],[59,13,59,14,0],[61,13,61,36,0],[62,9,62,10,0],[65,9,65,10,0],[66,13,66,47,0],[67,13,67,14,0],[69,17,69,95,0],[70,17,70,99,0],[71,17,71,66,0],[72,21,72,107,0],[73,17,73,36,0],[74,17,74,29,0],[77,13,77,40,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,46,0],[83,13,83,14,0],[84,17,84,38,0],[85,17,85,29,0],[88,13,88,40,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,58,0],[94,17,94,36,0],[96,13,96,31,0],[97,9,97,10,0],[100,9,100,10,0],[101,13,101,50,0],[102,17,102,74,0],[104,13,104,142,0],[106,13,106,64,0],[108,13,108,58,0],[109,17,109,60,0],[111,13,111,14,0],[113,17,113,85,0],[114,17,114,18,0],[115,21,115,78,0],[116,21,116,70,0],[117,25,117,85,0],[118,17,118,18,0],[120,17,120,18,0],[121,21,121,99,0],[122,17,122,18,0],[123,13,123,14,0],[125,13,125,27,0],[126,9,126,10,0],[129,9,129,10,0],[130,13,130,27,0],[131,13,131,30,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,67,0],[137,13,137,70,0],[138,13,138,62,0],[139,17,139,77,0],[140,9,140,10,0]]);
     </script>
   </body>
 </html>

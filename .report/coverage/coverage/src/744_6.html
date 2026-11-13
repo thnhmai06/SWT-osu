@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModGrow.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuBlueprintContainer.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,35 +11,127 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Localisation;
-using osu.Game.Graphics;
+using osu.Framework.Input.Events;
+using osu.Game.Configuration;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.Spinners;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.Edit
 {
-    public class OsuModGrow : OsuModObjectScaleTween
+    public partial class OsuBlueprintContainer : ComposeBlueprintContainer
     {
-        public override string Name =&gt; &quot;Grow&quot;;
+        private Bindable&lt;bool&gt; limitedDistanceSnap { get; set; } = null!;
 
-        public override string Acronym =&gt; &quot;GR&quot;;
+        public new OsuHitObjectComposer Composer =&gt; (OsuHitObjectComposer)base.Composer;
 
-        public override IconUsage? Icon =&gt; OsuIcon.ModGrow;
-
-        public override LocalisableString Description =&gt; &quot;Hit them at the right size!&quot;;
-
-        public override BindableNumber&lt;float&gt; StartScale { get; } = new BindableFloat(0.5f)
+        public OsuBlueprintContainer(OsuHitObjectComposer composer)
+            : base(composer)
         {
-            MinValue = 0f,
-            MaxValue = 0.99f,
-            Precision = 0.01f,
-        };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            limitedDistanceSnap = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+        }
+
+        protected override SelectionHandler&lt;HitObject&gt; CreateSelectionHandler() =&gt; new OsuSelectionHandler();
+
+        public override HitObjectSelectionBlueprint? CreateHitObjectBlueprintFor(HitObject hitObject)
+        {
+            switch (hitObject)
+            {
+                case HitCircle circle:
+                    return new HitCircleSelectionBlueprint(circle);
+
+                case Slider slider:
+                    return new SliderSelectionBlueprint(slider);
+
+                case Spinner spinner:
+                    return new SpinnerSelectionBlueprint(spinner);
+            }
+
+            return base.CreateHitObjectBlueprintFor(hitObject);
+        }
+
+        protected override bool TryMoveBlueprints(DragEvent e, IList&lt;(SelectionBlueprint&lt;HitObject&gt; blueprint, Vector2[] originalSnapPositions)&gt; blueprints)
+        {
+            Vector2 distanceTravelled = e.ScreenSpaceMousePosition - e.ScreenSpaceMouseDownPosition;
+
+            for (int i = 0; i &lt; blueprints.Count; i++)
+            {
+                if (checkSnappingBlueprintToNearbyObjects(blueprints[i].blueprint, distanceTravelled, blueprints[i].originalSnapPositions))
+                    return true;
+            }
+
+            // if no positional snapping could be performed, try unrestricted snapping from the earliest
+            // item in the selection.
+
+            // The final movement position, relative to movementBlueprintOriginalPosition.
+            Vector2 movePosition = blueprints.First().originalSnapPositions.First() + distanceTravelled;
+            var referenceBlueprint = blueprints.First().blueprint;
+
+            // Retrieve a snapped position.
+            var result = Composer.TrySnapToNearbyObjects(movePosition);
+            result ??= Composer.TrySnapToDistanceGrid(movePosition, limitedDistanceSnap.Value ? referenceBlueprint.Item.StartTime : null);
+            if (Composer.TrySnapToPositionGrid(result?.ScreenSpacePosition ?? movePosition, result?.Time) is SnapResult gridSnapResult)
+                result = gridSnapResult;
+            result ??= new SnapResult(movePosition, null);
+
+            bool moved = SelectionHandler.HandleMovement(new MoveSelectionEvent&lt;HitObject&gt;(referenceBlueprint, result.ScreenSpacePosition - referenceBlueprint.ScreenSpaceSelectionPoint));
+            if (moved)
+                ApplySnapResultTime(result, referenceBlueprint.Item.StartTime);
+            return moved;
+        }
+
+        /// &lt;summary&gt;
+        /// Check for positional snap for given blueprint.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;blueprint&quot;&gt;The blueprint to check for snapping.&lt;/param&gt;
+        /// &lt;param name=&quot;distanceTravelled&quot;&gt;Distance travelled since start of dragging action.&lt;/param&gt;
+        /// &lt;param name=&quot;originalPositions&quot;&gt;The snap positions of blueprint before start of dragging action.&lt;/param&gt;
+        /// &lt;returns&gt;Whether an object to snap to was found.&lt;/returns&gt;
+        private bool checkSnappingBlueprintToNearbyObjects(SelectionBlueprint&lt;HitObject&gt; blueprint, Vector2 distanceTravelled, Vector2[] originalPositions)
+        {
+            var currentPositions = blueprint.ScreenSpaceSnapPoints;
+
+            for (int i = 0; i &lt; originalPositions.Length; i++)
+            {
+                Vector2 originalPosition = originalPositions[i];
+                var testPosition = originalPosition + distanceTravelled;
+
+                var positionalResult = Composer.TrySnapToNearbyObjects(testPosition);
+
+                if (positionalResult == null || positionalResult.ScreenSpacePosition == testPosition) continue;
+
+                var delta = positionalResult.ScreenSpacePosition - currentPositions[i];
+
+                // attempt to move the objects, and apply any time based snapping if we can.
+                if (SelectionHandler.HandleMovement(new MoveSelectionEvent&lt;HitObject&gt;(blueprint, delta)))
+                {
+                    ApplySnapResultTime(positionalResult, blueprint.Item.StartTime);
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[13,40,13,46,0],[15,43,15,47,0],[17,44,17,59,0],[19,58,19,87,0],[21,60,21,64,0],[21,69,26,10,1]]);
+      highlightRanges([[23,54,23,58,0],[23,59,23,63,0],[23,68,23,73,0],[25,53,25,88,0],[28,15,28,29,0],[29,9,29,10,0],[30,9,30,10,0],[34,9,34,10,0],[35,13,35,98,0],[36,9,36,10,0],[38,84,38,109,0],[41,9,41,10,0],[42,13,42,31,0],[45,21,45,68,0],[48,21,48,65,0],[51,21,51,67,0],[54,13,54,64,0],[55,9,55,10,0],[58,9,58,10,0],[59,13,59,101,0],[61,18,61,27,0],[61,29,61,49,0],[61,51,61,54,0],[62,13,62,14,0],[63,17,63,140,0],[64,21,64,33,0],[65,13,65,14,0],[71,13,71,105,0],[72,13,72,67,0],[75,13,75,72,0],[76,13,76,139,0],[77,13,77,136,0],[78,17,78,41,0],[79,13,79,59,0],[81,13,81,188,0],[82,13,82,23,0],[83,17,83,80,0],[84,13,84,26,0],[85,9,85,10,0],[95,9,95,10,0],[96,13,96,68,0],[98,18,98,27,0],[98,29,98,57,0],[98,59,98,62,0],[99,13,99,14,0],[100,17,100,65,0],[101,17,101,73,0],[103,17,103,86,0],[105,17,105,102,0],[105,103,105,112,0],[107,17,107,88,0],[110,17,110,106,0],[111,17,111,18,0],[112,21,112,85,0],[113,21,113,33,0],[115,13,115,14,0],[117,13,117,26,0],[118,9,118,10,0]]);
     </script>
   </body>
 </html>

@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Slider.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModFreezeFrame.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,304 +11,114 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-#nullable disable
-
-using osuTK;
-using osu.Game.Rulesets.Objects.Types;
-using System.Collections.Generic;
-using osu.Game.Rulesets.Objects;
+using System;
 using System.Linq;
-using System.Threading;
-using JetBrains.Annotations;
-using Newtonsoft.Json;
-using osu.Framework.Bindables;
-using osu.Framework.Caching;
-using osu.Game.Audio;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
 using osu.Game.Beatmaps;
-using osu.Game.Beatmaps.ControlPoints;
-using osu.Game.Rulesets.Judgements;
-using osu.Game.Rulesets.Objects.Legacy;
-using osu.Game.Rulesets.Osu.Judgements;
-using osu.Game.Rulesets.Scoring;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
 
-namespace osu.Game.Rulesets.Osu.Objects
+namespace osu.Game.Rulesets.Osu.Mods
 {
-    public class Slider : OsuHitObject, IHasPathWithRepeats, IHasSliderVelocity, IHasGenerateTicks
+    public class OsuModFreezeFrame : Mod, IApplicableToDrawableHitObject, IApplicableToBeatmap
     {
-        public double EndTime =&gt; StartTime + this.SpanCount() * Path.Distance / Velocity;
+        public override string Name =&gt; &quot;Freeze Frame&quot;;
 
-        [JsonIgnore]
-        public double Duration
+        public override string Acronym =&gt; &quot;FR&quot;;
+
+        public override IconUsage? Icon =&gt; OsuIcon.ModFreezeFrame;
+
+        public override LocalisableString Description =&gt; &quot;Burn the notes into your memory.&quot;;
+
+        /// &lt;remarks&gt;
+        /// Incompatible with all mods that directly modify or indirectly depend on &lt;see cref=&quot;OsuHitObject.TimePreempt&quot;/&gt;, or alter the behaviour of approach circles.
+        /// &lt;/remarks&gt;
+        public override Type[] IncompatibleMods =&gt; base.IncompatibleMods.Concat(new[] { typeof(OsuModApproachDifferent), typeof(OsuModTransform), typeof(OsuModDepth), typeof(OsuModHidden) }).ToArray();
+
+        public override ModType Type =&gt; ModType.Fun;
+
+        //mod breaks normal approach circle preempt
+        private double originalPreempt;
+
+        public void ApplyToBeatmap(IBeatmap beatmap)
         {
-            get =&gt; EndTime - StartTime;
-            set =&gt; throw new System.NotSupportedException($&quot;Adjust via {nameof(RepeatCount)} instead&quot;); // can be implemented if/when needed.
-        }
+            var firstHitObject = beatmap.HitObjects.OfType&lt;OsuHitObject&gt;().FirstOrDefault();
+            if (firstHitObject == null)
+                return;
 
-        public override IList&lt;HitSampleInfo&gt; AuxiliarySamples =&gt; CreateSlidingSamples().Concat(TailSamples).ToArray();
+            double lastNewComboTime = 0;
 
-        private readonly Cached&lt;Vector2&gt; endPositionCache = new Cached&lt;Vector2&gt;();
+            originalPreempt = firstHitObject.TimePreempt;
 
-        public override Vector2 EndPosition =&gt; endPositionCache.IsValid ? endPositionCache.Value : endPositionCache.Value = Position + this.CurvePositionAt(1);
-
-        public Vector2 StackedPositionAt(double t) =&gt; StackedPosition + this.CurvePositionAt(t);
-
-        private readonly SliderPath path = new SliderPath { OptimiseCatmull = true };
-
-        public SliderPath Path
-        {
-            get =&gt; path;
-            set
+            foreach (var obj in beatmap.HitObjects.OfType&lt;OsuHitObject&gt;())
             {
-                path.ControlPoints.Clear();
-                path.ControlPoints.AddRange(value.ControlPoints.Select(c =&gt; new PathControlPoint(c.Position, c.Type)));
-
-                path.ExpectedDistance.Value = value.ExpectedDistance.Value;
-            }
-        }
-
-        public double Distance =&gt; Path.Distance;
-
-        public override Vector2 Position
-        {
-            get =&gt; base.Position;
-            set
-            {
-                base.Position = value;
-                updateNestedPositions();
-            }
-        }
-
-        public IList&lt;IList&lt;HitSampleInfo&gt;&gt; NodeSamples { get; set; } = new List&lt;IList&lt;HitSampleInfo&gt;&gt;();
-
-        [JsonIgnore]
-        public IList&lt;HitSampleInfo&gt; TailSamples { get; private set; }
-
-        private int repeatCount;
-
-        public int RepeatCount
-        {
-            get =&gt; repeatCount;
-            set
-            {
-                repeatCount = value;
-                updateNestedPositions();
-            }
-        }
-
-        /// &lt;summary&gt;
-        /// The length of one span of this &lt;see cref=&quot;Slider&quot;/&gt;.
-        /// &lt;/summary&gt;
-        public double SpanDuration =&gt; Duration / this.SpanCount();
-
-        /// &lt;summary&gt;
-        /// The computed velocity of this &lt;see cref=&quot;Slider&quot;/&gt;. This is the amount of path distance travelled in 1 ms.
-        /// &lt;/summary&gt;
-        public double Velocity { get; private set; }
-
-        /// &lt;summary&gt;
-        /// Spacing between &lt;see cref=&quot;SliderTick&quot;/&gt;s of this &lt;see cref=&quot;Slider&quot;/&gt;.
-        /// &lt;/summary&gt;
-        public double TickDistance { get; private set; }
-
-        /// &lt;summary&gt;
-        /// An extra multiplier that affects the number of &lt;see cref=&quot;SliderTick&quot;/&gt;s generated by this &lt;see cref=&quot;Slider&quot;/&gt;.
-        /// An increase in this value increases &lt;see cref=&quot;TickDistance&quot;/&gt;, which reduces the number of ticks generated.
-        /// &lt;/summary&gt;
-        public double TickDistanceMultiplier = 1;
-
-        /// &lt;summary&gt;
-        /// If &lt;see langword=&quot;false&quot;/&gt;, &lt;see cref=&quot;Slider&quot;/&gt;&#39;s judgement is fully handled by its nested &lt;see cref=&quot;HitObject&quot;/&gt;s.
-        /// If &lt;see langword=&quot;true&quot;/&gt;, this &lt;see cref=&quot;Slider&quot;/&gt; will be judged proportionally to the number of nested &lt;see cref=&quot;HitObject&quot;/&gt;s hit.
-        /// &lt;/summary&gt;
-        public bool ClassicSliderBehaviour
-        {
-            get =&gt; classicSliderBehaviour;
-            set
-            {
-                classicSliderBehaviour = value;
-                HeadCircle?.ClassicSliderBehaviour = value;
-                TailCircle?.ClassicSliderBehaviour = value;
-            }
-        }
-
-        private bool classicSliderBehaviour;
-
-        public BindableNumber&lt;double&gt; SliderVelocityMultiplierBindable { get; } = new BindableDouble(1)
-        {
-            MinValue = 0.1,
-            MaxValue = 10
-        };
-
-        public double SliderVelocityMultiplier
-        {
-            get =&gt; SliderVelocityMultiplierBindable.Value;
-            set =&gt; SliderVelocityMultiplierBindable.Value = value;
-        }
-
-        public bool GenerateTicks { get; set; } = true;
-
-        [JsonIgnore]
-        public SliderHeadCircle HeadCircle { get; protected set; }
-
-        [JsonIgnore]
-        public SliderTailCircle TailCircle { get; protected set; }
-
-        [JsonIgnore]
-        [CanBeNull]
-        public SliderRepeat LastRepeat { get; protected set; }
-
-        public Slider()
-        {
-            SamplesBindable.CollectionChanged += (_, _) =&gt; UpdateNestedSamples();
-            Path.Version.ValueChanged += _ =&gt; updateNestedPositions();
-        }
-
-        protected override void ApplyDefaultsToSelf(ControlPointInfo controlPointInfo, IBeatmapDifficultyInfo difficulty)
-        {
-            base.ApplyDefaultsToSelf(controlPointInfo, difficulty);
-
-            TimingControlPoint timingPoint = controlPointInfo.TimingPointAt(StartTime);
-
-            Velocity = BASE_SCORING_DISTANCE * difficulty.SliderMultiplier / LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(this, timingPoint, OsuRuleset.SHORT_NAME);
-            // WARNING: this is intentionally not computed as `BASE_SCORING_DISTANCE * difficulty.SliderMultiplier`
-            // for backwards compatibility reasons (intentionally introducing floating point errors to match stable).
-            double scoringDistance = Velocity * timingPoint.BeatLength;
-
-            TickDistance = GenerateTicks ? (scoringDistance / difficulty.SliderTickRate * TickDistanceMultiplier) : double.PositiveInfinity;
-        }
-
-        protected override void CreateNestedHitObjects(CancellationToken cancellationToken)
-        {
-            base.CreateNestedHitObjects(cancellationToken);
-
-            var sliderEvents = SliderEventGenerator.Generate(StartTime, SpanDuration, Velocity, TickDistance, Path.Distance, this.SpanCount(), cancellationToken);
-
-            foreach (var e in sliderEvents)
-            {
-                switch (e.Type)
+                if (obj.NewCombo)
                 {
-                    case SliderEventType.Tick:
-                        AddNested(new SliderTick
-                        {
-                            SpanIndex = e.SpanIndex,
-                            SpanStartTime = e.SpanStartTime,
-                            StartTime = e.Time,
-                            Position = Position + Path.PositionAt(e.PathProgress),
-                            PathProgress = e.PathProgress,
-                            StackHeight = StackHeight,
-                        });
-                        break;
-
-                    case SliderEventType.Head:
-                        AddNested(HeadCircle = new SliderHeadCircle
-                        {
-                            StartTime = e.Time,
-                            Position = Position,
-                            StackHeight = StackHeight,
-                            ClassicSliderBehaviour = ClassicSliderBehaviour,
-                        });
-                        break;
-
-                    case SliderEventType.Tail:
-                        AddNested(TailCircle = new SliderTailCircle(this)
-                        {
-                            RepeatIndex = e.SpanIndex,
-                            StartTime = e.Time,
-                            Position = EndPosition,
-                            StackHeight = StackHeight,
-                            ClassicSliderBehaviour = ClassicSliderBehaviour,
-                        });
-                        break;
-
-                    case SliderEventType.Repeat:
-                        AddNested(LastRepeat = new SliderRepeat(this)
-                        {
-                            RepeatIndex = e.SpanIndex,
-                            StartTime = StartTime + (e.SpanIndex + 1) * SpanDuration,
-                            Position = Position + Path.PositionAt(e.PathProgress),
-                            StackHeight = StackHeight,
-                            PathProgress = e.PathProgress,
-                        });
-                        break;
+                    lastNewComboTime = obj.StartTime;
                 }
+
+                applyFadeInAdjustment(obj);
             }
 
-            UpdateNestedSamples();
-        }
-
-        private void updateNestedPositions()
-        {
-            endPositionCache.Invalidate();
-
-            foreach (var nested in NestedHitObjects)
+            void applyFadeInAdjustment(OsuHitObject osuObject)
             {
-                switch (nested)
+                if (osuObject is not Spinner)
+                    osuObject.TimePreempt += osuObject.StartTime - lastNewComboTime;
+
+                int repeatCount = 0;
+
+                foreach (var nested in osuObject.NestedHitObjects.OfType&lt;OsuHitObject&gt;())
                 {
-                    case SliderHeadCircle headCircle:
-                        headCircle.Position = Position;
-                        break;
+                    switch (nested)
+                    {
+                        // Freezing the SliderTicks doesnt play well with snaking sliders
+                        case SliderTick:
+                            break;
 
-                    case SliderTailCircle tailCircle:
-                        tailCircle.Position = EndPosition;
-                        break;
+                        case SliderRepeat:
+                            if (repeatCount &gt; 2)
+                                break;
 
-                    case SliderRepeat repeat:
-                        repeat.Position = Position + Path.PositionAt(repeat.PathProgress);
-                        break;
+                            applyFadeInAdjustment(nested);
+                            repeatCount++;
+                            break;
 
-                    case SliderTick tick:
-                        tick.Position = Position + Path.PositionAt(tick.PathProgress);
-                        break;
+                        default:
+                            applyFadeInAdjustment(nested);
+                            break;
+                    }
                 }
             }
         }
 
-        protected void UpdateNestedSamples()
+        public void ApplyToDrawableHitObject(DrawableHitObject drawableObject)
         {
-            this.PopulateNodeSamples();
-
-            // TODO: remove this when guaranteed sort is present for samples (https://github.com/ppy/osu/issues/1933)
-            HitSampleInfo tickSample = (Samples.FirstOrDefault(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL) ?? Samples.FirstOrDefault())?.With(&quot;slidertick&quot;);
-
-            foreach (var nested in NestedHitObjects)
+            drawableObject.ApplyCustomUpdateState += (drawableHitObject, _) =&gt;
             {
-                switch (nested)
-                {
-                    case SliderTick tick:
-                        tick.SamplesBindable.Clear();
+                if (drawableHitObject is not DrawableHitCircle drawableHitCircle) return;
 
-                        if (tickSample != null)
-                            tick.SamplesBindable.Add(tickSample);
-                        break;
+                var hitCircle = drawableHitCircle.HitObject;
+                var approachCircle = drawableHitCircle.ApproachCircle;
 
-                    case SliderRepeat repeat:
-                        repeat.Samples = this.GetNodeSamples(repeat.RepeatIndex + 1);
-                        break;
-                }
-            }
+                // Reapply scale, ensuring the AR isn&#39;t changed due to the new preempt.
+                approachCircle.ClearTransforms(targetMember: nameof(approachCircle.Scale));
+                approachCircle.ScaleTo(4 * (float)(hitCircle.TimePreempt / originalPreempt));
 
-            HeadCircle?.Samples = this.GetNodeSamples(0);
-
-            // The samples should be attached to the slider tail, however this can only be done if LastTick is removed otherwise they would play earlier than they&#39;re intended to.
-            // (see mapping logic in `CreateNestedHitObjects` above)
-            //
-            // For now, the samples are played by the slider itself at the correct end time.
-            TailSamples = this.GetNodeSamples(repeatCount + 1);
+                using (drawableHitCircle.ApproachCircle.BeginAbsoluteSequence(hitCircle.StartTime - hitCircle.TimePreempt))
+                    approachCircle.ScaleTo(1, hitCircle.TimePreempt).Then().Expire();
+            };
         }
-
-        public override Judgement CreateJudgement() =&gt; ClassicSliderBehaviour
-            // Final combo is provided by the slider itself - see logic in `DrawableSlider.CheckForResult()`
-            ? new OsuJudgement()
-            // Final combo is provided by the tail circle - see `SliderTailCircle`
-            : new OsuIgnoreJudgement();
-
-        protected override HitWindows CreateHitWindows() =&gt; HitWindows.Empty;
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[28,34,28,89,1],[33,20,33,39,1],[34,20,34,103,1],[37,66,37,118,1],[39,9,39,83,1],[41,48,41,159,1],[43,55,43,96,1],[45,9,45,86,1],[49,20,49,24,1],[51,13,51,14,1],[52,17,52,44,1],[53,17,53,77,1],[53,77,53,117,1],[53,117,53,120,1],[55,17,55,76,1],[56,13,56,14,1],[59,35,59,48,1],[63,20,63,33,1],[65,13,65,14,1],[66,17,66,39,1],[67,17,67,41,1],[68,13,68,14,1],[71,58,71,62,1],[71,63,71,67,1],[71,72,71,104,1],[74,51,74,55,1],[74,56,74,68,1],[80,20,80,31,1],[82,13,82,14,1],[83,17,83,37,1],[84,17,84,41,1],[85,13,85,14,1],[91,39,91,66,1],[96,34,96,38,1],[96,39,96,51,1],[101,38,101,42,1],[101,43,101,55,1],[107,9,107,50,1],[115,20,115,42,1],[117,13,117,14,1],[118,17,118,48,1],[119,17,119,60,1],[120,17,120,60,1],[121,13,121,14,1],[126,74,126,78,1],[126,83,130,10,1],[134,20,134,58,1],[135,20,135,66,1],[138,37,138,41,1],[138,42,138,46,1],[138,51,138,55,1],[141,46,141,50,1],[141,51,141,65,1],[144,46,144,50,1],[144,51,144,65,1],[148,42,148,46,1],[148,47,148,61,1],[150,9,150,24,1],[151,9,151,10,1],[152,13,152,60,1],[152,60,152,81,1],[152,81,152,82,1],[153,13,153,47,1],[153,47,153,70,1],[153,70,153,71,1],[154,9,154,10,1],[157,9,157,10,1],[158,13,158,68,1],[160,13,160,88,1],[162,13,162,175,1],[165,13,165,72,1],[167,13,167,141,1],[168,9,168,10,1],[171,9,171,10,1],[172,13,172,60,1],[174,13,174,163,1],[176,13,176,20,1],[176,22,176,27,1],[176,28,176,30,1],[176,31,176,43,1],[177,13,177,14,1],[178,17,178,32,1],[181,25,189,28,1],[190,25,190,31,1],[193,25,199,28,1],[200,25,200,31,1],[203,25,210,28,1],[211,25,211,31,1],[214,25,221,28,1],[222,25,222,31,1],[224,13,224,14,1],[226,13,226,35,1],[227,9,227,10,1],[230,9,230,10,1],[231,13,231,43,1],[233,13,233,20,1],[233,22,233,32,1],[233,33,233,35,1],[233,36,233,52,1],[234,13,234,14,1],[235,17,235,32,1],[238,25,238,56,1],[239,25,239,31,1],[242,25,242,59,1],[243,25,243,31,1],[246,25,246,91,1],[247,25,247,31,1],[250,25,250,87,1],[251,25,251,31,1],[253,13,253,14,1],[254,9,254,10,1],[257,9,257,10,1],[258,13,258,40,1],[261,13,261,69,1],[261,69,261,103,1],[261,103,261,154,1],[263,13,263,20,1],[263,22,263,32,1],[263,33,263,35,1],[263,36,263,52,1],[264,13,264,14,1],[265,17,265,32,1],[268,25,268,54,1],[270,25,270,48,1],[271,29,271,66,1],[272,25,272,31,1],[275,25,275,86,1],[276,25,276,31,1],[278,13,278,14,1],[280,13,280,58,1],[286,13,286,64,1],[287,9,287,10,1],[289,56,293,39,1],[295,61,295,77,1]]);
+      highlightRanges([[20,40,20,54,0],[22,43,22,47,0],[24,44,24,66,0],[26,58,26,92,0],[31,52,31,201,0],[33,41,33,52,0],[39,9,39,10,0],[40,13,40,93,0],[41,13,41,40,0],[42,17,42,24,0],[44,13,44,41,0],[46,13,46,58,0],[48,13,48,20,0],[48,22,48,29,0],[48,30,48,32,0],[48,33,48,74,0],[49,13,49,14,0],[50,17,50,34,0],[51,17,51,18,0],[52,21,52,54,0],[53,17,53,18,0],[55,17,55,44,0],[56,13,56,14,0],[59,13,59,14,0],[60,17,60,46,0],[61,21,61,85,0],[63,17,63,37,0],[65,17,65,24,0],[65,26,65,36,0],[65,37,65,39,0],[65,40,65,89,0],[66,17,66,18,0],[67,21,67,36,0],[71,29,71,35,0],[74,29,74,49,0],[75,33,75,39,0],[77,29,77,59,0],[78,29,78,43,0],[79,29,79,35,0],[82,29,82,59,0],[83,29,83,35,0],[85,17,85,18,0],[86,13,86,14,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,92,13,0],[92,13,92,14,0],[92,14,93,17,0],[93,17,93,82,0],[93,82,93,83,0],[93,83,93,90,0],[93,90,95,17,0],[95,17,95,61,0],[95,61,96,17,0],[96,17,96,71,0],[96,71,99,17,0],[99,17,99,92,0],[99,92,100,17,0],[100,17,100,94,0],[100,94,102,17,0],[102,17,102,124,0],[102,124,103,21,0],[103,21,103,86,0],[103,86,104,13,0],[104,13,104,14,0],[104,14,104,15,0],[105,9,105,10,0]]);
     </script>
   </body>
 </html>

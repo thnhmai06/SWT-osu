@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuSelectionHandler.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Extensions;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Beatmaps;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Screens.Edit.Compose.Components;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Rulesets.Osu.Edit
+{
+    public partial class OsuSelectionHandler : EditorSelectionHandler
+    {
+        [Resolved]
+        private OsuGridToolboxGroup gridToolbox { get; set; } = null!;
+
+        protected override void OnSelectionChanged()
+        {
+            base.OnSelectionChanged();
+
+            Quad quad = selectedMovableObjects.Length &gt; 0 ? GeometryUtils.GetSurroundingQuad(selectedMovableObjects) : new Quad();
+
+            SelectionBox.CanFlipX = quad.Width &gt; 0;
+            SelectionBox.CanFlipY = quad.Height &gt; 0;
+            SelectionBox.CanReverse = EditorBeatmap.SelectedHitObjects.Count &gt; 1 || EditorBeatmap.SelectedHitObjects.Any(s =&gt; s is Slider);
+        }
+
+        private bool nudgeMovementActive;
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Key == Key.M &amp;&amp; e.ControlPressed &amp;&amp; e.ShiftPressed)
+            {
+                mergeSelection();
+                return true;
+            }
+
+            // Until the keys below are global actions, this will prevent conflicts with &quot;seek between sample points&quot;
+            // which has a default of ctrl+shift+arrows.
+            if (e.ShiftPressed)
+                return false;
+
+            if (e.ControlPressed)
+            {
+                switch (e.Key)
+                {
+                    case Key.Left:
+                        return nudgeSelection(new Vector2(-1, 0));
+
+                    case Key.Right:
+                        return nudgeSelection(new Vector2(1, 0));
+
+                    case Key.Up:
+                        return nudgeSelection(new Vector2(0, -1));
+
+                    case Key.Down:
+                        return nudgeSelection(new Vector2(0, 1));
+                }
+            }
+
+            return false;
+        }
+
+        protected override void OnKeyUp(KeyUpEvent e)
+        {
+            base.OnKeyUp(e);
+
+            if (nudgeMovementActive &amp;&amp; !e.ControlPressed)
+            {
+                EditorBeatmap.EndChange();
+                nudgeMovementActive = false;
+            }
+        }
+
+        public override bool HandleMovement(MoveSelectionEvent&lt;HitObject&gt; moveEvent)
+        {
+            var hitObjects = selectedMovableObjects;
+
+            var localDelta = this.ScreenSpaceDeltaToParentSpace(moveEvent.ScreenSpaceDelta);
+
+            // this conditional is a rather ugly special case for stacks.
+            // as it turns out, adding the `EditorBeatmap.Update()` call at the end of this would cause stacked objects to jitter when moved around
+            // (they would stack and then unstack every frame).
+            // the reason for that is that the selection handling abstractions are not aware of the distinction between &quot;displayed&quot; and &quot;actual&quot; position
+            // which is unique to osu! due to stacking being applied as a post-processing step.
+            // therefore, the following loop would occur:
+            // - on frame 1 the blueprint is snapped to the stack&#39;s baseline position. `EditorBeatmap.Update()` applies stacking successfully,
+            //   the blueprint moves up the stack from its original drag position.
+            // - on frame 2 the blueprint&#39;s position is now the *stacked* position, which is interpreted higher up as *manually performing an unstack*
+            //   to the blueprint&#39;s unstacked position (as the machinery higher up only cares about differences in screen space position).
+            if (hitObjects.Any(h =&gt; Precision.AlmostEquals(localDelta, -h.StackOffset)))
+                return true;
+
+            moveObjects(hitObjects, localDelta);
+
+            return true;
+        }
+
+        private void moveObjects(OsuHitObject[] hitObjects, Vector2 localDelta)
+        {
+            // this will potentially move the selection out of bounds...
+            foreach (var h in hitObjects)
+                h.Position += localDelta;
+
+            // but this will be corrected.
+            moveSelectionInBounds();
+
+            // manually update stacking.
+            // this intentionally bypasses the editor `UpdateState()` / beatmap processor flow for performance reasons,
+            // as the entire flow is too expensive to run on every movement.
+            Scheduler.AddOnce(OsuBeatmapProcessor.ApplyStacking, EditorBeatmap);
+        }
+
+        /// &lt;summary&gt;
+        /// Move the current selection spatially by the specified delta, in gamefield coordinates (ie. the same coordinates as the blueprints).
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;delta&quot;&gt;&lt;/param&gt;
+        private bool nudgeSelection(Vector2 delta)
+        {
+            if (!nudgeMovementActive)
+            {
+                nudgeMovementActive = true;
+                EditorBeatmap.BeginChange();
+            }
+
+            var firstBlueprint = SelectedBlueprints.FirstOrDefault();
+
+            if (firstBlueprint == null)
+                return false;
+
+            moveObjects(selectedMovableObjects, delta);
+            return true;
+        }
+
+        public override bool HandleReverse()
+        {
+            var hitObjects = EditorBeatmap.SelectedHitObjects
+                                          .OfType&lt;OsuHitObject&gt;()
+                                          .OrderBy(obj =&gt; obj.StartTime)
+                                          .ToList();
+
+            double endTime = hitObjects.Max(h =&gt; h.GetEndTime());
+            double startTime = hitObjects.Min(h =&gt; h.StartTime);
+
+            bool moreThanOneObject = hitObjects.Count &gt; 1;
+
+            // the expectation is that even if the objects themselves are reversed temporally,
+            // the position of new combos in the selection should remain the same.
+            // preserve it for later before doing the reversal.
+            var newComboOrder = hitObjects.Select(obj =&gt; obj.NewCombo).ToList();
+
+            foreach (var h in hitObjects)
+            {
+                if (moreThanOneObject)
+                    h.StartTime = endTime - (h.GetEndTime() - startTime);
+
+                if (h is Slider slider)
+                {
+                    slider.Path.Reverse(out Vector2 offset);
+                    slider.Position += offset;
+                }
+            }
+
+            // re-order objects by start time again after reversing, and restore new combo flag positioning
+            hitObjects = hitObjects.OrderBy(obj =&gt; obj.StartTime).ToList();
+
+            for (int i = 0; i &lt; hitObjects.Count; ++i)
+                hitObjects[i].NewCombo = newComboOrder[i];
+
+            return true;
+        }
+
+        public override bool HandleFlip(Direction direction, bool flipOverOrigin)
+        {
+            var hitObjects = selectedMovableObjects;
+
+            // If we&#39;re flipping over the origin, we take the grid origin position from the grid toolbox.
+            var flipQuad = flipOverOrigin ? new Quad(gridToolbox.StartPositionX.Value, gridToolbox.StartPositionY.Value, 0, 0) : GeometryUtils.GetSurroundingQuad(hitObjects);
+            Vector2 flipAxis = direction == Direction.Vertical ? Vector2.UnitY : Vector2.UnitX;
+
+            if (flipOverOrigin)
+            {
+                // If we&#39;re flipping over the origin, we take one of the axes of the grid.
+                // Take the axis closest to the direction we want to flip over.
+                switch (gridToolbox.GridType.Value)
+                {
+                    case PositionSnapGridType.Square:
+                        flipAxis = GeometryUtils.RotateVector(Vector2.UnitX, -((gridToolbox.GridLinesRotation.Value + 360 + 45) % 90 - 45));
+                        flipAxis = direction == Direction.Vertical ? flipAxis.PerpendicularLeft : flipAxis;
+                        break;
+
+                    case PositionSnapGridType.Triangle:
+                        // Hex grid has 3 axes, so you can not directly flip over one of the axes,
+                        // however it&#39;s still possible to achieve that flip by combining multiple flips over the other axes.
+                        // Angle degree range for vertical = (-120, -60]
+                        // Angle degree range for horizontal = [-30, 30)
+                        flipAxis = direction == Direction.Vertical
+                            ? GeometryUtils.RotateVector(Vector2.UnitX, -((gridToolbox.GridLinesRotation.Value + 360 + 30) % 60 + 60))
+                            : GeometryUtils.RotateVector(Vector2.UnitX, -((gridToolbox.GridLinesRotation.Value + 360) % 60 - 30));
+                        break;
+                }
+            }
+
+            var controlPointFlipQuad = new Quad();
+
+            bool didFlip = false;
+
+            foreach (var h in hitObjects)
+            {
+                var flippedPosition = GeometryUtils.GetFlippedPosition(flipAxis, flipQuad, h.Position);
+
+                // Clamp the flipped position inside the playfield bounds, because the flipped position might be outside the playfield bounds if the origin is not centered.
+                flippedPosition = Vector2.Clamp(flippedPosition, Vector2.Zero, OsuPlayfield.BASE_SIZE);
+
+                if (!Precision.AlmostEquals(flippedPosition, h.Position))
+                {
+                    h.Position = flippedPosition;
+                    didFlip = true;
+                }
+
+                if (h is Slider slider)
+                {
+                    didFlip = true;
+
+                    foreach (var cp in slider.Path.ControlPoints)
+                        cp.Position = GeometryUtils.GetFlippedPosition(flipAxis, controlPointFlipQuad, cp.Position);
+                }
+            }
+
+            return didFlip;
+        }
+
+        public override SelectionRotationHandler CreateRotationHandler() =&gt; new OsuSelectionRotationHandler();
+
+        public override SelectionScaleHandler CreateScaleHandler() =&gt; new OsuSelectionScaleHandler();
+
+        private void moveSelectionInBounds()
+        {
+            var hitObjects = selectedMovableObjects;
+
+            Quad quad = GeometryUtils.GetSurroundingQuad(hitObjects, true);
+
+            Vector2 delta = Vector2.Zero;
+
+            if (quad.TopLeft.X &lt; 0)
+                delta.X -= quad.TopLeft.X;
+            if (quad.TopLeft.Y &lt; 0)
+                delta.Y -= quad.TopLeft.Y;
+
+            if (quad.BottomRight.X &gt; DrawWidth)
+                delta.X -= quad.BottomRight.X - DrawWidth;
+            if (quad.BottomRight.Y &gt; DrawHeight)
+                delta.Y -= quad.BottomRight.Y - DrawHeight;
+
+            foreach (var h in hitObjects)
+                h.Position += delta;
+        }
+
+        /// &lt;summary&gt;
+        /// All osu! hitobjects which can be moved/rotated/scaled.
+        /// &lt;/summary&gt;
+        private OsuHitObject[] selectedMovableObjects =&gt; SelectedItems.OfType&lt;OsuHitObject&gt;()
+                                                                      .Where(h =&gt; h is not Spinner)
+                                                                      .ToArray();
+
+        /// &lt;summary&gt;
+        /// All osu! hitobjects which can be merged.
+        /// &lt;/summary&gt;
+        private OsuHitObject[] selectedMergeableObjects =&gt; SelectedItems.OfType&lt;OsuHitObject&gt;()
+                                                                        .Where(h =&gt; h is HitCircle or Slider)
+                                                                        .OrderBy(h =&gt; h.StartTime)
+                                                                        .ToArray();
+
+        private void mergeSelection()
+        {
+            var mergeableObjects = selectedMergeableObjects;
+
+            if (!canMerge(mergeableObjects))
+                return;
+
+            EditorBeatmap.BeginChange();
+
+            // Have an initial slider object.
+            var firstHitObject = mergeableObjects[0];
+            var mergedHitObject = firstHitObject as Slider ?? new Slider
+            {
+                StartTime = firstHitObject.StartTime,
+                Position = firstHitObject.Position,
+                NewCombo = firstHitObject.NewCombo,
+                Samples = firstHitObject.Samples,
+            };
+
+            if (mergedHitObject.Path.ControlPoints.Count == 0)
+            {
+                mergedHitObject.Path.ControlPoints.Add(new PathControlPoint(Vector2.Zero, PathType.LINEAR));
+            }
+
+            // Merge all the selected hit objects into one slider path.
+            bool lastCircle = firstHitObject is HitCircle;
+
+            foreach (var selectedMergeableObject in mergeableObjects.Skip(1))
+            {
+                if (selectedMergeableObject is IHasPath hasPath)
+                {
+                    var offset = lastCircle ? selectedMergeableObject.Position - mergedHitObject.Position : mergedHitObject.Path.ControlPoints[^1].Position;
+                    float distanceToLastControlPoint = Vector2.Distance(mergedHitObject.Path.ControlPoints[^1].Position, offset);
+
+                    // Calculate the distance required to travel to the expected distance of the merging slider.
+                    mergedHitObject.Path.ExpectedDistance.Value = mergedHitObject.Path.CalculatedDistance + distanceToLastControlPoint + hasPath.Path.Distance;
+
+                    // Remove the last control point if it sits exactly on the start of the next control point.
+                    if (Precision.AlmostEquals(distanceToLastControlPoint, 0))
+                    {
+                        mergedHitObject.Path.ControlPoints.RemoveAt(mergedHitObject.Path.ControlPoints.Count - 1);
+                    }
+
+                    mergedHitObject.Path.ControlPoints.AddRange(hasPath.Path.ControlPoints.Select(o =&gt; new PathControlPoint(o.Position + offset, o.Type)));
+                    lastCircle = false;
+                }
+                else
+                {
+                    // Turn the last control point into a linear type if this is the first merging circle in a sequence, so the subsequent control points can be inherited path type.
+                    if (!lastCircle)
+                    {
+                        mergedHitObject.Path.ControlPoints.Last().Type = PathType.LINEAR;
+                    }
+
+                    mergedHitObject.Path.ControlPoints.Add(new PathControlPoint(selectedMergeableObject.Position - mergedHitObject.Position));
+                    mergedHitObject.Path.ExpectedDistance.Value = null;
+                    lastCircle = true;
+                }
+            }
+
+            // Make sure only the merged hit object is in the beatmap.
+            if (firstHitObject is Slider)
+            {
+                foreach (var selectedMergeableObject in mergeableObjects.Skip(1))
+                {
+                    EditorBeatmap.Remove(selectedMergeableObject);
+                }
+            }
+            else
+            {
+                foreach (var selectedMergeableObject in mergeableObjects)
+                {
+                    EditorBeatmap.Remove(selectedMergeableObject);
+                }
+
+                EditorBeatmap.Add(mergedHitObject);
+            }
+
+            // Make sure the merged hitobject is selected.
+            SelectedItems.Clear();
+            SelectedItems.Add(mergedHitObject);
+
+            EditorBeatmap.EndChange();
+        }
+
+        protected override IEnumerable&lt;MenuItem&gt; GetContextMenuItemsForSelection(IEnumerable&lt;SelectionBlueprint&lt;HitObject&gt;&gt; selection)
+        {
+            foreach (var item in base.GetContextMenuItemsForSelection(selection))
+                yield return item;
+
+            if (canMerge(selectedMergeableObjects))
+                yield return new OsuMenuItem(&quot;Merge selection&quot;, MenuItemType.Destructive, mergeSelection);
+        }
+
+        private bool canMerge(IReadOnlyList&lt;OsuHitObject&gt; objects) =&gt;
+            objects.Count &gt; 1
+            &amp;&amp; (objects.Any(h =&gt; h is Slider)
+                || objects.Zip(objects.Skip(1), (h1, h2) =&gt; Precision.DefinitelyBigger(Vector2.DistanceSquared(h1.Position, h2.Position), 1)).Any(x =&gt; x));
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,51,30,55,0],[30,56,30,60,0],[30,65,30,70,0],[33,9,33,10,0],[34,13,34,39,0],[36,13,36,131,0],[38,13,38,52,0],[39,13,39,53,0],[40,13,40,127,0],[40,127,40,138,0],[40,138,40,140,0],[41,9,41,10,0],[46,9,46,10,0],[47,13,47,70,0],[48,13,48,14,0],[49,17,49,34,0],[50,17,50,29,0],[55,13,55,32,0],[56,17,56,30,0],[58,13,58,34,0],[59,13,59,14,0],[60,17,60,31,0],[63,25,63,67,0],[66,25,66,66,0],[69,25,69,67,0],[72,25,72,66,0],[74,13,74,14,0],[76,13,76,26,0],[77,9,77,10,0],[80,9,80,10,0],[81,13,81,29,0],[83,13,83,58,0],[84,13,84,14,0],[85,17,85,43,0],[86,17,86,45,0],[87,13,87,14,0],[88,9,88,10,0],[91,9,91,10,0],[92,13,92,53,0],[94,13,94,93,0],[106,13,106,37,0],[106,37,106,87,0],[106,87,106,89,0],[107,17,107,29,0],[109,13,109,49,0],[111,13,111,25,0],[112,9,112,10,0],[115,9,115,10,0],[117,13,117,20,0],[117,22,117,27,0],[117,28,117,30,0],[117,31,117,41,0],[118,17,118,42,0],[121,13,121,37,0],[126,13,126,81,0],[127,9,127,10,0],[134,9,134,10,0],[135,13,135,38,0],[136,13,136,14,0],[137,17,137,44,0],[138,17,138,45,0],[139,13,139,14,0],[141,13,141,70,0],[143,13,143,40,0],[144,17,144,30,0],[146,13,146,56,0],[147,13,147,25,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,154,59,0],[154,59,154,72,0],[154,72,155,53,0],[157,13,157,50,0],[157,50,157,64,0],[157,64,157,66,0],[158,13,158,52,0],[158,52,158,63,0],[158,63,158,65,0],[160,13,160,59,0],[165,13,165,58,0],[165,58,165,70,0],[165,70,165,81,0],[167,13,167,20,0],[167,22,167,27,0],[167,28,167,30,0],[167,31,167,41,0],[168,13,168,14,0],[169,17,169,39,0],[170,21,170,74,0],[172,17,172,40,0],[173,17,173,18,0],[174,21,174,61,0],[175,21,175,47,0],[176,17,176,18,0],[177,13,177,14,0],[180,13,180,52,0],[180,52,180,65,0],[180,65,180,76,0],[182,18,182,27,0],[182,29,182,49,0],[182,51,182,54,0],[183,17,183,59,0],[185,13,185,25,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,53,0],[193,13,193,175,0],[194,13,194,96,0],[196,13,196,32,0],[197,13,197,14,0],[200,17,200,52,0],[203,25,203,141,0],[204,25,204,108,0],[205,25,205,31,0],[212,25,214,131,0],[215,25,215,31,0],[217,13,217,14,0],[219,13,219,51,0],[221,13,221,34,0],[223,13,223,20,0],[223,22,223,27,0],[223,28,223,30,0],[223,31,223,41,0],[224,13,224,14,0],[225,17,225,104,0],[228,17,228,104,0],[230,17,230,74,0],[231,17,231,18,0],[232,21,232,50,0],[233,21,233,36,0],[234,17,234,18,0],[236,17,236,40,0],[237,17,237,18,0],[238,21,238,36,0],[240,21,240,28,0],[240,30,240,36,0],[240,37,240,39,0],[240,40,240,65,0],[241,25,241,117,0],[242,17,242,18,0],[243,13,243,14,0],[245,13,245,28,0],[246,9,246,10,0],[248,77,248,110,0],[250,71,250,101,0],[253,9,253,10,0],[254,13,254,53,0],[256,13,256,76,0],[258,13,258,42,0],[260,13,260,36,0],[261,17,261,43,0],[262,13,262,36,0],[263,17,263,43,0],[265,13,265,48,0],[266,17,266,59,0],[267,13,267,49,0],[268,17,268,60,0],[270,13,270,20,0],[270,22,270,27,0],[270,28,270,30,0],[270,31,270,41,0],[271,17,271,37,0],[272,9,272,10,0],[277,58,278,83,0],[278,83,278,99,0],[278,99,279,81,0],[284,60,285,85,0],[285,85,285,109,0],[285,109,286,87,0],[286,87,286,98,0],[286,98,287,83,0],[290,9,290,10,0],[291,13,291,61,0],[293,13,293,45,0],[294,17,294,24,0],[296,13,296,41,0],[299,13,299,54,0],[300,13,306,15,0],[308,13,308,63,0],[309,13,309,14,0],[310,17,310,109,0],[311,13,311,14,0],[314,13,314,59,0],[316,13,316,20,0],[316,22,316,49,0],[316,50,316,52,0],[316,53,316,77,0],[317,13,317,14,0],[318,17,318,65,0],[319,17,319,18,0],[320,21,320,157,0],[321,21,321,130,0],[324,21,324,160,0],[327,21,327,79,0],[328,21,328,22,0],[329,25,329,115,0],[330,21,330,22,0],[332,21,332,104,0],[332,104,332,153,0],[332,153,332,156,0],[333,21,333,40,0],[334,17,334,18,0],[336,17,336,18,0],[338,21,338,37,0],[339,21,339,22,0],[340,25,340,90,0],[341,21,341,22,0],[343,21,343,143,0],[344,21,344,72,0],[345,21,345,39,0],[346,17,346,18,0],[347,13,347,14,0],[350,13,350,42,0],[351,13,351,14,0],[352,17,352,24,0],[352,26,352,53,0],[352,54,352,56,0],[352,57,352,81,0],[353,17,353,18,0],[354,21,354,67,0],[355,17,355,18,0],[356,13,356,14,0],[358,13,358,14,0],[359,17,359,24,0],[359,26,359,53,0],[359,54,359,56,0],[359,57,359,73,0],[360,17,360,18,0],[361,21,361,67,0],[362,17,362,18,0],[364,17,364,52,0],[365,13,365,14,0],[368,13,368,35,0],[369,13,369,48,0],[371,13,371,39,0],[372,9,372,10,0],[375,9,375,10,0],[376,13,376,20,0],[376,22,376,30,0],[376,31,376,33,0],[376,34,376,81,0],[377,17,377,35,0],[379,13,379,52,0],[380,17,380,107,0],[381,9,381,10,0],[384,13,385,34,0],[385,34,385,45,0],[385,45,386,61,0],[386,61,386,141,0],[386,141,386,152,0],[386,152,386,153,0],[386,153,386,155,0]]);
+    </script>
+  </body>
+</html>

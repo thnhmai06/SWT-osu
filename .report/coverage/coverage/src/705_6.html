@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/PolygonGenerationPopover.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/Preprocessing/OsuDifficultyHitObject.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -14,239 +14,414 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Game.Beatmaps.ControlPoints;
-using osu.Game.Graphics.UserInterfaceV2;
-using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
 using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Objects.Legacy;
-using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Mods;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.UI;
-using osu.Game.Screens.Edit;
-using osu.Game.Screens.Edit.Compose.Components;
 using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Edit
+namespace osu.Game.Rulesets.Osu.Difficulty.Preprocessing
 {
-    public partial class PolygonGenerationPopover : OsuPopover
+    public class OsuDifficultyHitObject : DifficultyHitObject
     {
-        private DependencyContainer dependencies = null!;
+        /// &lt;summary&gt;
+        /// A distance by which all distances should be scaled in order to assume a uniform circle size.
+        /// &lt;/summary&gt;
+        public const int NORMALISED_RADIUS = 50; // Change radius to 50 to make 100 the diameter. Easier for mental maths.
 
-        private FormSliderBar&lt;double&gt; distanceSnapInput { get; set; } = null!;
-        private FormSliderBar&lt;int&gt; offsetAngleInput { get; set; } = null!;
-        private FormSliderBar&lt;int&gt; repeatCountInput { get; set; } = null!;
-        private FormSliderBar&lt;int&gt; pointInput { get; set; } = null!;
-        private RoundedButton commitButton = null!;
+        public const int NORMALISED_DIAMETER = NORMALISED_RADIUS * 2;
 
-        private readonly List&lt;HitCircle&gt; insertedCircles = new List&lt;HitCircle&gt;();
-        private bool began;
-        private bool committed;
+        public const int MIN_DELTA_TIME = 25;
 
-        [Resolved]
-        private IBeatSnapProvider beatSnapProvider { get; set; } = null!;
+        private const float maximum_slider_radius = NORMALISED_RADIUS * 2.4f;
+        private const float assumed_slider_radius = NORMALISED_RADIUS * 1.8f;
 
-        [Resolved]
-        private EditorClock editorClock { get; set; } = null!;
+        protected new OsuHitObject BaseObject =&gt; (OsuHitObject)base.BaseObject;
+        protected new OsuHitObject LastObject =&gt; (OsuHitObject)base.LastObject;
 
-        [Resolved]
-        private EditorBeatmap editorBeatmap { get; set; } = null!;
+        /// &lt;summary&gt;
+        /// &lt;see cref=&quot;DifficultyHitObject.DeltaTime&quot;/&gt; capped to a minimum of &lt;see cref=&quot;MIN_DELTA_TIME&quot;/&gt;ms.
+        /// &lt;/summary&gt;
+        public readonly double AdjustedDeltaTime;
 
-        [Resolved]
-        private IEditorChangeHandler? changeHandler { get; set; }
+        /// &lt;summary&gt;
+        /// Amount of time elapsed between lastDifficultyObject&#39;s &lt;see cref=&quot;DifficultyHitObject.EndTime&quot;/&gt; and &lt;see cref=&quot;DifficultyHitObject.StartTime&quot;/&gt; capped to a minimum of &lt;see cref=&quot;MIN_DELTA_TIME&quot;/&gt;ms.
+        /// &lt;/summary&gt;
+        public double LastObjectEndDeltaTime { get; private set; }
 
-        [Resolved]
-        private HitObjectComposer composer { get; set; } = null!;
+        /// &lt;summary&gt;
+        /// Time (in ms) between the object first appearing and the time it needs to be clicked.
+        /// &lt;see cref=&quot;OsuHitObject.TimePreempt&quot;/&gt; adjusted by clock rate.
+        /// &lt;/summary&gt;
+        public double Preempt =&gt; BaseObject.TimePreempt / ClockRate;
 
-        private PlacementStateManager? placementStateManager;
+        /// &lt;summary&gt;
+        /// Normalised distance from the start position of the previous &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; to the start position of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double JumpDistance { get; private set; }
 
-        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        /// &lt;summary&gt;
+        /// Normalised distance from the &quot;lazy&quot; end position of the previous &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; to the start position of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;para&gt;
+        /// The &quot;lazy&quot; end position is the position at which the cursor ends up if the previous hitobject is followed with as minimal movement as possible (i.e. on the edge of slider follow circles).
+        /// &lt;/para&gt;
+        /// &lt;/summary&gt;
+        public double LazyJumpDistance { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Normalised shortest distance to consider for a jump between the previous &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; and this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is bounded from above by &lt;see cref=&quot;LazyJumpDistance&quot;/&gt;, and is smaller than the former if a more natural path is able to be taken through the previous &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;example&gt;
+        /// Suppose a linear slider - circle pattern.
+        /// &lt;br /&gt;
+        /// Following the slider lazily (see: &lt;see cref=&quot;LazyJumpDistance&quot;/&gt;) will result in underestimating the true end position of the slider as being closer towards the start position.
+        /// As a result, &lt;see cref=&quot;LazyJumpDistance&quot;/&gt; overestimates the jump distance because the player is able to take a more natural path by following through the slider to its end,
+        /// such that the jump is felt as only starting from the slider&#39;s true end position.
+        /// &lt;br /&gt;
+        /// Now consider a slider - circle pattern where the circle is stacked along the path inside the slider.
+        /// In this case, the lazy end position correctly estimates the true end position of the slider and provides the more natural movement path.
+        /// &lt;/example&gt;
+        public double MinimumJumpDistance { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The time taken to travel through &lt;see cref=&quot;MinimumJumpDistance&quot;/&gt;, with a minimum value of 25ms.
+        /// &lt;/summary&gt;
+        public double MinimumJumpTime { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Normalised distance between the start and end position of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double TravelDistance { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The time taken to travel through &lt;see cref=&quot;TravelDistance&quot;/&gt;, with a minimum value of 25ms for &lt;see cref=&quot;Slider&quot;/&gt; objects.
+        /// &lt;/summary&gt;
+        public double TravelTime { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The position of the cursor at the point of completion of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; if it is a &lt;see cref=&quot;Slider&quot;/&gt;
+        /// and was hit with as few movements as possible.
+        /// &lt;/summary&gt;
+        public Vector2? LazyEndPosition { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The distance travelled by the cursor upon completion of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; if it is a &lt;see cref=&quot;Slider&quot;/&gt;
+        /// and was hit with as few movements as possible.
+        /// &lt;/summary&gt;
+        public double LazyTravelDistance { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The time taken by the cursor upon completion of this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt; if it is a &lt;see cref=&quot;Slider&quot;/&gt;
+        /// and was hit with as few movements as possible.
+        /// &lt;/summary&gt;
+        public double LazyTravelTime { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Angle the player has to take to hit this &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// Calculated as the angle between the circles (current-2, current-1, current).
+        /// &lt;/summary&gt;
+        public double? Angle { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Angle of the vector created between current and current-1
+        /// normalised to consider symmetrical vectors in any axis to be the same angle.
+        /// &lt;/summary&gt;
+        public double? NormalisedVectorAngle { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Selective bonus for maps with higher circle size.
+        /// &lt;/summary&gt;
+        public double SmallCircleBonus =&gt; Math.Max(1.0, 1.0 + (30 - BaseObject.Radius) / 70);
+
+        /// &lt;summary&gt;
+        /// Object&#39;s immediate OverallDifficulty value calculated from the raw hitwindow.
+        /// &lt;/summary&gt;
+        public double OverallDifficulty =&gt; (79.5 - HitWindowGreat / 2) / 6;
+
+        public OsuDifficultyHitObject(HitObject hitObject, HitObject lastObject, double clockRate, List&lt;DifficultyHitObject&gt; objects, int index)
+            : base(hitObject, lastObject, clockRate, objects, index)
         {
-            return dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+            // Capped to 25ms to prevent difficulty calculation breaking from simultaneous objects.
+            AdjustedDeltaTime = Math.Max(DeltaTime, MIN_DELTA_TIME);
+            LastObjectEndDeltaTime = Previous() is DifficultyHitObject last ? Math.Max(StartTime - last.EndTime, MIN_DELTA_TIME) : AdjustedDeltaTime;
+
+            computeSliderCursorPosition();
+            setDistances(clockRate);
         }
 
-        [BackgroundDependencyLoader]
-        private void load()
+        public double OpacityAt(double time, bool hidden)
         {
-            AllowableAnchors = new[] { Anchor.CentreLeft, Anchor.CentreRight };
-
-            Child = new FillFlowContainer
+            if (time &gt; BaseObject.StartTime)
             {
-                Width = 220,
-                AutoSizeAxes = Axes.Y,
-                Spacing = new Vector2(5),
-                Children = new Drawable[]
-                {
-                    distanceSnapInput = new FormSliderBar&lt;double&gt;
-                    {
-                        Caption = &quot;Distance snap&quot;,
-                        Current = new BindableNumber&lt;double&gt;(1)
-                        {
-                            MinValue = 0.1,
-                            MaxValue = 6,
-                            Precision = 0.1,
-                            Value = ((OsuHitObjectComposer)composer).DistanceSnapProvider.DistanceSpacingMultiplier.Value,
-                        },
-                        TabbableContentContainer = this
-                    },
-                    offsetAngleInput = new FormSliderBar&lt;int&gt;
-                    {
-                        Caption = &quot;Offset angle&quot;,
-                        Current = new BindableNumber&lt;int&gt;
-                        {
-                            MinValue = 0,
-                            MaxValue = 180,
-                            Precision = 1
-                        },
-                        TabbableContentContainer = this
-                    },
-                    repeatCountInput = new FormSliderBar&lt;int&gt;
-                    {
-                        Caption = &quot;Repeats&quot;,
-                        Current = new BindableNumber&lt;int&gt;(1)
-                        {
-                            MinValue = 1,
-                            MaxValue = 10,
-                            Precision = 1
-                        },
-                        TabbableContentContainer = this
-                    },
-                    pointInput = new FormSliderBar&lt;int&gt;
-                    {
-                        Caption = &quot;Vertices&quot;,
-                        Current = new BindableNumber&lt;int&gt;(3)
-                        {
-                            MinValue = 3,
-                            MaxValue = 32,
-                            Precision = 1,
-                        },
-                        TabbableContentContainer = this
-                    },
-                    commitButton = new RoundedButton
-                    {
-                        RelativeSizeAxes = Axes.X,
-                        Text = &quot;Create&quot;,
-                        Action = commit
-                    }
-                }
-            };
-
-            // TODO: This is a pretty ugly dependency chain.
-            // We should look to rearrange things to avoid this altogether.
-            dependencies.CacheAs(composer.BlueprintContainer.SelectionHandler);
-        }
-
-        protected override void LoadComplete()
-        {
-            base.LoadComplete();
-
-            changeHandler?.BeginChange();
-            began = true;
-
-            distanceSnapInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
-            offsetAngleInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
-            repeatCountInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
-            pointInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
-            tryCreatePolygon();
-        }
-
-        private void tryCreatePolygon()
-        {
-            double startTime = beatSnapProvider.SnapTime(editorClock.CurrentTime);
-            TimingControlPoint timingPoint = editorBeatmap.ControlPointInfo.TimingPointAt(startTime);
-            double timeSpacing = timingPoint.BeatLength / editorBeatmap.BeatDivisor;
-            IHasSliderVelocity lastWithSliderVelocity = editorBeatmap.HitObjects.Where(ho =&gt; ho.GetEndTime() &lt;= startTime).OfType&lt;IHasSliderVelocity&gt;().LastOrDefault() ?? new Slider();
-            double velocity = OsuHitObject.BASE_SCORING_DISTANCE * editorBeatmap.Difficulty.SliderMultiplier
-                              / LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(lastWithSliderVelocity, timingPoint, OsuRuleset.SHORT_NAME);
-            double length = distanceSnapInput.Current.Value * velocity * timeSpacing;
-            float polygonRadius = (float)(length / (2 * Math.Sin(double.Pi / pointInput.Current.Value)));
-
-            int totalPoints = pointInput.Current.Value * repeatCountInput.Current.Value;
-
-            if (insertedCircles.Count &gt; totalPoints)
-            {
-                editorBeatmap.RemoveRange(insertedCircles.GetRange(totalPoints, insertedCircles.Count - totalPoints));
-                insertedCircles.RemoveRange(totalPoints, insertedCircles.Count - totalPoints);
+                // Consider a hitobject as being invisible when its start time is passed.
+                // In reality the hitobject will be visible beyond its start time up until its hittable window has passed,
+                // but this is an approximation and such a case is unlikely to be hit where this function is used.
+                return 0.0;
             }
 
-            var newlyAdded = new List&lt;HitCircle&gt;();
+            double fadeInStartTime = BaseObject.StartTime - BaseObject.TimePreempt;
 
-            for (int i = 0; i &lt; totalPoints; ++i)
+            // Equal to `OsuHitObject.TimeFadeIn` minus any adjustments from the HD mod.
+            double fadeInDuration = 400 * Math.Min(1, BaseObject.TimePreempt / OsuHitObject.PREEMPT_MIN);
+
+            if (hidden)
             {
-                float angle = float.DegreesToRadians(offsetAngleInput.Current.Value) + (i + 1) * (2 * float.Pi / pointInput.Current.Value);
-                var position = OsuPlayfield.BASE_SIZE / 2 + new Vector2(polygonRadius * float.Cos(angle), polygonRadius * float.Sin(angle));
+                // Taken from OsuModHidden.
+                double fadeOutStartTime = BaseObject.StartTime - BaseObject.TimePreempt + BaseObject.TimeFadeIn;
+                double fadeOutDuration = BaseObject.TimePreempt * OsuModHidden.FADE_OUT_DURATION_MULTIPLIER;
 
-                HitCircle circle;
-
-                if (i &lt; insertedCircles.Count)
-                {
-                    circle = insertedCircles[i];
-
-                    circle.Position = position;
-                    circle.StartTime = startTime;
-                }
-                else
-                {
-                    circle = new HitCircle
-                    {
-                        Position = position,
-                        StartTime = startTime,
-                    };
-
-                    newlyAdded.Add(circle);
-
-                    circle.Samples.Add(circle.CreateHitSampleInfo());
-                }
-
-                if (position.X &lt; 0 || position.Y &lt; 0 || position.X &gt; OsuPlayfield.BASE_SIZE.X || position.Y &gt; OsuPlayfield.BASE_SIZE.Y)
-                {
-                    commitButton.Enabled.Value = false;
-                    editorBeatmap.RemoveRange(insertedCircles);
-                    insertedCircles.Clear();
-                    return;
-                }
-
-                startTime = beatSnapProvider.SnapTime(startTime + timeSpacing);
+                return Math.Min
+                (
+                    Math.Clamp((time - fadeInStartTime) / fadeInDuration, 0.0, 1.0),
+                    1.0 - Math.Clamp((time - fadeOutStartTime) / fadeOutDuration, 0.0, 1.0)
+                );
             }
 
-            insertedCircles.AddRange(newlyAdded);
-            editorBeatmap.AddRange(newlyAdded);
-
-            placementStateManager?.RemoveAndDisposeImmediately();
-            Content.Add(placementStateManager = new PlacementStateManager(insertedCircles.Cast&lt;HitObject&gt;().ToArray())
-            {
-                PerformBeatmapUpdates = true,
-            });
-
-            commitButton.Enabled.Value = true;
+            return Math.Clamp((time - fadeInStartTime) / fadeInDuration, 0.0, 1.0);
         }
 
-        private void commit()
+        /// &lt;summary&gt;
+        /// Returns how possible is it to doubletap this object together with the next one and get perfect judgement in range from 0 to 1
+        /// &lt;/summary&gt;
+        public double CalculateDoubleTapFeasibility(OsuDifficultyHitObject? nextObj)
         {
-            changeHandler?.EndChange();
-            committed = true;
-            Hide();
+            if (nextObj == null) return 0;
+
+            double currDeltaTime = Math.Max(1, DeltaTime);
+            double nextDeltaTime = Math.Max(1, nextObj.DeltaTime);
+
+            double deltaDifference = Math.Abs(nextDeltaTime - currDeltaTime);
+
+            double speedRatio = currDeltaTime / Math.Max(currDeltaTime, deltaDifference);
+            double windowRatio = DiffUtils.Pow(Math.Min(1, currDeltaTime / HitWindowGreat), 5);
+
+            // Can&#39;t doubletap if circles don&#39;t intersect
+            double distanceFactor = DiffUtils.Pow(DiffUtils.ReverseLerp(LazyJumpDistance, NORMALISED_DIAMETER, NORMALISED_RADIUS), 2);
+
+            return 1.0 - DiffUtils.Pow(speedRatio, distanceFactor * (1 - windowRatio));
         }
 
-        protected override void PopOut()
+        private void setDistances(double clockRate)
         {
-            base.PopOut();
-
-            if (began &amp;&amp; !committed)
+            if (BaseObject is Slider currentSlider)
             {
-                editorBeatmap.RemoveRange(insertedCircles);
-                changeHandler?.EndChange();
+                // Bonus for repeat sliders until a better per nested object strain system can be achieved.
+                TravelDistance = LazyTravelDistance * Math.Max(1, DiffUtils.Pow(currentSlider.RepeatCount, 0.3));
+                TravelTime = Math.Max(LazyTravelTime / clockRate, MIN_DELTA_TIME);
             }
+
+            MinimumJumpTime = AdjustedDeltaTime;
+
+            // We don&#39;t need to calculate either angle or distance when one of the last-&gt;curr objects is a spinner
+            if (BaseObject is Spinner || LastObject is Spinner)
+                return;
+
+            // We will scale distances by this factor, so we can assume a uniform CircleSize among beatmaps.
+            float scalingFactor = NORMALISED_RADIUS / (float)BaseObject.Radius;
+
+            var lastDifficultyObject = Previous() as OsuDifficultyHitObject;
+            var lastLastDifficultyObject = Previous(1) as OsuDifficultyHitObject;
+
+            Vector2 lastCursorPosition = lastDifficultyObject != null ? getEndCursorPosition(lastDifficultyObject) : LastObject.StackedPosition;
+
+            JumpDistance = (LastObject.StackedPosition - BaseObject.StackedPosition).Length * scalingFactor;
+            LazyJumpDistance = (BaseObject.StackedPosition - lastCursorPosition).Length * scalingFactor;
+            MinimumJumpDistance = LazyJumpDistance;
+
+            if (LastObject is Slider lastSlider &amp;&amp; lastDifficultyObject != null)
+            {
+                double lastTravelTime = Math.Max(lastDifficultyObject.LazyTravelTime / clockRate, MIN_DELTA_TIME);
+                MinimumJumpTime = Math.Max(AdjustedDeltaTime - lastTravelTime, MIN_DELTA_TIME);
+
+                //
+                // There are two types of slider-to-object patterns to consider in order to better approximate the real movement a player will take to jump between the hitobjects.
+                //
+                // 1. The anti-flow pattern, where players cut the slider short in order to move to the next hitobject.
+                //
+                //      &lt;======o==&gt;  ← slider
+                //             |     ← most natural jump path
+                //             o     ← a follow-up hitcircle
+                //
+                // In this case the most natural jump path is approximated by LazyJumpDistance.
+                //
+                // 2. The flow pattern, where players follow through the slider to its visual extent into the next hitobject.
+                //
+                //      &lt;======o==&gt;---o
+                //                  ↑
+                //        most natural jump path
+                //
+                // In this case the most natural jump path is better approximated by a new distance called &quot;tailJumpDistance&quot; - the distance between the slider&#39;s tail and the next hitobject.
+                //
+                // Thus, the player is assumed to jump the minimum of these two distances in all cases.
+                //
+
+                float tailJumpDistance = Vector2.Subtract(lastSlider.TailCircle.StackedPosition, BaseObject.StackedPosition).Length * scalingFactor;
+                MinimumJumpDistance = Math.Max(0, Math.Min(LazyJumpDistance - (maximum_slider_radius - assumed_slider_radius), tailJumpDistance - maximum_slider_radius));
+            }
+
+            if (lastLastDifficultyObject != null &amp;&amp; lastLastDifficultyObject.BaseObject is not Spinner)
+            {
+                if (lastDifficultyObject!.BaseObject is Slider prevSlider &amp;&amp; lastDifficultyObject.TravelDistance &gt; 0)
+                    lastCursorPosition = prevSlider.HeadCircle.StackedPosition;
+
+                Vector2 lastLastCursorPosition = getEndCursorPosition(lastLastDifficultyObject);
+
+                double angle = calculateAngle(BaseObject.StackedPosition, lastCursorPosition, lastLastCursorPosition);
+                double sliderAngle = calculateSliderAngle(lastDifficultyObject, lastLastCursorPosition);
+
+                Vector2 v = BaseObject.StackedPosition - lastCursorPosition;
+                NormalisedVectorAngle = Math.Atan2(Math.Abs(v.Y), Math.Abs(v.X));
+
+                Angle = Math.Min(angle, sliderAngle);
+            }
+        }
+
+        private void computeSliderCursorPosition()
+        {
+            if (BaseObject is not Slider slider)
+                return;
+
+            if (LazyEndPosition != null)
+                return;
+
+            // TODO: This commented version is actually correct by the new lazer implementation, but intentionally held back from
+            // difficulty calculator to preserve known behaviour.
+            // double trackingEndTime = Math.Max(
+            //     // SliderTailCircle always occurs at the final end time of the slider, but the player only needs to hold until within a lenience before it.
+            //     slider.Duration + SliderEventGenerator.TAIL_LENIENCY,
+            //     // There&#39;s an edge case where one or more ticks/repeats fall within that leniency range.
+            //     // In such a case, the player needs to track until the final tick or repeat.
+            //     slider.NestedHitObjects.LastOrDefault(n =&gt; n is not SliderTailCircle)?.StartTime ?? double.MinValue
+            // );
+
+            double trackingEndTime = Math.Max(
+                slider.StartTime + slider.Duration + SliderEventGenerator.TAIL_LENIENCY,
+                slider.StartTime + slider.Duration / 2
+            );
+
+            IList&lt;HitObject&gt; nestedObjects = slider.NestedHitObjects;
+
+            SliderTick? lastRealTick = null;
+
+            foreach (var hitobject in slider.NestedHitObjects)
+            {
+                if (hitobject is SliderTick tick)
+                    lastRealTick = tick;
+            }
+
+            if (lastRealTick?.StartTime &gt; trackingEndTime)
+            {
+                trackingEndTime = lastRealTick.StartTime;
+
+                // When the last tick falls after the tracking end time, we need to re-sort the nested objects
+                // based on time. This creates a somewhat weird ordering which is counter to how a user would
+                // understand the slider, but allows a zero-diff with known diffcalc output.
+                //
+                // To reiterate, this is definitely not correct from a difficulty calculation perspective
+                // and should be revisited at a later date (likely by replacing this whole code with the commented
+                // version above).
+                List&lt;HitObject&gt; reordered = nestedObjects.ToList();
+
+                reordered.Remove(lastRealTick);
+                reordered.Add(lastRealTick);
+
+                nestedObjects = reordered;
+            }
+
+            LazyTravelTime = trackingEndTime - slider.StartTime;
+
+            double endTimeMin = LazyTravelTime / slider.SpanDuration;
+            if (endTimeMin % 2 &gt;= 1)
+                endTimeMin = 1 - endTimeMin % 1;
+            else
+                endTimeMin %= 1;
+
+            LazyEndPosition = slider.StackedPosition + slider.Path.PositionAt(endTimeMin); // temporary lazy end position until a real result can be derived.
+
+            Vector2 currCursorPosition = slider.StackedPosition;
+
+            double scalingFactor = NORMALISED_RADIUS / slider.Radius; // lazySliderDistance is coded to be sensitive to scaling, this makes the maths easier with the thresholds being used.
+
+            for (int i = 1; i &lt; nestedObjects.Count; i++)
+            {
+                var currMovementObj = (OsuHitObject)nestedObjects[i];
+
+                Vector2 currMovement = Vector2.Subtract(currMovementObj.StackedPosition, currCursorPosition);
+                double currMovementLength = scalingFactor * currMovement.Length;
+
+                // Amount of movement required so that the cursor position needs to be updated.
+                double requiredMovement = assumed_slider_radius;
+
+                if (i == nestedObjects.Count - 1)
+                {
+                    // The end of a slider has special aim rules due to the relaxed time constraint on position.
+                    // There is both a lazy end position as well as the actual end slider position. We assume the player takes the simpler movement.
+                    // For sliders that are circular, the lazy end position may actually be farther away than the sliders true end.
+                    // This code is designed to prevent buffing situations where lazy end is actually a less efficient movement.
+                    Vector2 lazyMovement = Vector2.Subtract((Vector2)LazyEndPosition, currCursorPosition);
+
+                    if (lazyMovement.Length &lt; currMovement.Length)
+                        currMovement = lazyMovement;
+
+                    currMovementLength = scalingFactor * currMovement.Length;
+                }
+                else if (currMovementObj is SliderRepeat)
+                {
+                    // For a slider repeat, assume a tighter movement threshold to better assess repeat sliders.
+                    requiredMovement = NORMALISED_RADIUS;
+                }
+
+                if (currMovementLength &gt; requiredMovement)
+                {
+                    // this finds the positional delta from the required radius and the current position, and updates the currCursorPosition accordingly, as well as rewarding distance.
+                    currCursorPosition = Vector2.Add(currCursorPosition, Vector2.Multiply(currMovement, (float)((currMovementLength - requiredMovement) / currMovementLength)));
+                    currMovementLength *= (currMovementLength - requiredMovement) / currMovementLength;
+                    LazyTravelDistance += currMovementLength;
+                }
+
+                if (i == nestedObjects.Count - 1)
+                    LazyEndPosition = currCursorPosition;
+            }
+        }
+
+        private double calculateSliderAngle(OsuDifficultyHitObject lastDifficultyObject, Vector2 lastLastCursorPosition)
+        {
+            Vector2 lastCursorPosition = getEndCursorPosition(lastDifficultyObject);
+
+            if (lastDifficultyObject.BaseObject is Slider prevSlider &amp;&amp; lastDifficultyObject.TravelDistance &gt; 0)
+            {
+                OsuHitObject secondLastNestedObject = (OsuHitObject)prevSlider.NestedHitObjects[^2];
+                lastLastCursorPosition = secondLastNestedObject.StackedPosition;
+            }
+
+            return calculateAngle(BaseObject.StackedPosition, lastCursorPosition, lastLastCursorPosition);
+        }
+
+        private double calculateAngle(Vector2 currentPosition, Vector2 lastPosition, Vector2 lastLastPosition)
+        {
+            Vector2 v1 = lastLastPosition - lastPosition;
+            Vector2 v2 = currentPosition - lastPosition;
+
+            float dot = Vector2.Dot(v1, v2);
+            float det = v1.X * v2.Y - v1.Y * v2.X;
+
+            return Math.Abs(Math.Atan2(det, dot));
+        }
+
+        private Vector2 getEndCursorPosition(OsuDifficultyHitObject difficultyHitObject)
+        {
+            return difficultyHitObject.LazyEndPosition ?? difficultyHitObject.BaseObject.StackedPosition;
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[27,9,27,58,0],[29,59,29,63,0],[29,64,29,68,0],[29,73,29,78,0],[30,55,30,59,0],[30,60,30,64,0],[30,69,30,74,0],[31,55,31,59,0],[31,60,31,64,0],[31,69,31,74,0],[32,49,32,53,0],[32,54,32,58,0],[32,63,32,68,0],[33,9,33,52,0],[35,9,35,82,0],[40,54,40,58,0],[40,59,40,63,0],[40,68,40,73,0],[43,43,43,47,0],[43,48,43,52,0],[43,57,43,62,0],[46,47,46,51,0],[46,52,46,56,0],[46,61,46,66,0],[49,55,49,59,0],[49,60,49,64,0],[52,46,52,50,0],[52,51,52,55,0],[52,60,52,65,0],[57,9,57,10,0],[58,13,58,97,0],[59,9,59,10,0],[63,9,63,10,0],[64,13,64,80,0],[66,13,125,15,0],[129,13,129,80,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,33,0],[136,13,136,42,0],[137,13,137,26,0],[139,13,139,61,0],[139,61,139,96,0],[139,96,139,98,0],[140,13,140,60,0],[140,60,140,95,0],[140,95,140,97,0],[141,13,141,60,0],[141,60,141,95,0],[141,95,141,97,0],[142,13,142,54,0],[142,54,142,89,0],[142,89,142,91,0],[143,13,143,32,0],[144,9,144,10,0],[147,9,147,10,0],[148,13,148,83,0],[149,13,149,102,0],[150,13,150,85,0],[151,13,151,94,0],[151,94,151,122,0],[151,122,151,185,0],[152,13,153,148,0],[154,13,154,86,0],[155,13,155,106,0],[157,13,157,89,0],[159,13,159,53,0],[160,13,160,14,0],[161,17,161,119,0],[162,17,162,95,0],[163,13,163,14,0],[165,13,165,52,0],[167,18,167,27,0],[167,29,167,44,0],[167,46,167,49,0],[168,13,168,14,0],[169,17,169,140,0],[170,17,170,141,0],[174,17,174,47,0],[175,17,175,18,0],[176,21,176,49,0],[178,21,178,48,0],[179,21,179,50,0],[180,17,180,18,0],[182,17,182,18,0],[183,21,187,23,0],[189,21,189,44,0],[191,21,191,70,0],[192,17,192,18,0],[194,17,194,136,0],[195,17,195,18,0],[196,21,196,56,0],[197,21,197,64,0],[198,21,198,45,0],[199,21,199,28,0],[202,17,202,80,0],[203,13,203,14,0],[205,13,205,50,0],[206,13,206,48,0],[208,13,208,66,0],[209,13,212,16,0],[214,13,214,47,0],[215,9,215,10,0],[218,9,218,10,0],[219,13,219,40,0],[220,13,220,30,0],[221,13,221,20,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,27,0],[228,13,228,37,0],[229,13,229,14,0],[230,17,230,60,0],[231,17,231,44,0],[232,13,232,14,0],[233,9,233,10,0]]);
+      highlightRanges([[30,50,30,79,1],[31,50,31,79,1],[41,48,41,52,1],[41,53,41,65,1],[47,34,47,68,1],[52,38,52,42,1],[52,43,52,55,1],[60,42,60,46,1],[60,47,60,59,1],[78,45,78,49,1],[78,50,78,62,1],[83,41,83,45,1],[83,46,83,58,1],[88,40,88,44,1],[88,45,88,57,1],[93,36,93,40,1],[93,41,93,53,1],[99,43,99,47,1],[99,48,99,60,1],[105,44,105,48,1],[105,49,105,61,1],[111,40,111,44,1],[111,45,111,57,1],[117,32,117,36,1],[117,37,117,49,1],[123,48,123,52,1],[123,53,123,65,1],[128,43,128,93,1],[133,44,133,75,1],[136,15,136,69,1],[137,9,137,10,1],[139,13,139,69,1],[140,13,140,150,1],[142,13,142,43,1],[143,13,143,37,1],[144,9,144,10,1],[147,9,147,10,1],[148,13,148,45,1],[149,13,149,14,1],[153,17,153,28,1],[156,13,156,84,1],[159,13,159,106,1],[161,13,161,24,1],[162,13,162,14,1],[164,17,164,113,1],[165,17,165,109,1],[167,17,171,19,1],[174,13,174,84,1],[175,9,175,10,1],[181,9,181,10,1],[182,13,182,33,1],[182,34,182,43,1],[184,13,184,59,1],[185,13,185,67,1],[187,13,187,78,1],[189,13,189,90,1],[190,13,190,96,1],[193,13,193,135,1],[195,13,195,88,1],[196,9,196,10,1],[199,9,199,10,1],[200,13,200,52,1],[201,13,201,14,1],[203,17,203,114,1],[204,17,204,83,1],[205,13,205,14,1],[207,13,207,49,1],[210,13,210,64,1],[211,17,211,24,1],[214,13,214,80,1],[216,13,216,77,1],[217,13,217,82,1],[219,13,219,145,1],[221,13,221,109,1],[222,13,222,105,1],[223,13,223,52,1],[225,13,225,81,1],[226,13,226,14,1],[227,17,227,115,1],[228,17,228,96,1],[252,17,252,149,1],[253,17,253,171,1],[254,13,254,14,1],[256,13,256,104,1],[257,13,257,14,1],[258,17,258,118,1],[259,21,259,80,1],[261,17,261,97,1],[263,17,263,119,1],[264,17,264,105,1],[266,17,266,77,1],[267,17,267,82,1],[269,17,269,54,1],[270,13,270,14,1],[271,9,271,10,1],[274,9,274,10,1],[275,13,275,49,1],[276,17,276,24,1],[278,13,278,41,1],[279,17,279,24,0],[291,13,294,15,1],[296,13,296,70,1],[298,13,298,45,1],[300,13,300,20,1],[300,22,300,35,1],[300,36,300,38,1],[300,39,300,62,1],[301,13,301,14,1],[302,17,302,50,1],[303,21,303,41,1],[304,13,304,14,1],[306,13,306,59,1],[307,13,307,14,0],[308,17,308,58,0],[317,17,317,68,0],[319,17,319,48,0],[320,17,320,45,0],[322,17,322,43,0],[323,13,323,14,0],[325,13,325,65,1],[327,13,327,70,1],[328,13,328,37,1],[329,17,329,49,1],[331,17,331,33,1],[333,13,333,91,1],[335,13,335,65,1],[337,13,337,70,1],[339,18,339,27,1],[339,29,339,52,1],[339,54,339,57,1],[340,13,340,14,1],[341,17,341,70,1],[343,17,343,110,1],[344,17,344,81,1],[347,17,347,65,1],[349,17,349,50,1],[350,17,350,18,1],[355,21,355,107,1],[357,21,357,67,1],[358,25,358,53,1],[360,21,360,78,1],[361,17,361,18,1],[362,22,362,58,1],[363,17,363,18,1],[365,21,365,58,1],[366,17,366,18,1],[368,17,368,59,1],[369,17,369,18,1],[371,21,371,177,1],[372,21,372,104,1],[373,21,373,62,1],[374,17,374,18,1],[376,17,376,50,1],[377,21,377,58,1],[378,13,378,14,1],[379,9,379,10,1],[382,9,382,10,1],[383,13,383,85,1],[385,13,385,113,1],[386,13,386,14,1],[387,17,387,101,1],[388,17,388,81,1],[389,13,389,14,1],[391,13,391,107,1],[392,9,392,10,1],[395,9,395,10,1],[396,13,396,58,1],[397,13,397,57,1],[399,13,399,45,1],[400,13,400,51,1],[402,13,402,51,1],[403,9,403,10,1],[406,9,406,10,1],[407,13,407,106,1],[408,9,408,10,1]]);
     </script>
   </body>
 </html>

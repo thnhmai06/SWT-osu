@@ -26,7 +26,7 @@ namespace osu.Game.Rulesets.Osu.Tests.Beatmaps
             string text = $"osu file format v{version}\n\n[General]\nMode: 0\n\n[Difficulty]\nSliderMultiplier:1.4\n\n[TimingPoints]\n{timingPoints}\n\n[HitObjects]\n{hitObjects}\n";
 
             using var reader = new LineBufferedReader(new MemoryStream(Encoding.UTF8.GetBytes(text)));
-            return new LegacyBeatmapDecoder().Decode(reader);
+            return new LegacyBeatmapDecoder((byte)version).Decode(reader);
         }
 
         private static List<OsuHitObject> convert(IBeatmap beatmap) => new OsuBeatmapConverter(beatmap, new OsuRuleset()).Convert().HitObjects.Cast<OsuHitObject>().ToList();
@@ -97,7 +97,7 @@ namespace osu.Game.Rulesets.Osu.Tests.Beatmaps
         public void TestConvert_Slider_ModernBeatmapKeepsTickDistanceMultiplier()
         {
             // BeatmapVersion < 8 FALSE
-            var slider = (Slider)convert(decode(14, "100,100,2000,2,0,L|300:100,1,200", "0,500,4,1,0,100,1,0\n0,-50,4,1,0,100,0,0")).Single();
+            var slider = (Slider)convert(decode(14, "100,100,2000,2,0,L|300:100,1,200", "0,500,4,1,0,100,1,0\n1000,-50,4,1,0,100,0,0")).Single();
 
             Assert.That(slider.TickDistanceMultiplier, Is.EqualTo(1));
         }
@@ -106,7 +106,7 @@ namespace osu.Game.Rulesets.Osu.Tests.Beatmaps
         public void TestConvert_Slider_LegacyBeatmapScalesTickDistanceByInverseVelocity()
         {
             // BeatmapVersion < 8 TRUE: 1 / SliderVelocity (inherited point at 50% beat length => velocity 2)
-            var slider = (Slider)convert(decode(7, "100,100,2000,2,0,L|300:100,1,200", "0,500,4,1,0,100,1,0\n0,-50,4,1,0,100,0,0")).Single();
+            var slider = (Slider)convert(decode(7, "100,100,2000,2,0,L|300:100,1,200", "0,500,4,1,0,100,1,0\n1000,-50,4,1,0,100,0,0")).Single();
 
             Assert.That(slider.TickDistanceMultiplier, Is.EqualTo(0.5).Within(1e-6));
         }

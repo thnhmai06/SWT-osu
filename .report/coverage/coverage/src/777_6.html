@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSlider.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModAutopilot.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,420 +11,78 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-#nullable disable
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using JetBrains.Annotations;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Framework.Layout;
-using osu.Game.Audio;
-using osu.Game.Graphics.Containers;
-using osu.Game.Rulesets.Judgements;
-using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Judgements;
-using osu.Game.Rulesets.Osu.Skinning.Default;
-using osu.Game.Rulesets.Scoring;
-using osu.Game.Skinning;
-using osuTK;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.StateChanges;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Replays;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.UI;
 
-namespace osu.Game.Rulesets.Osu.Objects.Drawables
+namespace osu.Game.Rulesets.Osu.Mods
 {
-    public partial class DrawableSlider : DrawableOsuHitObject
+    public class OsuModAutopilot : Mod, IUpdatableByPlayfield, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;
     {
-        public new Slider HitObject =&gt; (Slider)base.HitObject;
+        public override string Name =&gt; &quot;Autopilot&quot;;
+        public override string Acronym =&gt; &quot;AP&quot;;
+        public override IconUsage? Icon =&gt; OsuIcon.ModAutopilot;
+        public override ModType Type =&gt; ModType.Automation;
+        public override LocalisableString Description =&gt; @&quot;Automatic cursor movement - just follow the rhythm.&quot;;
 
-        public new OsuSliderJudgementResult Result =&gt; (OsuSliderJudgementResult)base.Result;
-
-        public DrawableSliderHead HeadCircle =&gt; headContainer.Child;
-        public DrawableSliderTail TailCircle =&gt; tailContainer.Child;
-
-        [Cached]
-        public DrawableSliderBall Ball { get; private set; }
-
-        public SkinnableDrawable Body { get; private set; }
-
-        private ShakeContainer shakeContainer;
-
-        protected override IEnumerable&lt;Drawable&gt; DimmablePieces =&gt; new Drawable[]
+        public override Type[] IncompatibleMods =&gt; new[]
         {
-            // HeadCircle should not be added to this list, as it handles dimming itself
-            TailCircle,
-            repeatContainer,
-            Body,
+            typeof(OsuModSpunOut),
+            typeof(ModRelax),
+            typeof(ModAutoplay),
+            typeof(OsuModMagnetised),
+            typeof(OsuModRepel),
+            typeof(ModTouchDevice)
         };
 
-        /// &lt;summary&gt;
-        /// A target container which can be used to add top level elements to the slider&#39;s display.
-        /// Intended to be used for proxy purposes only.
-        /// &lt;/summary&gt;
-        public Container OverlayElementContainer { get; private set; }
+        private OsuInputManager inputManager = null!;
 
-        public override bool DisplayResult =&gt; HitObject.ClassicSliderBehaviour;
+        private List&lt;OsuReplayFrame&gt; replayFrames = null!;
 
-        [CanBeNull]
-        public PlaySliderBody SliderBody =&gt; Body.Drawable as PlaySliderBody;
+        private int currentFrame = -1;
 
-        public IBindable&lt;int&gt; PathVersion =&gt; pathVersion;
-        private readonly Bindable&lt;int&gt; pathVersion = new Bindable&lt;int&gt;();
-
-        public readonly SliderInputManager SliderInputManager;
-
-        private Container&lt;DrawableSliderHead&gt; headContainer;
-        private Container&lt;DrawableSliderTail&gt; tailContainer;
-        private Container&lt;DrawableSliderTick&gt; tickContainer;
-        private Container&lt;DrawableSliderRepeat&gt; repeatContainer;
-        private PausableSkinnableSound slidingSample;
-
-        private readonly LayoutValue relativeAnchorPositionLayout;
-
-        public DrawableSlider()
-            : this(null)
+        public void Update(Playfield playfield)
         {
-        }
+            if (currentFrame == replayFrames.Count - 1) return;
 
-        public DrawableSlider([CanBeNull] Slider s = null)
-            : base(s)
-        {
-            SliderInputManager = new SliderInputManager(this);
+            double time = playfield.Clock.CurrentTime;
 
-            Ball = new DrawableSliderBall
+            // Very naive implementation of autopilot based on proximity to replay frames.
+            // Special case for the first frame is required to ensure the mouse is in a sane position until the actual time of the first frame is hit.
+            // TODO: this needs to be based on user interactions to better match stable (pausing until judgement is registered).
+            if (currentFrame &lt; 0 || Math.Abs(replayFrames[currentFrame + 1].Time - time) &lt;= Math.Abs(replayFrames[currentFrame].Time - time))
             {
-                BypassAutoSizeAxes = Axes.Both,
-                AlwaysPresent = true,
-                Alpha = 0
-            };
-            AddLayout(relativeAnchorPositionLayout = new LayoutValue(Invalidation.DrawSize | Invalidation.MiscGeometry));
-        }
-
-        [BackgroundDependencyLoader]
-        private void load()
-        {
-            tailContainer = new Container&lt;DrawableSliderTail&gt; { RelativeSizeAxes = Axes.Both };
-
-            AddRangeInternal(new Drawable[]
-            {
-                SliderInputManager,
-                shakeContainer = new ShakeContainer
-                {
-                    ShakeDuration = 30,
-                    RelativeSizeAxes = Axes.Both,
-                    Children = new[]
-                    {
-                        Body = new SkinnableDrawable(new OsuSkinComponentLookup(OsuSkinComponents.SliderBody), _ =&gt; new DefaultSliderBody(), confineMode: ConfineMode.NoScaling),
-                        // proxied here so that the tail is drawn under repeats/ticks - legacy skins rely on this
-                        tailContainer.CreateProxy(),
-                        tickContainer = new Container&lt;DrawableSliderTick&gt; { RelativeSizeAxes = Axes.Both },
-                        repeatContainer = new Container&lt;DrawableSliderRepeat&gt; { RelativeSizeAxes = Axes.Both },
-                        // actual tail container is placed here to ensure that tail hitobjects are processed after ticks/repeats.
-                        // this is required for the correct operation of Score V2.
-                        tailContainer,
-                    }
-                },
-                // slider head is not included in shake as it handles hit detection, and handles its own shaking.
-                headContainer = new Container&lt;DrawableSliderHead&gt; { RelativeSizeAxes = Axes.Both },
-                OverlayElementContainer = new Container { RelativeSizeAxes = Axes.Both, },
-                Ball,
-                slidingSample = new PausableSkinnableSound
-                {
-                    Looping = true,
-                    MinimumSampleVolume = MINIMUM_SAMPLE_VOLUME,
-                }
-            });
-
-            PositionBindable.BindValueChanged(_ =&gt; Position = HitObject.StackedPosition);
-            StackHeightBindable.BindValueChanged(_ =&gt; Position = HitObject.StackedPosition);
-            ScaleBindable.BindValueChanged(scale =&gt; Ball.Scale = new Vector2(scale.NewValue));
-
-            AccentColour.BindValueChanged(colour =&gt;
-            {
-                foreach (var drawableHitObject in NestedHitObjects)
-                    drawableHitObject.AccentColour.Value = colour.NewValue;
-            }, true);
-        }
-
-        protected override JudgementResult CreateResult(Judgement judgement) =&gt; new OsuSliderJudgementResult(HitObject, judgement);
-
-        protected override void OnApply()
-        {
-            base.OnApply();
-
-            // Ensure that the version will change after the upcoming BindTo().
-            pathVersion.Value = int.MaxValue;
-            PathVersion.BindTo(HitObject.Path.Version);
-        }
-
-        public override void Shake() =&gt; shakeContainer.Shake();
-
-        protected override void OnFree()
-        {
-            base.OnFree();
-
-            PathVersion.UnbindFrom(HitObject.Path.Version);
-
-            slidingSample?.ClearSamples();
-        }
-
-        protected override void LoadSamples()
-        {
-            // Note: base.LoadSamples() isn&#39;t called since the slider plays the tail&#39;s hitsounds for the time being.
-
-            Samples.Samples = HitObject.TailSamples.Cast&lt;ISampleInfo&gt;().ToArray();
-            slidingSample.Samples = HitObject.CreateSlidingSamples().Cast&lt;ISampleInfo&gt;().ToArray();
-        }
-
-        public override void StopAllSamples()
-        {
-            base.StopAllSamples();
-            slidingSample?.Stop();
-        }
-
-        protected override void AddNestedHitObject(DrawableHitObject hitObject)
-        {
-            base.AddNestedHitObject(hitObject);
-
-            switch (hitObject)
-            {
-                case DrawableSliderHead head:
-                    headContainer.Child = head;
-                    break;
-
-                case DrawableSliderTail tail:
-                    tailContainer.Child = tail;
-                    break;
-
-                case DrawableSliderTick tick:
-                    tickContainer.Add(tick);
-                    break;
-
-                case DrawableSliderRepeat repeat:
-                    repeatContainer.Add(repeat);
-                    break;
+                currentFrame++;
+                new MousePositionAbsoluteInput { Position = playfield.ToScreenSpace(replayFrames[currentFrame].Position) }.Apply(inputManager.CurrentState, inputManager);
             }
 
-            relativeAnchorPositionLayout.Invalidate();
+            // TODO: Implement the functionality to automatically spin spinners
         }
 
-        protected override void ClearNestedHitObjects()
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
         {
-            base.ClearNestedHitObjects();
+            // Grab the input manager to disable the user&#39;s cursor, and for future use
+            inputManager = ((DrawableOsuRuleset)drawableRuleset).KeyBindingInputManager;
+            inputManager.AllowUserCursorMovement = false;
 
-            headContainer.Clear(false);
-            tailContainer.Clear(false);
-            repeatContainer.Clear(false);
-            tickContainer.Clear(false);
-
-            OverlayElementContainer.Clear(false);
+            // Generate the replay frames the cursor should follow
+            replayFrames = new OsuAutoGenerator(drawableRuleset.Beatmap, drawableRuleset.Mods).Generate().Frames.Cast&lt;OsuReplayFrame&gt;().ToList();
         }
-
-        protected override DrawableHitObject CreateNestedHitObject(HitObject hitObject)
-        {
-            switch (hitObject)
-            {
-                case SliderTailCircle tail:
-                    return new DrawableSliderTail(tail);
-
-                case SliderHeadCircle head:
-                    return new DrawableSliderHead(head);
-
-                case SliderTick tick:
-                    return new DrawableSliderTick(tick);
-
-                case SliderRepeat repeat:
-                    return new DrawableSliderRepeat(repeat);
-            }
-
-            return base.CreateNestedHitObject(hitObject);
-        }
-
-        public readonly Bindable&lt;bool&gt; Tracking = new Bindable&lt;bool&gt;();
-
-        protected override void Update()
-        {
-            base.Update();
-
-            Tracking.Value = SliderInputManager.Tracking;
-
-            if (slidingSample != null)
-            {
-                if (Tracking.Value &amp;&amp; Time.Current &gt;= HitObject.StartTime)
-                {
-                    // keep the sliding sample playing at the current tracking position
-                    if (!slidingSample.RequestedPlaying)
-                        slidingSample.Play();
-                    slidingSample.Balance.Value = CalculateSamplePlaybackBalance(CalculateDrawableRelativePosition(Ball));
-                }
-                else if (slidingSample.IsPlaying || slidingSample.RequestedPlaying)
-                    slidingSample.Stop();
-            }
-        }
-
-        protected override void UpdateAfterChildren()
-        {
-            base.UpdateAfterChildren();
-
-            // During slider path editing, the PlaySliderBody is scheduled to refresh once on Update.
-            // It is crucial to perform the code below in UpdateAfterChildren. This ensures that the SliderBody has the opportunity
-            // to update its Size and PathOffset beforehand, ensuring correct placement.
-
-            double completionProgress = Math.Clamp((Time.Current - HitObject.StartTime) / HitObject.Duration, 0, 1);
-
-            Ball.UpdateProgress(completionProgress);
-            SliderBody?.UpdateProgress(HeadCircle.IsHit ? completionProgress : 0);
-
-            foreach (DrawableSliderRepeat repeat in repeatContainer)
-                repeat.UpdateSnakingPosition(HitObject.Path.PositionAt(SliderBody?.SnakedStart ?? 0), HitObject.Path.PositionAt(SliderBody?.SnakedEnd ?? 0));
-
-            Size = SliderBody?.Size ?? Vector2.Zero;
-            OriginPosition = SliderBody?.PathOffset ?? Vector2.Zero;
-
-            if (!relativeAnchorPositionLayout.IsValid)
-            {
-                Vector2 pos = Vector2.Divide(OriginPosition, DrawSize);
-                foreach (var obj in NestedHitObjects)
-                    obj.RelativeAnchorPosition = pos;
-                Ball.RelativeAnchorPosition = pos;
-
-                relativeAnchorPositionLayout.Validate();
-            }
-        }
-
-        public override void OnKilled()
-        {
-            base.OnKilled();
-            SliderBody?.RecyclePath();
-        }
-
-        protected override void CheckForResult(bool userTriggered, double timeOffset)
-        {
-            if (userTriggered || !TailCircle.Judged || Time.Current &lt; HitObject.EndTime)
-                return;
-
-            if (HitObject.ClassicSliderBehaviour)
-            {
-                // Classic behaviour means a slider is judged proportionally to the number of nested hitobjects hit. This is the classic osu!stable scoring.
-                ApplyResult(static (r, hitObject) =&gt;
-                {
-                    int totalTicks = hitObject.NestedHitObjects.Count;
-                    int hitTicks = hitObject.NestedHitObjects.Count(h =&gt; h.IsHit);
-
-                    if (hitTicks == totalTicks)
-                        r.Type = HitResult.Great;
-                    else if (hitTicks == 0)
-                        r.Type = HitResult.Miss;
-                    else
-                    {
-                        double hitFraction = (double)hitTicks / totalTicks;
-                        r.Type = hitFraction &gt;= 0.5 ? HitResult.Ok : HitResult.Meh;
-                    }
-                });
-            }
-            else
-            {
-                // If only the nested hitobjects are judged, then the slider&#39;s own judgement is ignored for scoring purposes.
-                // But the slider needs to still be judged with a reasonable hit/miss result for visual purposes (hit/miss transforms, etc).
-                ApplyResult(static (r, hitObject) =&gt;
-                {
-                    r.Type = hitObject.NestedHitObjects.Any(h =&gt; h.Result.IsHit) ? r.Judgement.MaxResult : r.Judgement.MinResult;
-                });
-            }
-        }
-
-        public override void PlaySamples()
-        {
-            // rather than doing it this way, we should probably attach the sample to the tail circle.
-            // this can only be done if we stop using LastTick.
-            if (!TailCircle.SamplePlaysOnlyOnHit || TailCircle.IsHit)
-                base.PlaySamples();
-        }
-
-        protected override void UpdateInitialTransforms()
-        {
-            base.UpdateInitialTransforms();
-
-            Body.FadeInFromZero(HitObject.TimeFadeIn);
-        }
-
-        protected override void UpdateStartTimeStateTransforms()
-        {
-            base.UpdateStartTimeStateTransforms();
-
-            Ball.FadeIn();
-            Ball.ScaleTo(HitObject.Scale);
-        }
-
-        protected override void UpdateHitStateTransforms(ArmedState state)
-        {
-            base.UpdateHitStateTransforms(state);
-
-            const float fade_out_time = 240;
-
-            switch (state)
-            {
-                case ArmedState.Hit:
-                    if (HeadCircle.IsHit &amp;&amp; SliderBody?.SnakingOut.Value == true)
-                        Body.FadeOut(40); // short fade to allow for any body colour to smoothly disappear.
-                    break;
-            }
-
-            this.FadeOut(fade_out_time).Expire();
-        }
-
-        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; SliderBody?.ReceivePositionalInputAt(screenSpacePos) ?? base.ReceivePositionalInputAt(screenSpacePos);
-
-        private partial class DefaultSliderBody : PlaySliderBody
-        {
-        }
-
-        #region FOR EDITOR USE ONLY, DO NOT USE FOR ANY OTHER PURPOSE
-
-        internal void SuppressHitAnimations()
-        {
-            UpdateState(ArmedState.Idle);
-            HeadCircle.SuppressHitAnimations();
-
-            foreach (var repeat in repeatContainer)
-                repeat.SuppressHitAnimations();
-
-            TailCircle.SuppressHitAnimations();
-
-            // This method is called every frame in editor contexts, thus the lack of need for transforms.
-
-            if (Time.Current &gt;= HitStateUpdateTime)
-            {
-                // Apply the slider&#39;s alpha to *only* the body.
-                // This allows start and – more importantly – end circles to fade slower than the overall slider.
-                if (Alpha &lt; 1)
-                    Body.Alpha = Alpha;
-                Alpha = 1;
-            }
-
-            LifetimeEnd = HitStateUpdateTime + 700;
-        }
-
-        internal void RestoreHitAnimations()
-        {
-            UpdateState(ArmedState.Hit);
-            HeadCircle.RestoreHitAnimations();
-
-            foreach (var repeat in repeatContainer)
-                repeat.RestoreHitAnimations();
-
-            TailCircle.RestoreHitAnimations();
-        }
-
-        #endregion
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[30,40,30,62,0],[32,55,32,92,0],[34,49,34,68,0],[35,49,35,68,0],[38,42,38,46,0],[38,47,38,59,0],[40,41,40,45,0],[40,46,40,58,0],[44,68,50,10,0],[56,52,56,56,0],[56,57,56,69,0],[58,47,58,79,0],[61,45,61,76,0],[63,46,63,57,0],[64,9,64,74,0],[77,15,77,25,0],[78,9,78,10,0],[79,9,79,10,0],[82,15,82,22,0],[83,9,83,10,0],[84,13,84,63,0],[86,13,91,15,0],[92,13,92,122,0],[93,9,93,10,0],[97,9,97,10,0],[98,13,98,96,0],[100,13,109,117,0],[109,117,109,140,0],[109,140,128,16,0],[130,13,130,52,0],[130,52,130,88,0],[130,88,130,90,0],[131,13,131,55,0],[131,55,131,91,0],[131,91,131,93,0],[132,13,132,53,0],[132,53,132,93,0],[132,93,132,95,0],[134,13,135,13,0],[135,13,135,14,0],[135,14,136,17,0],[136,17,136,24,0],[136,24,136,26,0],[136,26,136,47,0],[136,47,136,48,0],[136,48,136,50,0],[136,50,136,51,0],[136,51,136,67,0],[136,67,137,21,0],[137,21,137,76,0],[137,76,138,13,0],[138,13,138,14,0],[138,14,138,22,0],[139,9,139,10,0],[141,81,141,131,0],[144,9,144,10,0],[145,13,145,28,0],[148,13,148,46,0],[149,13,149,56,0],[150,9,150,10,0],[152,41,152,63,0],[155,9,155,10,0],[156,13,156,27,0],[158,13,158,60,0],[160,13,160,43,0],[161,9,161,10,0],[164,9,164,10,0],[167,13,167,83,0],[168,13,168,100,0],[169,9,169,10,0],[172,9,172,10,0],[173,13,173,35,0],[174,13,174,35,0],[175,9,175,10,0],[178,9,178,10,0],[179,13,179,48,0],[181,13,181,31,0],[184,21,184,48,0],[185,21,185,27,0],[188,21,188,48,0],[189,21,189,27,0],[192,21,192,45,0],[193,21,193,27,0],[196,21,196,49,0],[197,21,197,27,0],[200,13,200,55,0],[201,9,201,10,0],[204,9,204,10,0],[205,13,205,42,0],[207,13,207,40,0],[208,13,208,40,0],[209,13,209,42,0],[210,13,210,40,0],[212,13,212,50,0],[213,9,213,10,0],[216,9,216,10,0],[217,13,217,31,0],[220,21,220,57,0],[223,21,223,57,0],[226,21,226,57,0],[229,21,229,61,0],[232,13,232,58,0],[233,9,233,10,0],[235,9,235,72,0],[238,9,238,10,0],[239,13,239,27,0],[241,13,241,58,0],[243,13,243,39,0],[244,13,244,14,0],[245,17,245,75,0],[246,17,246,18,0],[248,21,248,57,0],[249,25,249,46,0],[250,21,250,123,0],[251,17,251,18,0],[252,22,252,84,0],[253,21,253,42,0],[254,13,254,14,0],[255,9,255,10,0],[258,9,258,10,0],[259,13,259,40,0],[265,13,265,117,0],[267,13,267,53,0],[268,13,268,83,0],[270,13,270,20,0],[270,22,270,49,0],[270,50,270,52,0],[270,53,270,68,0],[271,17,271,158,0],[273,13,273,53,0],[274,13,274,69,0],[276,13,276,55,0],[277,13,277,14,0],[278,17,278,72,0],[279,17,279,24,0],[279,26,279,33,0],[279,34,279,36,0],[279,37,279,53,0],[280,21,280,54,0],[281,17,281,51,0],[283,17,283,57,0],[284,13,284,14,0],[285,9,285,10,0],[288,9,288,10,0],[289,13,289,29,0],[290,13,290,39,0],[291,9,291,10,0],[294,9,294,10,0],[295,13,295,89,0],[296,17,296,24,0],[298,13,298,50,0],[299,13,299,14,0],[301,17,302,17,0],[302,17,302,18,0],[302,18,303,21,0],[303,21,303,71,0],[303,71,304,21,0],[304,21,304,74,0],[304,74,304,81,0],[304,81,304,83,0],[304,83,306,21,0],[306,21,306,48,0],[306,48,307,25,0],[307,25,307,50,0],[307,50,308,26,0],[308,26,308,44,0],[308,44,309,25,0],[309,25,309,49,0],[309,49,311,21,0],[311,21,311,22,0],[311,22,312,25,0],[312,25,312,76,0],[312,76,313,25,0],[313,25,313,84,0],[313,84,314,21,0],[314,21,314,22,0],[314,22,315,17,0],[315,17,315,18,0],[315,18,315,20,0],[316,13,316,14,0],[318,13,318,14,0],[321,17,322,17,0],[322,17,322,18,0],[322,18,323,21,0],[323,21,323,66,0],[323,66,323,80,0],[323,80,323,130,0],[323,130,324,17,0],[324,17,324,18,0],[324,18,324,20,0],[325,13,325,14,0],[326,9,326,10,0],[329,9,329,10,0],[332,13,332,70,0],[333,17,333,36,0],[334,9,334,10,0],[337,9,337,10,0],[338,13,338,44,0],[340,13,340,55,0],[341,9,341,10,0],[344,9,344,10,0],[345,13,345,51,0],[347,13,347,27,0],[348,13,348,43,0],[349,9,349,10,0],[352,9,352,10,0],[353,13,353,50,0],[357,13,357,27,0],[360,21,360,82,0],[361,25,361,42,0],[362,21,362,27,0],[365,13,365,50,0],[366,9,366,10,0],[368,82,368,183,0],[377,9,377,10,0],[378,13,378,42,0],[379,13,379,48,0],[381,13,381,20,0],[381,22,381,32,0],[381,33,381,35,0],[381,36,381,51,0],[382,17,382,48,0],[384,13,384,48,0],[388,13,388,52,0],[389,13,389,14,0],[392,17,392,31,0],[393,21,393,40,0],[394,17,394,27,0],[395,13,395,14,0],[397,13,397,52,0],[398,9,398,10,0],[401,9,401,10,0],[402,13,402,41,0],[403,13,403,47,0],[405,13,405,20,0],[405,22,405,32,0],[405,33,405,35,0],[405,36,405,51,0],[406,17,406,47,0],[408,13,408,47,0],[409,9,409,10,0]]);
+      highlightRanges([[21,40,21,51,0],[22,43,22,47,1],[23,44,23,64,0],[24,41,24,59,1],[25,58,25,112,0],[27,52,35,10,0],[37,9,37,54,1],[39,9,39,59,1],[41,9,41,39,1],[44,9,44,10,0],[45,13,45,56,0],[45,57,45,64,0],[47,13,47,55,0],[52,13,52,142,0],[53,13,53,14,0],[54,17,54,32,0],[55,17,55,171,0],[56,13,56,14,0],[59,9,59,10,0],[62,9,62,10,0],[64,13,64,89,0],[65,13,65,58,0],[68,13,68,146,0],[69,9,69,10,0]]);
     </script>
   </body>
 </html>

@@ -72,14 +72,17 @@ namespace osu.Game.Rulesets.Osu.Tests.Editor.Checks
         [Test]
         public void TestSliderLeavingScreenMidway_ReportsFirstOffscreenPoint()
         {
-            // starts at x 400, extends to x 700; the first sampled point beyond x 515 is at 5px steps => offset 120 (progress 0.4)
+            // path leaves the screen (max x 579 minus radius); sampling every 5px reports the first sampled point beyond it.
             var slider = Slider(0, 400, 200, 300);
+            int firstOffscreenOffset = 0;
+            while (400 + firstOffscreenOffset + slider.Radius <= 579)
+                firstOffscreenOffset += 5;
 
             var issues = check.Run(Context(new HitObject[] { slider })).ToList();
 
             Assert.That(issues, Has.Count.EqualTo(1));
             Assert.That(issues[0].Template, Is.TypeOf<CheckOffscreenObjects.IssueTemplateOffscreenSlider>());
-            Assert.That(issues[0].Time, Is.EqualTo(slider.StartTime + 0.4 * slider.SpanDuration).Within(1e-3));
+            Assert.That(issues[0].Time, Is.EqualTo(slider.StartTime + firstOffscreenOffset / slider.Distance * slider.SpanDuration).Within(1e-3));
         }
 
         [Test]
@@ -96,8 +99,9 @@ namespace osu.Game.Rulesets.Osu.Tests.Editor.Checks
         [Test]
         public void TestSliderOnlyEndOffscreen_ReportedAtEndByFallbackCheck()
         {
-            // length 101: sampling visits offsets 0..100 (all onscreen) and skips the final point which lies at x = 515.2 (> 515)
-            var slider = Slider(0, 414.2f, 200, 101);
+            // length 101: sampling visits offsets 0..100 (all onscreen) and skips the final point, which lies just beyond the right bound.
+            float limit = 579 - (float)Slider(0, 0, 0, 1).Radius;
+            var slider = Slider(0, limit - 100.5f, 200, 101);
 
             var issue = check.Run(Context(new HitObject[] { slider })).Single();
 

@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Judgements/OsuSpinnerJudgementResult.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Blueprints/Sliders/Components/PathControlPointVisualiser.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,52 +11,639 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using osu.Game.Rulesets.Judgements;
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using Humanizer;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
 using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Screens.Edit;
+using osuTK;
+using osuTK.Input;
 
-namespace osu.Game.Rulesets.Osu.Judgements
+namespace osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components
 {
-    public class OsuSpinnerJudgementResult : OsuJudgementResult
+    public partial class PathControlPointVisualiser&lt;T&gt; : CompositeDrawable, IKeyBindingHandler&lt;PlatformAction&gt;, IHasContextMenu
+        where T : OsuHitObject, IHasPath, IHasSliderVelocity
     {
-        /// &lt;summary&gt;
-        /// The &lt;see cref=&quot;Spinner&quot;/&gt;.
-        /// &lt;/summary&gt;
-        public Spinner Spinner =&gt; (Spinner)HitObject;
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true; // allow context menu to appear outside the playfield.
 
-        /// &lt;summary&gt;
-        /// The total amount that the spinner was rotated.
-        /// &lt;/summary&gt;
-        public float TotalRotation =&gt; History.TotalRotation;
+        internal readonly Container&lt;PathControlPointPiece&lt;T&gt;&gt; Pieces;
 
-        /// &lt;summary&gt;
-        /// Stores the spinning history of the spinner.&lt;br /&gt;
-        /// Instants of movement deltas may be added or removed from this in order to calculate the total rotation for the spinner.
-        /// &lt;/summary&gt;
-        public readonly SpinnerSpinHistory History = new SpinnerSpinHistory();
+        private readonly IBindableList&lt;PathControlPoint&gt; controlPoints = new BindableList&lt;PathControlPoint&gt;();
+        private readonly T hitObject;
+        private readonly bool allowSelection;
 
-        /// &lt;summary&gt;
-        /// Time instant at which the spin was started (the first user input which caused an increase in spin).
-        /// &lt;/summary&gt;
-        public double? TimeStarted;
+        private InputManager inputManager;
 
-        /// &lt;summary&gt;
-        /// Time instant at which the spinner has been completed (the user has executed all required spins).
-        /// Will be null if all required spins haven&#39;t been completed.
-        /// &lt;/summary&gt;
-        public double? TimeCompleted;
+        public Action&lt;List&lt;PathControlPoint&gt;&gt; RemoveControlPointsRequested;
+        public Action&lt;List&lt;PathControlPoint&gt;&gt; SplitControlPointsRequested;
 
-        public OsuSpinnerJudgementResult(HitObject hitObject, Judgement judgement)
-            : base(hitObject, judgement)
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        private OsuHitObjectComposer positionSnapProvider { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        private IDistanceSnapProvider distanceSnapProvider { get; set; }
+
+        private Bindable&lt;bool&gt; limitedDistanceSnap { get; set; } = null!;
+
+        public PathControlPointVisualiser(T hitObject, bool allowSelection)
         {
+            this.hitObject = hitObject;
+            this.allowSelection = allowSelection;
+
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChildren = new Drawable[]
+            {
+                new PathControlPointConnection&lt;T&gt;(hitObject),
+                Pieces = new Container&lt;PathControlPointPiece&lt;T&gt;&gt; { RelativeSizeAxes = Axes.Both }
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            limitedDistanceSnap = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            inputManager = GetContainingInputManager();
+
+            controlPoints.CollectionChanged += onControlPointsChanged;
+            controlPoints.BindTo(hitObject.Path.ControlPoints);
+        }
+
+        // Generally all the control points are within the visible area all the time.
+        public override bool UpdateSubTreeMasking() =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Handles correction of invalid path types.
+        /// &lt;/summary&gt;
+        public void EnsureValidPathTypes()
+        {
+            List&lt;PathControlPoint&gt; pointsInCurrentSegment = new List&lt;PathControlPoint&gt;();
+
+            foreach (var controlPoint in controlPoints)
+            {
+                if (controlPoint.Type != null)
+                {
+                    pointsInCurrentSegment.Add(controlPoint);
+                    ensureValidPathType(pointsInCurrentSegment);
+                    pointsInCurrentSegment.Clear();
+                }
+
+                pointsInCurrentSegment.Add(controlPoint);
+            }
+
+            ensureValidPathType(pointsInCurrentSegment);
+        }
+
+        private void ensureValidPathType(IReadOnlyList&lt;PathControlPoint&gt; segment)
+        {
+            if (segment.Count == 0)
+                return;
+
+            PathControlPoint first = segment[0];
+
+            if (first.Type != PathType.PERFECT_CURVE)
+                return;
+
+            if (segment.Count &gt; 3)
+                first.Type = PathType.BEZIER;
+
+            if (segment.Count != 3)
+                return;
+
+            ReadOnlySpan&lt;Vector2&gt; points = segment.Select(p =&gt; p.Position).ToArray();
+            RectangleF boundingBox = PathApproximator.CircularArcBoundingBox(points);
+            if (boundingBox.Width &gt;= 640 || boundingBox.Height &gt;= 480)
+                first.Type = PathType.BEZIER;
+        }
+
+        /// &lt;summary&gt;
+        /// Selects the &lt;see cref=&quot;PathControlPointPiece{T}&quot;/&gt; corresponding to the given &lt;paramref name=&quot;pathControlPoint&quot;/&gt;,
+        /// and deselects all other &lt;see cref=&quot;PathControlPointPiece{T}&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        public void SetSelectionTo(PathControlPoint pathControlPoint)
+        {
+            foreach (var p in Pieces)
+                p.IsSelected.Value = p.ControlPoint == pathControlPoint;
+        }
+
+        /// &lt;summary&gt;
+        /// Delete all visually selected &lt;see cref=&quot;PathControlPoint&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether any change actually took place.&lt;/returns&gt;
+        public bool DeleteSelected()
+        {
+            List&lt;PathControlPoint&gt; toRemove = Pieces.Where(p =&gt; p.IsSelected.Value).Select(p =&gt; p.ControlPoint).ToList();
+
+            if (!Delete(toRemove))
+                return false;
+
+            // Since pieces are re-used, they will not point to the deleted control points while remaining selected
+            foreach (var piece in Pieces)
+                piece.IsSelected.Value = false;
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Delete the specified &lt;see cref=&quot;PathControlPoint&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether any change actually took place.&lt;/returns&gt;
+        public bool Delete(List&lt;PathControlPoint&gt; toRemove)
+        {
+            // Ensure that there are any points to be deleted
+            if (toRemove.Count == 0)
+                return false;
+
+            changeHandler?.BeginChange();
+            RemoveControlPointsRequested?.Invoke(toRemove);
+            changeHandler?.EndChange();
+            return true;
+        }
+
+        private bool splitSelected()
+        {
+            List&lt;PathControlPoint&gt; controlPointsToSplitAt = Pieces.Where(p =&gt; p.IsSelected.Value &amp;&amp; isSplittable(p)).Select(p =&gt; p.ControlPoint).ToList();
+
+            // Ensure that there are any points to be split
+            if (controlPointsToSplitAt.Count == 0)
+                return false;
+
+            changeHandler?.BeginChange();
+            SplitControlPointsRequested?.Invoke(controlPointsToSplitAt);
+            changeHandler?.EndChange();
+
+            // Since pieces are re-used, they will not point to the deleted control points while remaining selected
+            foreach (var piece in Pieces)
+                piece.IsSelected.Value = false;
+
+            return true;
+        }
+
+        private bool isSplittable(PathControlPointPiece&lt;T&gt; p) =&gt;
+            // A hit object can only be split on control points which connect two different path segments.
+            p.ControlPoint.Type.HasValue &amp;&amp; p.ControlPoint != controlPoints.FirstOrDefault() &amp;&amp; p.ControlPoint != controlPoints.LastOrDefault();
+
+        private void onControlPointsChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                    Debug.Assert(e.NewItems != null);
+
+                    for (int i = 0; i &lt; e.NewItems.Count; i++)
+                    {
+                        var point = (PathControlPoint)e.NewItems[i];
+
+                        Pieces.Add(new PathControlPointPiece&lt;T&gt;(hitObject, point).With(d =&gt;
+                        {
+                            if (allowSelection)
+                                d.RequestSelection = selectionRequested;
+
+                            d.ControlPoint.Changed += controlPointChanged;
+                            d.DragStarted = DragStarted;
+                            d.DragInProgress = DragInProgress;
+                            d.DragEnded = DragEnded;
+                        }));
+                    }
+
+                    break;
+
+                case NotifyCollectionChangedAction.Remove:
+                    Debug.Assert(e.OldItems != null);
+
+                    foreach (var point in e.OldItems.Cast&lt;PathControlPoint&gt;())
+                    {
+                        point.Changed -= controlPointChanged;
+
+                        foreach (var piece in Pieces.Where(p =&gt; p.ControlPoint == point).ToArray())
+                            piece.RemoveAndDisposeImmediately();
+                    }
+
+                    break;
+            }
+        }
+
+        private void controlPointChanged() =&gt; updateCurveMenuItems();
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            if (Pieces.Any(piece =&gt; piece.IsHovered))
+                return false;
+
+            foreach (var piece in Pieces)
+            {
+                piece.IsSelected.Value = false;
+            }
+
+            return false;
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;PlatformAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case PlatformAction.Delete:
+                    return DeleteSelected();
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;PlatformAction&gt; e)
+        {
+        }
+
+        // ReSharper disable once StaticMemberInGenericType
+        private static readonly PathType?[] path_types =
+        [
+            PathType.LINEAR,
+            PathType.BEZIER,
+            PathType.PERFECT_CURVE,
+            PathType.BSpline(4),
+            null,
+        ];
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Key)
+            {
+                case Key.Tab:
+                {
+                    var selectedPieces = Pieces.Where(p =&gt; p.IsSelected.Value).ToArray();
+                    if (selectedPieces.Length != 1)
+                        return false;
+
+                    PathControlPointPiece&lt;T&gt; selectedPiece = selectedPieces.Single();
+                    PathControlPoint selectedPoint = selectedPiece.ControlPoint;
+
+                    PathType?[] validTypes = path_types;
+
+                    if (selectedPoint == controlPoints[0])
+                        validTypes = validTypes.Where(t =&gt; t != null).ToArray();
+
+                    int currentTypeIndex = Array.IndexOf(validTypes, selectedPoint.Type);
+
+                    if (currentTypeIndex &lt; 0 &amp;&amp; e.ShiftPressed)
+                        currentTypeIndex = 0;
+
+                    changeHandler?.BeginChange();
+
+                    do
+                    {
+                        currentTypeIndex = (validTypes.Length + currentTypeIndex + (e.ShiftPressed ? -1 : 1)) % validTypes.Length;
+
+                        updatePathTypeOfSelectedPieces(validTypes[currentTypeIndex]);
+                    } while (selectedPoint.Type != validTypes[currentTypeIndex]);
+
+                    changeHandler?.EndChange();
+
+                    return true;
+                }
+
+                case Key.Number1:
+                case Key.Number2:
+                case Key.Number3:
+                case Key.Number4:
+                case Key.Number5:
+                {
+                    if (!e.AltPressed)
+                        return false;
+
+                    // If no pieces are selected, we can&#39;t change the path type.
+                    if (Pieces.All(p =&gt; !p.IsSelected.Value))
+                        return false;
+
+                    PathType? type = path_types[e.Key - Key.Number1];
+
+                    // The first control point can never be inherit type
+                    if (Pieces[0].IsSelected.Value &amp;&amp; type == null)
+                        return false;
+
+                    updatePathTypeOfSelectedPieces(type);
+                    return true;
+                }
+
+                default:
+                    return false;
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            foreach (var p in Pieces)
+                p.ControlPoint.Changed -= controlPointChanged;
+
+            if (draggedControlPointIndex &gt;= 0)
+                DragEnded();
+        }
+
+        private void selectionRequested(PathControlPointPiece&lt;T&gt; piece, MouseButtonEvent e)
+        {
+            if (e.Button == MouseButton.Left &amp;&amp; inputManager.CurrentState.Keyboard.ControlPressed)
+                piece.IsSelected.Toggle();
+            else
+                SetSelectionTo(piece.ControlPoint);
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to set all selected control point pieces to the given path type.
+        /// If that fails, try to change the path such that it instead succeeds
+        /// in a UX-friendly way.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;type&quot;&gt;The path type we want to assign to the given control point piece.&lt;/param&gt;
+        private void updatePathTypeOfSelectedPieces(PathType? type)
+        {
+            changeHandler?.BeginChange();
+
+            double originalDistance = hitObject.Path.Distance;
+
+            foreach (var p in Pieces.Where(p =&gt; p.IsSelected.Value))
+            {
+                List&lt;PathControlPoint&gt; pointsInSegment = hitObject.Path.PointsInSegment(p.ControlPoint);
+                int indexInSegment = pointsInSegment.IndexOf(p.ControlPoint);
+
+                if (type?.Type == SplineType.PerfectCurve)
+                {
+                    // Can&#39;t always create a circular arc out of 4 or more points,
+                    // so we split the segment into one 3-point circular arc segment
+                    // and one segment of the previous type.
+                    int thirdPointIndex = indexInSegment + 2;
+
+                    if (pointsInSegment.Count &gt; thirdPointIndex + 1)
+                        pointsInSegment[thirdPointIndex].Type = pointsInSegment[0].Type;
+                }
+
+                hitObject.Path.ExpectedDistance.Value = null;
+                p.ControlPoint.Type = type;
+            }
+
+            EnsureValidPathTypes();
+
+            if (hitObject.Path.Distance &lt; originalDistance)
+                hitObject.SnapTo(distanceSnapProvider);
+            else
+                hitObject.Path.ExpectedDistance.Value = originalDistance;
+
+            changeHandler?.EndChange();
+        }
+
+        [Resolved(CanBeNull = true)]
+        private IEditorChangeHandler changeHandler { get; set; }
+
+        #region Drag handling
+
+        private Vector2[] dragStartPositions;
+        private PathType?[] dragPathTypes;
+        private int draggedControlPointIndex = -1;
+        private HashSet&lt;PathControlPoint&gt; selectedControlPoints;
+
+        private List&lt;MenuItem&gt; curveTypeItems;
+
+        public void DragStarted(PathControlPoint controlPoint)
+        {
+            dragStartPositions = hitObject.Path.ControlPoints.Select(point =&gt; point.Position).ToArray();
+            dragPathTypes = hitObject.Path.ControlPoints.Select(point =&gt; point.Type).ToArray();
+            draggedControlPointIndex = hitObject.Path.ControlPoints.IndexOf(controlPoint);
+            selectedControlPoints = new HashSet&lt;PathControlPoint&gt;(Pieces.Where(piece =&gt; piece.IsSelected.Value).Select(piece =&gt; piece.ControlPoint));
+
+            Debug.Assert(draggedControlPointIndex &gt;= 0);
+
+            changeHandler?.BeginChange();
+        }
+
+        public void DragInProgress(DragEvent e)
+        {
+            Vector2[] oldControlPoints = hitObject.Path.ControlPoints.Select(cp =&gt; cp.Position).ToArray();
+            Vector2 oldPosition = hitObject.Position;
+            double oldStartTime = hitObject.StartTime;
+
+            if (selectedControlPoints.Contains(hitObject.Path.ControlPoints[0]))
+            {
+                // Special handling for selections containing head control point - the position of the hit object changes which means the snapped position and time have to be taken into account
+                Vector2 newHeadPosition = Parent!.ToScreenSpace(e.MousePosition + (dragStartPositions[0] - dragStartPositions[draggedControlPointIndex]));
+
+                var result = positionSnapProvider?.TrySnapToNearbyObjects(newHeadPosition, oldStartTime);
+                result ??= positionSnapProvider?.TrySnapToDistanceGrid(newHeadPosition, limitedDistanceSnap.Value ? oldStartTime : null);
+                if (positionSnapProvider?.TrySnapToPositionGrid(result?.ScreenSpacePosition ?? newHeadPosition, result?.Time ?? oldStartTime) is SnapResult gridSnapResult)
+                    result = gridSnapResult;
+                result ??= new SnapResult(newHeadPosition, oldStartTime);
+
+                Vector2 movementDelta = Parent!.ToLocalSpace(result.ScreenSpacePosition) - hitObject.Position;
+
+                hitObject.Position += movementDelta;
+                hitObject.StartTime = result.Time ?? hitObject.StartTime;
+
+                for (int i = 1; i &lt; hitObject.Path.ControlPoints.Count; i++)
+                {
+                    PathControlPoint controlPoint = hitObject.Path.ControlPoints[i];
+                    // Since control points are relative to the position of the hit object, all points that are _not_ selected
+                    // need to be offset _back_ by the delta corresponding to the movement of the head point.
+                    // All other selected control points (if any) will move together with the head point
+                    // (and so they will not move at all, relative to each other).
+                    if (!selectedControlPoints.Contains(controlPoint))
+                        controlPoint.Position -= movementDelta;
+                }
+            }
+            else
+            {
+                Vector2 newControlPointPosition = Parent!.ToScreenSpace(e.MousePosition);
+
+                // Snapping inherited B-spline control points to nearby objects would be unintuitive, because snapping them does not equate to snapping the interpolated slider path.
+                bool shouldSnapToNearbyObjects = dragPathTypes[draggedControlPointIndex] is not null ||
+                                                 dragPathTypes[..draggedControlPointIndex].LastOrDefault(t =&gt; t is not null)?.Type != SplineType.BSpline;
+
+                SnapResult result = null;
+                if (shouldSnapToNearbyObjects)
+                    result = positionSnapProvider?.TrySnapToNearbyObjects(newControlPointPosition, oldStartTime);
+                if (positionSnapProvider?.TrySnapToPositionGrid(result?.ScreenSpacePosition ?? newControlPointPosition, result?.Time ?? oldStartTime) is SnapResult gridSnapResult)
+                    result = gridSnapResult;
+                result ??= new SnapResult(newControlPointPosition, oldStartTime);
+
+                Vector2 movementDelta = Parent!.ToLocalSpace(result.ScreenSpacePosition) - dragStartPositions[draggedControlPointIndex] - hitObject.Position;
+
+                for (int i = 0; i &lt; controlPoints.Count; ++i)
+                {
+                    PathControlPoint controlPoint = controlPoints[i];
+                    if (selectedControlPoints.Contains(controlPoint))
+                        controlPoint.Position = dragStartPositions[i] + movementDelta;
+                }
+            }
+
+            // Snap the path to the current beat divisor before checking length validity.
+            hitObject.SnapTo(distanceSnapProvider);
+
+            if (!hitObject.Path.HasValidLengthForPlacement)
+            {
+                for (int i = 0; i &lt; hitObject.Path.ControlPoints.Count; i++)
+                    hitObject.Path.ControlPoints[i].Position = oldControlPoints[i];
+
+                hitObject.Position = oldPosition;
+                hitObject.StartTime = oldStartTime;
+                // Snap the path length again to undo the invalid length.
+                hitObject.SnapTo(distanceSnapProvider);
+                return;
+            }
+
+            // Maintain the path types in case they got defaulted to bezier at some point during the drag.
+            for (int i = 0; i &lt; hitObject.Path.ControlPoints.Count; i++)
+                hitObject.Path.ControlPoints[i].Type = dragPathTypes[i];
+
+            EnsureValidPathTypes();
+        }
+
+        public void DragEnded()
+        {
+            changeHandler?.EndChange();
+            draggedControlPointIndex = -1;
+        }
+
+        #endregion
+
+        public MenuItem[] ContextMenuItems
+        {
+            get
+            {
+                if (!Pieces.Any(p =&gt; p.IsHovered))
+                    return null;
+
+                var selectedPieces = Pieces.Where(p =&gt; p.IsSelected.Value).ToList();
+                int count = selectedPieces.Count;
+
+                if (count == 0)
+                    return null;
+
+                var splittablePieces = selectedPieces.Where(isSplittable).ToList();
+                int splittableCount = splittablePieces.Count;
+
+                curveTypeItems = new List&lt;MenuItem&gt;();
+
+                for (int i = 0; i &lt; path_types.Length; ++i)
+                {
+                    PathType? type = path_types[i];
+
+                    // special inherit case
+                    if (type == null)
+                    {
+                        if (selectedPieces.Contains(Pieces[0]))
+                            continue;
+
+                        curveTypeItems.Add(new OsuMenuItemSpacer());
+                    }
+
+                    curveTypeItems.Add(createMenuItemForPathType(type, InputKey.Number1 + i));
+                }
+
+                if (selectedPieces.Any(piece =&gt; piece.ControlPoint.Type?.Type == SplineType.Catmull))
+                {
+                    curveTypeItems.Add(new OsuMenuItemSpacer());
+                    curveTypeItems.Add(createMenuItemForPathType(PathType.CATMULL));
+                }
+
+                var menuItems = new List&lt;MenuItem&gt;
+                {
+                    new OsuMenuItem(&quot;Curve type&quot;)
+                    {
+                        Items = curveTypeItems
+                    }
+                };
+
+                if (splittableCount &gt; 0)
+                {
+                    menuItems.Add(new OsuMenuItem($&quot;Split {&quot;control point&quot;.ToQuantity(splittableCount, splittableCount &gt; 1 ? ShowQuantityAs.Numeric : ShowQuantityAs.None)}&quot;,
+                        MenuItemType.Destructive,
+                        () =&gt; splitSelected()));
+                }
+
+                menuItems.Add(
+                    new OsuMenuItem($&quot;Delete {&quot;control point&quot;.ToQuantity(count, count &gt; 1 ? ShowQuantityAs.Numeric : ShowQuantityAs.None)}&quot;,
+                        MenuItemType.Destructive,
+                        () =&gt; DeleteSelected())
+                );
+
+                updateCurveMenuItems();
+
+                return menuItems.ToArray();
+
+                CurveTypeMenuItem createMenuItemForPathType(PathType? type, InputKey? key = null)
+                {
+                    Hotkey hotkey = default;
+
+                    if (key != null)
+                        hotkey = new Hotkey(new KeyCombination(InputKey.Alt, key.Value));
+
+                    return new CurveTypeMenuItem(type, _ =&gt; updatePathTypeOfSelectedPieces(type)) { Hotkey = hotkey };
+                }
+            }
+        }
+
+        private void updateCurveMenuItems()
+        {
+            if (curveTypeItems == null)
+                return;
+
+            foreach (var item in curveTypeItems.OfType&lt;CurveTypeMenuItem&gt;())
+            {
+                int totalCount = Pieces.Count(p =&gt; p.IsSelected.Value);
+                int countOfState = Pieces.Where(p =&gt; p.IsSelected.Value).Count(p =&gt; p.ControlPoint.Type == item.PathType);
+
+                if (countOfState == totalCount)
+                    item.State.Value = TernaryState.True;
+                else if (countOfState &gt; 0)
+                    item.State.Value = TernaryState.Indeterminate;
+                else
+                    item.State.Value = TernaryState.False;
+            }
+        }
+
+        private class CurveTypeMenuItem : TernaryStateRadioMenuItem
+        {
+            public readonly PathType? PathType;
+
+            public CurveTypeMenuItem(PathType? pathType, Action&lt;TernaryState&gt; action)
+                : base(pathType?.Description ?? &quot;Inherit&quot;, MenuItemType.Standard, action)
+            {
+                PathType = pathType;
+            }
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[16,35,16,53,0],[21,39,21,60,0],[27,9,27,79,0],[41,15,41,41,0],[42,9,42,10,0],[43,9,43,10,0]]);
+      highlightRanges([[39,82,39,86,0],[43,9,43,111,0],[54,61,54,65,0],[54,66,54,70,0],[57,62,57,66,0],[57,67,57,71,0],[59,54,59,58,0],[59,59,59,63,0],[59,68,59,73,0],[61,9,61,76,0],[62,9,62,10,0],[63,13,63,40,0],[64,13,64,50,0],[66,13,66,42,0],[68,13,72,15,0],[73,9,73,10,0],[77,9,77,10,0],[78,13,78,98,0],[79,9,79,10,0],[82,9,82,10,0],[83,13,83,33,0],[85,13,85,56,0],[87,13,87,71,0],[88,13,88,64,0],[89,9,89,10,0],[92,56,92,60,0],[98,9,98,10,0],[99,13,99,90,0],[101,13,101,20,0],[101,22,101,38,0],[101,39,101,41,0],[101,42,101,55,0],[102,13,102,14,0],[103,17,103,47,0],[104,17,104,18,0],[105,21,105,62,0],[106,21,106,65,0],[107,21,107,52,0],[108,17,108,18,0],[110,17,110,58,0],[111,13,111,14,0],[113,13,113,57,0],[114,9,114,10,0],[117,9,117,10,0],[118,13,118,36,0],[119,17,119,24,0],[121,13,121,49,0],[123,13,123,54,0],[124,17,124,24,0],[126,13,126,35,0],[127,17,127,46,0],[129,13,129,36,0],[130,17,130,24,0],[132,13,132,64,0],[132,64,132,74,0],[132,74,132,86,0],[133,13,133,86,0],[134,13,134,71,0],[135,17,135,46,0],[136,9,136,10,0],[143,9,143,10,0],[144,13,144,20,0],[144,22,144,27,0],[144,28,144,30,0],[144,31,144,37,0],[145,17,145,73,0],[146,9,146,10,0],[153,9,153,10,0],[154,13,154,65,0],[154,65,154,83,0],[154,83,154,97,0],[154,97,154,111,0],[154,111,154,122,0],[156,13,156,35,0],[157,17,157,30,0],[160,13,160,20,0],[160,22,160,31,0],[160,32,160,34,0],[160,35,160,41,0],[161,17,161,48,0],[163,13,163,25,0],[164,9,164,10,0],[171,9,171,10,0],[173,13,173,37,0],[174,17,174,30,0],[176,13,176,42,0],[177,13,177,60,0],[178,13,178,40,0],[179,13,179,25,0],[180,9,180,10,0],[183,9,183,10,0],[184,13,184,79,0],[184,79,184,116,0],[184,116,184,130,0],[184,130,184,144,0],[184,144,184,155,0],[187,13,187,51,0],[188,17,188,30,0],[190,13,190,42,0],[191,13,191,73,0],[192,13,192,40,0],[195,13,195,20,0],[195,22,195,31,0],[195,32,195,34,0],[195,35,195,41,0],[196,17,196,48,0],[198,13,198,25,0],[199,9,199,10,0],[203,13,203,144,0],[206,9,206,10,0],[207,13,207,30,0],[210,21,210,54,0],[212,26,212,35,0],[212,37,212,57,0],[212,59,212,62,0],[213,21,213,22,0],[214,25,214,69,0],[216,25,217,25,0],[217,25,217,26,0],[217,26,218,29,0],[218,29,218,48,0],[218,48,219,33,0],[219,33,219,73,0],[219,73,221,29,0],[221,29,221,75,0],[221,75,222,29,0],[222,29,222,57,0],[222,57,223,29,0],[223,29,223,63,0],[223,63,224,29,0],[224,29,224,53,0],[224,53,225,25,0],[225,25,225,26,0],[225,26,225,29,0],[226,21,226,22,0],[228,21,228,27,0],[231,21,231,54,0],[233,21,233,28,0],[233,30,233,39,0],[233,40,233,42,0],[233,43,233,78,0],[234,21,234,22,0],[235,25,235,62,0],[237,25,237,32,0],[237,34,237,43,0],[237,44,237,46,0],[237,47,237,65,0],[237,65,237,88,0],[237,88,237,99,0],[238,29,238,65,0],[239,21,239,22,0],[241,21,241,27,0],[243,9,243,10,0],[245,47,245,69,0],[248,9,248,10,0],[249,13,249,37,0],[249,37,249,52,0],[249,52,249,54,0],[250,17,250,30,0],[252,13,252,20,0],[252,22,252,31,0],[252,32,252,34,0],[252,35,252,41,0],[253,13,253,14,0],[254,17,254,48,0],[255,13,255,14,0],[257,13,257,26,0],[258,9,258,10,0],[261,9,261,10,0],[262,13,262,30,0],[265,21,265,45,0],[268,13,268,26,0],[269,9,269,10,0],[272,9,272,10,0],[273,9,273,10,0],[276,9,283,11,0],[286,9,286,10,0],[287,13,287,26,0],[288,17,288,30,0],[290,13,290,27,0],[293,17,293,18,0],[294,21,294,60,0],[294,60,294,78,0],[294,78,294,90,0],[295,21,295,52,0],[296,25,296,38,0],[298,21,298,86,0],[299,21,299,81,0],[301,21,301,57,0],[303,21,303,59,0],[304,25,304,60,0],[304,60,304,69,0],[304,69,304,81,0],[306,21,306,90,0],[308,21,308,64,0],[309,25,309,46,0],[311,21,311,50,0],[314,21,314,22,0],[315,25,315,131,0],[317,25,317,86,0],[318,21,318,22,0],[318,23,318,82,0],[320,21,320,48,0],[322,21,322,33,0],[330,17,330,18,0],[331,21,331,39,0],[332,25,332,38,0],[335,21,335,41,0],[335,41,335,60,0],[335,60,335,62,0],[336,25,336,38,0],[338,21,338,70,0],[341,21,341,68,0],[342,25,342,38,0],[344,21,344,58,0],[345,21,345,33,0],[349,21,349,34,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,39,0],[356,13,356,20,0],[356,22,356,27,0],[356,28,356,30,0],[356,31,356,37,0],[357,17,357,63,0],[359,13,359,47,0],[360,17,360,29,0],[361,9,361,10,0],[364,9,364,10,0],[365,13,365,99,0],[366,17,366,43,0],[368,17,368,52,0],[369,9,369,10,0],[378,9,378,10,0],[379,13,379,42,0],[381,13,381,63,0],[383,13,383,20,0],[383,22,383,27,0],[383,28,383,30,0],[383,31,383,49,0],[383,49,383,67,0],[383,67,383,68,0],[384,13,384,14,0],[385,17,385,105,0],[386,17,386,78,0],[388,17,388,59,0],[389,17,389,18,0],[393,21,393,62,0],[395,21,395,69,0],[396,25,396,89,0],[397,17,397,18,0],[399,17,399,62,0],[400,17,400,44,0],[401,13,401,14,0],[403,13,403,36,0],[405,13,405,60,0],[406,17,406,56,0],[408,17,408,74,0],[410,13,410,40,0],[411,9,411,10,0],[414,54,414,58,0],[414,59,414,63,0],[420,9,420,51,0],[426,9,426,10,0],[427,13,427,79,0],[427,79,427,93,0],[427,93,427,105,0],[428,13,428,74,0],[428,74,428,84,0],[428,84,428,96,0],[429,13,429,91,0],[430,13,430,89,0],[430,89,430,111,0],[430,111,430,129,0],[430,129,430,147,0],[430,147,430,150,0],[432,13,432,57,0],[434,13,434,42,0],[435,9,435,10,0],[438,9,438,10,0],[439,13,439,84,0],[439,84,439,95,0],[439,95,439,107,0],[440,13,440,54,0],[441,13,441,55,0],[443,13,443,81,0],[444,13,444,14,0],[446,17,446,155,0],[448,17,448,106,0],[449,17,449,138,0],[450,17,450,172,0],[451,21,451,45,0],[452,17,452,74,0],[454,17,454,111,0],[456,17,456,53,0],[457,17,457,74,0],[459,22,459,31,0],[459,33,459,71,0],[459,73,459,76,0],[460,17,460,18,0],[461,21,461,85,0],[466,21,466,71,0],[467,25,467,64,0],[468,17,468,18,0],[469,13,469,14,0],[471,13,471,14,0],[472,17,472,90,0],[475,17,476,111,0],[476,111,476,124,0],[476,124,476,154,0],[478,17,478,42,0],[479,17,479,47,0],[480,21,480,114,0],[481,17,481,180,0],[482,21,482,45,0],[483,17,483,82,0],[485,17,485,158,0],[487,22,487,31,0],[487,33,487,56,0],[487,58,487,61,0],[488,17,488,18,0],[489,21,489,70,0],[490,21,490,70,0],[491,25,491,87,0],[492,17,492,18,0],[493,13,493,14,0],[496,13,496,52,0],[498,13,498,60,0],[499,13,499,14,0],[500,22,500,31,0],[500,33,500,71,0],[500,73,500,76,0],[501,21,501,84,0],[503,17,503,50,0],[504,17,504,52,0],[506,17,506,56,0],[507,17,507,24,0],[511,18,511,27,0],[511,29,511,67,0],[511,69,511,72,0],[512,17,512,73,0],[514,13,514,36,0],[515,9,515,10,0],[518,9,518,10,0],[519,13,519,40,0],[520,13,520,43,0],[521,9,521,10,0],[528,13,528,14,0],[529,17,529,38,0],[529,38,529,49,0],[529,49,529,51,0],[530,21,530,33,0],[532,17,532,56,0],[532,56,532,74,0],[532,74,532,85,0],[533,17,533,50,0],[535,17,535,32,0],[536,21,536,33,0],[538,17,538,84,0],[539,17,539,62,0],[541,17,541,55,0],[543,22,543,31,0],[543,33,543,54,0],[543,56,543,59,0],[544,17,544,18,0],[545,21,545,52,0],[548,21,548,38,0],[549,21,549,22,0],[550,25,550,64,0],[551,29,551,38,0],[553,25,553,69,0],[554,21,554,22,0],[556,21,556,95,0],[557,17,557,18,0],[559,17,559,49,0],[559,49,559,100,0],[559,100,559,102,0],[560,17,560,18,0],[561,21,561,65,0],[562,21,562,85,0],[563,17,563,18,0],[565,17,571,19,0],[573,17,573,41,0],[574,17,574,18,0],[575,21,577,31,0],[577,31,577,46,0],[577,46,577,49,0],[578,17,578,18,0],[580,17,583,31,0],[583,31,583,47,0],[583,47,584,19,0],[586,17,586,40,0],[588,17,588,44,0],[591,17,591,18,0],[592,21,592,45,0],[594,21,594,37,0],[595,25,595,90,0],[597,21,597,61,0],[597,61,597,97,0],[597,97,597,119,0],[598,17,598,18,0],[599,13,599,14,0],[603,9,603,10,0],[604,13,604,40,0],[605,17,605,24,0],[607,13,607,20,0],[607,22,607,30,0],[607,31,607,33,0],[607,34,607,76,0],[608,13,608,14,0],[609,17,609,52,0],[609,52,609,70,0],[609,70,609,72,0],[610,17,610,54,0],[610,54,610,72,0],[610,72,610,85,0],[610,85,610,121,0],[610,121,610,123,0],[612,17,612,48,0],[613,21,613,58,0],[614,22,614,43,0],[615,21,615,67,0],[617,21,617,59,0],[618,13,618,14,0],[619,9,619,10,0],[626,19,626,90,0],[627,13,627,14,0],[628,17,628,37,0],[629,13,629,14,0]]);
     </script>
   </body>
 </html>

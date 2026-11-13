@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Default/DefaultJudgementPieceSliderTickMiss.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/SliderInputManager.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,59 +11,314 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using osu.Framework.Allocation;
 using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Shapes;
-using osu.Game.Graphics;
-using osu.Game.Rulesets.Judgements;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
-using osu.Game.Rulesets.Scoring;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Screens.Play;
 using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Default
+namespace osu.Game.Rulesets.Osu.Objects.Drawables
 {
-    public partial class DefaultJudgementPieceSliderTickMiss : CompositeDrawable, IAnimatableJudgement
+    public partial class SliderInputManager : Component, IRequireHighFrequencyMousePosition
     {
-        private readonly HitResult result;
-        private Circle piece = null!;
+        /// &lt;summary&gt;
+        /// Whether the slider is currently being tracked.
+        /// &lt;/summary&gt;
+        public bool Tracking { get; private set; }
 
         [Resolved]
-        private OsuColour colours { get; set; } = null!;
+        private IGameplayClock? gameplayClock { get; set; }
 
-        public DefaultJudgementPieceSliderTickMiss(HitResult result)
+        /// &lt;summary&gt;
+        /// The point in time after which we can accept any key for tracking. Before this time, we may need to restrict tracking to the key used to hit the head circle.
+        ///
+        /// This is a requirement to stop the case where a player holds down one key (from before the slider) and taps the second key while maintaining full scoring (tracking) of sliders.
+        /// Visually, this special case can be seen below (time increasing from left to right):
+        ///
+        ///  Z  Z+X  Z
+        ///      o========o
+        ///
+        /// Without this logic, tracking would continue through the entire slider even though no key hold action is directly attributing to it.
+        ///
+        /// In all other cases, no special handling is required (either key being pressed is allowable as valid tracking).
+        ///
+        /// The reason for storing this as a time value (rather than a bool) is to correctly handle rewind scenarios.
+        /// &lt;/summary&gt;
+        private double? timeToAcceptAnyKeyAfter;
+
+        /// &lt;summary&gt;
+        /// The actions that were pressed in the previous frame.
+        /// &lt;/summary&gt;
+        private readonly List&lt;OsuAction&gt; lastPressedActions = new List&lt;OsuAction&gt;();
+
+        private Vector2? screenSpaceMousePosition;
+        private readonly DrawableSlider slider;
+
+        public SliderInputManager(DrawableSlider slider)
         {
-            this.result = result;
+            this.slider = slider;
+            this.slider.HitObjectApplied += resetState;
         }
 
-        [BackgroundDependencyLoader]
-        private void load()
+        /// &lt;summary&gt;
+        /// This component handles all input of the slider, so it should receive input no matter the position.
+        /// &lt;/summary&gt;
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
         {
-            AddInternal(piece = new Circle
+            screenSpaceMousePosition = e.ScreenSpaceMousePosition;
+            return base.OnMouseMove(e);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+            updateTracking(IsMouseInFollowArea(Tracking));
+        }
+
+        public void PostProcessHeadJudgement(DrawableSliderHead head)
+        {
+            if (!head.Judged || !head.Result.IsHit)
+                return;
+
+            if (!IsMouseInFollowArea(true))
+                return;
+
+            Debug.Assert(screenSpaceMousePosition != null);
+
+            Vector2 mousePositionInSlider = slider.ToLocalSpace(screenSpaceMousePosition.Value) - slider.OriginPosition;
+
+            // When the head is hit late:
+            // - If the cursor has at all times been within range of the expanded follow area, hit all nested objects that have been passed through.
+            // - If the cursor has at some point left the expanded follow area, miss those nested objects instead.
+
+            bool allTicksInRange = true;
+
+            foreach (var nested in slider.NestedHitObjects.OfType&lt;DrawableOsuHitObject&gt;())
             {
-                Anchor = Anchor.Centre,
-                Origin = Anchor.Centre,
-                Blending = BlendingParameters.Additive,
-                Colour = colours.ForHitResult(result),
-                Size = new Vector2(DrawableSliderTick.DEFAULT_TICK_SIZE)
-            });
+                // Skip nested objects that are already judged.
+                if (nested.Judged)
+                    continue;
+
+                // Stop the process when a nested object is reached that can&#39;t be hit before the current time.
+                if (nested.HitObject.StartTime &gt; Time.Current)
+                    break;
+
+                float radius = getFollowRadius(true);
+                double objectProgress = Math.Clamp((nested.HitObject.StartTime - slider.HitObject.StartTime) / slider.HitObject.Duration, 0, 1);
+                Vector2 objectPosition = slider.HitObject.CurvePositionAt(objectProgress);
+
+                // When the first nested object that is further outside the follow area is reached,
+                // forcefully miss all other nested objects that would otherwise be valid to be hit.
+                // This covers a case of a slider overlapping itself that requires tracking to a tick on an outer edge.
+                if ((objectPosition - mousePositionInSlider).LengthSquared &gt; radius * radius)
+                {
+                    allTicksInRange = false;
+                    break;
+                }
+            }
+
+            foreach (var nested in slider.NestedHitObjects.OfType&lt;DrawableOsuHitObject&gt;())
+            {
+                // Skip nested objects that are already judged.
+                if (nested.Judged)
+                    continue;
+
+                // Stop the process when a nested object is reached that can&#39;t be hit before the current time.
+                if (nested.HitObject.StartTime &gt; Time.Current)
+                    break;
+
+                if (allTicksInRange)
+                    nested.HitForcefully();
+                else
+                    nested.MissForcefully();
+            }
+
+            // If all ticks were hit so far, enable tracking the full extent.
+            // If any ticks were missed, assume tracking would&#39;ve broken at some point, and should only activate if the cursor is within the slider ball.
+            // For the second case, this may be the last chance we have to enable tracking before other objects get judged, otherwise the same would normally happen via Update().
+            updateTracking(allTicksInRange || IsMouseInFollowArea(false));
         }
 
-        public void PlayAnimation()
+        public void TryJudgeNestedObject(DrawableOsuHitObject nestedObject, double timeOffset)
         {
-            this.ScaleTo(1.4f);
-            this.ScaleTo(1f, 150, Easing.Out);
+            switch (nestedObject)
+            {
+                case DrawableSliderRepeat:
+                case DrawableSliderTick:
+                    if (timeOffset &lt; 0)
+                        return;
 
-            this.FadeOutFromOne(600);
+                    break;
+
+                case DrawableSliderTail:
+                    if (timeOffset &lt; SliderEventGenerator.TAIL_LENIENCY)
+                        return;
+
+                    // Ensure the tail can only activate after all previous ticks/repeats already have.
+                    //
+                    // This covers the edge case where the lenience may allow the tail to activate before
+                    // the last tick, changing ordering of score/combo awarding.
+                    var lastTick = slider.NestedHitObjects.LastOrDefault(o =&gt; o.HitObject is SliderTick || o.HitObject is SliderRepeat);
+                    if (lastTick?.Judged == false)
+                        return;
+
+                    break;
+
+                default:
+                    return;
+            }
+
+            if (!slider.HeadCircle.Judged)
+                return;
+
+            if (Tracking)
+                nestedObject.HitForcefully();
+            else if (timeOffset &gt;= 0)
+                nestedObject.MissForcefully();
         }
 
-        public Drawable? GetAboveHitObjectsProxiedContent() =&gt; piece.CreateProxy();
+        /// &lt;summary&gt;
+        /// Whether the mouse is currently in the follow area.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;expanded&quot;&gt;Whether to test against the maximum area of the follow circle.&lt;/param&gt;
+        public bool IsMouseInFollowArea(bool expanded)
+        {
+            if (screenSpaceMousePosition is not Vector2 pos)
+                return false;
+
+            float radius = getFollowRadius(expanded);
+
+            double followProgress = Math.Clamp((Time.Current - slider.HitObject.StartTime) / slider.HitObject.Duration, 0, 1);
+            Vector2 followCirclePosition = slider.HitObject.CurvePositionAt(followProgress);
+            Vector2 mousePositionInSlider = slider.ToLocalSpace(pos) - slider.OriginPosition;
+
+            return (mousePositionInSlider - followCirclePosition).LengthSquared &lt;= radius * radius;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the radius of the follow area.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;expanded&quot;&gt;Whether to return the maximum area of the follow circle.&lt;/param&gt;
+        private float getFollowRadius(bool expanded)
+        {
+            float radius = (float)slider.HitObject.Radius;
+
+            if (expanded)
+                radius *= DrawableSliderBall.FOLLOW_AREA;
+
+            return radius;
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the tracking state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;isValidTrackingPosition&quot;&gt;Whether the current mouse position is valid to begin tracking.&lt;/param&gt;
+        private void updateTracking(bool isValidTrackingPosition)
+        {
+            if (gameplayClock?.IsRewinding == true)
+            {
+                var trackingHistory = slider.Result.TrackingHistory;
+                while (trackingHistory.TryPeek(out var historyEntry) &amp;&amp; Time.Current &lt; historyEntry.time)
+                    trackingHistory.Pop();
+
+                Debug.Assert(trackingHistory.Count &gt; 0);
+
+                Tracking = trackingHistory.Peek().tracking;
+                return;
+            }
+
+            bool wasTracking = Tracking;
+
+            // from the point at which the head circle is hit, this will be non-null.
+            // it may be null if the head circle was missed.
+            OsuAction? headCircleHitAction = getInitialHitAction();
+
+            if (headCircleHitAction == null)
+                timeToAcceptAnyKeyAfter = null;
+
+            // if the head circle was hit with a specific key, tracking should only occur while that key is pressed.
+            if (headCircleHitAction != null &amp;&amp; timeToAcceptAnyKeyAfter == null)
+            {
+                var otherKey = headCircleHitAction == OsuAction.RightButton ? OsuAction.LeftButton : OsuAction.RightButton;
+
+                // we can start accepting any key once all other keys have been released in the previous frame.
+                if (!lastPressedActions.Contains(otherKey))
+                    timeToAcceptAnyKeyAfter = Time.Current;
+            }
+
+            if (slider.OsuActionInputManager == null)
+                return;
+
+            lastPressedActions.Clear();
+            bool validTrackingAction = false;
+
+            foreach (OsuAction action in slider.OsuActionInputManager.PressedActions)
+            {
+                if (isValidTrackingAction(action))
+                    validTrackingAction = true;
+
+                lastPressedActions.Add(action);
+            }
+
+            Tracking =
+                // even in an edge case where current time has exceeded the slider&#39;s time, we may not have finished judging.
+                // we don&#39;t want to potentially update from Tracking=true to Tracking=false at this point.
+                (!slider.AllJudged || Time.Current &lt;= slider.HitObject.GetEndTime())
+                // in valid position range
+                &amp;&amp; isValidTrackingPosition
+                // valid action
+                &amp;&amp; validTrackingAction;
+
+            if (wasTracking != Tracking)
+                slider.Result.TrackingHistory.Push((Time.Current, Tracking));
+        }
+
+        private OsuAction? getInitialHitAction() =&gt; slider.HeadCircle?.HitAction;
+
+        /// &lt;summary&gt;
+        /// Check whether a given user input is a valid tracking action.
+        /// &lt;/summary&gt;
+        private bool isValidTrackingAction(OsuAction action)
+        {
+            OsuAction? hitAction = getInitialHitAction();
+
+            // if the head circle was hit, we may not yet be allowed to accept any key, so we must use the initial hit action.
+            if (hitAction.HasValue &amp;&amp; (!timeToAcceptAnyKeyAfter.HasValue || Time.Current &lt;= timeToAcceptAnyKeyAfter.Value))
+                return action == hitAction;
+
+            return action == OsuAction.LeftButton || action == OsuAction.RightButton;
+        }
+
+        private void resetState(DrawableHitObject obj)
+        {
+            Tracking = false;
+            timeToAcceptAnyKeyAfter = null;
+            lastPressedActions.Clear();
+            screenSpaceMousePosition = null;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            slider.HitObjectApplied -= resetState;
+        }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[19,9,19,38,0],[22,37,22,41,0],[22,42,22,46,0],[22,51,22,56,0],[24,9,24,69,0],[25,9,25,10,0],[26,13,26,34,0],[27,9,27,10,0],[31,9,31,10,0],[32,13,39,16,0],[40,9,40,10,0],[43,9,43,10,0],[44,13,44,32,0],[45,13,45,47,0],[47,13,47,38,0],[48,9,48,10,0],[50,64,50,83,0]]);
+      highlightRanges([[25,32,25,36,0],[25,37,25,49,0],[28,49,28,53,0],[28,54,28,58,0],[50,9,50,85,0],[55,9,55,57,0],[56,9,56,10,0],[57,13,57,34,0],[58,13,58,56,0],[59,9,59,10,0],[64,82,64,86,0],[67,9,67,10,0],[68,13,68,67,0],[69,13,69,40,0],[70,9,70,10,0],[73,9,73,10,0],[74,13,74,27,0],[75,13,75,59,0],[76,9,76,10,0],[79,9,79,10,0],[80,13,80,52,0],[81,17,81,24,0],[83,13,83,44,0],[84,17,84,24,0],[86,13,86,60,0],[88,13,88,121,0],[94,13,94,41,0],[96,13,96,20,0],[96,22,96,32,0],[96,33,96,35,0],[96,36,96,90,0],[97,13,97,14,0],[99,17,99,35,0],[100,21,100,30,0],[103,17,103,63,0],[104,21,104,27,0],[106,17,106,54,0],[107,17,107,145,0],[108,17,108,91,0],[113,17,113,94,0],[114,17,114,18,0],[115,21,115,45,0],[116,21,116,27,0],[118,13,118,14,0],[120,13,120,20,0],[120,22,120,32,0],[120,33,120,35,0],[120,36,120,90,0],[121,13,121,14,0],[123,17,123,35,0],[124,21,124,30,0],[127,17,127,63,0],[128,21,128,27,0],[130,17,130,37,0],[131,21,131,44,0],[133,21,133,45,0],[134,13,134,14,0],[139,13,139,75,0],[140,9,140,10,0],[143,9,143,10,0],[144,13,144,34,0],[148,21,148,40,0],[149,25,149,32,0],[151,21,151,27,0],[154,21,154,73,0],[155,25,155,32,0],[161,21,161,79,0],[161,79,161,135,0],[161,135,161,137,0],[162,21,162,51,0],[163,25,163,32,0],[165,21,165,27,0],[168,21,168,28,0],[171,13,171,43,0],[172,17,172,24,0],[174,13,174,26,0],[175,17,175,46,0],[176,18,176,38,0],[177,17,177,47,0],[178,9,178,10,0],[185,9,185,10,0],[186,13,186,61,0],[187,17,187,30,0],[189,13,189,54,0],[191,13,191,127,0],[192,13,192,93,0],[193,13,193,94,0],[195,13,195,100,0],[196,9,196,10,0],[203,9,203,10,0],[204,13,204,59,0],[206,13,206,26,0],[207,17,207,58,0],[209,13,209,27,0],[210,9,210,10,0],[217,9,217,10,0],[218,13,218,52,0],[219,13,219,14,0],[220,17,220,69,0],[221,17,221,106,0],[222,21,222,43,0],[224,17,224,57,0],[226,17,226,60,0],[227,17,227,24,0],[230,13,230,41,0],[234,13,234,68,0],[236,13,236,45,0],[237,17,237,48,0],[240,13,240,80,0],[241,13,241,14,0],[242,17,242,124,0],[245,17,245,60,0],[246,21,246,60,0],[247,13,247,14,0],[249,13,249,54,0],[250,17,250,24,0],[252,13,252,40,0],[253,13,253,46,0],[255,13,255,20,0],[255,22,255,38,0],[255,39,255,41,0],[255,42,255,85,0],[256,13,256,14,0],[257,17,257,51,0],[258,21,258,48,0],[260,17,260,48,0],[261,13,261,14,0],[263,13,270,40,0],[272,13,272,41,0],[273,17,273,78,0],[274,9,274,10,0],[276,53,276,81,0],[282,9,282,10,0],[283,13,283,58,0],[286,13,286,124,0],[287,17,287,44,0],[289,13,289,86,0],[290,9,290,10,0],[293,9,293,10,0],[294,13,294,30,0],[295,13,295,44,0],[296,13,296,40,0],[297,13,297,45,0],[298,9,298,10,0],[301,9,301,10,0],[302,13,302,39,0],[304,13,304,51,0],[305,9,305,10,0]]);
     </script>
   </body>
 </html>

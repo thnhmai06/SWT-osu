@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Default/DefaultSpinnerDisc.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Slider.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,227 +11,304 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Extensions.Color4Extensions;
-using osu.Framework.Extensions.ObjectExtensions;
-using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Framework.Utils;
-using osu.Game.Graphics;
-using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
+#nullable disable
+
 using osuTK;
-using osuTK.Graphics;
+using osu.Game.Rulesets.Objects.Types;
+using System.Collections.Generic;
+using osu.Game.Rulesets.Objects;
+using System.Linq;
+using System.Threading;
+using JetBrains.Annotations;
+using Newtonsoft.Json;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Osu.Judgements;
+using osu.Game.Rulesets.Scoring;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Default
+namespace osu.Game.Rulesets.Osu.Objects
 {
-    public partial class DefaultSpinnerDisc : CompositeDrawable
+    public class Slider : OsuHitObject, IHasPathWithRepeats, IHasSliderVelocity, IHasGenerateTicks
     {
-        private DrawableSpinner drawableSpinner = null!;
+        public double EndTime =&gt; StartTime + this.SpanCount() * Path.Distance / Velocity;
 
-        private const float initial_scale = 1.3f;
-        private const float idle_alpha = 0.2f;
-        private const float tracking_alpha = 0.4f;
-
-        private Color4 normalColour;
-        private Color4 completeColour;
-
-        private SpinnerTicks ticks = null!;
-
-        private int wholeRotationCount;
-        private readonly BindableBool complete = new BindableBool();
-
-        private SpinnerFill fill = null!;
-        private Container mainContainer = null!;
-        private SpinnerCentreLayer centre = null!;
-        private SpinnerBackgroundLayer background = null!;
-
-        public DefaultSpinnerDisc()
+        [JsonIgnore]
+        public double Duration
         {
-            // we are slightly bigger than our parent, to clip the top and bottom of the circle
-            // this should probably be revisited when scaled spinners are a thing.
-            Scale = new Vector2(initial_scale);
+            get =&gt; EndTime - StartTime;
+            set =&gt; throw new System.NotSupportedException($&quot;Adjust via {nameof(RepeatCount)} instead&quot;); // can be implemented if/when needed.
         }
 
-        [BackgroundDependencyLoader]
-        private void load(OsuColour colours, DrawableHitObject drawableHitObject)
+        public override IList&lt;HitSampleInfo&gt; AuxiliarySamples =&gt; CreateSlidingSamples().Concat(TailSamples).ToArray();
+
+        private readonly Cached&lt;Vector2&gt; endPositionCache = new Cached&lt;Vector2&gt;();
+
+        public override Vector2 EndPosition =&gt; endPositionCache.IsValid ? endPositionCache.Value : endPositionCache.Value = Position + this.CurvePositionAt(1);
+
+        public Vector2 StackedPositionAt(double t) =&gt; StackedPosition + this.CurvePositionAt(t);
+
+        private readonly SliderPath path = new SliderPath { OptimiseCatmull = true };
+
+        public SliderPath Path
         {
-            drawableSpinner = (DrawableSpinner)drawableHitObject;
-
-            normalColour = colours.BlueDark;
-            completeColour = colours.YellowLight;
-
-            InternalChildren = new Drawable[]
+            get =&gt; path;
+            set
             {
-                mainContainer = new Container
+                path.ControlPoints.Clear();
+                path.ControlPoints.AddRange(value.ControlPoints.Select(c =&gt; new PathControlPoint(c.Position, c.Type)));
+
+                path.ExpectedDistance.Value = value.ExpectedDistance.Value;
+            }
+        }
+
+        public double Distance =&gt; Path.Distance;
+
+        public override Vector2 Position
+        {
+            get =&gt; base.Position;
+            set
+            {
+                base.Position = value;
+                updateNestedPositions();
+            }
+        }
+
+        public IList&lt;IList&lt;HitSampleInfo&gt;&gt; NodeSamples { get; set; } = new List&lt;IList&lt;HitSampleInfo&gt;&gt;();
+
+        [JsonIgnore]
+        public IList&lt;HitSampleInfo&gt; TailSamples { get; private set; }
+
+        private int repeatCount;
+
+        public int RepeatCount
+        {
+            get =&gt; repeatCount;
+            set
+            {
+                repeatCount = value;
+                updateNestedPositions();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The length of one span of this &lt;see cref=&quot;Slider&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double SpanDuration =&gt; Duration / this.SpanCount();
+
+        /// &lt;summary&gt;
+        /// The computed velocity of this &lt;see cref=&quot;Slider&quot;/&gt;. This is the amount of path distance travelled in 1 ms.
+        /// &lt;/summary&gt;
+        public double Velocity { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Spacing between &lt;see cref=&quot;SliderTick&quot;/&gt;s of this &lt;see cref=&quot;Slider&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double TickDistance { get; private set; }
+
+        /// &lt;summary&gt;
+        /// An extra multiplier that affects the number of &lt;see cref=&quot;SliderTick&quot;/&gt;s generated by this &lt;see cref=&quot;Slider&quot;/&gt;.
+        /// An increase in this value increases &lt;see cref=&quot;TickDistance&quot;/&gt;, which reduces the number of ticks generated.
+        /// &lt;/summary&gt;
+        public double TickDistanceMultiplier = 1;
+
+        /// &lt;summary&gt;
+        /// If &lt;see langword=&quot;false&quot;/&gt;, &lt;see cref=&quot;Slider&quot;/&gt;&#39;s judgement is fully handled by its nested &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// If &lt;see langword=&quot;true&quot;/&gt;, this &lt;see cref=&quot;Slider&quot;/&gt; will be judged proportionally to the number of nested &lt;see cref=&quot;HitObject&quot;/&gt;s hit.
+        /// &lt;/summary&gt;
+        public bool ClassicSliderBehaviour
+        {
+            get =&gt; classicSliderBehaviour;
+            set
+            {
+                classicSliderBehaviour = value;
+                HeadCircle?.ClassicSliderBehaviour = value;
+                TailCircle?.ClassicSliderBehaviour = value;
+            }
+        }
+
+        private bool classicSliderBehaviour;
+
+        public BindableNumber&lt;double&gt; SliderVelocityMultiplierBindable { get; } = new BindableDouble(1)
+        {
+            MinValue = 0.1,
+            MaxValue = 10
+        };
+
+        public double SliderVelocityMultiplier
+        {
+            get =&gt; SliderVelocityMultiplierBindable.Value;
+            set =&gt; SliderVelocityMultiplierBindable.Value = value;
+        }
+
+        public bool GenerateTicks { get; set; } = true;
+
+        [JsonIgnore]
+        public SliderHeadCircle HeadCircle { get; protected set; }
+
+        [JsonIgnore]
+        public SliderTailCircle TailCircle { get; protected set; }
+
+        [JsonIgnore]
+        [CanBeNull]
+        public SliderRepeat LastRepeat { get; protected set; }
+
+        public Slider()
+        {
+            SamplesBindable.CollectionChanged += (_, _) =&gt; UpdateNestedSamples();
+            Path.Version.ValueChanged += _ =&gt; updateNestedPositions();
+        }
+
+        protected override void ApplyDefaultsToSelf(ControlPointInfo controlPointInfo, IBeatmapDifficultyInfo difficulty)
+        {
+            base.ApplyDefaultsToSelf(controlPointInfo, difficulty);
+
+            TimingControlPoint timingPoint = controlPointInfo.TimingPointAt(StartTime);
+
+            Velocity = BASE_SCORING_DISTANCE * difficulty.SliderMultiplier / LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(this, timingPoint, OsuRuleset.SHORT_NAME);
+            // WARNING: this is intentionally not computed as `BASE_SCORING_DISTANCE * difficulty.SliderMultiplier`
+            // for backwards compatibility reasons (intentionally introducing floating point errors to match stable).
+            double scoringDistance = Velocity * timingPoint.BeatLength;
+
+            TickDistance = GenerateTicks ? (scoringDistance / difficulty.SliderTickRate * TickDistanceMultiplier) : double.PositiveInfinity;
+        }
+
+        protected override void CreateNestedHitObjects(CancellationToken cancellationToken)
+        {
+            base.CreateNestedHitObjects(cancellationToken);
+
+            var sliderEvents = SliderEventGenerator.Generate(StartTime, SpanDuration, Velocity, TickDistance, Path.Distance, this.SpanCount(), cancellationToken);
+
+            foreach (var e in sliderEvents)
+            {
+                switch (e.Type)
                 {
-                    RelativeSizeAxes = Axes.Both,
-                    Anchor = Anchor.Centre,
-                    Origin = Anchor.Centre,
-                    Children = new Drawable[]
-                    {
-                        background = new SpinnerBackgroundLayer(),
-                        fill = new SpinnerFill
+                    case SliderEventType.Tick:
+                        AddNested(new SliderTick
                         {
-                            Alpha = idle_alpha,
-                            AccentColour = normalColour
-                        },
-                        ticks = new SpinnerTicks
+                            SpanIndex = e.SpanIndex,
+                            SpanStartTime = e.SpanStartTime,
+                            StartTime = e.Time,
+                            Position = Position + Path.PositionAt(e.PathProgress),
+                            PathProgress = e.PathProgress,
+                            StackHeight = StackHeight,
+                        });
+                        break;
+
+                    case SliderEventType.Head:
+                        AddNested(HeadCircle = new SliderHeadCircle
                         {
-                            Anchor = Anchor.Centre,
-                            Origin = Anchor.Centre,
-                            AccentColour = normalColour
-                        },
-                    }
-                },
-                centre = new SpinnerCentreLayer
-                {
-                    Anchor = Anchor.Centre,
-                    Origin = Anchor.Centre,
-                },
-            };
-        }
+                            StartTime = e.Time,
+                            Position = Position,
+                            StackHeight = StackHeight,
+                            ClassicSliderBehaviour = ClassicSliderBehaviour,
+                        });
+                        break;
 
-        protected override void LoadComplete()
-        {
-            base.LoadComplete();
+                    case SliderEventType.Tail:
+                        AddNested(TailCircle = new SliderTailCircle(this)
+                        {
+                            RepeatIndex = e.SpanIndex,
+                            StartTime = e.Time,
+                            Position = EndPosition,
+                            StackHeight = StackHeight,
+                            ClassicSliderBehaviour = ClassicSliderBehaviour,
+                        });
+                        break;
 
-            complete.BindValueChanged(complete =&gt; updateDiscColour(complete.NewValue, 200));
-            drawableSpinner.ApplyCustomUpdateState += updateStateTransforms;
-
-            updateStateTransforms(drawableSpinner, drawableSpinner.State.Value);
-        }
-
-        protected override void Update()
-        {
-            base.Update();
-
-            complete.Value = Time.Current &gt;= drawableSpinner.Result.TimeCompleted;
-
-            if (complete.Value)
-            {
-                if (checkNewRotationCount)
-                {
-                    fill.FinishTransforms(false, nameof(Alpha));
-                    fill
-                        .FadeTo(tracking_alpha + 0.2f, 60, Easing.OutExpo)
-                        .Then()
-                        .FadeTo(tracking_alpha, 250, Easing.OutQuint);
-                }
-            }
-            else
-            {
-                fill.Alpha = (float)Interpolation.Damp(fill.Alpha, drawableSpinner.RotationTracker.Tracking ? tracking_alpha : idle_alpha, 0.98f, (float)Math.Abs(Clock.ElapsedFrameTime));
-            }
-
-            const float initial_fill_scale = 0.2f;
-            float targetScale = initial_fill_scale + (1 - initial_fill_scale) * drawableSpinner.Progress;
-
-            fill.Scale = new Vector2((float)Interpolation.Lerp(fill.Scale.X, targetScale, Math.Clamp(Math.Abs(Time.Elapsed) / 100, 0, 1)));
-            mainContainer.Rotation = drawableSpinner.RotationTracker.Rotation;
-        }
-
-        private void updateStateTransforms(DrawableHitObject drawableHitObject, ArmedState state)
-        {
-            if (!(drawableHitObject is DrawableSpinner))
-                return;
-
-            Spinner spinner = drawableSpinner.HitObject;
-
-            using (BeginAbsoluteSequence(spinner.StartTime - spinner.TimePreempt))
-            {
-                this.ScaleTo(initial_scale);
-                this.RotateTo(0);
-
-                updateDiscColour(false);
-
-                using (BeginDelayedSequence(spinner.TimePreempt / 2))
-                {
-                    // constant ambient rotation to give the spinner &quot;spinning&quot; character.
-                    this.RotateTo((float)(25 * spinner.Duration / 2000), spinner.TimePreempt + spinner.Duration);
-                }
-
-                using (BeginDelayedSequence(spinner.TimePreempt + spinner.Duration + drawableHitObject.Result.TimeOffset))
-                {
-                    switch (state)
-                    {
-                        case ArmedState.Hit:
-                            this.ScaleTo(initial_scale * 1.2f, 320, Easing.Out);
-                            this.RotateTo(mainContainer.Rotation + 180, 320);
-                            break;
-
-                        case ArmedState.Miss:
-                            this.ScaleTo(initial_scale * 0.8f, 320, Easing.In);
-                            break;
-                    }
+                    case SliderEventType.Repeat:
+                        AddNested(LastRepeat = new SliderRepeat(this)
+                        {
+                            RepeatIndex = e.SpanIndex,
+                            StartTime = StartTime + (e.SpanIndex + 1) * SpanDuration,
+                            Position = Position + Path.PositionAt(e.PathProgress),
+                            StackHeight = StackHeight,
+                            PathProgress = e.PathProgress,
+                        });
+                        break;
                 }
             }
 
-            using (BeginAbsoluteSequence(spinner.StartTime - spinner.TimePreempt))
+            UpdateNestedSamples();
+        }
+
+        private void updateNestedPositions()
+        {
+            endPositionCache.Invalidate();
+
+            foreach (var nested in NestedHitObjects)
             {
-                centre.ScaleTo(0);
-                mainContainer.ScaleTo(0);
-
-                using (BeginDelayedSequence(spinner.TimePreempt / 2))
+                switch (nested)
                 {
-                    centre.ScaleTo(0.3f, spinner.TimePreempt / 4, Easing.OutQuint);
-                    mainContainer.ScaleTo(0.2f, spinner.TimePreempt / 4, Easing.OutQuint);
+                    case SliderHeadCircle headCircle:
+                        headCircle.Position = Position;
+                        break;
 
-                    using (BeginDelayedSequence(spinner.TimePreempt / 2))
-                    {
-                        centre.ScaleTo(0.5f, spinner.TimePreempt / 2, Easing.OutQuint);
-                        mainContainer.ScaleTo(1, spinner.TimePreempt / 2, Easing.OutQuint);
-                    }
+                    case SliderTailCircle tailCircle:
+                        tailCircle.Position = EndPosition;
+                        break;
+
+                    case SliderRepeat repeat:
+                        repeat.Position = Position + Path.PositionAt(repeat.PathProgress);
+                        break;
+
+                    case SliderTick tick:
+                        tick.Position = Position + Path.PositionAt(tick.PathProgress);
+                        break;
+                }
+            }
+        }
+
+        protected void UpdateNestedSamples()
+        {
+            this.PopulateNodeSamples();
+
+            // TODO: remove this when guaranteed sort is present for samples (https://github.com/ppy/osu/issues/1933)
+            HitSampleInfo tickSample = (Samples.FirstOrDefault(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL) ?? Samples.FirstOrDefault())?.With(&quot;slidertick&quot;);
+
+            foreach (var nested in NestedHitObjects)
+            {
+                switch (nested)
+                {
+                    case SliderTick tick:
+                        tick.SamplesBindable.Clear();
+
+                        if (tickSample != null)
+                            tick.SamplesBindable.Add(tickSample);
+                        break;
+
+                    case SliderRepeat repeat:
+                        repeat.Samples = this.GetNodeSamples(repeat.RepeatIndex + 1);
+                        break;
                 }
             }
 
-            if (drawableSpinner.Result?.TimeCompleted is double completionTime)
-            {
-                using (BeginAbsoluteSequence(completionTime))
-                    updateDiscColour(true, 200);
-            }
+            HeadCircle?.Samples = this.GetNodeSamples(0);
+
+            // The samples should be attached to the slider tail, however this can only be done if LastTick is removed otherwise they would play earlier than they&#39;re intended to.
+            // (see mapping logic in `CreateNestedHitObjects` above)
+            //
+            // For now, the samples are played by the slider itself at the correct end time.
+            TailSamples = this.GetNodeSamples(repeatCount + 1);
         }
 
-        private void updateDiscColour(bool complete, double duration = 0)
-        {
-            var colour = complete ? completeColour : normalColour;
+        public override Judgement CreateJudgement() =&gt; ClassicSliderBehaviour
+            // Final combo is provided by the slider itself - see logic in `DrawableSlider.CheckForResult()`
+            ? new OsuJudgement()
+            // Final combo is provided by the tail circle - see `SliderTailCircle`
+            : new OsuIgnoreJudgement();
 
-            ticks.FadeAccent(colour.Darken(1), duration);
-            fill.FadeAccent(colour.Darken(1), duration);
-
-            background.FadeAccent(colour, duration);
-            centre.FadeAccent(colour, duration);
-        }
-
-        private bool checkNewRotationCount
-        {
-            get
-            {
-                int rotations = (int)(drawableSpinner.Result.TotalRotation / 360);
-
-                if (wholeRotationCount == rotations) return false;
-
-                wholeRotationCount = rotations;
-                return true;
-            }
-        }
-
-        protected override void Dispose(bool isDisposing)
-        {
-            base.Dispose(isDisposing);
-
-            if (drawableSpinner.IsNotNull())
-                drawableSpinner.ApplyCustomUpdateState -= updateStateTransforms;
-        }
+        protected override HitWindows CreateHitWindows() =&gt; HitWindows.Empty;
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[23,9,23,57,0],[32,9,32,44,0],[35,9,35,69,0],[37,9,37,42,0],[38,9,38,49,0],[39,9,39,51,0],[40,9,40,59,0],[42,9,42,36,0],[43,9,43,10,0],[46,13,46,48,0],[47,9,47,10,0],[51,9,51,10,0],[52,13,52,66,0],[54,13,54,45,0],[55,13,55,50,0],[57,13,85,15,0],[86,9,86,10,0],[89,9,89,10,0],[90,13,90,33,0],[92,13,92,51,0],[92,51,92,91,0],[92,91,92,93,0],[93,13,93,77,0],[95,13,95,81,0],[96,9,96,10,0],[99,9,99,10,0],[100,13,100,27,0],[102,13,102,83,0],[104,13,104,32,0],[105,13,105,14,0],[106,17,106,43,0],[107,17,107,18,0],[108,21,108,65,0],[109,21,112,71,0],[113,17,113,18,0],[114,13,114,14,0],[116,13,116,14,0],[117,17,117,188,0],[118,13,118,14,0],[121,13,121,106,0],[123,13,123,140,0],[124,13,124,79,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,57,0],[130,17,130,24,0],[132,13,132,57,0],[134,13,134,83,0],[135,13,135,14,0],[136,17,136,45,0],[137,17,137,34,0],[139,17,139,41,0],[141,17,141,70,0],[142,17,142,18,0],[144,21,144,114,0],[145,17,145,18,0],[147,17,147,123,0],[148,17,148,18,0],[149,21,149,35,0],[152,29,152,81,0],[153,29,153,78,0],[154,29,154,35,0],[157,29,157,80,0],[158,29,158,35,0],[160,17,160,18,0],[161,13,161,14,0],[163,13,163,83,0],[164,13,164,14,0],[165,17,165,35,0],[166,17,166,42,0],[168,17,168,70,0],[169,17,169,18,0],[170,21,170,84,0],[171,21,171,91,0],[173,21,173,74,0],[174,21,174,22,0],[175,25,175,88,0],[176,25,176,92,0],[177,21,177,22,0],[178,17,178,18,0],[179,13,179,14,0],[181,13,181,80,0],[182,13,182,14,0],[183,17,183,62,0],[184,21,184,49,0],[185,13,185,14,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,67,0],[192,13,192,58,0],[193,13,193,57,0],[195,13,195,53,0],[196,13,196,49,0],[197,9,197,10,0],[202,13,202,14,0],[203,17,203,83,0],[205,17,205,53,0],[205,54,205,67,0],[207,17,207,48,0],[208,17,208,29,0],[209,13,209,14,0],[213,9,213,10,0],[214,13,214,39,0],[216,13,216,45,0],[217,17,217,81,0],[218,9,218,10,0]]);
+      highlightRanges([[28,34,28,89,1],[33,20,33,39,1],[34,20,34,103,1],[37,66,37,118,1],[39,9,39,83,1],[41,48,41,159,1],[43,55,43,96,1],[45,9,45,86,1],[49,20,49,24,1],[51,13,51,14,1],[52,17,52,44,1],[53,17,53,77,1],[53,77,53,117,1],[53,117,53,120,1],[55,17,55,76,1],[56,13,56,14,1],[59,35,59,48,1],[63,20,63,33,1],[65,13,65,14,1],[66,17,66,39,1],[67,17,67,41,1],[68,13,68,14,1],[71,58,71,62,1],[71,63,71,67,1],[71,72,71,104,1],[74,51,74,55,1],[74,56,74,68,1],[80,20,80,31,1],[82,13,82,14,1],[83,17,83,37,1],[84,17,84,41,1],[85,13,85,14,1],[91,39,91,66,1],[96,34,96,38,1],[96,39,96,51,1],[101,38,101,42,1],[101,43,101,55,1],[107,9,107,50,1],[115,20,115,42,1],[117,13,117,14,1],[118,17,118,48,1],[119,17,119,60,1],[120,17,120,60,1],[121,13,121,14,1],[126,74,126,78,1],[126,83,130,10,1],[134,20,134,58,1],[135,20,135,66,1],[138,37,138,41,1],[138,42,138,46,1],[138,51,138,55,1],[141,46,141,50,1],[141,51,141,65,1],[144,46,144,50,1],[144,51,144,65,1],[148,42,148,46,1],[148,47,148,61,1],[150,9,150,24,1],[151,9,151,10,1],[152,13,152,60,1],[152,60,152,81,1],[152,81,152,82,1],[153,13,153,47,1],[153,47,153,70,1],[153,70,153,71,1],[154,9,154,10,1],[157,9,157,10,1],[158,13,158,68,1],[160,13,160,88,1],[162,13,162,175,1],[165,13,165,72,1],[167,13,167,141,1],[168,9,168,10,1],[171,9,171,10,1],[172,13,172,60,1],[174,13,174,163,1],[176,13,176,20,1],[176,22,176,27,1],[176,28,176,30,1],[176,31,176,43,1],[177,13,177,14,1],[178,17,178,32,1],[181,25,189,28,1],[190,25,190,31,1],[193,25,199,28,1],[200,25,200,31,1],[203,25,210,28,1],[211,25,211,31,1],[214,25,221,28,1],[222,25,222,31,1],[224,13,224,14,1],[226,13,226,35,1],[227,9,227,10,1],[230,9,230,10,1],[231,13,231,43,1],[233,13,233,20,1],[233,22,233,32,1],[233,33,233,35,1],[233,36,233,52,1],[234,13,234,14,1],[235,17,235,32,1],[238,25,238,56,1],[239,25,239,31,1],[242,25,242,59,1],[243,25,243,31,1],[246,25,246,91,1],[247,25,247,31,1],[250,25,250,87,1],[251,25,251,31,1],[253,13,253,14,1],[254,9,254,10,1],[257,9,257,10,1],[258,13,258,40,1],[261,13,261,69,1],[261,69,261,103,1],[261,103,261,154,1],[263,13,263,20,1],[263,22,263,32,1],[263,33,263,35,1],[263,36,263,52,1],[264,13,264,14,1],[265,17,265,32,1],[268,25,268,54,1],[270,25,270,48,1],[271,29,271,66,1],[272,25,272,31,1],[275,25,275,86,1],[276,25,276,31,1],[278,13,278,14,1],[280,13,280,58,1],[286,13,286,64,1],[287,9,287,10,1],[289,56,293,39,1],[295,61,295,77,1]]);
     </script>
   </body>
 </html>

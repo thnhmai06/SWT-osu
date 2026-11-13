@@ -25,16 +25,7 @@ namespace osu.Game.Rulesets.Osu.Tests.Difficulty
             Assert.That(RhythmEvaluator.EvaluateDifficultyOf(objs[0]), Is.Zero);
         }
 
-        // Spinner FALSE, Index == 0 TRUE -> 0 (second operand decides).
-        [Test]
-        public void TestRhythm_FirstObject_IsZero()
-        {
-            var objs = DifficultyTestHelpers.DifficultyObjects(DifficultyTestHelpers.Stream(10, 200, 60));
-
-            Assert.That(RhythmEvaluator.EvaluateDifficultyOf(objs[0]), Is.Zero);
-        }
-
-        // Both operands FALSE: regular circle in a stream yields non-negative value.
+        // Spinner guard FALSE: regular circle in a stream yields non-negative value.
         [Test]
         public void TestRhythm_RegularObject_NonNegative()
         {

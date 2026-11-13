@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Utils/OsuHitObjectGenerationUtils.Reposition.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.UI;
+using osuTK;
+
+namespace osu.Game.Rulesets.Osu.Utils
+{
+    public static partial class OsuHitObjectGenerationUtils
+    {
+        /// &lt;summary&gt;
+        /// Number of previous hitobjects to be shifted together when an object is being moved.
+        /// &lt;/summary&gt;
+        private const int preceding_hitobjects_to_shift = 10;
+
+        private static readonly Vector2 playfield_centre = OsuPlayfield.BASE_SIZE / 2;
+
+        /// &lt;summary&gt;
+        /// Generate a list of &lt;see cref=&quot;ObjectPositionInfo&quot;/&gt;s containing information for how the given list of
+        /// &lt;see cref=&quot;OsuHitObject&quot;/&gt;s are positioned.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObjects&quot;&gt;A list of &lt;see cref=&quot;OsuHitObject&quot;/&gt;s to process.&lt;/param&gt;
+        /// &lt;returns&gt;A list of &lt;see cref=&quot;ObjectPositionInfo&quot;/&gt;s describing how each hit object is positioned relative to the previous one.&lt;/returns&gt;
+        public static List&lt;ObjectPositionInfo&gt; GeneratePositionInfos(IEnumerable&lt;OsuHitObject&gt; hitObjects)
+        {
+            var positionInfos = new List&lt;ObjectPositionInfo&gt;();
+            Vector2 previousPosition = playfield_centre;
+            float previousAngle = 0;
+
+            foreach (OsuHitObject hitObject in hitObjects)
+            {
+                Vector2 relativePosition = hitObject.Position - previousPosition;
+                float absoluteAngle = MathF.Atan2(relativePosition.Y, relativePosition.X);
+                float relativeAngle = absoluteAngle - previousAngle;
+
+                ObjectPositionInfo positionInfo;
+                positionInfos.Add(positionInfo = new ObjectPositionInfo(hitObject)
+                {
+                    RelativeAngle = relativeAngle,
+                    DistanceFromPrevious = relativePosition.Length
+                });
+
+                if (hitObject is Slider slider)
+                {
+                    float absoluteRotation = getSliderRotation(slider);
+                    positionInfo.Rotation = absoluteRotation - absoluteAngle;
+                    absoluteAngle = absoluteRotation;
+                }
+
+                previousPosition = hitObject.EndPosition;
+                previousAngle = absoluteAngle;
+            }
+
+            return positionInfos;
+        }
+
+        /// &lt;summary&gt;
+        /// Reposition the hit objects according to the information in &lt;paramref name=&quot;objectPositionInfos&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;objectPositionInfos&quot;&gt;Position information for each hit object.&lt;/param&gt;
+        /// &lt;returns&gt;The repositioned hit objects.&lt;/returns&gt;
+        public static List&lt;OsuHitObject&gt; RepositionHitObjects(IEnumerable&lt;ObjectPositionInfo&gt; objectPositionInfos)
+        {
+            List&lt;WorkingObject&gt; workingObjects = objectPositionInfos.Select(o =&gt; new WorkingObject(o)).ToList();
+            WorkingObject? previous = null;
+
+            for (int i = 0; i &lt; workingObjects.Count; i++)
+            {
+                var current = workingObjects[i];
+                var hitObject = current.HitObject;
+
+                if (hitObject is Spinner)
+                {
+                    previous = current;
+                    continue;
+                }
+
+                computeModifiedPosition(current, previous, i &gt; 1 ? workingObjects[i - 2] : null);
+
+                // Move hit objects back into the playfield if they are outside of it
+                Vector2 shift = Vector2.Zero;
+
+                switch (hitObject)
+                {
+                    case HitCircle:
+                        shift = clampHitCircleToPlayfield(current);
+                        break;
+
+                    case Slider:
+                        shift = clampSliderToPlayfield(current);
+                        break;
+                }
+
+                if (shift != Vector2.Zero)
+                {
+                    var toBeShifted = new List&lt;OsuHitObject&gt;();
+
+                    for (int j = i - 1; j &gt;= i - preceding_hitobjects_to_shift &amp;&amp; j &gt;= 0; j--)
+                    {
+                        // only shift hit circles
+                        if (!(workingObjects[j].HitObject is HitCircle)) break;
+
+                        toBeShifted.Add(workingObjects[j].HitObject);
+                    }
+
+                    if (toBeShifted.Count &gt; 0)
+                        applyDecreasingShift(toBeShifted, shift);
+                }
+
+                previous = current;
+            }
+
+            return workingObjects.Select(p =&gt; p.HitObject).ToList();
+        }
+
+        /// &lt;summary&gt;
+        /// Compute the modified position of a hit object while attempting to keep it inside the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;current&quot;&gt;The &lt;see cref=&quot;WorkingObject&quot;/&gt; representing the hit object to have the modified position computed for.&lt;/param&gt;
+        /// &lt;param name=&quot;previous&quot;&gt;The &lt;see cref=&quot;WorkingObject&quot;/&gt; representing the hit object immediately preceding the current one.&lt;/param&gt;
+        /// &lt;param name=&quot;beforePrevious&quot;&gt;The &lt;see cref=&quot;WorkingObject&quot;/&gt; representing the hit object immediately preceding the &lt;paramref name=&quot;previous&quot;/&gt; one.&lt;/param&gt;
+        private static void computeModifiedPosition(WorkingObject current, WorkingObject? previous, WorkingObject? beforePrevious)
+        {
+            float previousAbsoluteAngle = 0f;
+
+            if (previous != null)
+            {
+                if (previous.HitObject is Slider s)
+                {
+                    previousAbsoluteAngle = getSliderRotation(s);
+                }
+                else
+                {
+                    Vector2 earliestPosition = beforePrevious?.HitObject.EndPosition ?? playfield_centre;
+                    Vector2 relativePosition = previous.HitObject.Position - earliestPosition;
+                    previousAbsoluteAngle = MathF.Atan2(relativePosition.Y, relativePosition.X);
+                }
+            }
+
+            float absoluteAngle = previousAbsoluteAngle + current.PositionInfo.RelativeAngle;
+
+            var posRelativeToPrev = new Vector2(
+                current.PositionInfo.DistanceFromPrevious * MathF.Cos(absoluteAngle),
+                current.PositionInfo.DistanceFromPrevious * MathF.Sin(absoluteAngle)
+            );
+
+            Vector2 lastEndPosition = previous?.EndPositionModified ?? playfield_centre;
+
+            posRelativeToPrev = RotateAwayFromEdge(lastEndPosition, posRelativeToPrev);
+
+            current.PositionModified = lastEndPosition + posRelativeToPrev;
+
+            if (!(current.HitObject is Slider slider))
+                return;
+
+            absoluteAngle = MathF.Atan2(posRelativeToPrev.Y, posRelativeToPrev.X);
+
+            Vector2 centreOfMassOriginal = calculateCentreOfMass(slider);
+            Vector2 centreOfMassModified = rotateVector(centreOfMassOriginal, current.PositionInfo.Rotation + absoluteAngle - getSliderRotation(slider));
+            centreOfMassModified = RotateAwayFromEdge(current.PositionModified, centreOfMassModified);
+
+            float relativeRotation = MathF.Atan2(centreOfMassModified.Y, centreOfMassModified.X) - MathF.Atan2(centreOfMassOriginal.Y, centreOfMassOriginal.X);
+            if (!Precision.AlmostEquals(relativeRotation, 0))
+                RotateSlider(slider, relativeRotation);
+        }
+
+        /// &lt;summary&gt;
+        /// Move the modified position of a &lt;see cref=&quot;HitCircle&quot;/&gt; so that it fits inside the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The deviation from the original modified position in order to fit within the playfield.&lt;/returns&gt;
+        private static Vector2 clampHitCircleToPlayfield(WorkingObject workingObject)
+        {
+            var previousPosition = workingObject.PositionModified;
+            workingObject.EndPositionModified = workingObject.PositionModified = clampToPlayfieldWithPadding(
+                workingObject.PositionModified,
+                (float)workingObject.HitObject.Radius
+            );
+
+            workingObject.HitObject.Position = workingObject.PositionModified;
+
+            return workingObject.PositionModified - previousPosition;
+        }
+
+        /// &lt;summary&gt;
+        /// Moves the &lt;see cref=&quot;Slider&quot;/&gt; and all necessary nested &lt;see cref=&quot;OsuHitObject&quot;/&gt;s into the &lt;see cref=&quot;OsuPlayfield&quot;/&gt; if they aren&#39;t already.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The deviation from the original modified position in order to fit within the playfield.&lt;/returns&gt;
+        private static Vector2 clampSliderToPlayfield(WorkingObject workingObject)
+        {
+            var slider = (Slider)workingObject.HitObject;
+            var possibleMovementBounds = CalculatePossibleMovementBounds(slider);
+
+            // The slider rotation applied in computeModifiedPosition might make it impossible to fit the slider into the playfield
+            // For example, a long horizontal slider will be off-screen when rotated by 90 degrees
+            // In this case, limit the rotation to either 0 or 180 degrees
+            if (possibleMovementBounds.Width &lt; 0 || possibleMovementBounds.Height &lt; 0)
+            {
+                float currentRotation = getSliderRotation(slider);
+                float diff1 = getAngleDifference(workingObject.RotationOriginal, currentRotation);
+                float diff2 = getAngleDifference(workingObject.RotationOriginal + MathF.PI, currentRotation);
+
+                if (diff1 &lt; diff2)
+                {
+                    RotateSlider(slider, workingObject.RotationOriginal - getSliderRotation(slider));
+                }
+                else
+                {
+                    RotateSlider(slider, workingObject.RotationOriginal + MathF.PI - getSliderRotation(slider));
+                }
+
+                possibleMovementBounds = CalculatePossibleMovementBounds(slider);
+            }
+
+            var previousPosition = workingObject.PositionModified;
+
+            // Clamp slider position to the placement area
+            // If the slider is larger than the playfield, at least make sure that the head circle is inside the playfield
+            float newX = possibleMovementBounds.Width &lt; 0
+                ? Math.Clamp(possibleMovementBounds.Left, 0, OsuPlayfield.BASE_SIZE.X)
+                : Math.Clamp(previousPosition.X, possibleMovementBounds.Left, possibleMovementBounds.Right);
+
+            float newY = possibleMovementBounds.Height &lt; 0
+                ? Math.Clamp(possibleMovementBounds.Top, 0, OsuPlayfield.BASE_SIZE.Y)
+                : Math.Clamp(previousPosition.Y, possibleMovementBounds.Top, possibleMovementBounds.Bottom);
+
+            slider.Position = workingObject.PositionModified = new Vector2(newX, newY);
+            workingObject.EndPositionModified = slider.EndPosition;
+
+            return workingObject.PositionModified - previousPosition;
+        }
+
+        /// &lt;summary&gt;
+        /// Decreasingly shift a list of &lt;see cref=&quot;OsuHitObject&quot;/&gt;s by a specified amount.
+        /// The first item in the list is shifted by the largest amount, while the last item is shifted by the smallest amount.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObjects&quot;&gt;The list of hit objects to be shifted.&lt;/param&gt;
+        /// &lt;param name=&quot;shift&quot;&gt;The amount to be shifted.&lt;/param&gt;
+        private static void applyDecreasingShift(IList&lt;OsuHitObject&gt; hitObjects, Vector2 shift)
+        {
+            for (int i = 0; i &lt; hitObjects.Count; i++)
+            {
+                var hitObject = hitObjects[i];
+                // The first object is shifted by a vector slightly smaller than shift
+                // The last object is shifted by a vector slightly larger than zero
+                Vector2 position = hitObject.Position + shift * ((hitObjects.Count - i) / (float)(hitObjects.Count + 1));
+
+                hitObject.Position = clampToPlayfieldWithPadding(position, (float)hitObject.Radius);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates a &lt;see cref=&quot;RectangleF&quot;/&gt; which contains all of the possible movements of the slider (in relative X/Y coordinates)
+        /// such that the entire slider is inside the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;slider&quot;&gt;The &lt;see cref=&quot;Slider&quot;/&gt; for which to calculate a movement bounding box.&lt;/param&gt;
+        /// &lt;returns&gt;A &lt;see cref=&quot;RectangleF&quot;/&gt; which contains all of the possible movements of the slider such that the entire slider is inside the playfield.&lt;/returns&gt;
+        /// &lt;remarks&gt;
+        /// If the slider is larger than the playfield, the returned &lt;see cref=&quot;RectangleF&quot;/&gt; may have negative width/height.
+        /// &lt;/remarks&gt;
+        public static RectangleF CalculatePossibleMovementBounds(Slider slider)
+        {
+            float minX = float.PositiveInfinity;
+            float maxX = float.NegativeInfinity;
+
+            float minY = float.PositiveInfinity;
+            float maxY = float.NegativeInfinity;
+
+            // Compute the bounding box of the slider.
+            foreach (var pos in slider.Path.CalculatedPath)
+            {
+                minX = MathF.Min(minX, pos.X);
+                maxX = MathF.Max(maxX, pos.X);
+
+                minY = MathF.Min(minY, pos.Y);
+                maxY = MathF.Max(maxY, pos.Y);
+            }
+
+            // Take the circle radius into account.
+            float radius = (float)slider.Radius;
+
+            minX -= radius;
+            minY -= radius;
+
+            maxX += radius;
+            maxY += radius;
+
+            // Given the bounding box of the slider (via min/max X/Y),
+            // the amount that the slider can move to the left is minX (with the sign flipped, since positive X is to the right),
+            // and the amount that it can move to the right is WIDTH - maxX.
+            // Same calculation applies for the Y axis.
+            float left = -minX;
+            float right = OsuPlayfield.BASE_SIZE.X - maxX;
+            float top = -minY;
+            float bottom = OsuPlayfield.BASE_SIZE.Y - maxY;
+
+            return new RectangleF(left, top, right - left, bottom - top);
+        }
+
+        /// &lt;summary&gt;
+        /// Clamp a position to playfield, keeping a specified distance from the edges.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position to be clamped.&lt;/param&gt;
+        /// &lt;param name=&quot;padding&quot;&gt;The minimum distance allowed from playfield edges.&lt;/param&gt;
+        /// &lt;returns&gt;The clamped position.&lt;/returns&gt;
+        private static Vector2 clampToPlayfieldWithPadding(Vector2 position, float padding)
+        {
+            return new Vector2(
+                Math.Clamp(position.X, padding, OsuPlayfield.BASE_SIZE.X - padding),
+                Math.Clamp(position.Y, padding, OsuPlayfield.BASE_SIZE.Y - padding)
+            );
+        }
+
+        /// &lt;summary&gt;
+        /// Estimate the centre of mass of a slider relative to its start position.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;slider&quot;&gt;The slider to process.&lt;/param&gt;
+        /// &lt;returns&gt;The centre of mass of the slider.&lt;/returns&gt;
+        private static Vector2 calculateCentreOfMass(Slider slider)
+        {
+            const double sample_step = 50;
+
+            // just sample the start and end positions if the slider is too short
+            if (slider.Distance &lt;= sample_step)
+            {
+                return Vector2.Divide(slider.Path.PositionAt(1), 2);
+            }
+
+            int count = 0;
+            Vector2 sum = Vector2.Zero;
+            double pathDistance = slider.Distance;
+
+            for (double i = 0; i &lt; pathDistance; i += sample_step)
+            {
+                sum += slider.Path.PositionAt(i / pathDistance);
+                count++;
+            }
+
+            return sum / count;
+        }
+
+        /// &lt;summary&gt;
+        /// Get the absolute rotation of a slider, defined as the angle from its start position to the end of its path.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;slider&quot;&gt;The slider to process.&lt;/param&gt;
+        /// &lt;returns&gt;The angle in radians.&lt;/returns&gt;
+        private static float getSliderRotation(Slider slider)
+        {
+            var endPositionVector = slider.Path.PositionAt(1);
+            return MathF.Atan2(endPositionVector.Y, endPositionVector.X);
+        }
+
+        /// &lt;summary&gt;
+        /// Get the absolute difference between 2 angles measured in Radians.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;angle1&quot;&gt;The first angle&lt;/param&gt;
+        /// &lt;param name=&quot;angle2&quot;&gt;The second angle&lt;/param&gt;
+        /// &lt;returns&gt;The absolute difference with interval &lt;c&gt;[0, MathF.PI)&lt;/c&gt;&lt;/returns&gt;
+        private static float getAngleDifference(float angle1, float angle2)
+        {
+            float diff = MathF.Abs(angle1 - angle2) % (MathF.PI * 2);
+            return MathF.Min(diff, MathF.PI * 2 - diff);
+        }
+
+        public class ObjectPositionInfo
+        {
+            /// &lt;summary&gt;
+            /// The jump angle from the previous hit object to this one, relative to the previous hit object&#39;s jump angle.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// &lt;see cref=&quot;RelativeAngle&quot;/&gt; of the first hit object in a beatmap represents the absolute angle from playfield center to the object.
+            /// &lt;/remarks&gt;
+            /// &lt;example&gt;
+            /// If &lt;see cref=&quot;RelativeAngle&quot;/&gt; is 0, the player&#39;s cursor doesn&#39;t need to change its direction of movement when passing
+            /// the previous object to reach this one.
+            /// &lt;/example&gt;
+            public float RelativeAngle { get; set; }
+
+            /// &lt;summary&gt;
+            /// The jump distance from the previous hit object to this one.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// &lt;see cref=&quot;DistanceFromPrevious&quot;/&gt; of the first hit object in a beatmap is relative to the playfield center.
+            /// &lt;/remarks&gt;
+            public float DistanceFromPrevious { get; set; }
+
+            /// &lt;summary&gt;
+            /// The rotation of the hit object, relative to its jump angle.
+            /// For sliders, this is defined as the angle from the slider&#39;s start position to the end of its path, relative to its jump angle.
+            /// For hit circles and spinners, this property is ignored.
+            /// &lt;/summary&gt;
+            public float Rotation { get; set; }
+
+            /// &lt;summary&gt;
+            /// The hit object associated with this &lt;see cref=&quot;ObjectPositionInfo&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public OsuHitObject HitObject { get; }
+
+            public ObjectPositionInfo(OsuHitObject hitObject)
+            {
+                HitObject = hitObject;
+            }
+        }
+
+        private class WorkingObject
+        {
+            public float RotationOriginal { get; }
+            public Vector2 PositionModified { get; set; }
+            public Vector2 EndPositionModified { get; set; }
+
+            public ObjectPositionInfo PositionInfo { get; }
+            public OsuHitObject HitObject =&gt; PositionInfo.HitObject;
+
+            public WorkingObject(ObjectPositionInfo positionInfo)
+            {
+                PositionInfo = positionInfo;
+                RotationOriginal = HitObject is Slider slider ? getSliderRotation(slider) : 0;
+                PositionModified = HitObject.Position;
+                EndPositionModified = HitObject.EndPosition;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,87,1],[31,9,31,10,1],[32,13,32,64,1],[33,13,33,57,1],[34,13,34,37,1],[36,13,36,20,1],[36,22,36,44,1],[36,45,36,47,1],[36,48,36,58,1],[37,13,37,14,1],[38,17,38,82,1],[39,17,39,91,1],[40,17,40,69,1],[43,17,47,20,1],[49,17,49,48,1],[50,17,50,18,1],[51,21,51,72,1],[52,21,52,78,1],[53,21,53,54,1],[54,17,54,18,1],[56,17,56,58,1],[57,17,57,47,1],[58,13,58,14,1],[60,13,60,34,1],[61,9,61,10,1],[69,9,69,10,1],[70,13,70,82,1],[70,82,70,102,1],[70,102,70,113,1],[71,13,71,44,1],[73,18,73,27,1],[73,29,73,53,1],[73,55,73,58,1],[74,13,74,14,1],[75,17,75,49,1],[76,17,76,51,1],[78,17,78,42,1],[79,17,79,18,1],[80,21,80,40,1],[81,21,81,30,1],[84,17,84,98,1],[87,17,87,46,1],[89,17,89,35,1],[92,25,92,68,1],[93,25,93,31,1],[96,25,96,65,1],[97,25,97,31,1],[100,17,100,43,1],[101,17,101,18,1],[102,21,102,64,1],[104,26,104,39,1],[104,41,104,89,1],[104,91,104,94,1],[105,21,105,22,1],[107,25,107,73,1],[107,74,107,80,1],[109,25,109,70,1],[110,21,110,22,1],[112,21,112,47,1],[113,25,113,66,1],[114,17,114,18,1],[116,17,116,36,1],[117,13,117,14,1],[119,13,119,47,1],[119,47,119,58,1],[119,58,119,69,1],[120,9,120,10,1],[129,9,129,10,1],[130,13,130,46,1],[132,13,132,34,1],[133,13,133,14,1],[134,17,134,52,1],[135,17,135,18,1],[136,21,136,66,1],[137,17,137,18,1],[139,17,139,18,1],[140,21,140,106,1],[141,21,141,95,1],[142,21,142,97,1],[143,17,143,18,1],[144,13,144,14,1],[146,13,146,94,1],[148,13,151,15,1],[153,13,153,89,1],[155,13,155,88,1],[157,13,157,76,1],[159,13,159,55,1],[160,17,160,24,1],[162,13,162,83,1],[164,13,164,74,1],[165,13,165,154,1],[166,13,166,103,1],[168,13,168,160,1],[169,13,169,62,1],[170,17,170,56,1],[171,9,171,10,1],[178,9,178,10,1],[179,13,179,67,1],[180,13,183,15,1],[185,13,185,79,1],[187,13,187,70,1],[188,9,188,10,1],[195,9,195,10,1],[196,13,196,58,1],[197,13,197,82,1],[202,13,202,87,1],[203,13,203,14,1],[204,17,204,67,1],[205,17,205,99,1],[206,17,206,110,1],[208,17,208,35,1],[209,17,209,18,1],[210,21,210,102,1],[211,17,211,18,1],[213,17,213,18,1],[214,21,214,113,1],[215,17,215,18,1],[217,17,217,82,1],[218,13,218,14,1],[220,13,220,67,1],[224,13,226,109,1],[228,13,230,109,1],[232,13,232,88,1],[233,13,233,68,1],[235,13,235,70,1],[236,9,236,10,1],[245,9,245,10,1],[246,18,246,27,1],[246,29,246,49,1],[246,51,246,54,1],[247,13,247,14,1],[248,17,248,47,1],[251,17,251,122,1],[253,17,253,101,1],[254,13,254,14,1],[255,9,255,10,1],[267,9,267,10,1],[268,13,268,49,1],[269,13,269,49,1],[271,13,271,49,1],[272,13,272,49,1],[275,13,275,20,1],[275,22,275,29,1],[275,30,275,32,1],[275,33,275,59,1],[276,13,276,14,1],[277,17,277,47,1],[278,17,278,47,1],[280,17,280,47,1],[281,17,281,47,1],[282,13,282,14,1],[285,13,285,49,1],[287,13,287,28,1],[288,13,288,28,1],[290,13,290,28,1],[291,13,291,28,1],[297,13,297,32,1],[298,13,298,59,1],[299,13,299,31,1],[300,13,300,60,1],[302,13,302,74,1],[303,9,303,10,1],[312,9,312,10,1],[313,13,316,15,1],[317,9,317,10,1],[325,9,325,10,1],[329,13,329,48,1],[330,13,330,14,1],[331,17,331,69,1],[334,13,334,27,1],[335,13,335,40,1],[336,13,336,51,1],[338,18,338,30,1],[338,32,338,48,1],[338,50,338,66,1],[339,13,339,14,1],[340,17,340,65,1],[341,17,341,25,1],[342,13,342,14,1],[344,13,344,32,1],[345,9,345,10,1],[353,9,353,10,1],[354,13,354,63,1],[355,13,355,74,1],[356,9,356,10,1],[365,9,365,10,1],[366,13,366,70,1],[367,13,367,57,1],[368,9,368,10,1],[382,42,382,46,1],[382,47,382,51,1],[390,49,390,53,1],[390,54,390,58,1],[397,37,397,41,1],[397,42,397,46,1],[402,45,402,49,1],[404,13,404,62,1],[405,13,405,14,1],[406,17,406,39,1],[407,13,407,14,1],[412,45,412,49,1],[413,47,413,51,1],[413,52,413,56,1],[414,50,414,54,1],[414,55,414,59,1],[416,54,416,58,1],[417,46,417,68,1],[419,13,419,66,1],[420,13,420,14,1],[421,17,421,45,1],[422,17,422,95,1],[423,17,423,55,1],[424,17,424,61,1],[425,13,425,14,1]]);
+    </script>
+  </body>
+</html>

@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModMagnetised.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuHitObjectComposer.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,90 +11,509 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Caching;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Sprites;
-using osu.Framework.Localisation;
-using osu.Framework.Timing;
+using osu.Framework.Input.Events;
 using osu.Framework.Utils;
-using osu.Game.Configuration;
+using osu.Game.Beatmaps;
 using osu.Game.Graphics;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Edit.Tools;
 using osu.Game.Rulesets.Mods;
-using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
 using osu.Game.Rulesets.Osu.UI;
 using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Edit.Components.TernaryButtons;
+using osu.Game.Screens.Edit.Compose.Components;
 using osuTK;
+using osuTK.Input;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.Edit
 {
-    public class OsuModMagnetised : Mod, IUpdatableByPlayfield, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;
+    [Cached]
+    public partial class OsuHitObjectComposer : HitObjectComposer&lt;OsuHitObject, OsuAction&gt;
     {
-        public override string Name =&gt; &quot;Magnetised&quot;;
-        public override string Acronym =&gt; &quot;MG&quot;;
-        public override IconUsage? Icon =&gt; OsuIcon.ModMagnetised;
-        public override ModType Type =&gt; ModType.Fun;
-        public override LocalisableString Description =&gt; &quot;No need to chase the circles – your cursor is a magnet!&quot;;
-        public override Type[] IncompatibleMods =&gt; new[] { typeof(OsuModAutopilot), typeof(OsuModWiggle), typeof(OsuModTransform), typeof(ModAutoplay), typeof(OsuModRelax), typeof(OsuModRepel), typeof(OsuModBubbles), typeof(OsuModDepth) };
-
-        [SettingSource(&quot;Attraction strength&quot;, &quot;How strong the pull is.&quot;, 0)]
-        public BindableFloat AttractionStrength { get; } = new BindableFloat(0.5f)
+        public OsuHitObjectComposer(Ruleset ruleset)
+            : base(ruleset)
         {
-            Precision = 0.05f,
-            MinValue = 0.05f,
-            MaxValue = 1.0f,
-        };
-
-        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
-        {
-            // Hide follow points as they won&#39;t make any sense.
-            // Judgements can potentially be turned on in a future where they display at a position relative to their drawable counterpart.
-            (drawableRuleset.Playfield as OsuPlayfield)?.FollowPoints.Hide();
         }
 
-        public void Update(Playfield playfield)
+        public override Bindable&lt;TernaryState&gt; SelectionNewComboState { get; } = new Bindable&lt;TernaryState&gt;();
+
+        protected override DrawableRuleset&lt;OsuHitObject&gt; CreateDrawableRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods)
+            =&gt; new DrawableOsuEditorRuleset(ruleset, beatmap, mods);
+
+        protected override IReadOnlyList&lt;CompositionTool&lt;OsuAction&gt;&gt; CompositionTools =&gt; new CompositionTool&lt;OsuAction&gt;[]
         {
-            var cursorPos = playfield.Cursor.AsNonNull().ActiveCursor.DrawPosition;
+            new HitCircleCompositionTool(),
+            new SliderCompositionTool(),
+            new SpinnerCompositionTool(),
+            new GridFromPointsTool()
+        };
 
-            foreach (var entry in playfield.HitObjectContainer.AliveEntries)
-            {
-                var drawable = entry.Value;
+        private readonly Bindable&lt;TernaryState&gt; rectangularGridSnapToggle = new Bindable&lt;TernaryState&gt;();
 
-                switch (drawable)
+        protected override Drawable CreateHitObjectInspector() =&gt; new OsuHitObjectInspector(DistanceSnapProvider);
+
+        protected override IEnumerable&lt;Drawable&gt; CreateTernaryButtons()
+            =&gt; base.CreateTernaryButtons()
+                   .Append(new DrawableTernaryButton&lt;OsuAction&gt;
+                   {
+                       Current = rectangularGridSnapToggle,
+                       Description = &quot;Grid Snap&quot;,
+                       CreateIcon = () =&gt; new SpriteIcon { Icon = OsuIcon.EditorGridSnap },
+                       Action = OsuAction.EditorToggleGridSnap,
+                       Hotkey = HotkeyForAction(OsuAction.EditorToggleGridSnap)
+                   })
+                   .Concat(DistanceSnapProvider.CreateTernaryButtons());
+
+        private BindableList&lt;HitObject&gt; selectedHitObjects;
+
+        private Bindable&lt;HitObject&gt; placementObject;
+
+        [Cached(typeof(IDistanceSnapProvider))]
+        public readonly OsuDistanceSnapProvider DistanceSnapProvider = new OsuDistanceSnapProvider();
+
+        [Cached]
+        private readonly OsuSliderVelocityToolboxGroup sliderVelocityToolboxGroup = new OsuSliderVelocityToolboxGroup();
+
+        [Cached]
+        protected readonly OsuGridToolboxGroup OsuGridToolboxGroup = new OsuGridToolboxGroup();
+
+        [Cached]
+        protected readonly FreehandSliderToolboxGroup FreehandSliderToolboxGroup = new FreehandSliderToolboxGroup();
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            AddInternal(DistanceSnapProvider);
+            DistanceSnapProvider.AttachToToolbox(RightToolbox);
+
+            // Give a bit of breathing room around the playfield content.
+            PlayfieldContentContainer.Padding = new MarginPadding(10);
+
+            LayerBelowRuleset.Add(
+                distanceSnapGridContainer = new Container
                 {
-                    case DrawableHitCircle circle:
-                        easeTo(playfield.Clock, circle, cursorPos);
-                        break;
-
-                    case DrawableSlider slider:
-
-                        if (!slider.HeadCircle.Result.HasResult)
-                            easeTo(playfield.Clock, slider, cursorPos);
-                        else
-                            easeTo(playfield.Clock, slider, cursorPos - slider.Ball.DrawPosition);
-
-                        break;
+                    RelativeSizeAxes = Axes.Both
                 }
+            );
+
+            selectedHitObjects = EditorBeatmap.SelectedHitObjects.GetBoundCopy();
+            selectedHitObjects.CollectionChanged += (_, _) =&gt; updateDistanceSnapGrid();
+
+            placementObject = EditorBeatmap.PlacementObject.GetBoundCopy();
+            placementObject.ValueChanged += _ =&gt; updateDistanceSnapGrid();
+            DistanceSnapProvider.DistanceSnapToggle.ValueChanged += _ =&gt; updateDistanceSnapGrid();
+
+            // we may be entering the screen with a selection already active
+            updateDistanceSnapGrid();
+
+            OsuGridToolboxGroup.GridType.BindValueChanged(updatePositionSnapGrid, true);
+
+            RightToolbox.AddRange(new Drawable[]
+                {
+                    new OsuContextMenuContainer
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Child = sliderVelocityToolboxGroup,
+                    },
+                    OsuGridToolboxGroup,
+                    new TransformToolboxGroup
+                    {
+                        RotationHandler = BlueprintContainer.SelectionHandler.RotationHandler,
+                        ScaleHandler = (OsuSelectionScaleHandler)BlueprintContainer.SelectionHandler.ScaleHandler,
+                        GridToolbox = OsuGridToolboxGroup,
+                    },
+                    new GenerateToolboxGroup(),
+                    FreehandSliderToolboxGroup
+                }
+            );
+        }
+
+        private void updatePositionSnapGrid(ValueChangedEvent&lt;PositionSnapGridType&gt; obj)
+        {
+            if (positionSnapGrid != null)
+                LayerBelowRuleset.Remove(positionSnapGrid, true);
+
+            switch (obj.NewValue)
+            {
+                case PositionSnapGridType.Square:
+                    var rectangularPositionSnapGrid = new RectangularPositionSnapGrid();
+
+                    rectangularPositionSnapGrid.Spacing.BindTo(OsuGridToolboxGroup.SpacingVector);
+                    rectangularPositionSnapGrid.GridLineRotation.BindTo(OsuGridToolboxGroup.GridLinesRotation);
+
+                    positionSnapGrid = rectangularPositionSnapGrid;
+                    break;
+
+                case PositionSnapGridType.Triangle:
+                    var triangularPositionSnapGrid = new TriangularPositionSnapGrid();
+
+                    triangularPositionSnapGrid.Spacing.BindTo(OsuGridToolboxGroup.GridLineSpacing);
+                    triangularPositionSnapGrid.GridLineRotation.BindTo(OsuGridToolboxGroup.GridLinesRotation);
+
+                    positionSnapGrid = triangularPositionSnapGrid;
+                    break;
+
+                case PositionSnapGridType.Circle:
+                    var circularPositionSnapGrid = new CircularPositionSnapGrid();
+
+                    circularPositionSnapGrid.Spacing.BindTo(OsuGridToolboxGroup.GridLineSpacing);
+
+                    positionSnapGrid = circularPositionSnapGrid;
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(OsuGridToolboxGroup.GridType), OsuGridToolboxGroup.GridType, &quot;Unsupported grid type.&quot;);
+            }
+
+            // Bind the start position to the toolbox sliders.
+            positionSnapGrid.StartPosition.BindTo(OsuGridToolboxGroup.StartPosition);
+
+            positionSnapGrid.RelativeSizeAxes = Axes.Both;
+            LayerBelowRuleset.Add(positionSnapGrid);
+        }
+
+        protected override ComposeBlueprintContainer CreateBlueprintContainer()
+            =&gt; new OsuBlueprintContainer(this);
+
+        public override string ConvertSelectionToString()
+            =&gt; string.Join(&#39;,&#39;, selectedHitObjects.Cast&lt;OsuHitObject&gt;().OrderBy(h =&gt; h.StartTime)
+                                                  .Select(h =&gt; (h.IndexInCurrentCombo + 1).ToString(CultureInfo.InvariantCulture)));
+
+        // 1,2,3,4 ...
+        private static readonly Regex selection_regex = new Regex(@&quot;^\d+(,\d+)*$&quot;, RegexOptions.Compiled);
+
+        public override void SelectFromTimestamp(double timestamp, string objectDescription)
+        {
+            if (!selection_regex.IsMatch(objectDescription))
+                return;
+
+            List&lt;OsuHitObject&gt; remainingHitObjects = EditorBeatmap.HitObjects.Cast&lt;OsuHitObject&gt;().Where(h =&gt; h.StartTime &gt;= timestamp).ToList();
+            string[] splitDescription = objectDescription.Split(&#39;,&#39;);
+
+            for (int i = 0; i &lt; splitDescription.Length; i++)
+            {
+                if (!int.TryParse(splitDescription[i], out int combo) || combo &lt; 1)
+                    continue;
+
+                OsuHitObject current = remainingHitObjects.FirstOrDefault(h =&gt; h.IndexInCurrentCombo + 1 == combo);
+
+                if (current == null)
+                    continue;
+
+                EditorBeatmap.SelectedHitObjects.Add(current);
+
+                if (i &lt; splitDescription.Length - 1)
+                    remainingHitObjects = remainingHitObjects.Where(h =&gt; h != current &amp;&amp; h.StartTime &gt;= current.StartTime).ToList();
             }
         }
 
-        private void easeTo(IFrameBasedClock clock, DrawableHitObject hitObject, Vector2 destination)
+        private DistanceSnapGrid distanceSnapGrid;
+        private Container distanceSnapGridContainer;
+
+        private readonly Cached distanceSnapGridCache = new Cached();
+        private double? lastDistanceSnapGridTime;
+
+        private PositionSnapGrid positionSnapGrid;
+
+        protected override void Update()
         {
-            double dampLength = Interpolation.Lerp(3000, 40, AttractionStrength.Value);
+            base.Update();
 
-            float x = (float)Interpolation.DampContinuously(hitObject.X, destination.X, dampLength, clock.ElapsedFrameTime);
-            float y = (float)Interpolation.DampContinuously(hitObject.Y, destination.Y, dampLength, clock.ElapsedFrameTime);
+            if (!(BlueprintContainer.CurrentTool is SelectTool))
+            {
+                if (EditorClock.CurrentTime != lastDistanceSnapGridTime)
+                {
+                    distanceSnapGridCache.Invalidate();
+                    lastDistanceSnapGridTime = EditorClock.CurrentTime;
+                }
 
-            hitObject.Position = new Vector2(x, y);
+                if (!distanceSnapGridCache.IsValid)
+                    updateDistanceSnapGrid();
+            }
+        }
+
+        [CanBeNull]
+        public SnapResult TrySnapToNearbyObjects(Vector2 screenSpacePosition, double? fallbackTime = null)
+        {
+            if (!snapToVisibleBlueprints(screenSpacePosition, out var snapResult))
+                return null;
+
+            if (DistanceSnapProvider.DistanceSnapToggle.Value != TernaryState.True || distanceSnapGrid == null)
+                return snapResult;
+
+            // In the case of snapping to nearby objects, a time value is not provided.
+            // This matches the stable editor (which also uses current time), but with the introduction of time-snapping distance snap
+            // this could result in unexpected behaviour when distance snapping is turned on and a user attempts to place an object that is
+            // BOTH on a valid distance snap ring, and also at the same position as a previous object.
+            //
+            // We want to ensure that in this particular case, the time-snapping component of distance snap is still applied.
+            // The easiest way to ensure this is to attempt application of distance snap after a nearby object is found, and copy over
+            // the time value if the proposed positions are roughly the same.
+            (Vector2 distanceSnappedPosition, double distanceSnappedTime) = distanceSnapGrid.GetSnappedPosition(distanceSnapGrid.ToLocalSpace(snapResult.ScreenSpacePosition));
+            snapResult.Time = Precision.AlmostEquals(distanceSnapGrid.ToScreenSpace(distanceSnappedPosition), snapResult.ScreenSpacePosition, 1)
+                ? distanceSnappedTime
+                : fallbackTime;
+
+            return snapResult;
+        }
+
+        [CanBeNull]
+        public SnapResult TrySnapToDistanceGrid(Vector2 screenSpacePosition, double? fixedTime = null)
+        {
+            if (DistanceSnapProvider.DistanceSnapToggle.Value != TernaryState.True || distanceSnapGrid?.IsLoaded != true)
+                return null;
+
+            var playfield = PlayfieldAtScreenSpacePosition(screenSpacePosition);
+            (Vector2 pos, double time) = distanceSnapGrid.GetSnappedPosition(distanceSnapGrid.ToLocalSpace(screenSpacePosition), fixedTime);
+
+            if (pos.X &lt; 0 || pos.X &gt; OsuPlayfield.BASE_SIZE.X || pos.Y &lt; 0 || pos.Y &gt; OsuPlayfield.BASE_SIZE.Y)
+                return null;
+
+            return new SnapResult(distanceSnapGrid.ToScreenSpace(pos), time, playfield);
+        }
+
+        [CanBeNull]
+        public SnapResult TrySnapToPositionGrid(Vector2 screenSpacePosition, double? fallbackTime = null)
+        {
+            if (rectangularGridSnapToggle.Value != TernaryState.True)
+                return null;
+
+            Vector2 pos = positionSnapGrid.GetSnappedPosition(positionSnapGrid.ToLocalSpace(screenSpacePosition));
+
+            // A grid which doesn&#39;t perfectly fit the playfield can produce a position that is outside of the playfield.
+            // We need to clamp the position to the playfield bounds to ensure that the snapped position is always in bounds.
+            pos = Vector2.Clamp(pos, Vector2.Zero, OsuPlayfield.BASE_SIZE);
+
+            var playfield = PlayfieldAtScreenSpacePosition(screenSpacePosition);
+            return new SnapResult(positionSnapGrid.ToScreenSpace(pos), fallbackTime, playfield);
+        }
+
+        private bool snapToVisibleBlueprints(Vector2 screenSpacePosition, out SnapResult snapResult)
+        {
+            // check other on-screen objects for snapping/stacking
+            var blueprints = BlueprintContainer.SelectionBlueprints.AliveChildren;
+
+            var playfield = PlayfieldAtScreenSpacePosition(screenSpacePosition);
+
+            float snapRadius =
+                playfield.GamefieldToScreenSpace(new Vector2(OsuHitObject.OBJECT_RADIUS * 0.10f)).X -
+                playfield.GamefieldToScreenSpace(Vector2.Zero).X;
+
+            foreach (var b in blueprints)
+            {
+                if (b.IsSelected)
+                    continue;
+
+                var snapPositions = b.ScreenSpaceSnapPoints;
+
+                if (!snapPositions.Any())
+                    continue;
+
+                var closestSnapPosition = snapPositions.MinBy(p =&gt; Vector2.Distance(p, screenSpacePosition));
+
+                if (Vector2.Distance(closestSnapPosition, screenSpacePosition) &lt; snapRadius)
+                {
+                    // if the snap target is a stacked object, snap to its unstacked position rather than its stacked position.
+                    // this is intended to make working with stacks easier (because thanks to this, you can drag an object to any
+                    // of the items on the stack to add an object to it, rather than having to drag to the position of the *first* object on it at all times).
+                    if (b.Item is OsuHitObject osuObject &amp;&amp; osuObject.StackOffset != Vector2.Zero)
+                        closestSnapPosition = b.ToScreenSpace(b.ToLocalSpace(closestSnapPosition) - osuObject.StackOffset);
+
+                    // only return distance portion, since time is not really valid
+                    snapResult = new SnapResult(closestSnapPosition, null, playfield);
+                    return true;
+                }
+            }
+
+            snapResult = null;
+            return false;
+        }
+
+        private void updateDistanceSnapGrid()
+        {
+            distanceSnapGridContainer.Clear();
+            distanceSnapGridCache.Invalidate();
+            distanceSnapGrid = null;
+
+            if (DistanceSnapProvider.DistanceSnapToggle.Value != TernaryState.True)
+                return;
+
+            switch (BlueprintContainer.CurrentTool)
+            {
+                case SelectTool:
+                    if (!EditorBeatmap.SelectedHitObjects.Any())
+                        return;
+
+                    distanceSnapGrid = createDistanceSnapGrid(EditorBeatmap.SelectedHitObjects);
+                    break;
+
+                default:
+                    if (!CursorInPlacementArea)
+                        return;
+
+                    distanceSnapGrid = createDistanceSnapGrid(Enumerable.Empty&lt;HitObject&gt;());
+                    break;
+            }
+
+            if (distanceSnapGrid != null)
+            {
+                distanceSnapGridContainer.Add(distanceSnapGrid);
+                distanceSnapGridCache.Validate();
+            }
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            // Why is this logic here and not in `OsuSelectionHandler`?
+            // Because we only want to handle this toggle after all other right-click handling completes.
+            //
+            // Consider that input is handled from the most nested child first:
+            //
+            // ComposeScreen
+            //  |- OsuContextMenuContainer                 // right click for context
+            //     |- TimelineBlueprintContainer
+            //        |- TimelineSelectionHandler
+            //     |- (Osu)HitObjectComposer               // right click for toggle new combo
+            //        |- (Osu)EditorBlueprintContainer     // right click for select
+            //           |- (Osu)EditorSelectionHandler    // right click for delete
+            if (e.Button == MouseButton.Right)
+            {
+                var osuSelectionHandler = (OsuSelectionHandler)BlueprintContainer.SelectionHandler;
+
+                if (!osuSelectionHandler.SelectedItems.Any())
+                {
+                    SelectionNewComboState!.Value = SelectionNewComboState.Value == TernaryState.False ? TernaryState.True : TernaryState.False;
+                    return true;
+                }
+            }
+
+            return base.OnMouseDown(e);
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat)
+                return false;
+
+            handleToggleViaKey(e);
+            return base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyUpEvent e)
+        {
+            handleToggleViaKey(e);
+            base.OnKeyUp(e);
+        }
+
+        private bool gridSnapMomentary;
+
+        private void handleToggleViaKey(KeyboardEvent key)
+        {
+            bool shiftPressed = key.ShiftPressed;
+
+            if (shiftPressed != gridSnapMomentary)
+            {
+                gridSnapMomentary = shiftPressed;
+                rectangularGridSnapToggle.Value = rectangularGridSnapToggle.Value == TernaryState.False ? TernaryState.True : TernaryState.False;
+            }
+
+            DistanceSnapProvider.HandleToggleViaKey(key);
+        }
+
+        private DistanceSnapGrid createDistanceSnapGrid(IEnumerable&lt;HitObject&gt; selectedHitObjects)
+        {
+            if (BlueprintContainer.CurrentTool is SpinnerCompositionTool)
+                return null;
+
+            var objects = selectedHitObjects.ToList();
+
+            if (objects.Count == 0)
+                // use accurate time value to give more instantaneous feedback to the user.
+                return createGrid(h =&gt; h.StartTime &lt;= EditorClock.CurrentTimeAccurate);
+
+            double minTime = objects.Min(h =&gt; h.StartTime);
+            return createGrid(h =&gt; h.StartTime &lt; minTime, objects.Count + 1);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a grid from the last &lt;see cref=&quot;HitObject&quot;/&gt; matching a predicate to a target &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sourceSelector&quot;&gt;A predicate that matches &lt;see cref=&quot;HitObject&quot;/&gt;s where the grid can start from.
+        /// Only the last &lt;see cref=&quot;HitObject&quot;/&gt; matching the predicate is used.&lt;/param&gt;
+        /// &lt;param name=&quot;targetOffset&quot;&gt;An offset from the &lt;see cref=&quot;HitObject&quot;/&gt; selected via &lt;paramref name=&quot;sourceSelector&quot;/&gt; at which the grid should stop.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;OsuDistanceSnapGrid&quot;/&gt; from a selected &lt;see cref=&quot;HitObject&quot;/&gt; to a target &lt;see cref=&quot;HitObject&quot;/&gt;.&lt;/returns&gt;
+        private OsuDistanceSnapGrid createGrid(Func&lt;HitObject, bool&gt; sourceSelector, int targetOffset = 1)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(targetOffset);
+
+            int positionSourceObjectIndex = -1;
+            IHasSliderVelocity sliderVelocitySource = null;
+
+            for (int i = 0; i &lt; EditorBeatmap.HitObjects.Count; i++)
+            {
+                if (!sourceSelector(EditorBeatmap.HitObjects[i]))
+                    break;
+
+                positionSourceObjectIndex = i;
+
+                if (EditorBeatmap.HitObjects[i] is IHasSliderVelocity hasSliderVelocity)
+                    sliderVelocitySource = hasSliderVelocity;
+            }
+
+            if (positionSourceObjectIndex == -1)
+                return null;
+
+            HitObject sourceObject = EditorBeatmap.HitObjects[positionSourceObjectIndex];
+
+            int targetIndex = positionSourceObjectIndex + targetOffset;
+            HitObject targetObject = null;
+
+            // Keep advancing the target object while its start time falls before the end time of the source object
+            while (true)
+            {
+                if (targetIndex &gt;= EditorBeatmap.HitObjects.Count)
+                    break;
+
+                if (EditorBeatmap.HitObjects[targetIndex].StartTime &gt;= sourceObject.GetEndTime())
+                {
+                    targetObject = EditorBeatmap.HitObjects[targetIndex];
+                    break;
+                }
+
+                targetIndex++;
+            }
+
+            if (sourceObject is Spinner)
+                return null;
+
+            return new OsuDistanceSnapGrid((OsuHitObject)sourceObject, (OsuHitObject)targetObject, sliderVelocitySource);
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[25,40,25,52,0],[26,43,26,47,0],[27,44,27,65,0],[28,41,28,52,0],[29,58,29,115,0],[30,52,30,239,0],[33,51,33,55,1],[33,60,38,10,1],[41,9,41,10,0],[44,13,44,78,0],[45,9,45,10,0],[48,9,48,10,0],[49,13,49,84,0],[51,13,51,20,0],[51,22,51,31,0],[51,32,51,34,0],[51,35,51,76,0],[52,13,52,14,0],[53,17,53,44,0],[55,17,55,34,0],[58,25,58,68,0],[59,25,59,31,0],[63,25,63,65,0],[64,29,64,72,0],[66,29,66,99,0],[68,25,68,31,0],[70,13,70,14,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,88,0],[77,13,77,125,0],[78,13,78,125,0],[80,13,80,52,0],[81,9,81,10,0]]);
+      highlightRanges([[43,15,43,28,0],[44,9,44,10,0],[45,9,45,10,0],[47,73,47,77,0],[47,82,47,110,0],[50,16,50,68,0],[52,90,58,10,0],[60,9,60,106,0],[62,67,62,114,0],[65,16,70,43,0],[70,43,70,91,0],[70,91,74,72,0],[81,9,81,102,0],[84,9,84,121,0],[87,9,87,96,0],[90,9,90,117,0],[94,9,94,10,0],[95,13,95,47,0],[96,13,96,64,0],[99,13,99,71,0],[101,13,106,15,0],[108,13,108,82,0],[109,13,109,63,0],[109,63,109,87,0],[109,87,109,88,0],[111,13,111,76,0],[112,13,112,50,0],[112,50,112,74,0],[112,74,112,75,0],[113,13,113,74,0],[113,74,113,98,0],[113,98,113,99,0],[116,13,116,38,0],[118,13,118,89,0],[120,13,138,15,0],[139,9,139,10,0],[142,9,142,10,0],[143,13,143,42,0],[144,17,144,66,0],[146,13,146,34,0],[149,21,149,89,0],[151,21,151,99,0],[152,21,152,112,0],[154,21,154,68,0],[155,21,155,27,0],[158,21,158,87,0],[160,21,160,100,0],[161,21,161,111,0],[163,21,163,67,0],[164,21,164,27,0],[167,21,167,83,0],[169,21,169,98,0],[171,21,171,65,0],[172,21,172,27,0],[175,21,175,153,0],[179,13,179,86,0],[181,13,181,59,0],[182,13,182,53,0],[183,9,183,10,0],[186,16,186,47,0],[189,16,189,86,0],[189,86,189,97,0],[189,97,190,64,0],[190,64,190,130,0],[190,130,190,132,0],[193,9,193,107,0],[196,9,196,10,0],[197,13,197,61,0],[198,17,198,24,0],[200,13,200,111,0],[200,111,200,135,0],[200,135,200,146,0],[201,13,201,70,0],[203,18,203,27,0],[203,29,203,56,0],[203,58,203,61,0],[204,13,204,14,0],[205,17,205,84,0],[206,21,206,30,0],[208,17,208,80,0],[208,80,208,114,0],[208,114,208,116,0],[210,17,210,37,0],[211,21,211,30,0],[213,17,213,63,0],[215,17,215,53,0],[216,21,216,74,0],[216,74,216,122,0],[216,122,216,133,0],[217,13,217,14,0],[218,9,218,10,0],[223,9,223,70,0],[229,9,229,10,0],[230,13,230,27,0],[232,13,232,65,0],[233,13,233,14,0],[234,17,234,73,0],[235,17,235,18,0],[236,21,236,56,0],[237,21,237,72,0],[238,17,238,18,0],[240,17,240,52,0],[241,21,241,46,0],[242,13,242,14,0],[243,9,243,10,0],[247,9,247,10,0],[248,13,248,83,0],[249,17,249,29,0],[251,13,251,112,0],[252,17,252,35,0],[262,13,262,176,0],[263,13,265,32,0],[267,13,267,31,0],[268,9,268,10,0],[272,9,272,10,0],[273,13,273,122,0],[274,17,274,29,0],[276,13,276,81,0],[277,13,277,141,0],[279,13,279,112,0],[280,17,280,29,0],[282,13,282,89,0],[283,9,283,10,0],[287,9,287,10,0],[288,13,288,70,0],[289,17,289,29,0],[291,13,291,115,0],[295,13,295,76,0],[297,13,297,81,0],[298,13,298,97,0],[299,9,299,10,0],[302,9,302,10,0],[304,13,304,83,0],[306,13,306,81,0],[308,13,310,66,0],[312,13,312,20,0],[312,22,312,27,0],[312,28,312,30,0],[312,31,312,41,0],[313,13,313,14,0],[314,17,314,34,0],[315,21,315,30,0],[317,17,317,61,0],[319,17,319,42,0],[320,21,320,30,0],[322,17,322,68,0],[322,68,322,108,0],[322,108,322,110,0],[324,17,324,93,0],[325,17,325,18,0],[329,21,329,99,0],[330,25,330,124,0],[333,21,333,87,0],[334,21,334,33,0],[336,13,336,14,0],[338,13,338,31,0],[339,13,339,26,0],[340,9,340,10,0],[343,9,343,10,0],[344,13,344,47,0],[345,13,345,48,0],[346,13,346,37,0],[348,13,348,84,0],[349,17,349,24,0],[351,13,351,52,0],[354,21,354,65,0],[355,25,355,32,0],[357,21,357,97,0],[358,21,358,27,0],[361,21,361,48,0],[362,25,362,32,0],[364,21,364,94,0],[365,21,365,27,0],[368,13,368,42,0],[369,13,369,14,0],[370,17,370,65,0],[371,17,371,50,0],[372,13,372,14,0],[373,9,373,10,0],[376,9,376,10,0],[389,13,389,47,0],[390,13,390,14,0],[391,17,391,100,0],[393,17,393,62,0],[394,17,394,18,0],[395,21,395,145,0],[396,21,396,33,0],[398,13,398,14,0],[400,13,400,40,0],[401,9,401,10,0],[404,9,404,10,0],[405,13,405,26,0],[406,17,406,30,0],[408,13,408,35,0],[409,13,409,38,0],[410,9,410,10,0],[413,9,413,10,0],[414,13,414,35,0],[415,13,415,29,0],[416,9,416,10,0],[421,9,421,10,0],[422,13,422,50,0],[424,13,424,51,0],[425,13,425,14,0],[426,17,426,50,0],[427,17,427,146,0],[428,13,428,14,0],[430,13,430,58,0],[431,9,431,10,0],[434,9,434,10,0],[435,13,435,74,0],[436,17,436,29,0],[438,13,438,55,0],[440,13,440,36,0],[442,17,442,40,0],[442,40,442,86,0],[442,86,442,88,0],[444,13,444,47,0],[444,47,444,58,0],[444,58,444,60,0],[445,13,445,36,0],[445,36,445,57,0],[445,57,445,78,0],[446,9,446,10,0],[456,9,456,10,0],[457,13,457,77,0],[459,13,459,48,0],[460,13,460,60,0],[462,18,462,27,0],[462,29,462,63,0],[462,65,462,68,0],[463,13,463,14,0],[464,17,464,66,0],[465,21,465,27,0],[467,17,467,47,0],[469,17,469,89,0],[470,21,470,62,0],[471,13,471,14,0],[473,13,473,49,0],[474,17,474,29,0],[476,13,476,90,0],[478,13,478,72,0],[479,13,479,43,0],[482,13,482,25,0],[483,13,483,14,0],[484,17,484,67,0],[485,21,485,27,0],[487,17,487,98,0],[488,17,488,18,0],[489,21,489,74,0],[490,21,490,27,0],[493,17,493,31,0],[494,13,494,14,0],[496,13,496,41,0],[497,17,497,29,0],[499,13,499,122,0],[500,9,500,10,0]]);
     </script>
   </body>
 </html>

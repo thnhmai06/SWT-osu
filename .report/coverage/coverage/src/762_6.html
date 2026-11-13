@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModStrictTracking.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/HUD/AimErrorMeter.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,182 +11,482 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System;
+using System.ComponentModel;
 using System.Linq;
-using System.Threading;
-using osu.Framework.Graphics.Sprites;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Graphics.Shapes;
 using osu.Framework.Localisation;
 using osu.Game.Beatmaps;
+using osu.Game.Configuration;
 using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Localisation.HUD;
 using osu.Game.Rulesets.Judgements;
 using osu.Game.Rulesets.Mods;
-using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Objects.Types;
-using osu.Game.Rulesets.Osu.Beatmaps;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Osu.Judgements;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Statistics;
 using osu.Game.Rulesets.Scoring;
-using osu.Game.Rulesets.UI;
-using osu.Game.Screens.Play;
+using osu.Game.Screens.Play.HUD.HitErrorMeters;
+using osuTK;
+using osuTK.Graphics;
+using Container = osu.Framework.Graphics.Containers.Container;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.HUD
 {
-    public partial class OsuModStrictTracking : Mod, IApplicableAfterBeatmapConversion, IApplicableToDrawableHitObject, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;
+    [Cached]
+    public partial class AimErrorMeter : HitErrorMeter
     {
-        public override string Name =&gt; @&quot;Strict Tracking&quot;;
-        public override string Acronym =&gt; @&quot;ST&quot;;
-        public override IconUsage? Icon =&gt; OsuIcon.ModStrictTracking;
-        public override ModType Type =&gt; ModType.DifficultyIncrease;
-        public override LocalisableString Description =&gt; @&quot;Once you start a slider, follow precisely or get a miss.&quot;;
-        public override Type[] IncompatibleMods =&gt; new[] { typeof(ModClassic), typeof(OsuModTargetPractice) };
-
-        public void ApplyToDrawableHitObject(DrawableHitObject drawable)
+        [SettingSource(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.HitMarkerSize), nameof(AimErrorMeterStrings.HitMarkerSizeDescription))]
+        public BindableNumber&lt;float&gt; HitMarkerSize { get; } = new BindableNumber&lt;float&gt;(7f)
         {
-            if (drawable is DrawableSlider slider)
+            MinValue = 0f,
+            MaxValue = 12f,
+            Precision = 1f
+        };
+
+        [SettingSource(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.HitMarkerStyle), nameof(AimErrorMeterStrings.HitMarkerStyleDescription))]
+        public Bindable&lt;MarkerStyle&gt; HitMarkerStyle { get; } = new Bindable&lt;MarkerStyle&gt;();
+
+        [SettingSource(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.AverageMarkerSize), nameof(AimErrorMeterStrings.AverageMarkerSizeDescription))]
+        public BindableNumber&lt;float&gt; AverageMarkerSize { get; } = new BindableNumber&lt;float&gt;(12f)
+        {
+            MinValue = 7f,
+            MaxValue = 25f,
+            Precision = 1f
+        };
+
+        [SettingSource(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.AverageMarkerStyle), nameof(AimErrorMeterStrings.AverageMarkerStyleDescription))]
+        public Bindable&lt;MarkerStyle&gt; AverageMarkerStyle { get; } = new Bindable&lt;MarkerStyle&gt;(MarkerStyle.Plus);
+
+        [SettingSource(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.PositionDisplayStyle), nameof(AimErrorMeterStrings.PositionDisplayStyleDescription))]
+        public Bindable&lt;PositionDisplay&gt; PositionDisplayStyle { get; } = new Bindable&lt;PositionDisplay&gt;();
+
+        // used for calculate relative position.
+        private Vector2? lastObjectPosition;
+
+        private Container averagePositionMarker = null!;
+        private Container averagePositionMarkerRotationContainer = null!;
+        private Vector2? averagePosition;
+
+        private readonly DrawablePool&lt;HitPositionMarker&gt; hitPositionPool = new DrawablePool&lt;HitPositionMarker&gt;(30);
+        private Container hitPositionMarkerContainer = null!;
+
+        private Container arrowBackgroundContainer = null!;
+        private UprightAspectMaintainingContainer rotateFixedContainer = null!;
+        private Container mainContainer = null!;
+
+        private float objectRadius;
+
+        private const int max_concurrent_judgements = 30;
+
+        private const float line_thickness = 2;
+        private const float inner_portion = 0.85f;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        public AimErrorMeter()
+        {
+            AutoSizeAxes = Axes.Both;
+            AlwaysPresent = true;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IBindable&lt;WorkingBeatmap&gt; beatmap, ScoreProcessor processor)
+        {
+            InternalChild = new Container
             {
-                slider.Tracking.ValueChanged += e =&gt;
+                Height = 100,
+                Width = 100,
+                Children = new Drawable[]
                 {
-                    if (e.NewValue || slider.Judged) return;
-
-                    if (slider.Time.Current &lt; slider.HitObject.StartTime)
-                        return;
-
-                    if ((slider.Clock as IGameplayClock)?.IsRewinding == true)
-                        return;
-
-                    var tail = slider.NestedHitObjects.OfType&lt;StrictTrackingDrawableSliderTail&gt;().First();
-
-                    if (!tail.Judged)
-                        tail.MissForcefully();
-                };
-            }
-        }
-
-        public void ApplyToBeatmap(IBeatmap beatmap)
-        {
-            var osuBeatmap = (OsuBeatmap)beatmap;
-
-            if (osuBeatmap.HitObjects.Count == 0) return;
-
-            var hitObjects = osuBeatmap.HitObjects.Select(ho =&gt;
-            {
-                if (ho is Slider slider)
-                {
-                    var newSlider = new StrictTrackingSlider(slider);
-                    return newSlider;
-                }
-
-                return ho;
-            }).ToList();
-
-            osuBeatmap.HitObjects = hitObjects;
-        }
-
-        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
-        {
-            drawableRuleset.Playfield.RegisterPool&lt;StrictTrackingSliderTailCircle, StrictTrackingDrawableSliderTail&gt;(10, 100);
-        }
-
-        private class StrictTrackingSliderTailCircle : SliderTailCircle
-        {
-            public StrictTrackingSliderTailCircle(Slider slider)
-                : base(slider)
-            {
-            }
-
-            public override Judgement CreateJudgement() =&gt; new StrictTrackingTailJudgement();
-        }
-
-        public class StrictTrackingTailJudgement : SliderTailCircle.TailJudgement
-        {
-            public override HitResult MinResult =&gt; HitResult.LargeTickMiss;
-        }
-
-        private partial class StrictTrackingDrawableSliderTail : DrawableSliderTail
-        {
-            public override bool DisplayResult =&gt; true;
-        }
-
-        private class StrictTrackingSlider : Slider
-        {
-            public StrictTrackingSlider(Slider original)
-            {
-                StartTime = original.StartTime;
-                Samples = original.Samples;
-                Path = original.Path;
-                NodeSamples = original.NodeSamples;
-                RepeatCount = original.RepeatCount;
-                Position = original.Position;
-                NewCombo = original.NewCombo;
-                ComboOffset = original.ComboOffset;
-                TickDistanceMultiplier = original.TickDistanceMultiplier;
-                SliderVelocityMultiplier = original.SliderVelocityMultiplier;
-            }
-
-            protected override void CreateNestedHitObjects(CancellationToken cancellationToken)
-            {
-                var sliderEvents = SliderEventGenerator.Generate(StartTime, SpanDuration, Velocity, TickDistance, Path.Distance, this.SpanCount(), cancellationToken);
-
-                foreach (var e in sliderEvents)
-                {
-                    switch (e.Type)
+                    hitPositionPool,
+                    rotateFixedContainer = new UprightAspectMaintainingContainer
                     {
-                        case SliderEventType.Tick:
-                            AddNested(new SliderTick
-                            {
-                                SpanIndex = e.SpanIndex,
-                                SpanStartTime = e.SpanStartTime,
-                                StartTime = e.Time,
-                                Position = Position + Path.PositionAt(e.PathProgress),
-                                StackHeight = StackHeight,
-                                Scale = Scale,
-                                PathProgress = e.PathProgress,
-                            });
-                            break;
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    },
+                }
+            };
 
-                        case SliderEventType.Head:
-                            AddNested(HeadCircle = new SliderHeadCircle
+            mainContainer = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    new CircularContainer
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        BorderColour = Colour4.White,
+                        Masking = true,
+                        BorderThickness = 2,
+                        RelativeSizeAxes = Axes.Both,
+                        Size = new Vector2(inner_portion),
+                        Child = new Box
+                        {
+                            Colour = Colour4.Gray,
+                            Alpha = 0.3f,
+                            RelativeSizeAxes = Axes.Both
+                        },
+                    },
+                    arrowBackgroundContainer = new Container
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Name = &quot;Arrow Background&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        Rotation = 45,
+                        Alpha = 0f,
+                        Children = new Drawable[]
+                        {
+                            new Circle
                             {
-                                StartTime = e.Time,
-                                Position = Position,
-                                StackHeight = StackHeight,
-                            });
-                            break;
-
-                        case SliderEventType.Tail:
-                            AddNested(TailCircle = new StrictTrackingSliderTailCircle(this)
+                                RelativeSizeAxes = Axes.Y,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Height = inner_portion + 0.2f,
+                                Width = line_thickness / 2,
+                            },
+                            new Circle
                             {
-                                RepeatIndex = e.SpanIndex,
-                                StartTime = e.Time,
-                                Position = EndPosition,
-                                StackHeight = StackHeight
-                            });
-                            break;
-
-                        case SliderEventType.Repeat:
-                            AddNested(new SliderRepeat(this)
+                                Height = 5f,
+                                Width = line_thickness / 2,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.TopCentre,
+                                Margin = new MarginPadding(-line_thickness / 4),
+                                RelativePositionAxes = Axes.Both,
+                                Y = -(inner_portion + 0.2f) / 2,
+                                Rotation = -45
+                            },
+                            new Circle
                             {
-                                RepeatIndex = e.SpanIndex,
-                                StartTime = StartTime + (e.SpanIndex + 1) * SpanDuration,
-                                Position = Position + Path.PositionAt(e.PathProgress),
-                                StackHeight = StackHeight,
-                                Scale = Scale,
-                                PathProgress = e.PathProgress,
-                            });
-                            break;
+                                Height = 5f,
+                                Width = line_thickness / 2,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.TopCentre,
+                                Margin = new MarginPadding(-line_thickness / 4),
+                                RelativePositionAxes = Axes.Both,
+                                Y = -(inner_portion + 0.2f) / 2,
+                                Rotation = 45
+                            }
+                        }
+                    },
+                    new Container
+                    {
+                        Name = &quot;Cross Background&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        Children = new Drawable[]
+                        {
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Y,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Alpha = 0.5f,
+                                Width = line_thickness,
+                                Height = inner_portion * 0.9f
+                            },
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Y,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Alpha = 0.5f,
+                                Width = line_thickness,
+                                Height = inner_portion * 0.9f,
+                                Rotation = 90
+                            },
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Y,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Alpha = 0.2f,
+                                Width = line_thickness / 2,
+                                Height = inner_portion * 0.9f,
+                                Rotation = 45
+                            },
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Y,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Alpha = 0.2f,
+                                Width = line_thickness / 2,
+                                Height = inner_portion * 0.9f,
+                                Rotation = 135
+                            },
+                        }
+                    },
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Children = new Drawable[]
+                        {
+                            hitPositionMarkerContainer = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre
+                            },
+                            averagePositionMarker = new UprightAspectMaintainingContainer
+                            {
+                                RelativePositionAxes = Axes.Both,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Child = averagePositionMarkerRotationContainer = new Container
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    Children = new Drawable[]
+                                    {
+                                        new Circle
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Anchor = Anchor.Centre,
+                                            Origin = Anchor.Centre,
+                                            Width = 0.25f,
+                                        },
+                                        new Circle
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Anchor = Anchor.Centre,
+                                            Origin = Anchor.Centre,
+                                            Width = 0.25f,
+                                            Rotation = 90
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            };
 
-                UpdateNestedSamples();
+            // handle IApplicableToDifficulty for CS change.
+            BeatmapDifficulty newDifficulty = new BeatmapDifficulty();
+            beatmap.Value.Beatmap.Difficulty.CopyTo(newDifficulty);
+
+            var mods = processor.Mods.Value;
+
+            foreach (var mod in mods.OfType&lt;IApplicableToDifficulty&gt;())
+                mod.ApplyToDifficulty(newDifficulty);
+
+            objectRadius = OsuHitObject.OBJECT_RADIUS * LegacyRulesetExtensions.CalculateScaleFromCircleSize(newDifficulty.CircleSize, true);
+
+            AverageMarkerSize.BindValueChanged(size =&gt; averagePositionMarker.Size = new Vector2(size.NewValue), true);
+            AverageMarkerStyle.BindValueChanged(style =&gt; averagePositionMarkerRotationContainer.Rotation = style.NewValue == MarkerStyle.Plus ? 0 : 45, true);
+
+            PositionDisplayStyle.BindValueChanged(s =&gt;
+            {
+                Clear();
+
+                if (s.NewValue == PositionDisplay.Normalised)
+                {
+                    arrowBackgroundContainer.FadeIn(100);
+                    rotateFixedContainer.Remove(mainContainer, false);
+                    AddInternal(mainContainer);
+                }
+                else
+                {
+                    arrowBackgroundContainer.FadeOut(100);
+                    // when in absolute mode, rotation of the aim error meter as a whole should not affect how the component is displayed
+                    RemoveInternal(mainContainer, false);
+                    rotateFixedContainer.Add(mainContainer);
+                }
+            }, true);
+        }
+
+        protected override void OnNewJudgement(JudgementResult judgement)
+        {
+            if (judgement is not OsuHitCircleJudgementResult circleJudgement) return;
+
+            if (circleJudgement.CursorPositionAtHit == null) return;
+
+            if (hitPositionMarkerContainer.Count &gt; max_concurrent_judgements)
+            {
+                const double quick_fade_time = 300;
+
+                // check with a bit of lenience to avoid precision error in comparison.
+                var old = hitPositionMarkerContainer.FirstOrDefault(j =&gt; j.LifetimeEnd &gt; Clock.CurrentTime + quick_fade_time * 1.1);
+
+                if (old != null)
+                {
+                    old.ClearTransforms();
+                    old.FadeOut(quick_fade_time).Expire();
+                }
             }
+
+            Vector2 hitPosition;
+
+            if (PositionDisplayStyle.Value == PositionDisplay.Normalised &amp;&amp; lastObjectPosition != null)
+            {
+                hitPosition = AccuracyHeatmap.FindRelativeHitPosition(lastObjectPosition.Value, ((OsuHitObject)circleJudgement.HitObject).StackedEndPosition,
+                    circleJudgement.CursorPositionAtHit.Value, objectRadius, 45) * (inner_portion / 2);
+            }
+            else
+            {
+                // get relative position between mouse position and current object.
+                hitPosition = (circleJudgement.CursorPositionAtHit.Value - ((OsuHitObject)circleJudgement.HitObject).StackedPosition) / objectRadius / 2 * inner_portion;
+            }
+
+            hitPosition = Vector2.Clamp(hitPosition, new Vector2(-0.5f), new Vector2(0.5f));
+
+            hitPositionPool.Get(drawableHit =&gt;
+            {
+                drawableHit.X = hitPosition.X;
+                drawableHit.Y = hitPosition.Y;
+                drawableHit.Colour = getColourForPosition(hitPosition);
+
+                hitPositionMarkerContainer.Add(drawableHit);
+            });
+
+            var newAveragePosition = 0.1f * hitPosition + 0.9f * (averagePosition ?? hitPosition);
+            averagePositionMarker.MoveTo(newAveragePosition, 800, Easing.OutQuint);
+            averagePosition = newAveragePosition;
+            lastObjectPosition = ((OsuHitObject)circleJudgement.HitObject).StackedPosition;
+        }
+
+        private Color4 getColourForPosition(Vector2 position)
+        {
+            float distance = Vector2.Distance(position, Vector2.Zero);
+
+            if (distance &gt;= 0.5f * inner_portion)
+                return colours.Red;
+
+            if (distance &gt;= 0.35f * inner_portion)
+                return colours.Yellow;
+
+            if (distance &gt;= 0.2f * inner_portion)
+                return colours.Green;
+
+            return colours.Blue;
+        }
+
+        public override void Clear()
+        {
+            averagePosition = null;
+            averagePositionMarker.MoveTo(Vector2.Zero, 800, Easing.OutQuint);
+            lastObjectPosition = null;
+
+            foreach (var h in hitPositionMarkerContainer)
+            {
+                h.ClearTransforms();
+                h.Expire();
+            }
+        }
+
+        private partial class HitPositionMarker : PoolableDrawable
+        {
+            [Resolved]
+            private AimErrorMeter aimErrorMeter { get; set; } = null!;
+
+            public readonly BindableNumber&lt;float&gt; MarkerSize = new BindableFloat();
+            public readonly Bindable&lt;MarkerStyle&gt; Style = new Bindable&lt;MarkerStyle&gt;();
+
+            private readonly Container content;
+
+            public HitPositionMarker()
+            {
+                RelativePositionAxes = Axes.Both;
+
+                Anchor = Anchor.Centre;
+                Origin = Anchor.Centre;
+
+                InternalChild = new UprightAspectMaintainingContainer
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Child = content = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Children = new Drawable[]
+                        {
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Width = 0.25f,
+                                Rotation = -45
+                            },
+                            new Circle
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Width = 0.25f,
+                                Rotation = 45
+                            }
+                        }
+                    }
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                MarkerSize.BindTo(aimErrorMeter.HitMarkerSize);
+                MarkerSize.BindValueChanged(size =&gt; Size = new Vector2(size.NewValue), true);
+                Style.BindTo(aimErrorMeter.HitMarkerStyle);
+                Style.BindValueChanged(style =&gt; content.Rotation = style.NewValue == MarkerStyle.X ? 0 : 45, true);
+            }
+
+            protected override void PrepareForUse()
+            {
+                base.PrepareForUse();
+
+                const int judgement_fade_in_duration = 100;
+                const int judgement_fade_out_duration = 5000;
+
+                this
+                    .ResizeTo(new Vector2(0))
+                    .FadeInFromZero(judgement_fade_in_duration, Easing.OutQuint)
+                    .ResizeTo(new Vector2(MarkerSize.Value), judgement_fade_in_duration, Easing.OutQuint)
+                    .Then()
+                    .FadeOut(judgement_fade_out_duration)
+                    .Expire();
+            }
+        }
+
+        public enum MarkerStyle
+        {
+            [Description(&quot;x&quot;)]
+            X,
+
+            [Description(&quot;+&quot;)]
+            Plus,
+        }
+
+        public enum PositionDisplay
+        {
+            [LocalisableDescription(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.Absolute))]
+            Absolute,
+
+            [LocalisableDescription(typeof(AimErrorMeterStrings), nameof(AimErrorMeterStrings.Normalised))]
+            Normalised,
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[27,40,27,58,0],[28,43,28,48,0],[29,44,29,69,0],[30,41,30,67,1],[31,58,31,117,0],[32,52,32,110,0],[35,9,35,10,0],[36,13,36,51,0],[37,13,37,14,0],[38,17,39,17,0],[39,17,39,18,0],[39,18,40,21,0],[40,21,40,53,0],[40,53,40,54,0],[40,54,40,61,0],[40,61,42,21,0],[42,21,42,74,0],[42,74,43,25,0],[43,25,43,32,0],[43,32,45,21,0],[45,21,45,79,0],[45,79,46,25,0],[46,25,46,32,0],[46,32,48,21,0],[48,21,48,107,0],[48,107,50,21,0],[50,21,50,38,0],[50,38,51,25,0],[51,25,51,47,0],[51,47,52,17,0],[52,17,52,18,0],[52,18,52,19,0],[53,13,53,14,0],[54,9,54,10,0],[57,9,57,10,0],[58,13,58,50,0],[60,13,60,50,0],[60,51,60,58,0],[62,13,63,13,0],[63,13,63,14,0],[63,14,64,17,0],[64,17,64,41,0],[64,41,65,17,0],[65,17,65,18,0],[65,18,66,21,0],[66,21,66,70,0],[66,70,67,21,0],[67,21,67,38,0],[67,38,70,17,0],[70,17,70,27,0],[70,27,71,13,0],[71,13,71,14,0],[71,14,71,25,0],[73,13,73,48,0],[74,9,74,10,0],[77,9,77,10,0],[78,13,78,127,0],[79,9,79,10,0],[84,19,84,31,0],[85,13,85,14,0],[86,13,86,14,0],[88,60,88,93,0],[93,52,93,75,0],[98,51,98,55,0],[103,13,103,57,0],[104,13,104,14,0],[105,17,105,48,0],[106,17,106,44,0],[107,17,107,38,0],[108,17,108,52,0],[109,17,109,52,0],[110,17,110,46,0],[111,17,111,46,0],[112,17,112,52,0],[113,17,113,74,0],[114,17,114,78,0],[115,13,115,14,0],[118,13,118,14,0],[119,17,119,167,0],[121,17,121,24,0],[121,26,121,31,0],[121,32,121,34,0],[121,35,121,47,0],[122,17,122,18,0],[123,21,123,36,0],[126,29,135,32,0],[136,29,136,35,0],[139,29,144,32,0],[145,29,145,35,0],[148,29,154,32,0],[155,29,155,35,0],[158,29,166,32,0],[167,29,167,35,0],[169,17,169,18,0],[171,17,171,39,0],[172,13,172,14,0]]);
+      highlightRanges([[36,54,36,58,0],[36,63,41,10,0],[44,55,44,59,0],[44,64,44,91,0],[47,58,47,62,0],[47,67,52,10,0],[55,59,55,63,0],[55,68,55,111,0],[58,65,58,69,0],[58,74,58,105,0],[63,9,63,57,0],[64,9,64,74,0],[67,9,67,116,0],[68,9,68,62,0],[70,9,70,60,0],[71,9,71,80,0],[72,9,72,49,0],[82,37,82,41,0],[82,42,82,46,0],[82,51,82,56,0],[84,9,84,31,0],[85,9,85,10,0],[86,13,86,38,0],[87,13,87,34,0],[88,9,88,10,0],[92,9,92,10,0],[93,13,107,15,0],[109,13,265,15,0],[268,13,268,71,0],[269,13,269,68,0],[271,13,271,45,0],[273,13,273,20,0],[273,22,273,29,0],[273,30,273,32,0],[273,33,273,71,0],[274,17,274,54,0],[276,13,276,142,0],[278,13,278,56,0],[278,56,278,111,0],[278,111,278,119,0],[279,13,279,58,0],[279,58,279,151,0],[279,151,279,159,0],[281,13,282,13,0],[282,13,282,14,0],[282,14,283,17,0],[283,17,283,25,0],[283,25,285,17,0],[285,17,285,62,0],[285,62,286,17,0],[286,17,286,18,0],[286,18,287,21,0],[287,21,287,58,0],[287,58,288,21,0],[288,21,288,71,0],[288,71,289,21,0],[289,21,289,48,0],[289,48,290,17,0],[290,17,290,18,0],[290,18,292,17,0],[292,17,292,18,0],[292,18,293,21,0],[293,21,293,59,0],[293,59,295,21,0],[295,21,295,58,0],[295,58,296,21,0],[296,21,296,61,0],[296,61,297,17,0],[297,17,297,18,0],[297,18,298,13,0],[298,13,298,14,0],[298,14,298,22,0],[299,9,299,10,0],[302,9,302,10,0],[303,13,303,78,0],[303,79,303,86,0],[305,13,305,61,0],[305,62,305,69,0],[307,13,307,78,0],[308,13,308,14,0],[312,17,312,74,0],[312,74,312,131,0],[312,131,312,133,0],[314,17,314,33,0],[315,17,315,18,0],[316,21,316,43,0],[317,21,317,59,0],[318,17,318,18,0],[319,13,319,14,0],[323,13,323,104,0],[324,13,324,14,0],[325,17,326,104,0],[327,13,327,14,0],[329,13,329,14,0],[331,17,331,170,0],[332,13,332,14,0],[334,13,334,93,0],[336,13,337,13,0],[337,13,337,14,0],[337,14,338,17,0],[338,17,338,47,0],[338,47,339,17,0],[339,17,339,47,0],[339,47,340,17,0],[340,17,340,72,0],[340,72,342,17,0],[342,17,342,61,0],[342,61,343,13,0],[343,13,343,14,0],[343,14,343,16,0],[345,13,345,99,0],[346,13,346,84,0],[347,13,347,50,0],[348,13,348,92,0],[349,9,349,10,0],[352,9,352,10,0],[353,13,353,71,0],[355,13,355,50,0],[356,17,356,36,0],[358,13,358,51,0],[359,17,359,39,0],[361,13,361,50,0],[362,17,362,38,0],[364,13,364,33,0],[365,9,365,10,0],[368,9,368,10,0],[369,13,369,36,0],[370,13,370,78,0],[371,13,371,39,0],[373,13,373,20,0],[373,22,373,27,0],[373,28,373,30,0],[373,31,373,57,0],[374,13,374,14,0],[375,17,375,37,0],[376,17,376,28,0],[377,13,377,14,0],[378,9,378,10,0],[383,51,383,55,0],[383,56,383,60,0],[383,65,383,70,0],[385,13,385,84,0],[386,13,386,87,0],[390,13,390,39,0],[391,13,391,14,0],[392,17,392,50,0],[394,17,394,40,0],[395,17,395,40,0],[397,17,427,19,0],[428,13,428,14,0],[431,13,431,14,0],[432,17,432,37,0],[434,17,434,64,0],[435,17,435,53,0],[435,53,435,86,0],[435,86,435,94,0],[436,17,436,60,0],[437,17,437,49,0],[437,49,437,108,0],[437,108,437,116,0],[438,13,438,14,0],[441,13,441,14,0],[442,17,442,38,0],[447,17,453,31,0],[454,13,454,14,0]]);
     </script>
   </body>
 </html>

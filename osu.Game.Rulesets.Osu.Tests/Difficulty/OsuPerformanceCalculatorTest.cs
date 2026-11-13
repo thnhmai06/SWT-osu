@@ -285,11 +285,15 @@ namespace osu.Game.Rulesets.Osu.Tests.Difficulty
         [Test]
         public void TestDroppedDifficultSliders_ReduceAimDownToSliderFactor()
         {
-            // non-classic: all slider ends dropped (clamped to difficult slider count) => factor == SliderFactor
-            double full = calculate(score(sliderTails: 20)).Aim;
-            double dropped = calculate(score(sliderTails: 0)).Aim;
+            // non-classic: all slider ends dropped (clamped to difficult slider count) => aim difficulty is scaled by exactly SliderFactor before conversion to performance
+            var baseAttributes = attributes();
+            var scaled = attributes();
+            scaled.AimDifficulty = baseAttributes.AimDifficulty * baseAttributes.SliderFactor;
 
-            Assert.That(dropped / full, Is.EqualTo(0.9).Within(1e-9));
+            double dropped = calculate(score(sliderTails: 0), baseAttributes).Aim;
+            double expected = calculate(score(sliderTails: 20), scaled).Aim;
+
+            Assert.That(dropped, Is.EqualTo(expected).Within(1e-9));
         }
 
         [Test]

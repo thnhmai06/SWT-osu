@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuSelectionRotationHandler.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/OsuLegacyScoreSimulator.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -13,116 +13,238 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Mods;
 using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Legacy;
 using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Mods;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Screens.Edit;
-using osu.Game.Screens.Edit.Compose.Components;
-using osu.Game.Utils;
-using osuTK;
+using osu.Game.Rulesets.Osu.Scoring;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.Scoring.Legacy;
 
-namespace osu.Game.Rulesets.Osu.Edit
+namespace osu.Game.Rulesets.Osu.Difficulty
 {
-    public partial class OsuSelectionRotationHandler : SelectionRotationHandler
+    internal class OsuLegacyScoreSimulator : ILegacyScoreSimulator
     {
-        [Resolved]
-        private IEditorChangeHandler? changeHandler { get; set; }
+        private readonly ScoreProcessor scoreProcessor = new OsuScoreProcessor();
 
-        private BindableList&lt;HitObject&gt; selectedItems { get; } = new BindableList&lt;HitObject&gt;();
+        private int legacyBonusScore;
+        private int standardisedBonusScore;
+        private int combo;
 
-        [BackgroundDependencyLoader]
-        private void load(EditorBeatmap editorBeatmap)
+        private double scoreMultiplier;
+
+        public LegacyScoreAttributes Simulate(IWorkingBeatmap workingBeatmap, IBeatmap playableBeatmap)
         {
-            selectedItems.BindTo(editorBeatmap.SelectedHitObjects);
-        }
+            IBeatmap baseBeatmap = workingBeatmap.Beatmap;
 
-        protected override void LoadComplete()
-        {
-            base.LoadComplete();
+            int countNormal = 0;
+            int countSlider = 0;
+            int countSpinner = 0;
 
-            selectedItems.CollectionChanged += (_, __) =&gt; updateState();
-            updateState();
-        }
-
-        private void updateState()
-        {
-            var quad = GeometryUtils.GetSurroundingQuad(selectedMovableObjects);
-            CanRotateAroundSelectionOrigin.Value = quad.Width &gt; 0 || quad.Height &gt; 0;
-            CanRotateAroundPlayfieldOrigin.Value = selectedMovableObjects.Any();
-        }
-
-        private OsuHitObject[]? objectsInRotation;
-
-        private Dictionary&lt;OsuHitObject, Vector2&gt;? originalPositions;
-        private Dictionary&lt;IHasPath, Vector2[]&gt;? originalPathControlPointPositions;
-
-        public override void Begin()
-        {
-            if (OperationInProgress.Value)
-                throw new InvalidOperationException($&quot;Cannot {nameof(Begin)} a rotate operation while another is in progress!&quot;);
-
-            base.Begin();
-
-            changeHandler?.BeginChange();
-
-            objectsInRotation = selectedMovableObjects.ToArray();
-            DefaultOrigin = GeometryUtils.MinimumEnclosingCircle(objectsInRotation).Item1;
-            originalPositions = objectsInRotation.ToDictionary(obj =&gt; obj, obj =&gt; obj.Position);
-            originalPathControlPointPositions = objectsInRotation.OfType&lt;IHasPath&gt;().ToDictionary(
-                obj =&gt; obj,
-                obj =&gt; obj.Path.ControlPoints.Select(point =&gt; point.Position).ToArray());
-        }
-
-        public override void Update(float rotation, Vector2? origin = null)
-        {
-            if (!OperationInProgress.Value)
-                throw new InvalidOperationException($&quot;Cannot {nameof(Update)} a rotate operation without calling {nameof(Begin)} first!&quot;);
-
-            Debug.Assert(objectsInRotation != null &amp;&amp; originalPositions != null &amp;&amp; originalPathControlPointPositions != null &amp;&amp; DefaultOrigin != null);
-
-            Vector2 actualOrigin = origin ?? DefaultOrigin.Value;
-
-            foreach (var ho in objectsInRotation)
+            foreach (HitObject obj in workingBeatmap.Beatmap.HitObjects)
             {
-                ho.Position = GeometryUtils.RotatePointAroundOrigin(originalPositions[ho], actualOrigin, rotation);
-
-                if (ho is IHasPath withPath)
+                switch (obj)
                 {
-                    var originalPath = originalPathControlPointPositions[withPath];
+                    case IHasPath:
+                        countSlider++;
+                        break;
 
-                    for (int i = 0; i &lt; withPath.Path.ControlPoints.Count; ++i)
-                        withPath.Path.ControlPoints[i].Position = GeometryUtils.RotatePointAroundOrigin(originalPath[i], Vector2.Zero, rotation);
+                    case IHasDuration:
+                        countSpinner++;
+                        break;
+
+                    default:
+                        countNormal++;
+                        break;
                 }
             }
+
+            int objectCount = countNormal + countSlider + countSpinner;
+
+            int drainLength = 0;
+
+            if (baseBeatmap.HitObjects.Count &gt; 0)
+            {
+                int breakLength = baseBeatmap.Breaks.Select(b =&gt; (int)Math.Round(b.EndTime) - (int)Math.Round(b.StartTime)).Sum();
+                drainLength = ((int)Math.Round(baseBeatmap.HitObjects[^1].StartTime) - (int)Math.Round(baseBeatmap.HitObjects[0].StartTime) - breakLength) / 1000;
+            }
+
+            scoreMultiplier = LegacyRulesetExtensions.CalculateDifficultyPeppyStars(baseBeatmap.Difficulty, objectCount, drainLength);
+
+            LegacyScoreAttributes attributes = new LegacyScoreAttributes();
+
+            foreach (var obj in playableBeatmap.HitObjects)
+                simulateHit(obj, ref attributes);
+
+            attributes.BonusScoreRatio = legacyBonusScore == 0 ? 0 : (double)standardisedBonusScore / legacyBonusScore;
+            attributes.BonusScore = legacyBonusScore;
+            attributes.MaxCombo = combo;
+
+            return attributes;
         }
 
-        public override void Commit()
+        private void simulateHit(HitObject hitObject, ref LegacyScoreAttributes attributes)
         {
-            if (!OperationInProgress.Value)
-                throw new InvalidOperationException($&quot;Cannot {nameof(Commit)} a rotate operation without calling {nameof(Begin)} first!&quot;);
+            bool increaseCombo = true;
+            bool addScoreComboMultiplier = false;
 
-            changeHandler?.EndChange();
+            bool isBonus = false;
+            HitResult bonusResult = HitResult.None;
 
-            base.Commit();
+            int scoreIncrease = 0;
 
-            objectsInRotation = null;
-            originalPositions = null;
-            originalPathControlPointPositions = null;
-            DefaultOrigin = null;
+            switch (hitObject)
+            {
+                case SliderHeadCircle:
+                case SliderTailCircle:
+                case SliderRepeat:
+                    scoreIncrease = 30;
+                    break;
+
+                case SliderTick:
+                    scoreIncrease = 10;
+                    break;
+
+                case SpinnerBonusTick:
+                    scoreIncrease = 1100;
+                    increaseCombo = false;
+                    isBonus = true;
+                    bonusResult = HitResult.LargeBonus;
+                    break;
+
+                case SpinnerTick:
+                    scoreIncrease = 100;
+                    increaseCombo = false;
+                    isBonus = true;
+                    bonusResult = HitResult.SmallBonus;
+                    break;
+
+                case HitCircle:
+                    scoreIncrease = 300;
+                    addScoreComboMultiplier = true;
+                    break;
+
+                case Slider:
+                    foreach (var nested in hitObject.NestedHitObjects)
+                        simulateHit(nested, ref attributes);
+
+                    scoreIncrease = 300;
+                    increaseCombo = false;
+                    addScoreComboMultiplier = true;
+                    break;
+
+                case Spinner spinner:
+                    // The spinner object applies a lenience because gameplay mechanics differ from osu-stable.
+                    // We&#39;ll redo the calculations to match osu-stable here...
+                    const double maximum_rotations_per_second = 477.0 / 60;
+
+                    // Normally, this value depends on the final overall difficulty. For simplicity, we&#39;ll only consider the worst case that maximises bonus score.
+                    // As we&#39;re primarily concerned with computing the maximum theoretical final score,
+                    // this will have the final effect of slightly underestimating bonus score achieved on stable when converting from score V1.
+                    const double minimum_rotations_per_second = 3;
+
+                    double secondsDuration = spinner.Duration / 1000;
+
+                    // The total amount of half spins possible for the entire spinner.
+                    int totalHalfSpinsPossible = (int)(secondsDuration * maximum_rotations_per_second * 2);
+                    // The amount of half spins that are required to successfully complete the spinner (i.e. get a 300).
+                    int halfSpinsRequiredForCompletion = (int)(secondsDuration * minimum_rotations_per_second);
+                    // To be able to receive bonus points, the spinner must be rotated another 1.5 times.
+                    int halfSpinsRequiredBeforeBonus = halfSpinsRequiredForCompletion + 3;
+
+                    for (int i = 0; i &lt;= totalHalfSpinsPossible; i++)
+                    {
+                        if (i &gt; halfSpinsRequiredBeforeBonus &amp;&amp; (i - halfSpinsRequiredBeforeBonus) % 2 == 0)
+                            simulateHit(new SpinnerBonusTick(), ref attributes);
+                        else if (i &gt; 1 &amp;&amp; i % 2 == 0)
+                            simulateHit(new SpinnerTick(), ref attributes);
+                    }
+
+                    scoreIncrease = 300;
+                    addScoreComboMultiplier = true;
+                    break;
+            }
+
+            if (addScoreComboMultiplier)
+            {
+                // ReSharper disable once PossibleLossOfFraction (intentional to match osu-stable...)
+                attributes.ComboScore += (int)(Math.Max(0, combo - 1) * (scoreIncrease / 25 * scoreMultiplier));
+            }
+
+            if (isBonus)
+            {
+                legacyBonusScore += scoreIncrease;
+                standardisedBonusScore += scoreProcessor.GetBaseScoreForResult(bonusResult);
+            }
+            else
+                attributes.AccuracyScore += scoreIncrease;
+
+            if (increaseCombo)
+                combo++;
         }
 
-        private IEnumerable&lt;OsuHitObject&gt; selectedMovableObjects =&gt; selectedItems.Cast&lt;OsuHitObject&gt;()
-                                                                                 .Where(h =&gt; h is not Spinner);
+        public double GetLegacyScoreMultiplier(IReadOnlyList&lt;Mod&gt; mods, LegacyBeatmapConversionDifficultyInfo difficulty)
+        {
+            bool scoreV2 = mods.Any(m =&gt; m is ModScoreV2);
+
+            double multiplier = 1.0;
+
+            foreach (var mod in mods)
+            {
+                switch (mod)
+                {
+                    case OsuModNoFail:
+                        multiplier *= scoreV2 ? 1.0 : 0.5;
+                        break;
+
+                    case OsuModEasy:
+                        multiplier *= 0.5;
+                        break;
+
+                    case OsuModHalfTime:
+                    case OsuModDaycore:
+                        multiplier *= 0.3;
+                        break;
+
+                    case OsuModHidden:
+                        multiplier *= 1.06;
+                        break;
+
+                    case OsuModHardRock:
+                        multiplier *= scoreV2 ? 1.10 : 1.06;
+                        break;
+
+                    case OsuModDoubleTime:
+                    case OsuModNightcore:
+                        multiplier *= scoreV2 ? 1.20 : 1.12;
+                        break;
+
+                    case OsuModFlashlight:
+                        multiplier *= 1.12;
+                        break;
+
+                    case OsuModSpunOut:
+                        multiplier *= 0.9;
+                        break;
+
+                    case OsuModRelax:
+                    case OsuModAutopilot:
+                        return 0;
+                }
+            }
+
+            return multiplier;
+        }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[23,55,23,59,0],[23,60,23,64,0],[25,57,25,61,0],[25,66,25,95,0],[29,9,29,10,0],[30,13,30,68,0],[31,9,31,10,0],[34,9,34,10,0],[35,13,35,33,0],[37,13,37,59,0],[37,59,37,72,0],[37,72,37,73,0],[38,13,38,27,0],[39,9,39,10,0],[42,9,42,10,0],[43,13,43,81,0],[44,13,44,86,0],[45,13,45,81,0],[46,9,46,10,0],[54,9,54,10,0],[55,13,55,43,0],[56,17,56,129,0],[58,13,58,26,0],[60,13,60,42,0],[62,13,62,66,0],[63,13,63,91,0],[64,13,64,71,0],[64,71,64,74,0],[64,74,64,83,0],[64,83,64,95,0],[64,95,64,97,0],[65,13,66,24,0],[66,24,66,27,0],[66,27,67,24,0],[67,24,67,63,0],[67,63,67,77,0],[67,77,67,88,0],[67,88,67,90,0],[68,9,68,10,0],[71,9,71,10,0],[72,13,72,44,0],[73,17,73,139,0],[75,13,75,152,0],[77,13,77,66,0],[79,13,79,20,0],[79,22,79,28,0],[79,29,79,31,0],[79,32,79,49,0],[80,13,80,14,0],[81,17,81,116,0],[83,17,83,45,0],[84,17,84,18,0],[85,21,85,84,0],[87,26,87,35,0],[87,37,87,74,0],[87,76,87,79,0],[88,25,88,146,0],[89,17,89,18,0],[90,13,90,14,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,44,0],[96,17,96,139,0],[98,13,98,40,0],[100,13,100,27,0],[102,13,102,38,0],[103,13,103,38,0],[104,13,104,54,0],[105,13,105,34,0],[106,9,106,10,0],[108,69,109,94,0],[109,94,109,110,0],[109,110,109,111,0]]);
+      highlightRanges([[22,9,22,82,1],[31,9,31,10,1],[32,13,32,59,1],[34,13,34,33,1],[35,13,35,33,1],[36,13,36,34,1],[38,13,38,20,1],[38,22,38,35,1],[38,36,38,38,1],[38,39,38,72,1],[39,13,39,14,1],[40,17,40,29,1],[43,25,43,39,1],[44,25,44,31,1],[47,25,47,40,1],[48,25,48,31,1],[51,25,51,39,1],[52,25,52,31,1],[54,13,54,14,1],[56,13,56,72,1],[58,13,58,33,1],[60,13,60,50,1],[61,13,61,14,1],[62,17,62,66,1],[62,66,62,123,0],[62,123,62,131,1],[63,17,63,163,1],[64,13,64,14,1],[66,13,66,135,1],[68,13,68,76,1],[70,13,70,20,1],[70,22,70,29,1],[70,30,70,32,1],[70,33,70,59,1],[71,17,71,50,1],[73,13,73,120,1],[74,13,74,54,1],[75,13,75,41,1],[77,13,77,31,1],[78,9,78,10,1],[81,9,81,10,1],[82,13,82,39,1],[83,13,83,50,1],[85,13,85,34,1],[86,13,86,52,1],[88,13,88,35,1],[90,13,90,31,1],[95,21,95,40,1],[96,21,96,27,1],[99,21,99,40,1],[100,21,100,27,1],[103,21,103,42,1],[104,21,104,43,1],[105,21,105,36,1],[106,21,106,56,1],[107,21,107,27,1],[110,21,110,41,1],[111,21,111,43,1],[112,21,112,36,1],[113,21,113,56,1],[114,21,114,27,1],[117,21,117,41,1],[118,21,118,52,1],[119,21,119,27,1],[122,21,122,28,1],[122,30,122,40,1],[122,41,122,43,1],[122,44,122,70,1],[123,25,123,61,1],[125,21,125,41,1],[126,21,126,43,1],[127,21,127,52,1],[128,21,128,27,1],[140,21,140,70,1],[143,21,143,108,1],[145,21,145,112,1],[147,21,147,91,1],[149,26,149,35,1],[149,37,149,64,1],[149,66,149,69,1],[150,21,150,22,1],[151,25,151,109,1],[152,29,152,81,1],[153,30,153,54,1],[154,29,154,76,1],[155,21,155,22,1],[157,21,157,41,1],[158,21,158,52,1],[159,21,159,27,1],[162,13,162,41,1],[163,13,163,14,1],[165,17,165,113,1],[166,13,166,14,1],[168,13,168,25,1],[169,13,169,14,1],[170,17,170,51,1],[171,17,171,93,1],[172,13,172,14,1],[174,17,174,59,1],[176,13,176,31,1],[177,17,177,25,1],[178,9,178,10,1],[181,9,181,10,1],[182,13,182,42,1],[182,42,182,57,1],[182,57,182,59,1],[184,13,184,37,1],[186,13,186,20,1],[186,22,186,29,1],[186,30,186,32,1],[186,33,186,37,1],[187,13,187,14,1],[188,17,188,29,1],[191,25,191,59,1],[192,25,192,31,1],[195,25,195,43,1],[196,25,196,31,1],[200,25,200,43,1],[201,25,201,31,1],[204,25,204,44,1],[205,25,205,31,1],[208,25,208,61,1],[209,25,209,31,1],[213,25,213,61,1],[214,25,214,31,1],[217,25,217,44,1],[218,25,218,31,1],[221,25,221,43,1],[222,25,222,31,1],[226,25,226,34,1],[228,13,228,14,1],[230,13,230,31,1],[231,9,231,10,1]]);
     </script>
   </body>
 </html>

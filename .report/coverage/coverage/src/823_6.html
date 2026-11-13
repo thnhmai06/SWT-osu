@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Argon/ArgonReverseArrow.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableHitCircle.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -12,121 +12,367 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Extensions.Color4Extensions;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Shapes;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Graphics.Textures;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
 using osu.Framework.Utils;
+using osu.Game.Graphics.Containers;
+using osu.Game.Rulesets.Judgements;
 using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Configuration;
+using osu.Game.Rulesets.Osu.Judgements;
+using osu.Game.Rulesets.Osu.Skinning;
+using osu.Game.Rulesets.Osu.Skinning.Default;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Skinning;
 using osuTK;
 using osuTK.Graphics;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Argon
+namespace osu.Game.Rulesets.Osu.Objects.Drawables
 {
-    public partial class ArgonReverseArrow : CompositeDrawable
+    public partial class DrawableHitCircle : DrawableOsuHitObject, IHasApproachCircle
     {
-        private DrawableSliderRepeat drawableRepeat { get; set; } = null!;
+        public OsuAction? HitAction =&gt; HitArea.HitAction;
+        protected virtual OsuSkinComponents CirclePieceComponent =&gt; OsuSkinComponents.HitCircle;
 
-        private Bindable&lt;Color4&gt; accentColour = null!;
+        public SkinnableDrawable ApproachCircle { get; private set; } = null!;
+        public HitReceptor HitArea { get; private set; } = null!;
+        public SkinnableDrawable CirclePiece { get; private set; } = null!;
 
-        private SpriteIcon icon = null!;
-        private Container main = null!;
-        private Sprite side = null!;
+        protected override IEnumerable&lt;Drawable&gt; DimmablePieces =&gt; new[] { CirclePiece };
 
-        [BackgroundDependencyLoader]
-        private void load(DrawableHitObject drawableObject, TextureStore textures)
+        Drawable IHasApproachCircle.ApproachCircle =&gt; ApproachCircle;
+
+        private Container scaleContainer = null!;
+        private ShakeContainer shakeContainer = null!;
+
+        public DrawableHitCircle()
+            : this(null)
         {
-            drawableRepeat = (DrawableSliderRepeat)drawableObject;
-
-            Anchor = Anchor.Centre;
-            Origin = Anchor.Centre;
-
-            Size = OsuHitObject.OBJECT_DIMENSIONS;
-
-            InternalChildren = new Drawable[]
-            {
-                main = new Container
-                {
-                    RelativeSizeAxes = Axes.Both,
-                    Anchor = Anchor.Centre,
-                    Origin = Anchor.Centre,
-                    Children = new Drawable[]
-                    {
-                        new Circle
-                        {
-                            Size = new Vector2(40, 20),
-                            Colour = Color4.White,
-                            Anchor = Anchor.Centre,
-                            Origin = Anchor.Centre,
-                        },
-                        icon = new SpriteIcon
-                        {
-                            Icon = FontAwesome.Solid.AngleDoubleRight,
-                            Size = new Vector2(16),
-                            Anchor = Anchor.Centre,
-                            Origin = Anchor.Centre,
-                        },
-                    }
-                },
-                side = new Sprite
-                {
-                    Anchor = Anchor.Centre,
-                    Origin = Anchor.Centre,
-                    Texture = textures.Get(&quot;Gameplay/osu/repeat-edge-piece&quot;),
-                    Size = new Vector2(ArgonMainCirclePiece.OUTER_GRADIENT_SIZE),
-                }
-            };
-
-            accentColour = drawableRepeat.AccentColour.GetBoundCopy();
-            accentColour.BindValueChanged(accent =&gt; icon.Colour = accent.NewValue.Darken(4), true);
         }
 
-        protected override void Update()
+        public DrawableHitCircle(HitCircle? h = null)
+            : base(h)
         {
-            base.Update();
+        }
 
-            if (Time.Current &gt;= drawableRepeat.HitStateUpdateTime &amp;&amp; drawableRepeat.State.Value == ArmedState.Hit)
+        private readonly Bindable&lt;bool&gt; hitAnimations = new Bindable&lt;bool&gt;(true);
+
+        [BackgroundDependencyLoader]
+        private void load(OsuRulesetConfigManager? osuConfig)
+        {
+            osuConfig?.BindWith(OsuRulesetSetting.HitAnimations, hitAnimations);
+
+            Origin = Anchor.Centre;
+
+            AddRangeInternal(new Drawable[]
             {
-                double animDuration = Math.Min(300, drawableRepeat.HitObject.SpanDuration);
-                Scale = new Vector2(Interpolation.ValueAt(Time.Current, 1, 1.5f, drawableRepeat.HitStateUpdateTime, drawableRepeat.HitStateUpdateTime + animDuration, Easing.Out));
+                scaleContainer = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Origin = Anchor.Centre,
+                    Anchor = Anchor.Centre,
+                    Children = new Drawable[]
+                    {
+                        HitArea = new HitReceptor
+                        {
+                            CanBeHit = () =&gt; !AllJudged,
+                            Hit = () =&gt; UpdateResult(true)
+                        },
+                        shakeContainer = new ShakeContainer
+                        {
+                            ShakeDuration = 30,
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                CirclePiece = new SkinnableDrawable(new OsuSkinComponentLookup(CirclePieceComponent), _ =&gt; new MainCirclePiece())
+                                {
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                },
+                                ApproachCircle = new ProxyableSkinnableDrawable(new OsuSkinComponentLookup(OsuSkinComponents.ApproachCircle), _ =&gt; new DefaultApproachCircle())
+                                {
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Alpha = 0,
+                                    Scale = new Vector2(4),
+                                }
+                            }
+                        }
+                    }
+                },
+            });
 
-                // When hit, don&#39;t animate further. This avoids a scale being applied on a scale and looking very weird.
+            Size = HitArea.DrawSize;
+
+            PositionBindable.BindValueChanged(_ =&gt; UpdatePosition());
+            StackHeightBindable.BindValueChanged(_ =&gt; UpdatePosition());
+            ScaleBindable.BindValueChanged(scale =&gt; scaleContainer.Scale = new Vector2(scale.NewValue));
+        }
+
+        public override double LifetimeStart
+        {
+            get =&gt; base.LifetimeStart;
+            set
+            {
+                base.LifetimeStart = value;
+                ApproachCircle.LifetimeStart = value;
+            }
+        }
+
+        public override double LifetimeEnd
+        {
+            get =&gt; base.LifetimeEnd;
+            set
+            {
+                base.LifetimeEnd = value;
+                ApproachCircle.LifetimeEnd = value;
+            }
+        }
+
+        protected virtual void UpdatePosition()
+        {
+            Position = HitObject.StackedPosition;
+        }
+
+        public override void Shake() =&gt; shakeContainer.Shake();
+
+        protected override void CheckForResult(bool userTriggered, double timeOffset)
+        {
+            Debug.Assert(HitObject.HitWindows != null);
+
+            if (!userTriggered)
+            {
+                if (!HitObject.HitWindows.CanBeHit(timeOffset))
+                {
+                    ApplyResult((r, position) =&gt;
+                    {
+                        var circleResult = (OsuHitCircleJudgementResult)r;
+
+                        circleResult.Type = r.Judgement.MinResult;
+                        circleResult.CursorPositionAtHit = position;
+                    }, computeHitPosition());
+                }
+
                 return;
             }
 
-            Scale = Vector2.One;
+            var result = ResultFor(timeOffset);
+            var clickAction = CheckHittable?.Invoke(this, Time.Current, result);
 
-            const float move_distance = -12;
-            const float scale_amount = 1.3f;
+            if (clickAction == ClickAction.Shake)
+                Shake();
 
-            const double move_out_duration = 35;
-            const double move_in_duration = 250;
-            const double total = 300;
+            if (result == HitResult.None || clickAction != ClickAction.Hit)
+                return;
 
-            double loopCurrentTime = (Time.Current - drawableRepeat.AnimationStartTime.Value) % total;
+            ApplyResult&lt;(HitResult result, Vector2? position)&gt;((r, state) =&gt;
+            {
+                var circleResult = (OsuHitCircleJudgementResult)r;
 
-            if (loopCurrentTime &lt; move_out_duration)
-                main.Scale = new Vector2(Interpolation.ValueAt(loopCurrentTime, 1, scale_amount, 0, move_out_duration, Easing.Out));
-            else
-                main.Scale = new Vector2(Interpolation.ValueAt(loopCurrentTime, scale_amount, 1f, move_out_duration, move_out_duration + move_in_duration, Easing.Out));
-
-            if (loopCurrentTime &lt; move_out_duration)
-                side.X = Interpolation.ValueAt(loopCurrentTime, 0, move_distance, 0, move_out_duration, Easing.Out);
-            else
-                side.X = Interpolation.ValueAt(loopCurrentTime, move_distance, 0, move_out_duration, move_out_duration + move_in_duration, Easing.Out);
+                circleResult.Type = state.result;
+                circleResult.CursorPositionAtHit = state.position;
+            }, (result, computeHitPosition()));
         }
+
+        private Vector2? computeHitPosition()
+        {
+            if (HitArea.ClosestPressPosition is Vector2 screenSpaceHitPosition)
+                return HitObject.StackedPosition + (ToLocalSpace(screenSpaceHitPosition) - DrawSize / 2);
+
+            return null;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the &lt;see cref=&quot;HitResult&quot;/&gt; for a time offset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;timeOffset&quot;&gt;The time offset.&lt;/param&gt;
+        /// &lt;returns&gt;The hit result, or &lt;see cref=&quot;HitResult.None&quot;/&gt; if &lt;paramref name=&quot;timeOffset&quot;/&gt; doesn&#39;t result in a judgement.&lt;/returns&gt;
+        protected virtual HitResult ResultFor(double timeOffset) =&gt; HitObject.HitWindows.ResultFor(timeOffset);
+
+        protected override void UpdateInitialTransforms()
+        {
+            base.UpdateInitialTransforms();
+
+            CirclePiece.FadeInFromZero(HitObject.TimeFadeIn);
+
+            ApproachCircle.FadeTo(0.9f, Math.Min(HitObject.TimeFadeIn * 2, HitObject.TimePreempt));
+            ApproachCircle.ScaleTo(1f, HitObject.TimePreempt);
+            ApproachCircle.Expire(true);
+        }
+
+        protected override void UpdateStartTimeStateTransforms()
+        {
+            base.UpdateStartTimeStateTransforms();
+
+            // always fade out at the circle&#39;s start time (to match user expectations).
+            ApproachCircle.FadeOut(50);
+        }
+
+        protected override void UpdateHitStateTransforms(ArmedState state)
+        {
+            Debug.Assert(HitObject.HitWindows != null);
+
+            // todo: temporary / arbitrary, used for lifetime optimisation.
+            this.Delay(800).FadeOut();
+
+            switch (state)
+            {
+                default:
+                    ApproachCircle.FadeOut();
+
+                    if (!hitAnimations.Value)
+                        this.FadeOut(60, Easing.Out);
+                    break;
+
+                case ArmedState.Idle:
+                    HitArea.Reset();
+                    break;
+
+                case ArmedState.Miss:
+                    this.FadeOut(100);
+                    break;
+            }
+
+            Expire();
+        }
+
+        public Drawable ProxiedLayer =&gt; ApproachCircle;
+
+        protected override JudgementResult CreateResult(Judgement judgement) =&gt; new OsuHitCircleJudgementResult(HitObject, judgement);
+
+        public partial class HitReceptor : CompositeDrawable, IKeyBindingHandler&lt;OsuAction&gt;
+        {
+            // IsHovered is used
+            public override bool HandlePositionalInput =&gt; true;
+
+            /// &lt;summary&gt;
+            /// Whether the hitobject can still be hit at the current point in time.
+            /// &lt;/summary&gt;
+            public required Func&lt;bool&gt; CanBeHit { get; set; }
+
+            /// &lt;summary&gt;
+            /// An action that&#39;s invoked to perform the hit.
+            /// &lt;/summary&gt;
+            public required Action Hit { get; set; }
+
+            /// &lt;summary&gt;
+            /// The &lt;see cref=&quot;OsuAction&quot;/&gt; with which the hit was attempted.
+            /// &lt;/summary&gt;
+            public OsuAction? HitAction { get; private set; }
+
+            /// &lt;summary&gt;
+            /// The closest position to the hit receptor at the point where the hit was attempted.
+            /// &lt;/summary&gt;
+            public Vector2? ClosestPressPosition { get; private set; }
+
+            public HitReceptor()
+            {
+                Size = OsuHitObject.OBJECT_DIMENSIONS;
+
+                Anchor = Anchor.Centre;
+                Origin = Anchor.Centre;
+
+                CornerRadius = OsuHitObject.OBJECT_RADIUS;
+                CornerExponent = 2;
+            }
+
+            public bool OnPressed(KeyBindingPressEvent&lt;OsuAction&gt; e)
+            {
+                if (!CanBeHit())
+                    return false;
+
+                switch (e.Action)
+                {
+                    case OsuAction.LeftButton:
+                    case OsuAction.RightButton:
+                        if (ClosestPressPosition is Vector2 curClosest)
+                        {
+                            float oldDist = Vector2.DistanceSquared(curClosest, ScreenSpaceDrawQuad.Centre);
+                            float newDist = Vector2.DistanceSquared(e.ScreenSpaceMousePosition, ScreenSpaceDrawQuad.Centre);
+
+                            if (newDist &lt; oldDist)
+                                ClosestPressPosition = e.ScreenSpaceMousePosition;
+                        }
+                        else
+                            ClosestPressPosition = e.ScreenSpaceMousePosition;
+
+                        if (IsHovered)
+                        {
+                            Hit();
+                            HitAction ??= e.Action;
+                            return true;
+                        }
+
+                        break;
+                }
+
+                return false;
+            }
+
+            public void OnReleased(KeyBindingReleaseEvent&lt;OsuAction&gt; e)
+            {
+            }
+
+            /// &lt;summary&gt;
+            /// Resets to a fresh state.
+            /// &lt;/summary&gt;
+            public void Reset()
+            {
+                HitAction = null;
+                ClosestPressPosition = null;
+            }
+        }
+
+        private partial class ProxyableSkinnableDrawable : SkinnableDrawable
+        {
+            public override bool RemoveWhenNotAlive =&gt; false;
+
+            public ProxyableSkinnableDrawable(ISkinComponentLookup lookup, Func&lt;ISkinComponentLookup, Drawable&gt;? defaultImplementation = null, ConfineMode confineMode = ConfineMode.NoScaling)
+                : base(lookup, defaultImplementation, confineMode)
+            {
+            }
+        }
+
+        #region FOR EDITOR USE ONLY, DO NOT USE FOR ANY OTHER PURPOSE
+
+        internal void SuppressHitAnimations()
+        {
+            UpdateState(ArmedState.Idle);
+            UpdateComboColour();
+
+            // This method is called every frame in editor contexts, thus the lack of need for transforms.
+
+            if (Time.Current &gt;= HitStateUpdateTime)
+            {
+                // More or less matches stable (see https://github.com/peppy/osu-stable-reference/blob/bb57924c1552adbed11ee3d96cdcde47cf96f2b6/osu!/GameplayElements/HitObjects/Osu/HitCircleOsu.cs#L336-L338)
+                AccentColour.Value = Color4.White;
+                Alpha = Interpolation.ValueAt(Time.Current, 1f, 0f, HitStateUpdateTime, HitStateUpdateTime + 700);
+            }
+
+            LifetimeEnd = HitStateUpdateTime + 700;
+        }
+
+        internal void RestoreHitAnimations()
+        {
+            UpdateState(ArmedState.Hit, force: true);
+            UpdateComboColour();
+        }
+
+        #endregion
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[24,55,24,59,0],[24,60,24,64,0],[24,69,24,74,0],[26,9,26,55,0],[28,9,28,41,0],[29,9,29,40,0],[30,9,30,37,0],[34,9,34,10,0],[35,13,35,67,0],[37,13,37,36,0],[38,13,38,36,0],[40,13,40,51,0],[42,13,74,15,0],[76,13,76,71,0],[77,13,77,53,0],[77,53,77,92,0],[77,92,77,100,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,27,0],[84,13,84,115,0],[85,13,85,14,0],[86,17,86,92,0],[87,17,87,180,0],[90,17,90,24,0],[93,13,93,33,0],[102,13,102,103,0],[104,13,104,53,0],[105,17,105,133,0],[107,17,107,169,0],[109,13,109,53,0],[110,17,110,117,0],[112,17,112,152,0],[113,9,113,10,0]]);
+      highlightRanges([[31,40,31,57,0],[32,69,32,96,0],[34,51,34,55,0],[34,56,34,68,0],[34,73,34,78,1],[35,38,35,42,0],[35,43,35,55,0],[35,60,35,65,1],[36,48,36,52,0],[36,53,36,65,0],[36,70,36,75,1],[38,68,38,89,0],[40,55,40,69,0],[42,9,42,50,1],[43,9,43,55,1],[46,15,46,25,0],[47,9,47,10,0],[48,9,48,10,0],[51,15,51,22,1],[52,9,52,10,1],[53,9,53,10,1],[55,9,55,82,1],[59,9,59,10,0],[60,13,60,81,0],[62,13,62,36,0],[64,13,75,46,0],[75,46,75,56,0],[75,56,76,41,0],[76,41,76,59,0],[76,59,84,124,0],[84,124,84,145,0],[84,145,89,148,0],[89,148,89,175,0],[89,175,101,16,0],[103,13,103,37,0],[105,13,105,52,0],[105,52,105,68,0],[105,68,105,70,0],[106,13,106,55,0],[106,55,106,71,0],[106,71,106,73,0],[107,13,107,53,0],[107,53,107,103,0],[107,103,107,105,0],[108,9,108,10,0],[112,20,112,38,0],[114,13,114,14,0],[115,17,115,44,0],[116,17,116,54,0],[117,13,117,14,0],[122,20,122,36,0],[124,13,124,14,0],[125,17,125,42,0],[126,17,126,52,0],[127,13,127,14,0],[131,9,131,10,0],[132,13,132,50,0],[133,9,133,10,0],[135,41,135,63,0],[138,9,138,10,0],[139,13,139,56,0],[141,13,141,32,0],[142,13,142,14,0],[143,17,143,64,0],[144,17,144,18,0],[145,21,146,21,0],[146,21,146,22,0],[146,22,147,25,0],[147,25,147,75,0],[147,75,149,25,0],[149,25,149,67,0],[149,67,150,25,0],[150,25,150,69,0],[150,69,151,21,0],[151,21,151,22,0],[151,22,151,46,0],[152,17,152,18,0],[154,17,154,24,0],[157,13,157,48,0],[158,13,158,81,0],[160,13,160,50,0],[161,17,161,25,0],[163,13,163,76,0],[164,17,164,24,0],[166,13,167,13,0],[167,13,167,14,0],[167,14,168,17,0],[168,17,168,67,0],[168,67,170,17,0],[170,17,170,50,0],[170,50,171,17,0],[171,17,171,67,0],[171,67,172,13,0],[172,13,172,14,0],[172,14,172,48,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,177,80,0],[178,17,178,106,0],[180,13,180,25,0],[181,9,181,10,0],[188,69,188,111,0],[191,9,191,10,0],[192,13,192,44,0],[194,13,194,62,0],[196,13,196,100,0],[197,13,197,63,0],[198,13,198,41,0],[199,9,199,10,0],[202,9,202,10,0],[203,13,203,51,0],[206,13,206,40,0],[207,9,207,10,0],[210,9,210,10,0],[211,13,211,56,0],[214,13,214,39,0],[216,13,216,27,0],[219,21,219,46,0],[221,21,221,46,0],[222,25,222,54,0],[223,21,223,27,0],[226,21,226,37,0],[227,21,227,27,0],[230,21,230,39,0],[231,21,231,27,0],[234,13,234,22,0],[235,9,235,10,0],[237,41,237,55,0],[239,81,239,134,1],[244,59,244,63,0],[249,51,249,55,0],[249,56,249,60,0],[254,42,254,46,0],[254,47,254,51,0],[259,43,259,47,0],[259,48,259,60,0],[264,52,264,56,0],[264,57,264,69,0],[266,13,266,33,0],[267,13,267,14,0],[268,17,268,55,0],[270,17,270,40,0],[271,17,271,40,0],[273,17,273,59,0],[274,17,274,36,0],[275,13,275,14,0],[278,13,278,14,0],[279,17,279,33,0],[280,21,280,34,0],[282,17,282,34,0],[286,25,286,72,0],[287,25,287,26,0],[288,29,288,109,0],[289,29,289,125,0],[291,29,291,51,0],[292,33,292,83,0],[293,25,293,26,0],[295,29,295,79,0],[297,25,297,39,0],[298,25,298,26,0],[299,29,299,35,0],[300,29,300,52,0],[301,29,301,41,0],[304,25,304,31,0],[307,17,307,30,0],[308,13,308,14,0],[311,13,311,14,0],[312,13,312,14,0],[318,13,318,14,0],[319,17,319,34,0],[320,17,320,45,0],[321,13,321,14,0],[326,56,326,61,0],[329,19,329,67,0],[330,13,330,14,0],[331,13,331,14,0],[337,9,337,10,0],[338,13,338,42,0],[339,13,339,33,0],[343,13,343,52,0],[344,13,344,14,0],[346,17,346,51,0],[347,17,347,115,0],[348,13,348,14,0],[350,13,350,52,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,54,0],[356,13,356,33,0],[357,9,357,10,0]]);
     </script>
   </body>
 </html>

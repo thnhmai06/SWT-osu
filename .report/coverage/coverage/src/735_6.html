@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModClassic.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Checks/CheckTimeDistanceEquality.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -12,125 +12,185 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using osu.Framework.Bindables;
-using osu.Framework.Graphics;
-using osu.Game.Configuration;
-using osu.Game.Rulesets.Mods;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Edit.Checks.Components;
 using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Objects.Drawables;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Scoring;
-using osu.Game.Rulesets.Osu.UI;
-using osu.Game.Rulesets.Scoring;
-using osu.Game.Rulesets.UI;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.Edit.Checks
 {
-    public class OsuModClassic : ModClassic, IApplicableToHitObject, IApplicableToDrawableHitObject, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;, IApplicableHealthProcessor
+    public class CheckTimeDistanceEquality : ICheck
     {
-        public override Type[] IncompatibleMods =&gt; base.IncompatibleMods.Append(typeof(OsuModStrictTracking)).ToArray();
-
-        [SettingSource(&quot;No slider head accuracy requirement&quot;, &quot;Scores sliders proportionally to the number of ticks hit.&quot;)]
-        public Bindable&lt;bool&gt; NoSliderHeadAccuracy { get; } = new BindableBool(true);
-
-        [SettingSource(&quot;Apply classic note lock&quot;, &quot;Applies note lock to the full hit window.&quot;)]
-        public Bindable&lt;bool&gt; ClassicNoteLock { get; } = new BindableBool(true);
-
-        [SettingSource(&quot;Always play a slider&#39;s tail sample&quot;, &quot;Always plays a slider&#39;s tail sample regardless of whether it was hit or not.&quot;)]
-        public Bindable&lt;bool&gt; AlwaysPlayTailSample { get; } = new BindableBool(true);
-
-        [SettingSource(&quot;Fade out hit circles earlier&quot;, &quot;Make hit circles fade out into a miss, rather than after it.&quot;)]
-        public Bindable&lt;bool&gt; FadeHitCircleEarly { get; } = new Bindable&lt;bool&gt;(true);
-
-        [SettingSource(&quot;Classic health&quot;, &quot;More closely resembles the original HP drain mechanics.&quot;)]
-        public Bindable&lt;bool&gt; ClassicHealth { get; } = new Bindable&lt;bool&gt;(true);
-
-        private bool usingHiddenFading;
-
-        public void ApplyToHitObject(HitObject hitObject)
-        {
-            switch (hitObject)
-            {
-                case Slider slider:
-                    slider.ClassicSliderBehaviour = NoSliderHeadAccuracy.Value;
-                    break;
-            }
-        }
-
-        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
-        {
-            var osuRuleset = (DrawableOsuRuleset)drawableRuleset;
-
-            if (ClassicNoteLock.Value)
-            {
-                double hittableRange = OsuHitWindows.MISS_WINDOW - (drawableRuleset.Mods.OfType&lt;OsuModAutopilot&gt;().Any() ? 200 : 0);
-                osuRuleset.Playfield.HitPolicy = new LegacyHitPolicy(hittableRange);
-            }
-
-            usingHiddenFading = drawableRuleset.Mods.OfType&lt;OsuModHidden&gt;().SingleOrDefault()?.OnlyFadeApproachCircles.Value == false;
-        }
-
-        public void ApplyToDrawableHitObject(DrawableHitObject obj)
-        {
-            switch (obj)
-            {
-                case DrawableSliderHead head:
-                    if (FadeHitCircleEarly.Value &amp;&amp; !usingHiddenFading)
-                        applyEarlyFading(head);
-
-                    if (ClassicNoteLock.Value)
-                        blockInputToObjectsUnderSliderHead(head);
-
-                    break;
-
-                case DrawableSliderTail tail:
-                    tail.SamplePlaysOnlyOnHit = !AlwaysPlayTailSample.Value;
-                    break;
-
-                case DrawableHitCircle circle:
-                    if (FadeHitCircleEarly.Value &amp;&amp; !usingHiddenFading)
-                        applyEarlyFading(circle);
-
-                    break;
-            }
-        }
+        /// &lt;summary&gt;
+        /// Two objects this many ms apart or more are skipped. (200 BPM 2/1)
+        /// &lt;/summary&gt;
+        private const double pattern_lifetime = 600;
 
         /// &lt;summary&gt;
-        /// On stable, slider heads that have already been hit block input from reaching objects that may be underneath them
-        /// until the sliders they&#39;re part of have been fully judged.
-        /// The purpose of this method is to restore that behaviour.
-        /// In order to avoid introducing yet another confusing config option, this behaviour is roped into the general notion of &quot;note lock&quot;.
+        /// Two objects this distance apart or less are skipped.
         /// &lt;/summary&gt;
-        private static void blockInputToObjectsUnderSliderHead(DrawableSliderHead slider)
-        {
-            slider.HitArea.CanBeHit = () =&gt; !slider.DrawableSlider.AllJudged;
-        }
+        private const double stack_leniency = 12;
 
-        private void applyEarlyFading(DrawableHitCircle circle)
+        /// &lt;summary&gt;
+        /// How long an observation is relevant for comparison. (120 BPM 8/1)
+        /// &lt;/summary&gt;
+        private const double observation_lifetime = 4000;
+
+        /// &lt;summary&gt;
+        /// How different two delta times can be to still be compared. (240 BPM 1/16)
+        /// &lt;/summary&gt;
+        private const double similar_time_leniency = 16;
+
+        /// &lt;summary&gt;
+        /// How many pixels are subtracted from the difference between current and expected distance.
+        /// &lt;/summary&gt;
+        private const double distance_leniency_absolute_warning = 10;
+
+        /// &lt;summary&gt;
+        /// How much of the current distance that the difference can make out.
+        /// &lt;/summary&gt;
+        private const double distance_leniency_percent_warning = 0.15;
+
+        private const double distance_leniency_absolute_problem = 20;
+        private const double distance_leniency_percent_problem = 0.3;
+
+        public CheckMetadata Metadata { get; } = new CheckMetadata(CheckCategory.Spread, &quot;Object too close or far away from previous&quot;);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
         {
-            circle.ApplyCustomUpdateState += (dho, state) =&gt;
+            new IssueTemplateIrregularSpacingProblem(this),
+            new IssueTemplateIrregularSpacingWarning(this)
+        };
+
+        /// &lt;summary&gt;
+        /// Represents an observation of the time and distance between two objects.
+        /// &lt;/summary&gt;
+        private readonly struct ObservedTimeDistance
+        {
+            public readonly double ObservationTime;
+            public readonly double DeltaTime;
+            public readonly double Distance;
+
+            public ObservedTimeDistance(double observationTime, double deltaTime, double distance)
             {
-                using (dho.BeginAbsoluteSequence(dho.StateUpdateTime))
-                {
-                    if (state != ArmedState.Hit)
-                    {
-                        double okWindow = dho.HitObject.HitWindows.WindowFor(HitResult.Ok);
-                        double lateMissFadeTime = dho.HitObject.HitWindows.WindowFor(HitResult.Meh) - okWindow;
-                        dho.Delay(okWindow).FadeOut(lateMissFadeTime);
-                    }
-                }
-            };
+                ObservationTime = observationTime;
+                DeltaTime = deltaTime;
+                Distance = distance;
+            }
         }
 
-        public HealthProcessor? CreateHealthProcessor(double drainStartTime) =&gt; ClassicHealth.Value ? new OsuLegacyHealthProcessor(drainStartTime) : null;
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            if (context.InterpretedDifficulty &gt; DifficultyRating.Normal)
+                yield break;
+
+            var prevObservedTimeDistances = new List&lt;ObservedTimeDistance&gt;();
+            var hitObjects = context.CurrentDifficulty.Playable.HitObjects;
+
+            for (int i = 0; i &lt; hitObjects.Count - 1; ++i)
+            {
+                if (!(hitObjects[i] is OsuHitObject hitObject) || hitObject is Spinner)
+                    continue;
+
+                if (!(hitObjects[i + 1] is OsuHitObject nextHitObject) || nextHitObject is Spinner)
+                    continue;
+
+                double deltaTime = nextHitObject.StartTime - hitObject.GetEndTime();
+
+                // Ignore objects that are far enough apart in time to not be considered the same pattern.
+                if (deltaTime &gt; pattern_lifetime)
+                    continue;
+
+                // Relying on FastInvSqrt is probably good enough here. We&#39;ll be taking the difference between distances later, hence square not being sufficient.
+                float distance = (hitObject.StackedEndPosition - nextHitObject.StackedPosition).LengthFast;
+
+                // Ignore stacks and half-stacks, as these are close enough to where they can&#39;t be confused for being time-distanced.
+                if (distance &lt; stack_leniency)
+                    continue;
+
+                var observedTimeDistance = new ObservedTimeDistance(nextHitObject.StartTime, deltaTime, distance);
+                double expectedDistance = getExpectedDistance(prevObservedTimeDistances, observedTimeDistance);
+
+                if (expectedDistance == 0)
+                {
+                    // There was nothing relevant to compare to.
+                    prevObservedTimeDistances.Add(observedTimeDistance);
+                    continue;
+                }
+
+                if ((Math.Abs(expectedDistance - distance) - distance_leniency_absolute_problem) / distance &gt; distance_leniency_percent_problem)
+                    yield return new IssueTemplateIrregularSpacingProblem(this).Create(expectedDistance, distance, hitObject, nextHitObject);
+                else if ((Math.Abs(expectedDistance - distance) - distance_leniency_absolute_warning) / distance &gt; distance_leniency_percent_warning)
+                    yield return new IssueTemplateIrregularSpacingWarning(this).Create(expectedDistance, distance, hitObject, nextHitObject);
+                else
+                {
+                    // We use `else` here to prevent issues from cascading; an object spaced too far could cause regular spacing to be considered &quot;too short&quot; otherwise.
+                    prevObservedTimeDistances.Add(observedTimeDistance);
+                }
+            }
+        }
+
+        private double getExpectedDistance(IEnumerable&lt;ObservedTimeDistance&gt; prevObservedTimeDistances, ObservedTimeDistance observedTimeDistance)
+        {
+            int observations = prevObservedTimeDistances.Count();
+
+            int count = 0;
+            double sum = 0;
+
+            // Looping this in reverse allows us to break before going through all elements, as we&#39;re only interested in the most recent ones.
+            for (int i = observations - 1; i &gt;= 0; --i)
+            {
+                var prevObservedTimeDistance = prevObservedTimeDistances.ElementAt(i);
+
+                // Only consider observations within the last few seconds - this allows the map to build spacing up/down over time, but prevents it from being too sudden.
+                if (observedTimeDistance.ObservationTime - prevObservedTimeDistance.ObservationTime &gt; observation_lifetime)
+                    break;
+
+                // Only consider observations which have a similar time difference - this leniency allows handling of multi-BPM maps which speed up/down slowly.
+                if (Math.Abs(observedTimeDistance.DeltaTime - prevObservedTimeDistance.DeltaTime) &gt; similar_time_leniency)
+                    break;
+
+                count += 1;
+                sum += prevObservedTimeDistance.Distance / Math.Max(prevObservedTimeDistance.DeltaTime, 1);
+            }
+
+            return sum / Math.Max(count, 1) * observedTimeDistance.DeltaTime;
+        }
+
+        public abstract class IssueTemplateIrregularSpacing : IssueTemplate
+        {
+            protected IssueTemplateIrregularSpacing(ICheck check, IssueType issueType)
+                : base(check, issueType, &quot;Expected {0:0} px spacing like previous objects, currently {1:0}.&quot;)
+            {
+            }
+
+            public Issue Create(double expected, double actual, params HitObject[] hitObjects) =&gt; new Issue(hitObjects, this, expected, actual);
+        }
+
+        public class IssueTemplateIrregularSpacingProblem : IssueTemplateIrregularSpacing
+        {
+            public IssueTemplateIrregularSpacingProblem(ICheck check)
+                : base(check, IssueType.Problem)
+            {
+            }
+        }
+
+        public class IssueTemplateIrregularSpacingWarning : IssueTemplateIrregularSpacing
+        {
+            public IssueTemplateIrregularSpacingWarning(ICheck check)
+                : base(check, IssueType.Warning)
+            {
+            }
+        }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[23,52,23,120,0],[26,54,26,58,1],[26,63,26,85,1],[29,49,29,53,1],[29,58,29,80,1],[32,54,32,58,1],[32,63,32,85,1],[35,52,35,56,1],[35,61,35,85,1],[38,47,38,51,1],[38,56,38,80,1],[43,9,43,10,0],[44,13,44,31,0],[47,21,47,80,0],[48,21,48,27,0],[50,9,50,10,0],[53,9,53,10,0],[54,13,54,66,0],[56,13,56,39,0],[57,13,57,14,0],[58,17,58,133,0],[59,17,59,85,0],[60,13,60,14,0],[62,13,62,135,0],[63,9,63,10,0],[66,9,66,10,0],[67,13,67,25,0],[70,21,70,72,0],[71,25,71,48,0],[73,21,73,47,0],[74,25,74,66,0],[76,21,76,27,0],[79,21,79,77,0],[80,21,80,27,0],[83,21,83,72,0],[84,25,84,50,0],[86,21,86,27,0],[88,9,88,10,0],[97,9,97,10,0],[98,13,98,45,0],[98,45,98,77,0],[98,77,98,78,0],[99,9,99,10,0],[102,9,102,10,0],[103,13,104,13,0],[104,13,104,14,0],[104,14,105,17,0],[105,17,105,71,0],[105,71,106,17,0],[106,17,106,18,0],[106,18,107,21,0],[107,21,107,49,0],[107,49,108,21,0],[108,21,108,22,0],[108,22,109,25,0],[109,25,109,92,0],[109,92,110,25,0],[110,25,110,112,0],[110,112,111,25,0],[111,25,111,71,0],[111,71,112,21,0],[112,21,112,22,0],[112,22,113,17,0],[113,17,113,18,0],[113,18,114,13,0],[114,13,114,14,0],[114,14,114,15,0],[115,9,115,10,0],[117,81,117,154,0]]);
+      highlightRanges([[50,41,50,45,0],[50,50,50,135,1],[52,64,56,10,0],[68,13,68,14,1],[69,17,69,51,1],[70,17,70,39,1],[71,17,71,37,1],[72,13,72,14,1],[76,9,76,10,1],[77,13,77,73,1],[78,17,78,29,1],[80,13,80,78,1],[81,13,81,76,1],[83,18,83,27,1],[83,29,83,53,1],[83,55,83,58,1],[84,13,84,14,1],[85,17,85,88,1],[86,21,86,30,1],[88,17,88,100,1],[89,21,89,30,1],[91,17,91,85,1],[94,17,94,50,1],[95,21,95,30,1],[98,17,98,108,1],[101,17,101,47,1],[102,21,102,30,1],[104,17,104,115,1],[105,17,105,112,1],[107,17,107,43,1],[108,17,108,18,1],[110,21,110,73,1],[111,21,111,30,1],[114,17,114,145,1],[115,21,115,142,1],[116,22,116,150,1],[117,21,117,142,1],[119,17,119,18,1],[121,21,121,73,1],[122,17,122,18,1],[123,13,123,14,1],[124,9,124,10,1],[127,9,127,10,1],[128,13,128,66,1],[130,13,130,27,1],[131,13,131,28,1],[134,18,134,42,1],[134,44,134,50,1],[134,52,134,55,1],[135,13,135,14,1],[136,17,136,87,1],[139,17,139,124,1],[140,21,140,27,1],[143,17,143,123,1],[144,21,144,27,1],[146,17,146,28,1],[147,17,147,108,1],[148,13,148,14,1],[150,13,150,78,1],[151,9,151,10,1],[156,19,156,110,1],[157,13,157,14,1],[158,13,158,14,1],[160,99,160,144,1],[166,19,166,49,1],[167,13,167,14,1],[168,13,168,14,1],[174,19,174,49,1],[175,13,175,14,1],[176,13,176,14,1]]);
     </script>
   </body>
 </html>

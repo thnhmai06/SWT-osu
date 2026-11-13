@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Judgements/OsuSliderJudgementResult.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Blueprints/Sliders/Components/PathControlPointPiece.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,27 +11,234 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System.Collections.Generic;
-using osu.Game.Rulesets.Judgements;
+#nullable disable
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
 using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Objects;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
 
-namespace osu.Game.Rulesets.Osu.Judgements
+namespace osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components
 {
-    public class OsuSliderJudgementResult : OsuJudgementResult
+    /// &lt;summary&gt;
+    /// A visualisation of a single &lt;see cref=&quot;PathControlPoint&quot;/&gt; in an osu hit object with a path.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;T&quot;&gt;The type of &lt;see cref=&quot;OsuHitObject&quot;/&gt; which this &lt;see cref=&quot;PathControlPointPiece{T}&quot;/&gt; visualises.&lt;/typeparam&gt;
+    public partial class PathControlPointPiece&lt;T&gt; : BlueprintPiece&lt;T&gt;, IHasTooltip
+        where T : OsuHitObject, IHasPath
     {
-        public readonly Stack&lt;(double time, bool tracking)&gt; TrackingHistory = new Stack&lt;(double, bool)&gt;();
+        public Action&lt;PathControlPointPiece&lt;T&gt;, MouseButtonEvent&gt; RequestSelection;
 
-        public OsuSliderJudgementResult(HitObject hitObject, Judgement judgement)
-            : base(hitObject, judgement)
+        public Action&lt;PathControlPoint&gt; DragStarted;
+        public Action&lt;DragEvent&gt; DragInProgress;
+        public Action DragEnded;
+
+        public readonly BindableBool IsSelected = new BindableBool();
+        public readonly PathControlPoint ControlPoint;
+
+        private readonly T hitObject;
+        private readonly FastCircle circle;
+        private readonly Drawable markerRing;
+
+        [Resolved]
+        private OsuColour colours { get; set; }
+
+        private IBindable&lt;Vector2&gt; hitObjectPosition;
+        private IBindable&lt;float&gt; hitObjectScale;
+        private IBindable&lt;int&gt; stackHeight;
+
+        public PathControlPointPiece(T hitObject, PathControlPoint controlPoint)
         {
-            TrackingHistory.Push((double.NegativeInfinity, false));
+            this.hitObject = hitObject;
+            ControlPoint = controlPoint;
+
+            controlPoint.Changed += updateMarkerDisplay;
+
+            Origin = Anchor.Centre;
+            AutoSizeAxes = Axes.Both;
+
+            InternalChildren = new[]
+            {
+                circle = new FastCircle
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Size = new Vector2(20),
+                },
+                markerRing = new CircularProgress
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Size = new Vector2(28),
+                    Alpha = 0,
+                    InnerRadius = 0.1f,
+                    Progress = 1
+                }
+            };
         }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            hitObjectPosition = hitObject.PositionBindable.GetBoundCopy();
+            hitObjectPosition.BindValueChanged(_ =&gt; updateMarkerDisplay());
+
+            hitObjectScale = hitObject.ScaleBindable.GetBoundCopy();
+            hitObjectScale.BindValueChanged(_ =&gt; updateMarkerDisplay());
+
+            stackHeight = hitObject.StackHeightBindable.GetBoundCopy();
+            stackHeight.BindValueChanged(_ =&gt; updateMarkerDisplay());
+
+            IsSelected.BindValueChanged(_ =&gt; updateMarkerDisplay());
+
+            updateMarkerDisplay();
+        }
+
+        // The connecting path is excluded from positional input
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; circle.ReceivePositionalInputAt(screenSpacePos);
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            updateMarkerDisplay();
+            return false;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            updateMarkerDisplay();
+        }
+
+        // Used to pair up mouse down/drag events with their corresponding mouse up events,
+        // to avoid deselecting the piece by accident when the mouse up corresponding to the mouse down/drag fires.
+        private bool keepSelection;
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            if (RequestSelection == null)
+                return false;
+
+            switch (e.Button)
+            {
+                case MouseButton.Left:
+                    // if control is pressed, do not do anything as the user may be adding to current selection
+                    // or dragging all currently selected control points.
+                    // if it isn&#39;t and the user&#39;s intent is to deselect, deselection will happen on mouse up.
+                    if (e.ControlPressed &amp;&amp; IsSelected.Value)
+                        return true;
+
+                    RequestSelection.Invoke(this, e);
+                    keepSelection = true;
+
+                    return true;
+
+                case MouseButton.Right:
+                    if (!IsSelected.Value)
+                        RequestSelection.Invoke(this, e);
+
+                    keepSelection = true;
+                    return false; // Allow context menu to show
+            }
+
+            return false;
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            base.OnMouseUp(e);
+
+            // ctrl+click deselects this piece, but only if this event
+            // wasn&#39;t immediately preceded by a matching mouse down or drag.
+            if (IsSelected.Value &amp;&amp; e.ControlPressed &amp;&amp; !keepSelection)
+                IsSelected.Value = false;
+
+            keepSelection = false;
+        }
+
+        protected override bool OnClick(ClickEvent e) =&gt; RequestSelection != null;
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (RequestSelection == null)
+                return false;
+
+            if (e.Button == MouseButton.Left)
+            {
+                DragStarted?.Invoke(ControlPoint);
+                keepSelection = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override void OnDrag(DragEvent e) =&gt; DragInProgress?.Invoke(e);
+
+        protected override void OnDragEnd(DragEndEvent e) =&gt; DragEnded?.Invoke();
+
+        /// &lt;summary&gt;
+        /// Updates the state of the circular control point marker.
+        /// &lt;/summary&gt;
+        private void updateMarkerDisplay()
+        {
+            Position = hitObject.StackedPosition + ControlPoint.Position;
+
+            markerRing.Alpha = IsSelected.Value ? 1 : 0;
+
+            Color4 colour = getColourFromNodeType();
+
+            if (IsHovered || IsSelected.Value)
+                colour = colour.Lighten(1);
+
+            Colour = colour;
+            Scale = new Vector2(hitObject.Scale);
+        }
+
+        private Color4 getColourFromNodeType()
+        {
+            if (ControlPoint.Type is not PathType pathType)
+                return colours.Yellow;
+
+            switch (pathType.Type)
+            {
+                case SplineType.Catmull:
+                    return colours.SeaFoam;
+
+                case SplineType.BSpline:
+                    if (!pathType.Degree.HasValue)
+                        return colours.PinkLighter;
+
+                    int idx = Math.Clamp(pathType.Degree.Value, 0, 3);
+                    return new[] { colours.PinkDarker, colours.PinkDark, colours.Pink, colours.PinkLight }[idx];
+
+                case SplineType.PerfectCurve:
+                    return colours.PurpleDark;
+
+                default:
+                    return colours.Red;
+            }
+        }
+
+        public LocalisableString TooltipText =&gt; ControlPoint.Type?.Description ?? string.Empty;
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[12,9,12,107,0],[15,15,15,41,0],[16,9,16,10,0],[17,13,17,68,0],[18,9,18,10,0]]);
+      highlightRanges([[39,9,39,70,0],[47,37,47,41,0],[47,42,47,46,0],[53,9,53,81,0],[54,9,54,10,0],[55,13,55,40,0],[56,13,56,41,0],[58,13,58,57,0],[60,13,60,36,0],[61,13,61,38,0],[63,13,80,15,0],[81,9,81,10,0],[84,9,84,10,0],[85,13,85,33,0],[87,13,87,75,0],[88,13,88,53,0],[88,53,88,74,0],[88,74,88,76,0],[90,13,90,69,0],[91,13,91,50,0],[91,50,91,71,0],[91,71,91,73,0],[93,13,93,72,0],[94,13,94,47,0],[94,47,94,68,0],[94,68,94,70,0],[96,13,96,46,0],[96,46,96,67,0],[96,67,96,69,0],[98,13,98,35,0],[99,9,99,10,0],[102,82,102,129,0],[105,9,105,10,0],[106,13,106,35,0],[107,13,107,26,0],[108,9,108,10,0],[111,9,111,10,0],[112,13,112,35,0],[113,9,113,10,0],[120,9,120,10,0],[121,13,121,42,0],[122,17,122,30,0],[124,13,124,30,0],[130,21,130,62,0],[131,25,131,37,0],[133,21,133,54,0],[134,21,134,42,0],[136,21,136,33,0],[139,21,139,43,0],[140,25,140,58,0],[142,21,142,42,0],[143,21,143,34,0],[146,13,146,26,0],[147,9,147,10,0],[150,9,150,10,0],[151,13,151,31,0],[155,13,155,72,0],[156,17,156,42,0],[158,13,158,35,0],[159,9,159,10,0],[161,58,161,82,0],[164,9,164,10,0],[165,13,165,42,0],[166,17,166,30,0],[168,13,168,46,0],[169,13,169,14,0],[170,17,170,51,0],[171,17,171,38,0],[172,17,172,29,0],[175,13,175,26,0],[176,9,176,10,0],[178,56,178,81,0],[180,62,180,81,0],[186,9,186,10,0],[187,13,187,74,0],[189,13,189,57,0],[191,13,191,53,0],[193,13,193,47,0],[194,17,194,44,0],[196,13,196,29,0],[197,13,197,50,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,60,0],[203,17,203,39,0],[205,13,205,35,0],[208,21,208,44,0],[211,21,211,51,0],[212,25,212,52,0],[214,21,214,71,0],[215,21,215,113,0],[218,21,218,47,0],[221,21,221,40,0],[223,9,223,10,0],[225,49,225,95,0]]);
     </script>
   </body>
 </html>

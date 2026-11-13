@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Argon/OsuArgonSkinTransformer.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableSpinner.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,98 +11,400 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Audio;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Judgements;
+using osu.Game.Rulesets.Osu.Scoring;
+using osu.Game.Rulesets.Osu.Skinning;
+using osu.Game.Rulesets.Osu.Skinning.Default;
 using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Ranking;
 using osu.Game.Skinning;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Argon
+namespace osu.Game.Rulesets.Osu.Objects.Drawables
 {
-    public class OsuArgonSkinTransformer : SkinTransformer
+    public partial class DrawableSpinner : DrawableOsuHitObject
     {
-        public OsuArgonSkinTransformer(ISkin skin)
-            : base(skin)
+        public new Spinner HitObject =&gt; (Spinner)base.HitObject;
+
+        public new OsuSpinnerJudgementResult Result =&gt; (OsuSpinnerJudgementResult)base.Result;
+
+        public SkinnableDrawable Body { get; private set; }
+
+        public SpinnerRotationTracker RotationTracker { get; private set; }
+
+        private SpinnerSpmCalculator spmCalculator;
+
+        private Container&lt;DrawableSpinnerTick&gt; ticks;
+        private PausableSkinnableSound spinningSample;
+
+        private Bindable&lt;bool&gt; isSpinning;
+        private bool spinnerFrequencyModulate;
+
+        // see https://github.com/peppy/osu-stable-reference/blob/0b8b19af621dbb282773c22b36cc0453942b98d8/osu!/Audio/AudioEngine.cs#L924
+        private const float spinning_sample_modulated_base_frequency = 20_000f / 44_100;
+        private const float spinning_sample_modulaton_ratio = 40_000f / 44_100;
+        private const float spinning_sample_modulated_max_frequency = 100_000f / 44_100;
+
+        private PausableSkinnableSound maxBonusSample;
+
+        /// &lt;summary&gt;
+        /// The amount of bonus score gained from spinning after the required number of spins, for display purposes.
+        /// &lt;/summary&gt;
+        public double CurrentBonusScore =&gt; score_per_tick * Math.Clamp(completedFullSpins.Value - HitObject.SpinsRequiredForBonus, 0, HitObject.MaximumBonusSpins);
+
+        /// &lt;summary&gt;
+        /// The maximum amount of bonus score which can be achieved from extra spins.
+        /// &lt;/summary&gt;
+        public double MaximumBonusScore =&gt; score_per_tick * HitObject.MaximumBonusSpins;
+
+        public IBindable&lt;int&gt; CompletedFullSpins =&gt; completedFullSpins;
+
+        private readonly Bindable&lt;int&gt; completedFullSpins = new Bindable&lt;int&gt;();
+
+        /// &lt;summary&gt;
+        /// The number of spins per minute this spinner is spinning at, for display purposes.
+        /// &lt;/summary&gt;
+        public readonly IBindable&lt;double&gt; SpinsPerMinute = new BindableDouble();
+
+        private const double fade_out_duration = 240;
+
+        public DrawableSpinner()
+            : this(null)
         {
         }
 
-        public override Drawable? GetDrawableComponent(ISkinComponentLookup lookup)
+        public DrawableSpinner([CanBeNull] Spinner s = null)
+            : base(s)
         {
-            bool isPro = Skin is ArgonProSkin;
+        }
 
-            switch (lookup)
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Origin = Anchor.Centre;
+            RelativeSizeAxes = Axes.Both;
+
+            AddRangeInternal(new Drawable[]
             {
-                case SkinComponentLookup&lt;HitResult&gt; resultComponent:
-                    HitResult result = resultComponent.Component;
-
-                    // This should eventually be moved to a skin setting, when supported.
-                    if (isPro &amp;&amp; (result == HitResult.Great || result == HitResult.Perfect))
-                        return Drawable.Empty();
-
-                    switch (result)
+                spmCalculator = new SpinnerSpmCalculator
+                {
+                    Result = { BindTarget = SpinsPerMinute },
+                },
+                ticks = new Container&lt;DrawableSpinnerTick&gt;
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
+                new AspectContainer
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Y,
+                    Children = new Drawable[]
                     {
-                        case HitResult.LargeTickHit:
-                        case HitResult.SliderTailHit:
-                            return null;
-
-                        case HitResult.IgnoreMiss:
-                        case HitResult.LargeTickMiss:
-                            return new ArgonJudgementPieceSliderTickMiss(result);
-
-                        default:
-                            return new ArgonJudgementPiece(result);
+                        Body = new SkinnableDrawable(new OsuSkinComponentLookup(OsuSkinComponents.SpinnerBody), _ =&gt; new DefaultSpinner()),
+                        RotationTracker = new SpinnerRotationTracker(this)
                     }
+                },
+                spinningSample = new PausableSkinnableSound
+                {
+                    Volume = { Value = 0 },
+                    MinimumSampleVolume = MINIMUM_SAMPLE_VOLUME,
+                    Looping = true,
+                    Frequency = { Value = spinning_sample_modulated_base_frequency }
+                },
+                maxBonusSample = new PausableSkinnableSound
+                {
+                    MinimumSampleVolume = MINIMUM_SAMPLE_VOLUME,
+                }
+            });
 
-                case OsuSkinComponentLookup osuComponent:
-                    // TODO: Once everything is finalised, consider throwing UnsupportedSkinComponentException on missing entries.
-                    switch (osuComponent.Component)
-                    {
-                        case OsuSkinComponents.HitCircle:
-                            return new ArgonMainCirclePiece(true);
+            PositionBindable.BindValueChanged(pos =&gt; Position = pos.NewValue);
+        }
 
-                        case OsuSkinComponents.SliderHeadHitCircle:
-                            return new ArgonMainCirclePiece(false);
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
 
-                        case OsuSkinComponents.SliderBody:
-                            return new ArgonSliderBody
-                            {
-                                BodyAlpha = isPro ? 0.92f : 0.98f
-                            };
+            isSpinning = RotationTracker.IsSpinning.GetBoundCopy();
+            isSpinning.BindValueChanged(updateSpinningSample);
+        }
 
-                        case OsuSkinComponents.SliderBall:
-                            return new ArgonSliderBall();
+        protected override void OnFree()
+        {
+            base.OnFree();
 
-                        case OsuSkinComponents.SliderFollowCircle:
-                            return new ArgonFollowCircle();
+            spinningSample.ClearSamples();
+            maxBonusSample.ClearSamples();
+        }
 
-                        case OsuSkinComponents.SliderScorePoint:
-                            return new ArgonSliderScorePoint();
+        protected override void LoadSamples()
+        {
+            base.LoadSamples();
 
-                        case OsuSkinComponents.SpinnerBody:
-                            return new ArgonSpinner();
+            spinningSample.Samples = HitObject.CreateSpinningSamples().Cast&lt;ISampleInfo&gt;().ToArray();
+            spinningSample.Frequency.Value = spinning_sample_modulated_base_frequency;
 
-                        case OsuSkinComponents.ReverseArrow:
-                            return new ArgonReverseArrow();
+            maxBonusSample.Samples = new ISampleInfo[] { new SpinnerBonusMaxSampleInfo(HitObject.CreateHitSampleInfo()) };
+        }
 
-                        case OsuSkinComponents.FollowPoint:
-                            return new ArgonFollowPoint();
+        private void updateSpinningSample(ValueChangedEvent&lt;bool&gt; tracking)
+        {
+            if (tracking.NewValue)
+            {
+                if (!spinningSample.RequestedPlaying)
+                    spinningSample.Play();
 
-                        case OsuSkinComponents.Cursor:
-                            return new ArgonCursor();
+                spinningSample.VolumeTo(1, 300);
+            }
+            else
+            {
+                spinningSample.VolumeTo(0, fade_out_duration);
+            }
+        }
 
-                        case OsuSkinComponents.CursorTrail:
-                            return new ArgonCursorTrail();
-                    }
+        public override void StopAllSamples()
+        {
+            base.StopAllSamples();
+            spinningSample?.Stop();
+            maxBonusSample?.Stop();
+        }
 
+        protected override void AddNestedHitObject(DrawableHitObject hitObject)
+        {
+            base.AddNestedHitObject(hitObject);
+
+            switch (hitObject)
+            {
+                case DrawableSpinnerTick tick:
+                    ticks.Add(tick);
                     break;
             }
+        }
 
-            return base.GetDrawableComponent(lookup);
+        protected override void UpdateHitStateTransforms(ArmedState state)
+        {
+            base.UpdateHitStateTransforms(state);
+
+            this.FadeOut(fade_out_duration).OnComplete(_ =&gt;
+            {
+                // looping sample should be stopped here as it is safer than running in the OnComplete
+                // of the volume transition above.
+                spinningSample.Stop();
+            });
+
+            Expire();
+
+            // skin change does a rewind of transforms, which will stop the spinning sound from playing if it&#39;s currently in playback.
+            isSpinning?.TriggerChange();
+        }
+
+        protected override void ClearNestedHitObjects()
+        {
+            base.ClearNestedHitObjects();
+            ticks.Clear(false);
+        }
+
+        protected override DrawableHitObject CreateNestedHitObject(HitObject hitObject)
+        {
+            switch (hitObject)
+            {
+                case SpinnerBonusTick bonusTick:
+                    return new DrawableSpinnerBonusTick(bonusTick);
+
+                case SpinnerTick tick:
+                    return new DrawableSpinnerTick(tick);
+            }
+
+            return base.CreateNestedHitObject(hitObject);
+        }
+
+        protected override void ApplySkin(ISkinSource skin, bool allowFallback)
+        {
+            base.ApplySkin(skin, allowFallback);
+            spinnerFrequencyModulate = skin.GetConfig&lt;OsuSkinConfiguration, bool&gt;(OsuSkinConfiguration.SpinnerFrequencyModulate)?.Value ?? true;
+        }
+
+        /// &lt;summary&gt;
+        /// The completion progress of this spinner from 0..1 (clamped).
+        /// &lt;/summary&gt;
+        public float Progress =&gt; Math.Clamp(progressUnclamped, 0, 1);
+
+        private float progressUnclamped
+        {
+            get
+            {
+                if (HitObject.SpinsRequired == 0)
+                    // some spinners are so short they can&#39;t require an integer spin count.
+                    // these become implicitly hit.
+                    return 1;
+
+                return Result.TotalRotation / 360 / HitObject.SpinsRequired;
+            }
+        }
+
+        protected override JudgementResult CreateResult(Judgement judgement) =&gt; new OsuSpinnerJudgementResult(HitObject, judgement);
+
+        protected override void CheckForResult(bool userTriggered, double timeOffset)
+        {
+            if (Time.Current &lt; HitObject.StartTime) return;
+
+            if (Progress &gt;= 1)
+                Result.TimeCompleted ??= Time.Current;
+
+            if (userTriggered || Time.Current &lt; HitObject.EndTime)
+                return;
+
+            // Trigger a miss result for remaining ticks to avoid infinite gameplay.
+            foreach (var tick in ticks.Where(t =&gt; !t.Result.HasResult))
+                tick.TriggerResult(false);
+
+            ApplyResult(static (r, hitObject) =&gt;
+            {
+                var spinner = (DrawableSpinner)hitObject;
+                if (spinner.Progress &gt;= 1)
+                    r.Type = HitResult.Great;
+                else if (spinner.Progress &gt; .9)
+                    r.Type = HitResult.Ok;
+                else if (spinner.Progress &gt; .75)
+                    r.Type = HitResult.Meh;
+                else if (spinner.Time.Current &gt;= spinner.HitObject.EndTime)
+                    r.Type = r.Judgement.MinResult;
+            });
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (HandleUserInput)
+                RotationTracker.Tracking = RotationTracker.IsSpinnableTime &amp;&amp; !Result.HasResult &amp;&amp; correctButtonPressed();
+
+            spinningSample?.Frequency.Value = spinnerFrequencyModulate
+                ? Math.Min(spinning_sample_modulated_max_frequency, spinning_sample_modulated_base_frequency + progressUnclamped * spinning_sample_modulaton_ratio)
+                : 1;
+
+            // Ticks can theoretically be judged at any point in the spinner&#39;s duration.
+            // A tick must be alive to correctly play back samples,
+            // but for performance reasons, we only want to keep the next tick alive.
+            DrawableHitObject nextTick = null;
+
+            foreach (var nested in NestedHitObjects)
+            {
+                if (!nested.Judged)
+                {
+                    nextTick = nested;
+                    break;
+                }
+            }
+
+            // See default `LifetimeStart` as set in `DrawableSpinnerTick`.
+            if (nextTick?.LifetimeStart == double.MaxValue)
+                nextTick.LifetimeStart = HitObject.StartTime;
+        }
+
+        private bool correctButtonPressed()
+        {
+            if (OsuActionInputManager == null)
+                return false;
+
+            foreach (var action in OsuActionInputManager.PressedActions)
+            {
+                if (action == OsuAction.LeftButton || action == OsuAction.RightButton)
+                    return true;
+            }
+
+            return false;
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (Result.TimeStarted == null &amp;&amp; RotationTracker.Tracking)
+                Result.TimeStarted = Time.Current;
+
+            // don&#39;t update after end time to avoid the rate display dropping during fade out.
+            // this shouldn&#39;t be limited to StartTime as it causes weirdness with the underlying calculation, which is expecting updates during that period.
+            if (Time.Current &lt;= HitObject.EndTime)
+                spmCalculator.SetRotation(Result.TotalRotation);
+
+            updateBonusScore();
+        }
+
+        private static readonly int score_per_tick = new OsuScoreProcessor().GetBaseScoreForResult(new SpinnerBonusTick.OsuSpinnerBonusTickJudgement().MaxResult);
+
+        private void updateBonusScore()
+        {
+            if (ticks.Count == 0)
+                return;
+
+            int spins = (int)(Result.TotalRotation / 360);
+
+            if (spins &lt; completedFullSpins.Value)
+            {
+                // rewinding, silently handle
+                completedFullSpins.Value = spins;
+                return;
+            }
+
+            while (completedFullSpins.Value != spins)
+            {
+                var tick = ticks.FirstOrDefault(t =&gt; !t.Result.HasResult);
+
+                // tick may be null if we&#39;ve hit the spin limit.
+                if (tick == null)
+                {
+                    // we still want to play a sound. this will probably be a new sound in the future, but for now let&#39;s continue playing the bonus sound.
+                    // TODO: this doesn&#39;t concurrency. i can&#39;t figure out how to make it concurrency. samples are bad and need a refactor.
+                    maxBonusSample.Play();
+                }
+                else
+                    tick.TriggerResult(true);
+
+                completedFullSpins.Value++;
+            }
+        }
+
+        public class SpinnerBonusMaxSampleInfo : HitSampleInfo
+        {
+            public override IEnumerable&lt;string&gt; LookupNames
+            {
+                get
+                {
+                    foreach (string name in base.LookupNames)
+                        yield return name;
+
+                    foreach (string name in base.LookupNames)
+                        yield return name.Replace(&quot;-max&quot;, string.Empty);
+                }
+            }
+
+            public SpinnerBonusMaxSampleInfo(HitSampleInfo sampleInfo)
+                : base(&quot;spinnerbonus-max&quot;, sampleInfo.Bank, sampleInfo.Suffix, sampleInfo.Volume)
+
+            {
+            }
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[13,15,13,25,0],[14,9,14,10,0],[15,9,15,10,0],[18,9,18,10,0],[19,13,19,47,0],[21,13,21,28,0],[24,21,24,66,0],[27,21,27,93,0],[28,25,28,49,0],[30,21,30,36,0],[34,29,34,41,0],[38,29,38,82,0],[41,29,41,68,0],[46,21,46,52,0],[49,29,49,67,0],[52,29,52,68,0],[55,29,58,31,0],[61,29,61,58,0],[64,29,64,60,0],[67,29,67,64,0],[70,29,70,55,0],[73,29,73,60,0],[76,29,76,59,0],[79,29,79,54,0],[82,29,82,59,0],[85,21,85,27,0],[88,13,88,54,0],[89,9,89,10,0]]);
+      highlightRanges([[31,41,31,64,0],[33,56,33,94,0],[35,41,35,45,0],[35,46,35,58,0],[37,57,37,61,0],[37,62,37,74,0],[57,44,57,163,0],[62,44,62,88,0],[64,53,64,71,0],[66,9,66,81,0],[71,9,71,81,0],[76,15,76,25,0],[77,9,77,10,0],[78,9,78,10,0],[81,15,81,22,0],[82,9,82,10,0],[83,9,83,10,0],[87,9,87,10,0],[88,13,88,36,0],[89,13,89,42,0],[91,13,108,118,0],[108,118,108,138,0],[108,138,123,16,0],[125,13,125,54,0],[125,54,125,77,0],[125,77,125,79,0],[126,9,126,10,0],[129,9,129,10,0],[130,13,130,33,0],[132,13,132,68,0],[133,13,133,63,0],[134,9,134,10,0],[137,9,137,10,0],[138,13,138,27,0],[140,13,140,43,0],[141,13,141,43,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,32,0],[148,13,148,102,0],[149,13,149,87,0],[151,13,151,123,0],[152,9,152,10,0],[155,9,155,10,0],[156,13,156,35,0],[157,13,157,14,0],[158,17,158,54,0],[159,21,159,43,0],[161,17,161,49,0],[162,13,162,14,0],[164,13,164,14,0],[165,17,165,63,0],[166,13,166,14,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,35,0],[172,13,172,36,0],[173,13,173,36,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,48,0],[180,13,180,31,0],[183,21,183,37,0],[184,21,184,27,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,50,0],[192,13,193,13,0],[193,13,193,14,0],[193,14,196,17,0],[196,17,196,39,0],[196,39,197,13,0],[197,13,197,14,0],[197,14,197,16,0],[199,13,199,22,0],[202,13,202,41,0],[203,9,203,10,0],[206,9,206,10,0],[207,13,207,42,0],[208,13,208,32,0],[209,9,209,10,0],[212,9,212,10,0],[213,13,213,31,0],[216,21,216,68,0],[219,21,219,58,0],[222,13,222,58,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,49,0],[228,13,228,145,0],[229,9,229,10,0],[234,34,234,69,0],[239,13,239,14,0],[240,17,240,50,0],[243,21,243,30,0],[245,17,245,77,0],[246,13,246,14,0],[249,81,249,132,0],[252,9,252,10,0],[253,13,253,52,0],[253,53,253,60,0],[255,13,255,31,0],[256,17,256,55,0],[258,13,258,67,0],[259,17,259,24,0],[262,13,262,20,0],[262,22,262,30,0],[262,31,262,33,0],[262,34,262,51,0],[262,51,262,70,0],[262,70,262,71,0],[263,17,263,43,0],[265,13,266,13,0],[266,13,266,14,0],[266,14,267,17,0],[267,17,267,58,0],[267,58,268,17,0],[268,17,268,43,0],[268,43,269,21,0],[269,21,269,46,0],[269,46,270,22,0],[270,22,270,48,0],[270,48,271,21,0],[271,21,271,43,0],[271,43,272,22,0],[272,22,272,49,0],[272,49,273,21,0],[273,21,273,44,0],[273,44,274,22,0],[274,22,274,76,0],[274,76,275,21,0],[275,21,275,52,0],[275,52,276,13,0],[276,13,276,14,0],[276,14,276,16,0],[277,9,277,10,0],[280,9,280,10,0],[281,13,281,27,0],[283,13,283,33,0],[284,17,284,123,0],[286,13,288,21,0],[293,13,293,47,0],[295,13,295,20,0],[295,22,295,32,0],[295,33,295,35,0],[295,36,295,52,0],[296,13,296,14,0],[297,17,297,36,0],[298,17,298,18,0],[299,21,299,39,0],[300,21,300,27,0],[302,13,302,14,0],[305,13,305,60,0],[306,17,306,62,0],[307,9,307,10,0],[310,9,310,10,0],[311,13,311,47,0],[312,17,312,30,0],[314,13,314,20,0],[314,22,314,32,0],[314,33,314,35,0],[314,36,314,72,0],[315,13,315,14,0],[316,17,316,87,0],[317,21,317,33,0],[318,13,318,14,0],[320,13,320,26,0],[321,9,321,10,0],[324,9,324,10,0],[325,13,325,40,0],[327,13,327,72,0],[328,17,328,51,0],[332,13,332,51,0],[333,17,333,65,0],[335,13,335,32,0],[336,9,336,10,0],[338,9,338,163,0],[341,9,341,10,0],[342,13,342,34,0],[343,17,343,24,0],[345,13,345,59,0],[347,13,347,50,0],[348,13,348,14,0],[350,17,350,50,0],[351,17,351,24,0],[354,13,354,54,0],[355,13,355,14,0],[356,17,356,54,0],[356,54,356,73,0],[356,73,356,75,0],[359,17,359,34,0],[360,17,360,18,0],[363,21,363,43,0],[364,17,364,18,0],[366,21,366,46,0],[368,17,368,44,0],[369,13,369,14,0],[370,9,370,10,0],[377,17,377,18,0],[378,21,378,28,0],[378,30,378,41,0],[378,42,378,44,0],[378,45,378,61,0],[379,25,379,43,0],[381,21,381,28,0],[381,30,381,41,0],[381,42,381,44,0],[381,45,381,61,0],[382,25,382,73,0],[383,17,383,18,0],[387,19,387,98,0],[389,13,389,14,0],[390,13,390,14,0]]);
     </script>
   </body>
 </html>

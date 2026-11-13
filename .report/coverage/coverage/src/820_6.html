@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Argon/ArgonJudgementPiece.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/Connections/FollowPointConnection.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -12,177 +12,137 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using osu.Framework.Allocation;
+using System.Diagnostics;
 using osu.Framework.Graphics;
-using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Utils;
-using osu.Game.Graphics;
-using osu.Game.Graphics.Sprites;
-using osu.Game.Rulesets.Judgements;
-using osu.Game.Rulesets.Osu.Skinning.Default;
-using osu.Game.Rulesets.Scoring;
+using osu.Framework.Graphics.Pooling;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Pooling;
 using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Skinning.Argon
+namespace osu.Game.Rulesets.Osu.Objects.Drawables.Connections
 {
-    public partial class ArgonJudgementPiece : TextJudgementPiece, IAnimatableJudgement
+    /// &lt;summary&gt;
+    /// Visualises the &lt;see cref=&quot;FollowPoint&quot;/&gt;s between two &lt;see cref=&quot;DrawableOsuHitObject&quot;/&gt;s.
+    /// &lt;/summary&gt;
+    public partial class FollowPointConnection : PoolableDrawableWithLifetime&lt;FollowPointLifetimeEntry&gt;
     {
-        private RingExplosion? ringExplosion;
+        // Todo: These shouldn&#39;t be constants
+        public const int SPACING = 32;
+        public const double PREEMPT = 800;
 
-        [Resolved]
-        private OsuColour colours { get; set; } = null!;
+        public DrawablePool&lt;FollowPoint&gt;? Pool { private get; set; }
 
-        public ArgonJudgementPiece(HitResult result)
-            : base(result)
+        protected override void OnApply(FollowPointLifetimeEntry entry)
         {
-            AutoSizeAxes = Axes.Both;
+            base.OnApply(entry);
 
-            Origin = Anchor.Centre;
+            entry.Invalidated += scheduleRefresh;
+
+            // Our clock may not be correct at this point if `LoadComplete` has not run yet.
+            // Without a schedule, animations referencing FollowPoint&#39;s clock (see `IAnimationTimeReference`) would be incorrect on first pool usage.
+            scheduleRefresh();
         }
 
-        [BackgroundDependencyLoader]
-        private void load()
+        protected override void OnFree(FollowPointLifetimeEntry entry)
         {
-            if (Result.IsHit())
+            base.OnFree(entry);
+
+            entry.Invalidated -= scheduleRefresh;
+            // Return points to the pool.
+            ClearInternal(false);
+        }
+
+        private void scheduleRefresh() =&gt; Scheduler.AddOnce(() =&gt;
+        {
+            Debug.Assert(Pool != null);
+
+            ClearInternal(false);
+
+            var entry = Entry;
+
+            if (entry?.End == null) return;
+
+            OsuHitObject start = entry.Start;
+            OsuHitObject end = entry.End;
+
+            double startTime = start.GetEndTime();
+
+            Vector2 startPosition = start.StackedEndPosition;
+            Vector2 endPosition = end.StackedPosition;
+
+            Vector2 distanceVector = endPosition - startPosition;
+            int distance = (int)distanceVector.Length;
+            float rotation = (float)(Math.Atan2(distanceVector.Y, distanceVector.X) * (180 / Math.PI));
+
+            double finalTransformEndTime = startTime;
+
+            for (int d = (int)(SPACING * 1.5); d &lt; distance - SPACING; d += SPACING)
             {
-                AddInternal(ringExplosion = new RingExplosion(Result)
+                float fraction = (float)d / distance;
+                Vector2 pointStartPosition = startPosition + (fraction - 0.1f) * distanceVector;
+                Vector2 pointEndPosition = startPosition + fraction * distanceVector;
+
+                GetFadeTimes(start, end, (float)d / distance, out double fadeInTime, out double fadeOutTime);
+
+                FollowPoint fp;
+
+                AddInternal(fp = Pool.Get());
+
+                fp.ClearTransforms();
+                fp.Position = pointStartPosition;
+                fp.Rotation = rotation;
+                fp.Alpha = 0;
+                fp.Scale = new Vector2(1.5f * end.Scale);
+
+                fp.AnimationStartTime.Value = fadeInTime;
+
+                using (fp.BeginAbsoluteSequence(fadeInTime))
                 {
-                    Colour = colours.ForHitResult(Result),
-                });
-            }
-        }
+                    // stable uses `HitObjectManager.TimeFadeIn` for this
+                    // (https://github.com/peppy/osu-stable-reference/blob/baa8705f782c0de2b10a7387d78014c61c8b17fb/osu!/GameplayElements/HitObjectManager.cs#L1918-L1924),
+                    // which is a constant equal to 400.
+                    // `OsuHitObject.TimeFadeIn` is not used here because `OsuModHidden` changes it.
+                    const float duration = 400;
 
-        protected override SpriteText CreateJudgementText() =&gt;
-            new OsuSpriteText
-            {
-                Anchor = Anchor.Centre,
-                Origin = Anchor.Centre,
-                Blending = BlendingParameters.Additive,
-                Spacing = new Vector2(5, 0),
-                Font = OsuFont.Default.With(size: 20, weight: FontWeight.Bold),
-            };
+                    fp.FadeIn(duration);
+                    fp.ScaleTo(end.Scale, duration, Easing.Out);
+                    fp.MoveTo(pointEndPosition, duration, Easing.Out);
+                    fp.Delay(fadeOutTime - fadeInTime).FadeOut(duration).Expire();
+
+                    finalTransformEndTime = fp.LifetimeEnd;
+                }
+            }
+
+            entry.LifetimeEnd = finalTransformEndTime;
+        });
 
         /// &lt;summary&gt;
-        /// Plays the default animation for this judgement piece.
+        /// Computes the fade time of follow point positioned between two hitobjects.
         /// &lt;/summary&gt;
-        /// &lt;remarks&gt;
-        /// The base implementation only handles fade (for all result types) and misses.
-        /// Individual rulesets are recommended to implement their appropriate hit animations.
-        /// &lt;/remarks&gt;
-        public virtual void PlayAnimation()
+        /// &lt;param name=&quot;start&quot;&gt;The first &lt;see cref=&quot;OsuHitObject&quot;/&gt;, where follow points should originate from.&lt;/param&gt;
+        /// &lt;param name=&quot;end&quot;&gt;The second &lt;see cref=&quot;OsuHitObject&quot;/&gt;, which follow points should target.&lt;/param&gt;
+        /// &lt;param name=&quot;fraction&quot;&gt;The fractional distance along &lt;paramref name=&quot;start&quot;/&gt; and &lt;paramref name=&quot;end&quot;/&gt; at which the follow point is to be located.&lt;/param&gt;
+        /// &lt;param name=&quot;fadeInTime&quot;&gt;The fade-in time of the follow point/&lt;/param&gt;
+        /// &lt;param name=&quot;fadeOutTime&quot;&gt;The fade-out time of the follow point.&lt;/param&gt;
+        public static void GetFadeTimes(OsuHitObject start, OsuHitObject end, float fraction, out double fadeInTime, out double fadeOutTime)
         {
-            if (Result == HitResult.IgnoreMiss || Result == HitResult.LargeTickMiss)
-            {
-                this.RotateTo(-45);
-                this.ScaleTo(1.6f);
-                this.ScaleTo(1.2f, 100, Easing.In);
+            double startTime = start.GetEndTime();
+            double duration = end.StartTime - startTime;
 
-                this.FadeOutFromOne(400);
-            }
-            else if (Result.IsMiss())
-            {
-                this.FadeOutFromOne(800);
+            // Preempt time can go below 800ms. Normally, this is achieved via the DT mod which uniformly speeds up all animations game wide regardless of AR.
+            // This uniform speedup is hard to match 1:1, however we can at least make AR&gt;10 (via mods) feel good by extending the upper linear preempt function (see: OsuHitObject).
+            // Note that this doesn&#39;t exactly match the AR&gt;10 visuals as they&#39;re classically known, but it feels good.
+            double preempt = PREEMPT * Math.Min(1, start.TimePreempt / OsuHitObject.PREEMPT_MIN);
 
-                this.ScaleTo(1.6f);
-                this.ScaleTo(1, 100, Easing.In);
-
-                this.MoveTo(Vector2.Zero);
-                this.MoveToOffset(new Vector2(0, 100), 800, Easing.InQuint);
-
-                this.RotateTo(0);
-                this.RotateTo(40, 800, Easing.InQuint);
-            }
-            else
-            {
-                this.FadeOutFromOne(800);
-
-                JudgementText
-                    .FadeInFromZero(300, Easing.OutQuint)
-                    .ScaleTo(Vector2.One)
-                    .ScaleTo(new Vector2(1.2f), 1800, Easing.OutQuint);
-            }
-
-            ringExplosion?.PlayAnimation();
-        }
-
-        public Drawable? GetAboveHitObjectsProxiedContent() =&gt; JudgementText.CreateProxy();
-
-        private partial class RingExplosion : CompositeDrawable
-        {
-            private readonly float travel = 52;
-
-            public RingExplosion(HitResult result)
-            {
-                const float thickness = 4;
-
-                const float small_size = 9;
-                const float large_size = 14;
-
-                Anchor = Anchor.Centre;
-                Origin = Anchor.Centre;
-
-                Blending = BlendingParameters.Additive;
-
-                int countSmall = 0;
-                int countLarge = 0;
-
-                switch (result)
-                {
-                    case HitResult.Meh:
-                        countSmall = 3;
-                        travel *= 0.3f;
-                        break;
-
-                    case HitResult.Ok:
-                    case HitResult.Good:
-                        countSmall = 4;
-                        travel *= 0.6f;
-                        break;
-
-                    case HitResult.Great:
-                    case HitResult.Perfect:
-                        countSmall = 4;
-                        countLarge = 4;
-                        break;
-                }
-
-                for (int i = 0; i &lt; countSmall; i++)
-                    AddInternal(new RingPiece(thickness) { Size = new Vector2(small_size) });
-
-                for (int i = 0; i &lt; countLarge; i++)
-                    AddInternal(new RingPiece(thickness) { Size = new Vector2(large_size) });
-            }
-
-            public void PlayAnimation()
-            {
-                foreach (var c in InternalChildren)
-                {
-                    const float start_position_ratio = 0.3f;
-
-                    float direction = RNG.NextSingle(0, 360);
-                    float distance = RNG.NextSingle(travel / 2, travel);
-
-                    c.MoveTo(new Vector2(
-                        MathF.Cos(direction) * distance * start_position_ratio,
-                        MathF.Sin(direction) * distance * start_position_ratio
-                    ));
-
-                    c.MoveTo(new Vector2(
-                        MathF.Cos(direction) * distance,
-                        MathF.Sin(direction) * distance
-                    ), 600, Easing.OutQuint);
-                }
-
-                this.FadeOutFromOne(1000, Easing.OutQuint);
-            }
+            fadeOutTime = startTime + fraction * duration;
+            fadeInTime = fadeOutTime - preempt;
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[24,37,24,41,0],[24,42,24,46,0],[24,51,24,56,0],[27,15,27,27,0],[28,9,28,10,0],[29,13,29,38,0],[31,13,31,36,0],[32,9,32,10,0],[36,9,36,10,0],[37,13,37,32,0],[38,13,38,14,0],[39,17,42,20,0],[43,13,43,14,0],[44,9,44,10,0],[47,13,54,14,0],[64,9,64,10,0],[65,13,65,85,0],[66,13,66,14,0],[67,17,67,36,0],[68,17,68,36,0],[69,17,69,52,0],[71,17,71,42,0],[72,13,72,14,0],[73,18,73,38,0],[74,13,74,14,0],[75,17,75,42,0],[77,17,77,36,0],[78,17,78,49,0],[80,17,80,43,0],[81,17,81,77,0],[83,17,83,34,0],[84,17,84,56,0],[85,13,85,14,0],[87,13,87,14,0],[88,17,88,42,0],[90,17,93,72,0],[94,13,94,14,0],[96,13,96,44,0],[97,9,97,10,0],[99,64,99,91,0],[103,13,103,48,0],[105,13,105,51,0],[106,13,106,14,0],[112,17,112,40,0],[113,17,113,40,0],[115,17,115,56,0],[117,17,117,36,0],[118,17,118,36,0],[120,17,120,32,0],[123,25,123,40,0],[124,25,124,40,0],[125,25,125,31,0],[129,25,129,40,0],[130,25,130,40,0],[131,25,131,31,0],[135,25,135,40,0],[136,25,136,40,0],[137,25,137,31,0],[140,22,140,31,0],[140,33,140,47,0],[140,49,140,52,0],[141,21,141,94,0],[143,22,143,31,0],[143,33,143,47,0],[143,49,143,52,0],[144,21,144,94,0],[145,13,145,14,0],[148,13,148,14,0],[149,17,149,24,0],[149,26,149,31,0],[149,32,149,34,0],[149,35,149,51,0],[150,17,150,18,0],[153,21,153,62,0],[154,21,154,73,0],[156,21,159,24,0],[161,21,164,46,0],[165,17,165,18,0],[167,17,167,60,0],[168,13,168,14,0]]);
+      highlightRanges([[23,50,23,62,0],[23,63,23,67,0],[26,9,26,10,0],[27,13,27,33,0],[29,13,29,50,0],[33,13,33,31,0],[34,9,34,10,0],[37,9,37,10,0],[38,13,38,32,0],[40,13,40,50,0],[42,13,42,34,0],[43,9,43,10,0],[45,43,46,9,0],[46,9,46,10,0],[46,10,47,13,0],[47,13,47,40,0],[47,40,49,13,0],[49,13,49,34,0],[49,34,51,13,0],[51,13,51,31,0],[51,31,53,13,0],[53,13,53,36,0],[53,36,53,37,0],[53,37,53,44,0],[53,44,55,13,0],[55,13,55,46,0],[55,46,56,13,0],[56,13,56,42,0],[56,42,58,13,0],[58,13,58,51,0],[58,51,60,13,0],[60,13,60,62,0],[60,62,61,13,0],[61,13,61,55,0],[61,55,63,13,0],[63,13,63,66,0],[63,66,64,13,0],[64,13,64,55,0],[64,55,65,13,0],[65,13,65,104,0],[65,104,67,13,0],[67,13,67,54,0],[67,54,69,18,0],[69,18,69,46,0],[69,46,69,48,0],[69,48,69,70,0],[69,70,69,72,0],[69,72,69,84,0],[69,84,70,13,0],[70,13,70,14,0],[70,14,71,17,0],[71,17,71,54,0],[71,54,72,17,0],[72,17,72,97,0],[72,97,73,17,0],[73,17,73,86,0],[73,86,75,17,0],[75,17,75,110,0],[75,110,79,17,0],[79,17,79,46,0],[79,46,81,17,0],[81,17,81,38,0],[81,38,82,17,0],[82,17,82,50,0],[82,50,83,17,0],[83,17,83,40,0],[83,40,84,17,0],[84,17,84,30,0],[84,30,85,17,0],[85,17,85,58,0],[85,58,87,17,0],[87,17,87,58,0],[87,58,89,17,0],[89,17,89,61,0],[89,61,90,17,0],[90,17,90,18,0],[90,18,97,21,0],[97,21,97,41,0],[97,41,98,21,0],[98,21,98,65,0],[98,65,99,21,0],[99,21,99,71,0],[99,71,100,21,0],[100,21,100,83,0],[100,83,102,21,0],[102,21,102,60,0],[102,60,103,17,0],[103,17,103,18,0],[103,18,104,13,0],[104,13,104,14,0],[104,14,106,13,0],[106,13,106,55,0],[106,55,107,9,0],[107,9,107,10,0],[107,10,107,11,0],[118,9,118,10,0],[119,13,119,51,0],[120,13,120,57,0],[125,13,125,98,0],[127,13,127,59,0],[128,13,128,48,0],[129,9,129,10,0]]);
     </script>
   </body>
 </html>

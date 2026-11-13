@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModSpunOut.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/TransformToolboxGroup.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,63 +11,130 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
 using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
 using osu.Framework.Graphics.Sprites;
-using osu.Framework.Localisation;
-using osu.Framework.Utils;
-using osu.Game.Graphics;
-using osu.Game.Rulesets.Mods;
-using osu.Game.Rulesets.Objects.Drawables;
-using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Game.Input.Bindings;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Components;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.Edit
 {
-    public class OsuModSpunOut : Mod, IApplicableToDrawableHitObject
+    public partial class TransformToolboxGroup : EditorToolboxGroup, IKeyBindingHandler&lt;GlobalAction&gt;
     {
-        public override string Name =&gt; &quot;Spun Out&quot;;
-        public override string Acronym =&gt; &quot;SO&quot;;
-        public override IconUsage? Icon =&gt; OsuIcon.ModSpunOut;
-        public override ModType Type =&gt; ModType.Automation;
-        public override LocalisableString Description =&gt; @&quot;Spinners will be automatically completed.&quot;;
-        public override Type[] IncompatibleMods =&gt; new[] { typeof(ModAutoplay), typeof(OsuModAutopilot), typeof(OsuModTargetPractice) };
-        public override bool Ranked =&gt; UsesDefaultConfiguration;
+        private readonly BindableList&lt;HitObject&gt; selectedHitObjects = new BindableList&lt;HitObject&gt;();
+        private readonly BindableBool canMove = new BindableBool();
+        private readonly AggregateBindable&lt;bool&gt; canRotate = new AggregateBindable&lt;bool&gt;((x, y) =&gt; x || y);
+        private readonly AggregateBindable&lt;bool&gt; canScale = new AggregateBindable&lt;bool&gt;((x, y) =&gt; x || y);
 
-        public void ApplyToDrawableHitObject(DrawableHitObject hitObject)
+        private EditorToolButton moveButton = null!;
+        private EditorToolButton rotateButton = null!;
+        private EditorToolButton scaleButton = null!;
+
+        public SelectionRotationHandler RotationHandler { get; init; } = null!;
+        public OsuSelectionScaleHandler ScaleHandler { get; init; } = null!;
+
+        public OsuGridToolboxGroup GridToolbox { get; init; } = null!;
+
+        public TransformToolboxGroup()
+            : base(&quot;transform&quot;)
         {
-            if (hitObject is DrawableSpinner spinner)
-            {
-                spinner.HandleUserInput = false;
-                spinner.OnUpdate += onSpinnerUpdate;
-            }
         }
 
-        private void onSpinnerUpdate(Drawable drawable)
+        [BackgroundDependencyLoader]
+        private void load(EditorBeatmap editorBeatmap)
         {
-            var spinner = (DrawableSpinner)drawable;
+            Child = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(5),
+                Children = new Drawable[]
+                {
+                    moveButton = new EditorToolButton(&quot;Move&quot;,
+                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.ArrowsAlt },
+                        () =&gt; new PreciseMovementPopover()),
+                    rotateButton = new EditorToolButton(&quot;Rotate&quot;,
+                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.Undo },
+                        () =&gt; new PreciseRotationPopover(RotationHandler, GridToolbox)),
+                    scaleButton = new EditorToolButton(&quot;Scale&quot;,
+                        () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.ExpandArrowsAlt },
+                        () =&gt; new PreciseScalePopover(ScaleHandler, GridToolbox))
+                }
+            };
 
-            spinner.RotationTracker.Tracking = spinner.RotationTracker.IsSpinnableTime;
+            selectedHitObjects.BindTo(editorBeatmap.SelectedHitObjects);
+        }
 
-            // early-return if we were paused to avoid division-by-zero in the subsequent calculations.
-            if (Precision.AlmostEquals(spinner.Clock.Rate, 0))
-                return;
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
 
-            // because the spinner is under the gameplay clock, it is affected by rate adjustments on the track;
-            // for that reason using ElapsedFrameTime directly leads to fewer SPM with Half Time and more SPM with Double Time.
-            // for spinners we want the real (wall clock) elapsed time; to achieve that, unapply the clock rate locally here.
-            double rateIndependentElapsedTime = spinner.Clock.ElapsedFrameTime / spinner.Clock.Rate;
+            selectedHitObjects.BindCollectionChanged((_, _) =&gt; canMove.Value = selectedHitObjects.Any(ho =&gt; ho is not Spinner), true);
 
-            // multiply the SPM by 1.01 to ensure that the spinner is completed. if the calculation is left exact,
-            // some spinners may not complete due to very minor decimal loss during calculation
-            float rotationSpeed = (float)(1.01 * spinner.HitObject.SpinsRequired / spinner.HitObject.Duration);
-            spinner.RotationTracker.AddRotation(float.RadiansToDegrees((float)rateIndependentElapsedTime * rotationSpeed * MathF.PI * 2.0f));
+            canRotate.AddSource(RotationHandler.CanRotateAroundPlayfieldOrigin);
+            canRotate.AddSource(RotationHandler.CanRotateAroundSelectionOrigin);
+
+            canScale.AddSource(ScaleHandler.CanScaleX);
+            canScale.AddSource(ScaleHandler.CanScaleY);
+            canScale.AddSource(ScaleHandler.CanScaleFromPlayfieldOrigin);
+
+            // bindings to `Enabled` on the buttons are decoupled on purpose
+            // due to the weird `OsuButton` behaviour of resetting `Enabled` to `false` when `Action` is set.
+            canMove.BindValueChanged(move =&gt; moveButton.Enabled.Value = move.NewValue, true);
+            canRotate.Result.BindValueChanged(rotate =&gt; rotateButton.Enabled.Value = rotate.NewValue, true);
+            canScale.Result.BindValueChanged(scale =&gt; scaleButton.Enabled.Value = scale.NewValue, true);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat) return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.EditorToggleMoveControl:
+                {
+                    moveButton.TriggerClick();
+                    return true;
+                }
+
+                case GlobalAction.EditorToggleRotateControl:
+                {
+                    if (!RotationHandler.OperationInProgress.Value || rotateButton.Selected.Value)
+                        rotateButton.TriggerClick();
+                    return true;
+                }
+
+                case GlobalAction.EditorToggleScaleControl:
+                {
+                    if (!ScaleHandler.OperationInProgress.Value || scaleButton.Selected.Value)
+                        scaleButton.TriggerClick();
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[18,40,18,50,0],[19,43,19,47,1],[20,44,20,62,0],[21,41,21,59,1],[22,58,22,102,0],[23,52,23,136,0],[24,40,24,64,0],[27,9,27,10,0],[28,13,28,54,0],[29,13,29,14,0],[30,17,30,49,0],[31,17,31,53,0],[32,13,32,14,0],[33,9,33,10,0],[36,9,36,10,0],[37,13,37,53,0],[39,13,39,88,0],[42,13,42,63,0],[43,17,43,24,0],[48,13,48,101,0],[52,13,52,112,0],[53,13,53,142,0],[54,9,54,10,0]]);
+      highlightRanges([[25,9,25,101,0],[26,9,26,68,0],[27,9,27,100,0],[27,100,27,106,0],[27,106,27,108,0],[28,9,28,99,0],[28,99,28,105,0],[28,105,28,107,0],[30,9,30,53,0],[31,9,31,55,0],[32,9,32,54,0],[34,59,34,63,0],[34,64,34,69,0],[34,74,34,79,0],[35,56,35,60,0],[35,61,35,66,0],[35,71,35,76,0],[37,50,37,54,0],[37,55,37,60,0],[37,65,37,70,0],[40,15,40,32,0],[41,9,41,10,0],[42,9,42,10,0],[46,9,46,10,0],[47,13,55,31,0],[55,31,55,84,0],[55,84,56,31,0],[56,31,56,59,0],[56,59,58,31,0],[58,31,58,79,0],[58,79,59,31,0],[59,31,59,87,0],[59,87,61,31,0],[61,31,61,90,0],[61,90,62,31,0],[62,31,62,81,0],[62,81,64,15,0],[66,13,66,73,0],[67,9,67,10,0],[70,9,70,10,0],[71,13,71,33,0],[73,13,73,64,0],[73,64,73,109,0],[73,109,73,126,0],[73,126,73,127,0],[73,127,73,135,0],[75,13,75,81,0],[76,13,76,81,0],[78,13,78,56,0],[79,13,79,56,0],[80,13,80,74,0],[84,13,84,46,0],[84,46,84,86,0],[84,86,84,94,0],[85,13,85,57,0],[85,57,85,101,0],[85,101,85,109,0],[86,13,86,55,0],[86,55,86,97,0],[86,97,86,105,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,91,26,0],[91,27,91,40,0],[93,13,93,30,0],[96,17,96,18,0],[97,21,97,47,0],[98,21,98,33,0],[102,17,102,18,0],[103,21,103,99,0],[104,25,104,53,0],[105,21,105,33,0],[109,17,109,18,0],[110,21,110,95,0],[111,25,111,52,0],[112,21,112,33,0],[116,13,116,26,0],[117,9,117,10,0],[120,9,120,10,0],[121,9,121,10,0]]);
     </script>
   </body>
 </html>

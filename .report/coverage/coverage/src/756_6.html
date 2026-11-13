@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModRandom.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/PreciseRotationPopover.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -12,170 +12,210 @@
 // See the LICENCE file in the repository root for full licence text.
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
+using osu.Framework.Allocation;
 using osu.Framework.Bindables;
-using osu.Framework.Localisation;
-using osu.Framework.Utils;
-using osu.Game.Beatmaps;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
 using osu.Game.Configuration;
-using osu.Game.Rulesets.Mods;
-using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Osu.Beatmaps;
-using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
 using osu.Game.Rulesets.Osu.UI;
-using osu.Game.Rulesets.Osu.Utils;
+using osu.Game.Screens.Edit.Components.RadioButtons;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Mods
+namespace osu.Game.Rulesets.Osu.Edit
 {
-    /// &lt;summary&gt;
-    /// Mod that randomises the positions of the &lt;see cref=&quot;HitObject&quot;/&gt;s
-    /// &lt;/summary&gt;
-    public class OsuModRandom : ModRandom, IApplicableToBeatmap
+    public partial class PreciseRotationPopover : OsuPopover
     {
-        public override LocalisableString Description =&gt; &quot;It never gets boring!&quot;;
+        private readonly SelectionRotationHandler rotationHandler;
 
-        public override Type[] IncompatibleMods =&gt; base.IncompatibleMods.Append(typeof(OsuModTargetPractice)).ToArray();
+        private readonly OsuGridToolboxGroup gridToolbox;
 
-        [SettingSource(&quot;Angle sharpness&quot;, &quot;How sharp angles should be&quot;)]
-        public BindableFloat AngleSharpness { get; } = new BindableFloat(7)
+        private readonly Bindable&lt;PreciseRotationInfo&gt; rotationInfo = new Bindable&lt;PreciseRotationInfo&gt;(new PreciseRotationInfo(0, EditorOrigin.GridCentre));
+
+        private FormSliderBar&lt;float&gt; angleInput { get; set; } = null!;
+        private EditorRadioButtonCollection rotationOrigin = null!;
+
+        private EditorRadioButton gridCentreButton = null!;
+        private EditorRadioButton playfieldCentreButton = null!;
+        private EditorRadioButton selectionCentreButton = null!;
+
+        private Bindable&lt;EditorOrigin&gt; configRotationOrigin = null!;
+
+        public PreciseRotationPopover(SelectionRotationHandler rotationHandler, OsuGridToolboxGroup gridToolbox)
         {
-            MinValue = 1,
-            MaxValue = 10,
-            Precision = 0.1f
-        };
+            this.rotationHandler = rotationHandler;
+            this.gridToolbox = gridToolbox;
 
-        private static readonly float playfield_diagonal = OsuPlayfield.BASE_SIZE.LengthFast;
+            AllowableAnchors = new[] { Anchor.CentreLeft, Anchor.CentreRight };
+        }
 
-        private Random random = null!;
-
-        public void ApplyToBeatmap(IBeatmap beatmap)
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
         {
-            if (beatmap is not OsuBeatmap osuBeatmap)
-                return;
+            configRotationOrigin = config.GetBindable&lt;EditorOrigin&gt;(OsuSetting.EditorRotationOrigin);
 
-            Seed.Value ??= RNG.Next();
-
-            random = new Random((int)Seed.Value);
-
-            var positionInfos = OsuHitObjectGenerationUtils.GeneratePositionInfos(osuBeatmap.HitObjects);
-
-            // Offsets the angles of all hit objects in a &quot;section&quot; by the same amount.
-            float sectionOffset = 0;
-
-            // Whether the angles are positive or negative (clockwise or counter-clockwise flow).
-            bool flowDirection = false;
-
-            for (int i = 0; i &lt; positionInfos.Count; i++)
+            Child = new FillFlowContainer
             {
-                if (shouldStartNewSection(osuBeatmap, positionInfos, i))
+                Width = 220,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(5),
+                Children = new Drawable[]
                 {
-                    sectionOffset = getRandomOffset(0.0008f);
-                    flowDirection = !flowDirection;
-                }
-
-                if (positionInfos[i].HitObject is Slider slider &amp;&amp; random.NextDouble() &lt; 0.5)
-                {
-                    OsuHitObjectGenerationUtils.FlipSliderInPlaceHorizontally(slider);
-                }
-
-                if (i == 0)
-                {
-                    positionInfos[i].DistanceFromPrevious = (float)(random.NextDouble() * OsuPlayfield.BASE_SIZE.Y / 2);
-                    positionInfos[i].RelativeAngle = (float)(random.NextDouble() * 2 * Math.PI - Math.PI);
-                }
-                else
-                {
-                    // Offsets only the angle of the current hit object if a flow change occurs.
-                    float flowChangeOffset = 0;
-
-                    // Offsets only the angle of the current hit object.
-                    float oneTimeOffset = getRandomOffset(0.002f);
-
-                    if (shouldApplyFlowChange(positionInfos, i))
+                    angleInput = new FormSliderBar&lt;float&gt;
                     {
-                        flowChangeOffset = getRandomOffset(0.002f);
-                        flowDirection = !flowDirection;
+                        Caption = &quot;Angle (degrees)&quot;,
+                        Current = new BindableNumber&lt;float&gt;
+                        {
+                            MinValue = -360,
+                            MaxValue = 360,
+                            Precision = 1
+                        },
+                        KeyboardStep = 1f,
+                        TabbableContentContainer = this
+                    },
+                    rotationOrigin = new EditorRadioButtonCollection
+                    {
+                        RelativeSizeAxes = Axes.X,
                     }
-
-                    float totalOffset =
-                        // sectionOffset and oneTimeOffset should mainly affect patterns with large spacing.
-                        (sectionOffset + oneTimeOffset) * positionInfos[i].DistanceFromPrevious +
-                        // flowChangeOffset should mainly affect streams.
-                        flowChangeOffset * (playfield_diagonal - positionInfos[i].DistanceFromPrevious);
-
-                    positionInfos[i].RelativeAngle = getRelativeTargetAngle(positionInfos[i].DistanceFromPrevious, totalOffset, flowDirection);
                 }
+            };
+
+            rotationOrigin.AddButton(gridCentreButton = new EditorRadioButton(&quot;Grid centre&quot;,
+                () =&gt; rotationInfo.Value = rotationInfo.Value with { Origin = EditorOrigin.GridCentre },
+                () =&gt; new SpriteIcon { Icon = FontAwesome.Regular.PlusSquare }));
+            rotationOrigin.AddButton(playfieldCentreButton = new EditorRadioButton(&quot;Playfield centre&quot;,
+                () =&gt; rotationInfo.Value = rotationInfo.Value with { Origin = EditorOrigin.PlayfieldCentre },
+                () =&gt; new SpriteIcon { Icon = FontAwesome.Regular.Square }));
+            rotationOrigin.AddButton(selectionCentreButton = new EditorRadioButton(&quot;Selection centre&quot;,
+                () =&gt; rotationInfo.Value = rotationInfo.Value with { Origin = EditorOrigin.SelectionCentre },
+                () =&gt; new SpriteIcon { Icon = FontAwesome.Solid.VectorSquare }));
+
+            selectionCentreButton.Selected.DisabledChanged += isDisabled =&gt;
+            {
+                selectionCentreButton.TooltipText = isDisabled ? &quot;Select more than one object to perform selection-based rotation.&quot; : string.Empty;
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            ScheduleAfterChildren(() =&gt; angleInput.TakeFocus());
+            angleInput.Current.BindValueChanged(angle =&gt; rotationInfo.Value = rotationInfo.Value with { Degrees = angle.NewValue });
+
+            rotationHandler.CanRotateAroundSelectionOrigin.BindValueChanged(e =&gt;
+            {
+                selectionCentreButton.Selected.Disabled = !e.NewValue;
+            }, true);
+
+            bool didSelect = false;
+
+            configRotationOrigin.BindValueChanged(val =&gt;
+            {
+                switch (configRotationOrigin.Value)
+                {
+                    case EditorOrigin.GridCentre:
+                        if (!gridCentreButton.Selected.Disabled)
+                        {
+                            gridCentreButton.Select();
+                            didSelect = true;
+                        }
+
+                        break;
+
+                    case EditorOrigin.PlayfieldCentre:
+                        if (!playfieldCentreButton.Selected.Disabled)
+                        {
+                            playfieldCentreButton.Select();
+                            didSelect = true;
+                        }
+
+                        break;
+
+                    case EditorOrigin.SelectionCentre:
+                        if (!selectionCentreButton.Selected.Disabled)
+                        {
+                            selectionCentreButton.Select();
+                            didSelect = true;
+                        }
+
+                        break;
+                }
+            }, true);
+
+            if (!didSelect)
+                rotationOrigin.Items.First(b =&gt; !b.Selected.Disabled).Select();
+
+            gridCentreButton.Selected.BindValueChanged(b =&gt;
+            {
+                if (b.NewValue) configRotationOrigin.Value = EditorOrigin.GridCentre;
+            });
+            playfieldCentreButton.Selected.BindValueChanged(b =&gt;
+            {
+                if (b.NewValue) configRotationOrigin.Value = EditorOrigin.PlayfieldCentre;
+            });
+            selectionCentreButton.Selected.BindValueChanged(b =&gt;
+            {
+                if (b.NewValue) configRotationOrigin.Value = EditorOrigin.SelectionCentre;
+            });
+
+            rotationInfo.BindValueChanged(rotation =&gt;
+            {
+                // can happen if the popover is dismissed by a keyboard key press while dragging UI controls
+                if (!rotationHandler.OperationInProgress.Value)
+                    return;
+
+                rotationHandler.Update(rotation.NewValue.Degrees, getOriginPosition(rotation.NewValue));
+            });
+        }
+
+        private Vector2? getOriginPosition(PreciseRotationInfo rotation) =&gt;
+            rotation.Origin switch
+            {
+                EditorOrigin.GridCentre =&gt; gridToolbox.StartPosition.Value,
+                EditorOrigin.PlayfieldCentre =&gt; OsuPlayfield.BASE_SIZE / 2,
+                EditorOrigin.SelectionCentre =&gt; null,
+                _ =&gt; throw new ArgumentOutOfRangeException(nameof(rotation))
+            };
+
+        protected override void PopIn()
+        {
+            base.PopIn();
+            rotationHandler.Begin();
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            if (IsLoaded)
+                rotationHandler.Commit();
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Action == GlobalAction.Select &amp;&amp; !e.Repeat)
+            {
+                this.HidePopover();
+                return true;
             }
 
-            osuBeatmap.HitObjects = OsuHitObjectGenerationUtils.RepositionHitObjects(positionInfos);
-        }
-
-        private float getRandomOffset(float stdDev)
-        {
-            // Range: [0.5, 2]
-            // Higher angle sharpness -&gt; lower multiplier
-            float customMultiplier = (1.5f * AngleSharpness.MaxValue - AngleSharpness.Value) / (1.5f * AngleSharpness.MaxValue - AngleSharpness.Default);
-
-            return OsuHitObjectGenerationUtils.RandomGaussian(random, 0, stdDev * customMultiplier);
-        }
-
-        /// &lt;param name=&quot;targetDistance&quot;&gt;The target distance between the previous and the current &lt;see cref=&quot;OsuHitObject&quot;/&gt;.&lt;/param&gt;
-        /// &lt;param name=&quot;offset&quot;&gt;The angle (in rad) by which the target angle should be offset.&lt;/param&gt;
-        /// &lt;param name=&quot;flowDirection&quot;&gt;Whether the relative angle should be positive or negative.&lt;/param&gt;
-        private float getRelativeTargetAngle(float targetDistance, float offset, bool flowDirection)
-        {
-            // Range: [0.1, 1]
-            float angleSharpness = AngleSharpness.Value / AngleSharpness.MaxValue;
-            // Range: [0, 0.9]
-            float angleWideness = 1 - angleSharpness;
-
-            // Range: [-60, 30]
-            float customOffsetX = angleSharpness * 100 - 70;
-            // Range: [-0.075, 0.15]
-            float customOffsetY = angleWideness * 0.25f - 0.075f;
-
-            targetDistance += customOffsetX;
-            float angle = (float)(2.16 / (1 + 200 * Math.Exp(0.036 * (targetDistance - 310 + customOffsetX))) + 0.5);
-            angle += offset + customOffsetY;
-
-            float relativeAngle = (float)Math.PI - angle;
-
-            return flowDirection ? -relativeAngle : relativeAngle;
-        }
-
-        /// &lt;returns&gt;Whether a new section should be started at the current &lt;see cref=&quot;OsuHitObject&quot;/&gt;.&lt;/returns&gt;
-        private bool shouldStartNewSection(OsuBeatmap beatmap, IReadOnlyList&lt;OsuHitObjectGenerationUtils.ObjectPositionInfo&gt; positionInfos, int i)
-        {
-            if (i == 0)
-                return true;
-
-            // Exclude new-combo-spam and 1-2-combos.
-            bool previousObjectStartedCombo = positionInfos[Math.Max(0, i - 2)].HitObject.IndexInCurrentCombo &gt; 1 &amp;&amp;
-                                              positionInfos[i - 1].HitObject.NewCombo;
-            bool previousObjectWasOnDownbeat = OsuHitObjectGenerationUtils.IsHitObjectOnBeat(beatmap, positionInfos[i - 1].HitObject, true);
-            bool previousObjectWasOnBeat = OsuHitObjectGenerationUtils.IsHitObjectOnBeat(beatmap, positionInfos[i - 1].HitObject);
-
-            return (previousObjectStartedCombo &amp;&amp; random.NextDouble() &lt; 0.6f) ||
-                   previousObjectWasOnDownbeat ||
-                   (previousObjectWasOnBeat &amp;&amp; random.NextDouble() &lt; 0.4f);
-        }
-
-        /// &lt;returns&gt;Whether a flow change should be applied at the current &lt;see cref=&quot;OsuHitObject&quot;/&gt;.&lt;/returns&gt;
-        private bool shouldApplyFlowChange(IReadOnlyList&lt;OsuHitObjectGenerationUtils.ObjectPositionInfo&gt; positionInfos, int i)
-        {
-            // Exclude new-combo-spam and 1-2-combos.
-            bool previousObjectStartedCombo = positionInfos[Math.Max(0, i - 2)].HitObject.IndexInCurrentCombo &gt; 1 &amp;&amp;
-                                              positionInfos[i - 1].HitObject.NewCombo;
-
-            return previousObjectStartedCombo &amp;&amp; random.NextDouble() &lt; 0.6f;
+            return base.OnPressed(e);
         }
     }
+
+    public record PreciseRotationInfo(float Degrees, EditorOrigin Origin);
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[26,58,26,81,0],[28,52,28,120,0],[31,47,31,51,1],[31,56,36,10,1],[38,9,38,94,1],[40,9,40,39,1],[43,9,43,10,1],[44,13,44,54,1],[45,17,45,24,1],[47,13,47,39,1],[49,13,49,50,1],[51,13,51,106,1],[54,13,54,37,1],[57,13,57,40,1],[59,18,59,27,1],[59,29,59,52,1],[59,54,59,57,1],[60,13,60,14,1],[61,17,61,73,1],[62,17,62,18,1],[63,21,63,62,1],[64,21,64,52,1],[65,17,65,18,1],[67,17,67,94,1],[68,17,68,18,0],[69,21,69,87,0],[70,17,70,18,0],[72,17,72,28,1],[73,17,73,18,1],[74,21,74,121,1],[75,21,75,107,1],[76,17,76,18,1],[78,17,78,18,1],[80,21,80,48,1],[83,21,83,67,1],[85,21,85,65,1],[86,21,86,22,0],[87,25,87,68,0],[88,25,88,56,0],[89,21,89,22,0],[91,21,95,105,1],[97,21,97,144,1],[98,17,98,18,1],[99,13,99,14,1],[101,13,101,101,1],[102,9,102,10,1],[105,9,105,10,1],[108,13,108,154,1],[110,13,110,101,1],[111,9,111,10,1],[117,9,117,10,1],[119,13,119,83,1],[121,13,121,54,1],[124,13,124,61,1],[126,13,126,66,1],[128,13,128,45,1],[129,13,129,118,1],[130,13,130,45,1],[132,13,132,58,1],[134,13,134,67,1],[135,9,135,10,1],[139,9,139,10,1],[140,13,140,24,1],[141,17,141,29,1],[144,13,145,87,1],[146,13,146,141,1],[147,13,147,131,1],[149,13,151,76,1],[152,9,152,10,1],[156,9,156,10,1],[158,13,159,87,1],[161,13,161,77,1],[162,9,162,10,1]]);
+      highlightRanges([[29,9,29,158,0],[31,51,31,55,0],[31,56,31,60,0],[31,65,31,70,0],[32,9,32,68,0],[34,9,34,60,0],[35,9,35,65,0],[36,9,36,65,0],[38,9,38,69,0],[40,9,40,113,0],[41,9,41,10,0],[42,13,42,52,0],[43,13,43,44,0],[45,13,45,80,0],[46,9,46,10,0],[50,9,50,10,0],[51,13,51,102,0],[53,13,77,15,0],[79,13,80,23,0],[80,23,80,104,0],[80,104,81,23,0],[81,23,81,79,0],[81,79,81,82,0],[82,13,83,23,0],[83,23,83,109,0],[83,109,84,23,0],[84,23,84,75,0],[84,75,84,78,0],[85,13,86,23,0],[86,23,86,109,0],[86,109,87,23,0],[87,23,87,79,0],[87,79,87,82,0],[89,13,90,13,0],[90,13,90,14,0],[90,14,91,17,0],[91,17,91,148,0],[91,148,92,13,0],[92,13,92,14,0],[92,14,92,15,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,33,0],[99,13,99,41,0],[99,41,99,63,0],[99,63,99,65,0],[100,13,100,58,0],[100,58,100,131,0],[100,131,100,133,0],[102,13,103,13,0],[103,13,103,14,0],[103,14,104,17,0],[104,17,104,71,0],[104,71,105,13,0],[105,13,105,14,0],[105,14,105,22,0],[107,13,107,36,0],[109,13,110,13,0],[110,13,110,14,0],[110,14,111,17,0],[111,17,111,52,0],[111,52,114,25,0],[114,25,114,65,0],[114,65,115,25,0],[115,25,115,26,0],[115,26,116,29,0],[116,29,116,55,0],[116,55,117,29,0],[117,29,117,46,0],[117,46,118,25,0],[118,25,118,26,0],[118,26,120,25,0],[120,25,120,31,0],[120,31,123,25,0],[123,25,123,70,0],[123,70,124,25,0],[124,25,124,26,0],[124,26,125,29,0],[125,29,125,60,0],[125,60,126,29,0],[126,29,126,46,0],[126,46,127,25,0],[127,25,127,26,0],[127,26,129,25,0],[129,25,129,31,0],[129,31,132,25,0],[132,25,132,70,0],[132,70,133,25,0],[133,25,133,26,0],[133,26,134,29,0],[134,29,134,60,0],[134,60,135,29,0],[135,29,135,46,0],[135,46,136,25,0],[136,25,136,26,0],[136,26,138,25,0],[138,25,138,31,0],[138,31,140,13,0],[140,13,140,14,0],[140,14,140,22,0],[142,13,142,28,0],[143,17,143,49,0],[143,49,143,69,0],[143,69,143,80,0],[145,13,146,13,0],[146,13,146,14,0],[146,14,147,17,0],[147,17,147,32,0],[147,32,147,33,0],[147,33,147,86,0],[147,86,148,13,0],[148,13,148,14,0],[148,14,148,16,0],[149,13,150,13,0],[150,13,150,14,0],[150,14,151,17,0],[151,17,151,32,0],[151,32,151,33,0],[151,33,151,91,0],[151,91,152,13,0],[152,13,152,14,0],[152,14,152,16,0],[153,13,154,13,0],[154,13,154,14,0],[154,14,155,17,0],[155,17,155,32,0],[155,32,155,33,0],[155,33,155,91,0],[155,91,156,13,0],[156,13,156,14,0],[156,14,156,16,0],[158,13,159,13,0],[159,13,159,14,0],[159,14,161,17,0],[161,17,161,64,0],[161,64,162,21,0],[162,21,162,28,0],[162,28,164,17,0],[164,17,164,105,0],[164,105,165,13,0],[165,13,165,14,0],[165,14,165,16,0],[166,9,166,10,0],[169,13,171,44,0],[171,44,171,75,0],[171,75,172,49,0],[172,49,172,75,0],[172,75,173,49,0],[173,49,173,53,0],[173,53,174,22,0],[174,22,174,77,0],[174,77,175,14,0],[178,9,178,10,0],[179,13,179,26,0],[180,13,180,37,0],[181,9,181,10,0],[184,9,184,10,0],[185,13,185,27,0],[187,13,187,26,0],[188,17,188,42,0],[189,9,189,10,0],[192,9,192,10,0],[193,13,193,62,0],[194,13,194,14,0],[195,17,195,36,0],[196,17,196,29,0],[199,13,199,38,0],[200,9,200,10,0]]);
     </script>
   </body>
 </html>

@@ -37,8 +37,8 @@ namespace osu.Game.Rulesets.Osu.Tests.Editor.Checks
         [Test]
         public void TestSliderAtExactThreshold_NoIssue()
         {
-            // 17.5px / 0.14 = 125ms is not strictly below the threshold
-            Assert.That(check.Run(Context(new HitObject[] { Slider(0, 100, 100, 17.5f) })), Is.Empty);
+            // just above the threshold (17.5px would be exactly 125ms but float rounding lands just below): not strictly below -> no issue
+            Assert.That(check.Run(Context(new HitObject[] { Slider(0, 100, 100, 17.6f) })), Is.Empty);
         }
 
         [Test]

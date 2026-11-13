@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/NonPlayfieldSprite.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/Argon/ArgonSpinnerProgressArc.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,26 +11,188 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
-using osu.Framework.Graphics.Sprites;
+using System;
+using System.Runtime.InteropServices;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Shaders.Types;
 using osu.Framework.Graphics.Textures;
-using osu.Game.Rulesets.UI;
-using osu.Game.Skinning;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osuTK.Graphics;
 
-namespace osu.Game.Rulesets.Osu.Skinning
+namespace osu.Game.Rulesets.Osu.Skinning.Argon
 {
-    /// &lt;summary&gt;
-    /// A sprite which is displayed within the playfield, but historically was not considered part of the playfield.
-    /// Performs scale adjustment to undo the scale applied by &lt;see cref=&quot;PlayfieldAdjustmentContainer&quot;/&gt; (osu! ruleset specifically).
-    /// &lt;/summary&gt;
-    public partial class NonPlayfieldSprite : Sprite
+    public partial class ArgonSpinnerProgressArc : CompositeDrawable
     {
-        public override Texture? Texture
+        private const float arc_fill = 0.15f;
+        private const float arc_radius = 0.12f;
+
+        private ProgressFill fill = null!;
+
+        private DrawableSpinner spinner = null!;
+
+        private CircularProgress background = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(DrawableHitObject drawableHitObject)
         {
-            get =&gt; base.Texture;
-            set
+            RelativeSizeAxes = Axes.Both;
+
+            spinner = (DrawableSpinner)drawableHitObject;
+
+            InternalChildren = new Drawable[]
             {
-                value?.ScaleAdjust *= LegacySkin.STABLE_MAGIC_SCALE_FACTOR;
-                base.Texture = value;
+                background = new CircularProgress
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Colour = Color4.White.Opacity(0.25f),
+                    RelativeSizeAxes = Axes.Both,
+                    Progress = arc_fill,
+                    Rotation = 90 - arc_fill * 180,
+                    InnerRadius = arc_radius,
+                    RoundedCaps = true,
+                },
+                fill = new ProgressFill
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                    InnerRadius = arc_radius,
+                    RoundedCaps = true,
+                    GlowColour = new Color4(171, 255, 255, 180)
+                }
+            };
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            background.Alpha = spinner.Progress &gt;= 1 ? 0 : 1;
+
+            fill.Alpha = (float)Interpolation.DampContinuously(fill.Alpha, spinner.Progress &gt; 0 &amp;&amp; spinner.Progress &lt; 1 ? 1 : 0, 40f, (float)Math.Abs(Time.Elapsed));
+            fill.Progress = (float)Interpolation.DampContinuously(fill.Progress, spinner.Progress &gt;= 1 ? 0 : arc_fill * spinner.Progress, 40f, (float)Math.Abs(Time.Elapsed));
+
+            fill.Rotation = (float)(90 - fill.Progress * 180);
+        }
+
+        private partial class ProgressFill : CircularProgress
+        {
+            private Color4 glowColour = Color4.White;
+
+            public Color4 GlowColour
+            {
+                get =&gt; glowColour;
+                set
+                {
+                    glowColour = value;
+                    Invalidate(Invalidation.DrawNode);
+                }
+            }
+
+            private Texture glowTexture = null!;
+            private IShader glowShader = null!;
+            private float glowSize;
+
+            [BackgroundDependencyLoader]
+            private void load(TextureStore textures, ShaderManager shaders)
+            {
+                glowTexture = textures.Get(&quot;Gameplay/osu/spinner-glow&quot;);
+                glowShader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, &quot;SpinnerGlow&quot;);
+                glowSize = Blur.KernelSize(50); // Half of the maximum blur sigma in the design (which is 100)
+            }
+
+            protected override DrawNode CreateDrawNode() =&gt; new ProgressFillDrawNode(this);
+
+            private class ProgressFillDrawNode : CircularProgressDrawNode
+            {
+                protected new ProgressFill Source =&gt; (ProgressFill)base.Source;
+
+                public ProgressFillDrawNode(CircularProgress source)
+                    : base(source)
+                {
+                }
+
+                private Texture glowTexture = null!;
+                private IShader glowShader = null!;
+                private Quad glowQuad;
+                private float relativeGlowSize;
+                private Color4 glowColour;
+
+                public override void ApplyState()
+                {
+                    base.ApplyState();
+
+                    glowTexture = Source.glowTexture;
+                    glowShader = Source.glowShader;
+                    glowColour = Source.glowColour;
+
+                    // Inflated draw quad by the size of the blur.
+                    glowQuad = Source.ToScreenSpace(DrawRectangle.Inflate(Source.glowSize));
+                    relativeGlowSize = Source.glowSize / Source.DrawSize.X;
+                }
+
+                protected override void Draw(IRenderer renderer)
+                {
+                    base.Draw(renderer);
+                    drawGlow(renderer);
+                }
+
+                private void drawGlow(IRenderer renderer)
+                {
+                    renderer.SetBlend(BlendingParameters.Additive);
+
+                    glowShader.Bind();
+                    bindGlowUniformResources(glowShader, renderer);
+
+                    ColourInfo col = DrawColourInfo.Colour;
+                    col.ApplyChild(glowColour);
+
+                    renderer.DrawQuad(glowTexture, glowQuad, col);
+
+                    glowShader.Unbind();
+                }
+
+                private IUniformBuffer&lt;ProgressGlowParameters&gt;? progressGlowParametersBuffer;
+
+                private void bindGlowUniformResources(IShader shader, IRenderer renderer)
+                {
+                    progressGlowParametersBuffer ??= renderer.CreateUniformBuffer&lt;ProgressGlowParameters&gt;();
+                    progressGlowParametersBuffer.Data = new ProgressGlowParameters
+                    {
+                        InnerRadius = InnerRadius,
+                        Progress = Progress,
+                        TexelSize = TexelSize,
+                        GlowSize = relativeGlowSize
+                    };
+
+                    shader.BindUniformBlock(&quot;m_ProgressGlowParameters&quot;, progressGlowParametersBuffer);
+                }
+
+                protected override void Dispose(bool isDisposing)
+                {
+                    base.Dispose(isDisposing);
+                    progressGlowParametersBuffer?.Dispose();
+                }
+
+                [StructLayout(LayoutKind.Sequential, Pack = 1)]
+                private record struct ProgressGlowParameters
+                {
+                    public UniformFloat InnerRadius;
+                    public UniformFloat Progress;
+                    public UniformFloat TexelSize;
+                    public UniformFloat GlowSize;
+                }
             }
         }
     }
@@ -38,7 +200,7 @@ namespace osu.Game.Rulesets.Osu.Skinning
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[19,20,19,32,0],[21,13,21,14,0],[22,17,22,76,0],[23,17,23,38,0],[24,13,24,14,0]]);
+      highlightRanges([[29,9,29,43,0],[31,9,31,49,0],[33,9,33,53,0],[37,9,37,10,0],[38,13,38,42,0],[40,13,40,58,0],[42,13,64,15,0],[65,9,65,10,0],[68,9,68,10,0],[69,13,69,27,0],[71,13,71,62,0],[73,13,73,166,0],[74,13,74,175,0],[76,13,76,63,0],[77,9,77,10,0],[81,13,81,54,0],[85,24,85,34,0],[87,17,87,18,0],[88,21,88,40,0],[89,21,89,55,0],[90,17,90,18,0],[93,13,93,49,0],[94,13,94,48,0],[99,13,99,14,0],[100,17,100,73,0],[101,17,101,92,0],[102,17,102,48,0],[103,13,103,14,0],[105,61,105,91,0],[109,54,109,79,0],[112,23,112,35,0],[113,17,113,18,0],[114,17,114,18,0],[116,17,116,53,0],[117,17,117,52,0],[123,17,123,18,0],[124,21,124,39,0],[126,21,126,54,0],[127,21,127,52,0],[128,21,128,52,0],[131,21,131,93,0],[132,21,132,76,0],[133,17,133,18,0],[136,17,136,18,0],[137,21,137,41,0],[138,21,138,40,0],[139,17,139,18,0],[142,17,142,18,0],[143,21,143,68,0],[145,21,145,39,0],[146,21,146,68,0],[148,21,148,60,0],[149,21,149,48,0],[151,21,151,67,0],[153,21,153,41,0],[154,17,154,18,0],[159,17,159,18,0],[160,21,160,109,0],[161,21,167,23,0],[169,21,169,103,0],[170,17,170,18,0],[173,17,173,18,0],[174,21,174,47,0],[175,21,175,61,0],[176,17,176,18,0]]);
     </script>
   </body>
 </html>

@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta http-equiv="content-type" content="text/html; charset=utf-8" />
-    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuBlueprintContainer.cs</title>
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/Evaluators/FlashlightEvaluator.cs</title>
     <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
     <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
   </head>
@@ -11,127 +11,128 @@
 // Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
 // See the LICENCE file in the repository root for full licence text.
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using osu.Framework.Allocation;
-using osu.Framework.Bindables;
-using osu.Framework.Input.Events;
-using osu.Game.Configuration;
-using osu.Game.Rulesets.Edit;
-using osu.Game.Rulesets.Objects;
-using osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles;
-using osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders;
-using osu.Game.Rulesets.Osu.Edit.Blueprints.Spinners;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Osu.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Osu.Mods;
 using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Screens.Edit.Compose.Components;
-using osuTK;
 
-namespace osu.Game.Rulesets.Osu.Edit
+namespace osu.Game.Rulesets.Osu.Difficulty.Evaluators
 {
-    public partial class OsuBlueprintContainer : ComposeBlueprintContainer
+    public static class FlashlightEvaluator
     {
-        private Bindable&lt;bool&gt; limitedDistanceSnap { get; set; } = null!;
-
-        public new OsuHitObjectComposer Composer =&gt; (OsuHitObjectComposer)base.Composer;
-
-        public OsuBlueprintContainer(OsuHitObjectComposer composer)
-            : base(composer)
-        {
-        }
-
-        [BackgroundDependencyLoader]
-        private void load(OsuConfigManager config)
-        {
-            limitedDistanceSnap = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
-        }
-
-        protected override SelectionHandler&lt;HitObject&gt; CreateSelectionHandler() =&gt; new OsuSelectionHandler();
-
-        public override HitObjectSelectionBlueprint? CreateHitObjectBlueprintFor(HitObject hitObject)
-        {
-            switch (hitObject)
-            {
-                case HitCircle circle:
-                    return new HitCircleSelectionBlueprint(circle);
-
-                case Slider slider:
-                    return new SliderSelectionBlueprint(slider);
-
-                case Spinner spinner:
-                    return new SpinnerSelectionBlueprint(spinner);
-            }
-
-            return base.CreateHitObjectBlueprintFor(hitObject);
-        }
-
-        protected override bool TryMoveBlueprints(DragEvent e, IList&lt;(SelectionBlueprint&lt;HitObject&gt; blueprint, Vector2[] originalSnapPositions)&gt; blueprints)
-        {
-            Vector2 distanceTravelled = e.ScreenSpaceMousePosition - e.ScreenSpaceMouseDownPosition;
-
-            for (int i = 0; i &lt; blueprints.Count; i++)
-            {
-                if (checkSnappingBlueprintToNearbyObjects(blueprints[i].blueprint, distanceTravelled, blueprints[i].originalSnapPositions))
-                    return true;
-            }
-
-            // if no positional snapping could be performed, try unrestricted snapping from the earliest
-            // item in the selection.
-
-            // The final movement position, relative to movementBlueprintOriginalPosition.
-            Vector2 movePosition = blueprints.First().originalSnapPositions.First() + distanceTravelled;
-            var referenceBlueprint = blueprints.First().blueprint;
-
-            // Retrieve a snapped position.
-            var result = Composer.TrySnapToNearbyObjects(movePosition);
-            result ??= Composer.TrySnapToDistanceGrid(movePosition, limitedDistanceSnap.Value ? referenceBlueprint.Item.StartTime : null);
-            if (Composer.TrySnapToPositionGrid(result?.ScreenSpacePosition ?? movePosition, result?.Time) is SnapResult gridSnapResult)
-                result = gridSnapResult;
-            result ??= new SnapResult(movePosition, null);
-
-            bool moved = SelectionHandler.HandleMovement(new MoveSelectionEvent&lt;HitObject&gt;(referenceBlueprint, result.ScreenSpacePosition - referenceBlueprint.ScreenSpaceSelectionPoint));
-            if (moved)
-                ApplySnapResultTime(result, referenceBlueprint.Item.StartTime);
-            return moved;
-        }
-
         /// &lt;summary&gt;
-        /// Check for positional snap for given blueprint.
+        /// Evaluates the difficulty of memorising and hitting an object, based on:
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;&lt;description&gt;distance between a number of previous objects and the current object,&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;the visual opacity of the current object,&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;the angle made by the current object,&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;length and speed of the current object (for sliders),&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;and whether the hidden mod is enabled.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;/list&gt;
         /// &lt;/summary&gt;
-        /// &lt;param name=&quot;blueprint&quot;&gt;The blueprint to check for snapping.&lt;/param&gt;
-        /// &lt;param name=&quot;distanceTravelled&quot;&gt;Distance travelled since start of dragging action.&lt;/param&gt;
-        /// &lt;param name=&quot;originalPositions&quot;&gt;The snap positions of blueprint before start of dragging action.&lt;/param&gt;
-        /// &lt;returns&gt;Whether an object to snap to was found.&lt;/returns&gt;
-        private bool checkSnappingBlueprintToNearbyObjects(SelectionBlueprint&lt;HitObject&gt; blueprint, Vector2 distanceTravelled, Vector2[] originalPositions)
+        public static double EvaluateDifficultyOf(DifficultyHitObject current, IReadOnlyList&lt;Mod&gt; mods)
         {
-            var currentPositions = blueprint.ScreenSpaceSnapPoints;
+            if (current.BaseObject is Spinner)
+                return 0;
 
-            for (int i = 0; i &lt; originalPositions.Length; i++)
+            const double max_opacity_bonus = 0.4;
+            const double hidden_bonus = 0.2;
+
+            const double min_velocity = 0.5;
+            const double slider_multiplier = 1.3;
+
+            const double min_angle_multiplier = 0.2;
+
+            var osuCurrent = (OsuDifficultyHitObject)current;
+            var osuHitObject = (OsuHitObject)(osuCurrent.BaseObject);
+
+            double scalingFactor = 52.0 / osuHitObject.Radius;
+            double smallDistNerf = 1.0;
+            double cumulativeStrainTime = 0.0;
+
+            double flashlightDifficulty = 0.0;
+
+            OsuDifficultyHitObject lastObj = osuCurrent;
+
+            double angleRepeatCount = 0.0;
+
+            // This is iterating backwards in time from the current object.
+            for (int i = 0; i &lt; Math.Min(current.Index, 10); i++)
             {
-                Vector2 originalPosition = originalPositions[i];
-                var testPosition = originalPosition + distanceTravelled;
+                var currentObj = (OsuDifficultyHitObject)current.Previous(i);
+                var currentHitObject = (OsuHitObject)(currentObj.BaseObject);
 
-                var positionalResult = Composer.TrySnapToNearbyObjects(testPosition);
+                cumulativeStrainTime += lastObj.AdjustedDeltaTime;
 
-                if (positionalResult == null || positionalResult.ScreenSpacePosition == testPosition) continue;
-
-                var delta = positionalResult.ScreenSpacePosition - currentPositions[i];
-
-                // attempt to move the objects, and apply any time based snapping if we can.
-                if (SelectionHandler.HandleMovement(new MoveSelectionEvent&lt;HitObject&gt;(blueprint, delta)))
+                if (!(currentObj.BaseObject is Spinner))
                 {
-                    ApplySnapResultTime(positionalResult, blueprint.Item.StartTime);
-                    return true;
+                    double jumpDistance = (osuHitObject.StackedPosition - currentHitObject.StackedEndPosition).Length;
+
+                    // We want to nerf objects that can be easily seen within the Flashlight circle radius.
+                    if (i == 0)
+                        smallDistNerf = Math.Min(1.0, jumpDistance / 75.0);
+
+                    // We also want to nerf stacks so that only the first object of the stack is accounted for.
+                    double stackNerf = Math.Min(1.0, (currentObj.LazyJumpDistance / scalingFactor) / 25.0);
+
+                    // Bonus based on how visible the object is.
+                    double opacityBonus = 1.0 + max_opacity_bonus * (1.0 - osuCurrent.OpacityAt(currentHitObject.StartTime, mods.OfType&lt;OsuModHidden&gt;().Any(m =&gt; !m.OnlyFadeApproachCircles.Value)));
+
+                    flashlightDifficulty += stackNerf * opacityBonus * scalingFactor * jumpDistance / cumulativeStrainTime;
+
+                    if (currentObj.Angle != null &amp;&amp; osuCurrent.Angle != null)
+                    {
+                        // Objects further back in time should count less for the nerf.
+                        if (Math.Abs(currentObj.Angle.Value - osuCurrent.Angle.Value) &lt; 0.02)
+                            angleRepeatCount += Math.Max(1.0 - 0.1 * i, 0.0);
+                    }
                 }
+
+                lastObj = currentObj;
             }
 
-            return false;
+            flashlightDifficulty = DiffUtils.Pow(smallDistNerf * flashlightDifficulty, 2);
+
+            // Additional bonus for Hidden due to there being no approach circles.
+            if (mods.OfType&lt;OsuModHidden&gt;().Any())
+                flashlightDifficulty *= 1.0 + hidden_bonus;
+
+            // Nerf patterns with repeated angles.
+            flashlightDifficulty *= min_angle_multiplier + (1.0 - min_angle_multiplier) / (angleRepeatCount + 1.0);
+
+            double sliderBonus = 0.0;
+
+            if (osuCurrent.BaseObject is Slider osuSlider)
+            {
+                // Invert the scaling factor to determine the true travel distance independent of circle size.
+                double pixelTravelDistance = osuCurrent.LazyTravelDistance / scalingFactor;
+
+                // Reward sliders based on velocity.
+                sliderBonus = DiffUtils.Pow(Math.Max(0.0, pixelTravelDistance / osuCurrent.TravelTime - min_velocity), 0.5);
+
+                // Longer sliders require more memorisation.
+                sliderBonus *= pixelTravelDistance;
+
+                // Nerf sliders with repeats, as less memorisation is required.
+                if (osuSlider.RepeatCount &gt; 0)
+                    sliderBonus /= (osuSlider.RepeatCount + 1);
+            }
+
+            flashlightDifficulty += sliderBonus * slider_multiplier;
+
+            return flashlightDifficulty;
         }
     }
 }
 
     </pre>
     <script type="text/javascript">
-      highlightRanges([[23,54,23,58,0],[23,59,23,63,0],[23,68,23,73,0],[25,53,25,88,0],[28,15,28,29,0],[29,9,29,10,0],[30,9,30,10,0],[34,9,34,10,0],[35,13,35,98,0],[36,9,36,10,0],[38,84,38,109,0],[41,9,41,10,0],[42,13,42,31,0],[45,21,45,68,0],[48,21,48,65,0],[51,21,51,67,0],[54,13,54,64,0],[55,9,55,10,0],[58,9,58,10,0],[59,13,59,101,0],[61,18,61,27,0],[61,29,61,49,0],[61,51,61,54,0],[62,13,62,14,0],[63,17,63,140,0],[64,21,64,33,0],[65,13,65,14,0],[71,13,71,105,0],[72,13,72,67,0],[75,13,75,72,0],[76,13,76,139,0],[77,13,77,136,0],[78,17,78,41,0],[79,13,79,59,0],[81,13,81,188,0],[82,13,82,23,0],[83,17,83,80,0],[84,13,84,26,0],[85,9,85,10,0],[95,9,95,10,0],[96,13,96,68,0],[98,18,98,27,0],[98,29,98,57,0],[98,59,98,62,0],[99,13,99,14,0],[100,17,100,65,0],[101,17,101,73,0],[103,17,103,86,0],[105,17,105,102,0],[105,103,105,112,0],[107,17,107,88,0],[110,17,110,106,0],[111,17,111,18,0],[112,21,112,85,0],[113,21,113,33,0],[115,13,115,14,0],[117,13,117,26,0],[118,9,118,10,0]]);
+      highlightRanges([[29,9,29,10,1],[30,13,30,47,1],[31,17,31,26,1],[41,13,41,62,1],[42,13,42,70,1],[44,13,44,63,1],[45,13,45,40,1],[46,13,46,47,1],[48,13,48,47,1],[50,13,50,57,1],[52,13,52,43,1],[55,18,55,27,1],[55,29,55,60,1],[55,62,55,65,1],[56,13,56,14,1],[57,17,57,78,1],[58,17,58,78,1],[60,17,60,67,1],[62,17,62,57,1],[63,17,63,18,1],[64,21,64,119,1],[67,21,67,32,1],[68,25,68,76,1],[71,21,71,108,1],[74,21,74,162,1],[74,162,74,194,1],[74,194,74,198,1],[76,21,76,124,1],[78,21,78,78,1],[79,21,79,22,1],[81,25,81,94,1],[82,29,82,78,1],[83,21,83,22,1],[84,17,84,18,1],[86,17,86,38,1],[87,13,87,14,1],[89,13,89,91,1],[92,13,92,51,1],[93,17,93,60,1],[96,13,96,116,1],[98,13,98,38,1],[100,13,100,59,1],[101,13,101,14,1],[103,17,103,92,1],[106,17,106,125,1],[109,17,109,52,1],[112,17,112,47,1],[113,21,113,64,0],[114,13,114,14,1],[116,13,116,69,1],[118,13,118,41,1],[119,9,119,10,1]]);
     </script>
   </body>
 </html>
