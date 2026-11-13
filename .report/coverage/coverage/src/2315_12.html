@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Mods/ModAdaptiveSpeed.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Overlays.Settings;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+
+namespace osu.Game.Rulesets.Mods
+{
+    public class ModAdaptiveSpeed : Mod, IApplicableToRate, IApplicableToDrawableHitObject, IApplicableToBeatmap, IUpdatableByPlayfield
+    {
+        public override string Name =&gt; &quot;Adaptive Speed&quot;;
+
+        public override string Acronym =&gt; &quot;AS&quot;;
+
+        public override LocalisableString Description =&gt; &quot;Let track speed adapt to you.&quot;;
+
+        public override IconUsage? Icon =&gt; OsuIcon.ModAdaptiveSpeed;
+
+        public override ModType Type =&gt; ModType.Fun;
+
+        public sealed override bool ValidForMultiplayer =&gt; false;
+        public sealed override bool ValidForMultiplayerAsFreeMod =&gt; false;
+
+        public override Type[] IncompatibleMods =&gt; new[] { typeof(ModRateAdjust), typeof(ModTimeRamp), typeof(ModAutoplay) };
+
+        [SettingSource(&quot;Initial rate&quot;, &quot;The starting speed of the track&quot;, SettingControlType = typeof(MultiplierSettingsSlider))]
+        public BindableNumber&lt;double&gt; InitialRate { get; } = new BindableDouble(1)
+        {
+            MinValue = 0.5,
+            MaxValue = 2,
+            Precision = 0.01
+        };
+
+        [SettingSource(&quot;Adjust pitch&quot;, &quot;Should pitch be adjusted with speed&quot;)]
+        public BindableBool AdjustPitch { get; } = new BindableBool(true);
+
+        /// &lt;summary&gt;
+        /// The instantaneous rate of the track.
+        /// Every frame this mod will attempt to smoothly adjust this to meet &lt;see cref=&quot;targetRate&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public BindableNumber&lt;double&gt; SpeedChange { get; } = new BindableDouble(1)
+        {
+            MinValue = min_allowable_rate,
+            MaxValue = max_allowable_rate,
+        };
+
+        // The two constants below denote the maximum allowable range of rates that `SpeedChange` can take.
+        // The range is purposefully wider than the range of values that `InitialRate` allows
+        // in order to give some leeway for change even when extreme initial rates are chosen.
+        private const double min_allowable_rate = 0.4d;
+        private const double max_allowable_rate = 2.5d;
+
+        // The two constants below denote the maximum allowable change in rate caused by a single hit
+        // This prevents sudden jolts caused by a badly-timed hit.
+        private const double min_allowable_rate_change = 0.9d;
+        private const double max_allowable_rate_change = 1.11d;
+
+        // Apply a fixed rate change when missing, allowing the player to catch up when the rate is too fast.
+        private const double rate_change_on_miss = 0.95d;
+
+        private double targetRate = 1d;
+
+        /// &lt;summary&gt;
+        /// The number of most recent track rates (approximated from how early/late each object was hit relative to the previous object)
+        /// which should be averaged to calculate &lt;see cref=&quot;targetRate&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private const int recent_rate_count = 8;
+
+        /// &lt;summary&gt;
+        /// Stores the most recent &lt;see cref=&quot;recent_rate_count&quot;/&gt; approximated track rates
+        /// which are averaged to calculate the value of &lt;see cref=&quot;targetRate&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This list is used as a double-ended queue with fixed capacity
+        /// (items can be enqueued/dequeued at either end of the list).
+        /// When time is elapsing forward, items are dequeued from the start and enqueued onto the end of the list.
+        /// When time is being rewound, items are dequeued from the end and enqueued onto the start of the list.
+        /// &lt;/remarks&gt;
+        /// &lt;example&gt;
+        /// &lt;para&gt;
+        /// The track rate approximation is calculated as follows:
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// Consider a hitobject which ends at 1000ms, and assume that its preceding hitobject ends at 500ms.
+        /// This gives a time difference of 1000 - 500 = 500ms.
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// Now assume that the user hit this object at 980ms rather than 1000ms.
+        /// When compared to the preceding hitobject, this gives 980 - 500 = 480ms.
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// With the above assumptions, the player is rushing / hitting early, which means that the track should speed up to match.
+        /// Therefore, the approximated target rate for this object would be equal to 500 / 480 * &lt;see cref=&quot;InitialRate&quot;/&gt;.
+        /// &lt;/para&gt;
+        /// &lt;/example&gt;
+        private readonly List&lt;double&gt; recentRates = Enumerable.Repeat(1d, recent_rate_count).ToList();
+
+        /// &lt;summary&gt;
+        /// For each given &lt;see cref=&quot;HitObject&quot;/&gt; in the map, this dictionary maps the object onto the latest end time of any other object
+        /// that precedes the end time of the given object.
+        /// This can be loosely interpreted as the end time of the preceding hit object in rulesets that do not have overlapping hit objects.
+        /// &lt;/summary&gt;
+        private readonly Dictionary&lt;HitObject, double&gt; precedingEndTimes = new Dictionary&lt;HitObject, double&gt;();
+
+        /// &lt;summary&gt;
+        /// For each given &lt;see cref=&quot;HitObject&quot;/&gt; in the map, this dictionary maps the object onto the track rate dequeued from
+        /// &lt;see cref=&quot;recentRates&quot;/&gt; (i.e. the oldest value in the queue) when the object is hit. If the hit is then reverted,
+        /// the mapped value can be re-introduced to &lt;see cref=&quot;recentRates&quot;/&gt; to properly rewind the queue.
+        /// &lt;/summary&gt;
+        private readonly Dictionary&lt;HitObject, double&gt; ratesForRewinding = new Dictionary&lt;HitObject, double&gt;();
+
+        private readonly RateAdjustModHelper rateAdjustHelper;
+
+        public ModAdaptiveSpeed()
+        {
+            rateAdjustHelper = new RateAdjustModHelper(SpeedChange);
+            rateAdjustHelper.HandleAudioAdjustments(AdjustPitch);
+
+            InitialRate.BindValueChanged(val =&gt;
+            {
+                SpeedChange.Value = val.NewValue;
+                targetRate = val.NewValue;
+            });
+        }
+
+        public void ApplyToTrack(IAdjustableAudioComponent track)
+        {
+            InitialRate.TriggerChange();
+            recentRates.Clear();
+            recentRates.AddRange(Enumerable.Repeat(InitialRate.Value, recent_rate_count));
+
+            rateAdjustHelper.ApplyToTrack(track);
+        }
+
+        public void ApplyToSample(IAdjustableAudioComponent sample)
+        {
+            sample.AddAdjustment(AdjustableProperty.Frequency, SpeedChange);
+        }
+
+        public void Update(Playfield playfield)
+        {
+            SpeedChange.Value = Interpolation.DampContinuously(SpeedChange.Value, targetRate, 50, playfield.Clock.ElapsedFrameTime);
+        }
+
+        public double ApplyToRate(double time, double rate = 1) =&gt; rate * InitialRate.Value;
+
+        public void ApplyToDrawableHitObject(DrawableHitObject drawable)
+        {
+            drawable.OnNewResult += (_, result) =&gt;
+            {
+                if (ratesForRewinding.ContainsKey(result.HitObject)) return;
+                if (!shouldProcessResult(result)) return;
+
+                ratesForRewinding.Add(result.HitObject, recentRates[0]);
+                recentRates.RemoveAt(0);
+
+                recentRates.Add(Math.Clamp(getRelativeRateChange(result) * SpeedChange.Value, min_allowable_rate, max_allowable_rate));
+
+                updateTargetRate();
+            };
+            drawable.OnRevertResult += (_, result) =&gt;
+            {
+                if (!ratesForRewinding.TryGetValue(result.HitObject, out double rate)) return;
+                if (!shouldProcessResult(result)) return;
+
+                recentRates.Insert(0, rate);
+                ratesForRewinding.Remove(result.HitObject);
+
+                recentRates.RemoveAt(recentRates.Count - 1);
+
+                updateTargetRate();
+            };
+        }
+
+        public void ApplyToBeatmap(IBeatmap beatmap)
+        {
+            var hitObjects = getAllApplicableHitObjects(beatmap.HitObjects).ToList();
+            var endTimes = hitObjects.Select(x =&gt; x.GetEndTime()).Order().Distinct().ToList();
+
+            foreach (HitObject hitObject in hitObjects)
+            {
+                int index = endTimes.BinarySearch(hitObject.GetEndTime());
+                if (index &lt; 0) index = ~index; // BinarySearch returns the next larger element in bitwise complement if there&#39;s no exact match
+                index -= 1;
+
+                if (index &gt;= 0)
+                    precedingEndTimes.Add(hitObject, endTimes[index]);
+            }
+        }
+
+        private IEnumerable&lt;HitObject&gt; getAllApplicableHitObjects(IEnumerable&lt;HitObject&gt; hitObjects)
+        {
+            foreach (var hitObject in hitObjects)
+            {
+                if (hitObject.HitWindows != HitWindows.Empty)
+                    yield return hitObject;
+
+                foreach (HitObject nested in getAllApplicableHitObjects(hitObject.NestedHitObjects))
+                    yield return nested;
+            }
+        }
+
+        private bool shouldProcessResult(JudgementResult result)
+        {
+            if (!result.Type.AffectsAccuracy()) return false;
+            if (!precedingEndTimes.ContainsKey(result.HitObject)) return false;
+
+            return true;
+        }
+
+        private double getRelativeRateChange(JudgementResult result)
+        {
+            if (!result.IsHit)
+                return rate_change_on_miss;
+
+            double prevEndTime = precedingEndTimes[result.HitObject];
+            return Math.Clamp(
+                (result.HitObject.GetEndTime() - prevEndTime) / (result.TimeAbsolute - prevEndTime),
+                min_allowable_rate_change,
+                max_allowable_rate_change
+            );
+        }
+
+        /// &lt;summary&gt;
+        /// Update &lt;see cref=&quot;targetRate&quot;/&gt; based on the values in &lt;see cref=&quot;recentRates&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private void updateTargetRate()
+        {
+            // Compare values in recentRates to see how consistent the player&#39;s speed is
+            // If the player hits half of the notes too fast and the other half too slow:  Abs(consistency) = 0
+            // If the player hits all their notes too fast or too slow:                    Abs(consistency) = recent_rate_count - 1
+            int consistency = 0;
+
+            for (int i = 1; i &lt; recentRates.Count; i++)
+            {
+                consistency += Math.Sign(recentRates[i] - recentRates[i - 1]);
+            }
+
+            // Scale the rate adjustment based on consistency
+            targetRate = Interpolation.Lerp(targetRate, recentRates.Average(), Math.Abs(consistency) / (recent_rate_count - 1d));
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,40,26,56,0],[28,43,28,47,1],[30,58,30,89,0],[32,44,32,68,0],[34,41,34,52,1],[36,60,36,65,1],[37,69,37,74,0],[39,52,39,125,1],[42,53,42,57,1],[42,62,47,10,1],[50,43,50,47,1],[50,52,50,74,1],[56,53,56,57,1],[56,62,60,10,1],[76,9,76,40,1],[111,9,111,103,1],[118,9,118,112,1],[125,9,125,112,1],[129,9,129,34,1],[130,9,130,10,1],[131,13,131,69,1],[132,13,132,66,1],[134,13,135,13,1],[135,13,135,14,0],[135,14,136,17,1],[136,17,136,50,0],[136,50,137,17,1],[137,17,137,43,0],[137,43,138,13,1],[138,13,138,14,0],[138,14,138,16,1],[139,9,139,10,1],[142,9,142,10,0],[143,13,143,41,0],[144,13,144,33,0],[145,13,145,91,0],[147,13,147,50,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,77,0],[153,9,153,10,0],[156,9,156,10,0],[157,13,157,133,0],[158,9,158,10,0],[160,68,160,92,0],[163,9,163,10,0],[164,13,165,13,0],[165,13,165,14,0],[165,14,166,17,0],[166,17,166,69,0],[166,69,166,70,0],[166,70,166,77,0],[166,77,167,17,0],[167,17,167,50,0],[167,50,167,51,0],[167,51,167,58,0],[167,58,169,17,0],[169,17,169,73,0],[169,73,170,17,0],[170,17,170,41,0],[170,41,172,17,0],[172,17,172,136,0],[172,136,174,17,0],[174,17,174,36,0],[174,36,175,13,0],[175,13,175,14,0],[175,14,175,15,0],[176,13,177,13,0],[177,13,177,14,0],[177,14,178,17,0],[178,17,178,87,0],[178,87,178,88,0],[178,88,178,95,0],[178,95,179,17,0],[179,17,179,50,0],[179,50,179,51,0],[179,51,179,58,0],[179,58,181,17,0],[181,17,181,45,0],[181,45,182,17,0],[182,17,182,60,0],[182,60,184,17,0],[184,17,184,61,0],[184,61,186,17,0],[186,17,186,36,0],[186,36,187,13,0],[187,13,187,14,0],[187,14,187,15,0],[188,9,188,10,0],[191,9,191,10,0],[192,13,192,86,0],[193,13,193,51,0],[193,51,193,65,0],[193,65,193,95,0],[195,13,195,20,0],[195,22,195,41,0],[195,42,195,44,0],[195,45,195,55,0],[196,13,196,14,0],[197,17,197,75,0],[198,17,198,31,0],[198,32,198,47,0],[199,17,199,28,0],[201,17,201,32,0],[202,21,202,71,0],[203,13,203,14,0],[204,9,204,10,0],[207,9,207,10,0],[208,13,208,20,0],[208,22,208,35,0],[208,36,208,38,0],[208,39,208,49,0],[209,13,209,14,0],[210,17,210,62,0],[211,21,211,44,0],[213,17,213,24,0],[213,26,213,42,0],[213,43,213,45,0],[213,46,213,100,0],[214,21,214,41,0],[215,13,215,14,0],[216,9,216,10,0],[219,9,219,10,0],[220,13,220,48,0],[220,49,220,62,0],[221,13,221,66,0],[221,67,221,80,0],[223,13,223,25,0],[224,9,224,10,0],[227,9,227,10,0],[228,13,228,31,0],[229,17,229,44,0],[231,13,231,70,0],[232,13,236,15,0],[237,9,237,10,0],[243,9,243,10,0],[247,13,247,33,0],[249,18,249,27,0],[249,29,249,50,0],[249,52,249,55,0],[250,13,250,14,0],[251,17,251,79,0],[252,13,252,14,0],[255,13,255,130,0],[256,9,256,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/UserTagControl.AddTagsPopover.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Testing;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
+using osu.Game.Screens.Ranking.Statistics;
+using osuTK;
+
+namespace osu.Game.Screens.Ranking
+{
+    public partial class UserTagControl
+    {
+        private partial class AddTagsPopover : OsuPopover
+        {
+            private SearchTextBox searchBox = null!;
+            private SearchContainer searchContainer = null!;
+
+            public BindableDictionary&lt;long, UserTag&gt; AvailableTags { get; } = new BindableDictionary&lt;long, UserTag&gt;();
+
+            public Action&lt;UserTag&gt;? OnSelected { get; set; }
+
+            private CancellationTokenSource? loadCancellationTokenSource;
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                AllowableAnchors = new[]
+                {
+                    Anchor.TopCentre,
+                    Anchor.BottomCentre,
+                };
+
+                Children = new Drawable[]
+                {
+                    new Container
+                    {
+                        Size = new Vector2(400, 300),
+                        Children = new Drawable[]
+                        {
+                            searchBox = new SearchTextBox
+                            {
+                                HoldFocus = true,
+                                RelativeSizeAxes = Axes.X,
+                                Depth = float.MinValue,
+                            },
+                            new OsuScrollContainer
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                Y = 40,
+                                Height = 260,
+                                ScrollbarOverlapsContent = false,
+                                Child = searchContainer = new SearchContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Padding = new MarginPadding { Right = 5, Bottom = 10 },
+                                    Direction = FillDirection.Vertical,
+                                    Spacing = new Vector2(10),
+                                }
+                            }
+                        },
+                    },
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                AvailableTags.BindCollectionChanged((_, _) =&gt;
+                {
+                    loadCancellationTokenSource?.Cancel();
+                    loadCancellationTokenSource = new CancellationTokenSource();
+
+                    LoadComponentsAsync(createItems(AvailableTags.Values), loaded =&gt;
+                    {
+                        searchContainer.Clear();
+                        searchContainer.AddRange(loaded);
+                    }, loadCancellationTokenSource.Token);
+                }, true);
+                searchBox.Current.BindValueChanged(_ =&gt; searchContainer.SearchTerm = searchBox.Current.Value, true);
+            }
+
+            private IEnumerable&lt;Drawable&gt; createItems(IEnumerable&lt;UserTag&gt; tags)
+            {
+                var grouped = tags.GroupBy(tag =&gt; tag.GroupName).OrderBy(group =&gt; group.Key);
+
+                foreach (var group in grouped)
+                {
+                    var drawableGroup = new GroupFlow(group.Key);
+
+                    foreach (var tag in group.OrderBy(t =&gt; t.FullName))
+                        drawableGroup.Add(new DrawableAddableTag(tag) { Action = () =&gt; OnSelected?.Invoke(tag) });
+
+                    yield return drawableGroup;
+                }
+            }
+
+            public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+            {
+                if (e.Action == GlobalAction.Select &amp;&amp; !e.Repeat)
+                {
+                    attemptSelect();
+                    return true;
+                }
+
+                return false;
+            }
+
+            private void attemptSelect()
+            {
+                var visibleItems = searchContainer.ChildrenOfType&lt;DrawableAddableTag&gt;().Where(d =&gt; d.IsPresent).ToArray();
+
+                if (visibleItems.Length == 1)
+                    OnSelected?.Invoke(visibleItems.Single().Tag);
+            }
+
+            private partial class GroupFlow : FillFlowContainer, IFilterable
+            {
+                public IEnumerable&lt;LocalisableString&gt; FilterTerms { get; }
+
+                public bool MatchingFilter
+                {
+                    set =&gt; Alpha = value ? 1 : 0;
+                }
+
+                public bool FilteringActive
+                {
+                    set { }
+                }
+
+                public GroupFlow(string? name)
+                {
+                    RelativeSizeAxes = Axes.X;
+                    AutoSizeAxes = Axes.Y;
+                    Direction = FillDirection.Vertical;
+                    Spacing = new Vector2(5);
+
+                    Add(new StatisticItemHeader { Text = name ?? &quot;uncategorised&quot; });
+
+                    FilterTerms = name == null ? [] : [name];
+                }
+            }
+
+            private partial class DrawableAddableTag : OsuAnimatedButton, IFilterable
+            {
+                public readonly UserTag Tag;
+
+                private Box votedBackground = null!;
+                private SpriteIcon votedIcon = null!;
+
+                private readonly Bindable&lt;bool&gt; voted = new Bindable&lt;bool&gt;();
+                private readonly BindableBool updating = new BindableBool();
+
+                private LoadingLayer loadingLayer = null!;
+
+                public DrawableAddableTag(UserTag tag)
+                {
+                    Tag = tag;
+
+                    RelativeSizeAxes = Axes.X;
+                    AutoSizeAxes = Axes.Y;
+
+                    ScaleOnMouseDown = 0.95f;
+
+                    voted.BindTo(Tag.Voted);
+                    updating.BindTo(Tag.Updating);
+                }
+
+                [Resolved]
+                private OsuColour colours { get; set; } = null!;
+
+                [BackgroundDependencyLoader]
+                private void load()
+                {
+                    Content.AddRange(new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colours.Gray7,
+                            Depth = float.MaxValue,
+                        },
+                        new Container
+                        {
+                            RelativeSizeAxes = Axes.Y,
+                            Width = 30,
+                            Anchor = Anchor.CentreRight,
+                            Origin = Anchor.CentreRight,
+                            Depth = float.MaxValue,
+                            Children = new Drawable[]
+                            {
+                                votedBackground = new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                },
+                                votedIcon = new SpriteIcon
+                                {
+                                    Size = new Vector2(16),
+                                    Icon = FontAwesome.Solid.ThumbsUp,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                }
+                            }
+                        },
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(2),
+                            Padding = new MarginPadding(5) { Right = 35 },
+                            Children = new Drawable[]
+                            {
+                                new OsuTextFlowContainer(t =&gt; t.Font = OsuFont.Default.With(weight: FontWeight.SemiBold))
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Text = Tag.DisplayName,
+                                },
+                                new OsuTextFlowContainer(t =&gt; t.Font = OsuFont.Default.With(size: 14))
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Text = Tag.Description,
+                                }
+                            }
+                        },
+                        loadingLayer = new LoadingLayer(dimBackground: true),
+                    });
+                }
+
+                public IEnumerable&lt;LocalisableString&gt; FilterTerms =&gt; [Tag.FullName, Tag.Description];
+
+                public bool MatchingFilter
+                {
+                    set =&gt; Alpha = value ? 1 : 0;
+                }
+
+                public bool FilteringActive
+                {
+                    set { }
+                }
+
+                protected override void LoadComplete()
+                {
+                    base.LoadComplete();
+
+                    voted.BindValueChanged(_ =&gt;
+                    {
+                        votedBackground.FadeColour(voted.Value ? colours.Lime2 : colours.Gray2, 250, Easing.OutQuint);
+                        votedIcon.FadeColour(voted.Value ? Colour4.Black : Colour4.White, 250, Easing.OutQuint);
+                    }, true);
+                    FinishTransforms(true);
+
+                    updating.BindValueChanged(u =&gt; loadingLayer.State.Value = u.NewValue ? Visibility.Visible : Visibility.Hidden);
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,13,31,53,0],[32,13,32,61,0],[34,70,34,74,0],[34,79,34,118,0],[36,50,36,54,0],[36,55,36,59,0],[42,13,42,14,0],[43,17,47,19,0],[49,17,79,19,0],[80,13,80,14,0],[83,13,83,14,0],[84,17,84,37,0],[86,17,87,17,0],[87,17,87,18,0],[87,18,88,21,0],[88,21,88,59,0],[88,59,89,21,0],[89,21,89,81,0],[89,81,91,21,0],[91,21,92,21,0],[92,21,92,22,0],[92,22,93,25,0],[93,25,93,49,0],[93,49,94,25,0],[94,25,94,58,0],[94,58,95,21,0],[95,21,95,22,0],[95,22,95,59,0],[95,59,96,17,0],[96,17,96,18,0],[96,18,96,26,0],[97,17,97,57,0],[97,57,97,109,0],[97,109,97,117,0],[98,13,98,14,0],[101,13,101,14,0],[102,17,102,51,0],[102,51,102,64,0],[102,64,102,83,0],[102,83,102,92,0],[102,92,102,94,0],[104,17,104,24,0],[104,26,104,35,0],[104,36,104,38,0],[104,39,104,46,0],[105,17,105,18,0],[106,21,106,66,0],[108,21,108,28,0],[108,30,108,37,0],[108,38,108,40,0],[108,41,108,60,0],[108,60,108,70,0],[108,70,108,71,0],[109,25,109,88,0],[109,88,109,111,0],[109,111,109,115,0],[111,21,111,48,0],[112,17,112,18,0],[113,13,113,14,0],[116,13,116,14,0],[117,17,117,66,0],[118,17,118,18,0],[119,21,119,37,0],[120,21,120,33,0],[123,17,123,30,0],[124,13,124,14,0],[127,13,127,14,0],[128,17,128,100,0],[128,100,128,111,0],[128,111,128,123,0],[130,17,130,46,0],[131,21,131,67,0],[132,13,132,14,0],[136,69,136,73,0],[140,28,140,49,0],[145,25,145,26,0],[145,27,145,28,0],[148,17,148,47,0],[149,17,149,18,0],[150,21,150,47,0],[151,21,151,43,0],[152,21,152,56,0],[153,21,153,46,0],[155,21,155,85,0],[157,21,157,62,0],[158,17,158,18,0],[165,17,165,53,0],[166,17,166,54,0],[168,17,168,78,0],[169,17,169,77,0],[171,17,171,59,0],[173,17,173,55,0],[174,17,174,18,0],[175,21,175,31,0],[177,21,177,47,0],[178,21,178,43,0],[180,21,180,46,0],[182,21,182,45,0],[183,21,183,51,0],[184,17,184,18,0],[187,45,187,49,0],[187,50,187,54,0],[187,59,187,64,0],[191,17,191,18,0],[192,21,231,63,0],[231,63,231,121,0],[231,121,237,63,0],[237,63,237,102,0],[237,102,246,24,0],[247,17,247,18,0],[249,70,249,101,0],[253,28,253,49,0],[258,25,258,26,0],[258,27,258,28,0],[262,17,262,18,0],[263,21,263,41,0],[265,21,266,21,0],[266,21,266,22,0],[266,22,267,25,0],[267,25,267,119,0],[267,119,268,25,0],[268,25,268,113,0],[268,113,269,21,0],[269,21,269,22,0],[269,22,269,30,0],[270,21,270,44,0],[272,21,272,52,0],[272,52,272,130,0],[272,130,272,132,0],[273,17,273,18,0]]);
+    </script>
+  </body>
+</html>

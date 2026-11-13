@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Spectator/SpectatorClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Online.API;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Replays.Legacy;
+using osu.Game.Rulesets.Replays;
+using osu.Game.Rulesets.Replays.Types;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
+
+namespace osu.Game.Online.Spectator
+{
+    public abstract partial class SpectatorClient : Component, ISpectatorClient
+    {
+        /// &lt;summary&gt;
+        /// The maximum milliseconds between frame bundle sends.
+        /// &lt;/summary&gt;
+        public const double TIME_BETWEEN_SENDS = 200;
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;SpectatorClient&quot;/&gt; is currently connected.
+        /// This is NOT thread safe and usage should be scheduled.
+        /// &lt;/summary&gt;
+        public abstract IBindable&lt;bool&gt; IsConnected { get; }
+
+        /// &lt;summary&gt;
+        /// The states of all users currently being watched by the local user.
+        /// &lt;/summary&gt;
+        [UsedImplicitly] // Marked virtual due to mock use in testing
+        public virtual IBindableDictionary&lt;int, SpectatorState&gt; WatchedUserStates =&gt; watchedUserStates;
+
+        /// &lt;summary&gt;
+        /// All users who are currently watching the local user.
+        /// &lt;/summary&gt;
+        public IBindableList&lt;SpectatorUser&gt; WatchingUsers =&gt; watchingUsers;
+
+        /// &lt;summary&gt;
+        /// Whether the local user is playing.
+        /// &lt;/summary&gt;
+        private bool isPlaying { get; set; }
+
+        /// &lt;summary&gt;
+        /// Called whenever new frames arrive from the server.
+        /// &lt;/summary&gt;
+        [UsedImplicitly] // Marked virtual due to mock use in testing
+        public virtual event Action&lt;int, FrameDataBundle&gt;? OnNewFrames;
+
+        /// &lt;summary&gt;
+        /// Called whenever a user starts a play session, or immediately if the user is being watched and currently in a play session.
+        /// &lt;/summary&gt;
+        public event Action&lt;int, SpectatorState&gt;? OnUserBeganPlaying;
+
+        /// &lt;summary&gt;
+        /// Called whenever a user finishes a play session.
+        /// &lt;/summary&gt;
+        public event Action&lt;int, SpectatorState&gt;? OnUserFinishedPlaying;
+
+        /// &lt;summary&gt;
+        /// Called whenever a user-submitted score has been fully processed.
+        /// &lt;/summary&gt;
+        public event Action&lt;int, long&gt;? OnUserScoreProcessed;
+
+        /// &lt;summary&gt;
+        /// A dictionary containing all users currently being watched, with the number of watching components for each user.
+        /// &lt;/summary&gt;
+        private readonly Dictionary&lt;int, int&gt; watchedUsersRefCounts = new Dictionary&lt;int, int&gt;();
+
+        private readonly BindableDictionary&lt;int, SpectatorState&gt; watchedUserStates = new BindableDictionary&lt;int, SpectatorState&gt;();
+
+        private readonly BindableList&lt;SpectatorUser&gt; watchingUsers = new BindableList&lt;SpectatorUser&gt;();
+        private readonly SpectatorState currentState = new SpectatorState();
+
+        private IBeatmap? currentBeatmap;
+        private Score? currentScore;
+        private long? currentScoreToken;
+        private ScoreProcessor? currentScoreProcessor;
+
+        private readonly Queue&lt;FrameDataBundle&gt; pendingFrameBundles = new Queue&lt;FrameDataBundle&gt;();
+
+        private readonly List&lt;LegacyReplayFrame&gt; pendingFrames = new List&lt;LegacyReplayFrame&gt;();
+
+        private double lastPurgeTime;
+
+        private Task? lastSend;
+
+        private const int max_pending_frames = 30;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            IsConnected.BindValueChanged(connected =&gt; Schedule(() =&gt;
+            {
+                if (connected.NewValue)
+                {
+                    // get all the users that were previously being watched
+                    var users = new Dictionary&lt;int, int&gt;(watchedUsersRefCounts);
+                    watchedUsersRefCounts.Clear();
+
+                    // resubscribe to watched users.
+                    foreach ((int user, int watchers) in users)
+                    {
+                        for (int i = 0; i &lt; watchers; i++)
+                            WatchUser(user);
+                    }
+
+                    // re-send state in case it wasn&#39;t received
+                    if (isPlaying)
+                        // TODO: this is likely sent out of order after a reconnect scenario. needs further consideration.
+                        BeginPlayingInternal(currentScoreToken, currentState);
+                }
+                else
+                {
+                    watchedUserStates.Clear();
+                    watchingUsers.Clear();
+                }
+            }), true);
+        }
+
+        Task ISpectatorClient.UserBeganPlaying(int userId, SpectatorState state)
+        {
+            Schedule(() =&gt;
+            {
+                if (watchedUsersRefCounts.ContainsKey(userId))
+                    watchedUserStates[userId] = state;
+
+                OnUserBeganPlaying?.Invoke(userId, state);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task ISpectatorClient.UserFinishedPlaying(int userId, SpectatorState state)
+        {
+            Schedule(() =&gt;
+            {
+                if (watchedUsersRefCounts.ContainsKey(userId))
+                    watchedUserStates[userId] = state;
+
+                OnUserFinishedPlaying?.Invoke(userId, state);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task ISpectatorClient.UserSentFrames(int userId, FrameDataBundle data)
+        {
+            if (data.Frames.Count &gt; 0)
+                data.Frames[^1].Header = data.Header;
+
+            Schedule(() =&gt; OnNewFrames?.Invoke(userId, data));
+
+            return Task.CompletedTask;
+        }
+
+        Task ISpectatorClient.UserScoreProcessed(int userId, long scoreId)
+        {
+            Schedule(() =&gt; OnUserScoreProcessed?.Invoke(userId, scoreId));
+
+            return Task.CompletedTask;
+        }
+
+        Task ISpectatorClient.UserStartedWatching(SpectatorUser[] users)
+        {
+            Schedule(() =&gt;
+            {
+                foreach (var user in users)
+                {
+                    if (!watchingUsers.Contains(user))
+                        watchingUsers.Add(user);
+                }
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task ISpectatorClient.UserEndedWatching(int userId)
+        {
+            Schedule(() =&gt;
+            {
+                watchingUsers.RemoveAll(u =&gt; u.OnlineID == userId);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public void BeginPlaying(long? scoreToken, GameplayState state, Score score)
+        {
+            // This schedule is only here to match the one below in `EndPlaying`.
+            Schedule(() =&gt;
+            {
+                if (isPlaying)
+                    throw new InvalidOperationException($&quot;Cannot invoke {nameof(BeginPlaying)} when already playing&quot;);
+
+                // transfer state at point of beginning play
+                currentState.BeatmapID = score.ScoreInfo.BeatmapInfo!.OnlineID;
+                currentState.RulesetID = score.ScoreInfo.RulesetID;
+                currentState.Mods = score.ScoreInfo.Mods.Select(m =&gt; new APIMod(m)).ToArray();
+                currentState.State = SpectatedUserState.Playing;
+                currentState.MaximumStatistics = state.ScoreProcessor.MaximumStatistics;
+
+                setStateForScore(scoreToken, state, score);
+
+                BeginPlayingInternal(currentScoreToken, currentState).ContinueWith(t =&gt;
+                {
+                    bool success = t.GetResultSafely();
+
+                    if (!success)
+                    {
+                        Schedule(() =&gt;
+                        {
+                            if (IsConnected.Value)
+                                Logger.Log($&quot;Clearing {nameof(SpectatorClient)} state due to failed {nameof(BeginPlayingInternal)} call.&quot;);
+
+                            clearScoreState();
+
+                            currentState.BeatmapID = null;
+                            currentState.RulesetID = null;
+                            currentState.Mods = [];
+                            currentState.State = SpectatedUserState.Idle;
+                            currentState.MaximumStatistics = [];
+                        });
+                    }
+                });
+            });
+        }
+
+        public void HandleFrame(ReplayFrame frame) =&gt; Schedule(() =&gt;
+        {
+            if (!isPlaying)
+            {
+                if (IsConnected.Value)
+                    Logger.Log($&quot;Frames arrived at {nameof(SpectatorClient)} outside of gameplay scope and will be ignored.&quot;);
+                return;
+            }
+
+            if (frame is IConvertibleReplayFrame convertible)
+            {
+                Debug.Assert(currentBeatmap != null);
+
+                var convertedFrame = convertible.ToLegacy(currentBeatmap);
+
+                // this reduces redundancy of frames in the resulting replay.
+                // it is also done at `ReplayRecorder`, but needs to be done here as well
+                // due to the flow being handled differently.
+                if (pendingFrames.LastOrDefault()?.IsEquivalentTo(convertedFrame) == true)
+                    pendingFrames[^1] = convertedFrame;
+                else
+                    pendingFrames.Add(convertedFrame);
+            }
+
+            if (pendingFrames.Count &gt; max_pending_frames)
+                purgePendingFrames();
+        });
+
+        public void EndPlaying(long? scoreToken, GameplayState state)
+        {
+            // This method is most commonly called via Dispose(), which is can be asynchronous (via the AsyncDisposalQueue).
+            // We probably need to find a better way to handle this...
+            Schedule(() =&gt;
+            {
+                if (!isPlaying)
+                    return;
+
+                if (pendingFrames.Count &gt; 0)
+                    purgePendingFrames();
+
+                clearScoreState();
+
+                SpectatedUserState finalState;
+
+                if (state.HasPassed)
+                    finalState = SpectatedUserState.Passed;
+                else if (state.HasFailed)
+                    finalState = SpectatedUserState.Failed;
+                else
+                    finalState = SpectatedUserState.Quit;
+
+                EndPlayingInternal(scoreToken, finalState).FireAndForget();
+            });
+        }
+
+        private void setStateForScore(long? scoreToken, GameplayState state, Score score)
+        {
+            isPlaying = true;
+
+            currentBeatmap = state.Beatmap;
+            currentScore = score;
+            currentScoreToken = scoreToken;
+            currentScoreProcessor = state.ScoreProcessor;
+        }
+
+        private void clearScoreState()
+        {
+            isPlaying = false;
+
+            currentBeatmap = null;
+            currentScore = null;
+            currentScoreProcessor = null;
+            currentScoreToken = null;
+        }
+
+        public virtual void WatchUser(int userId)
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            if (!watchedUsersRefCounts.TryAdd(userId, 1))
+            {
+                watchedUsersRefCounts[userId]++;
+                return;
+            }
+
+            WatchUserInternal(userId).FireAndForget();
+        }
+
+        public void StopWatchingUser(int userId)
+        {
+            // This method is most commonly called via Dispose(), which is asynchronous.
+            // Todo: This should not be a thing, but requires framework changes.
+            Schedule(() =&gt;
+            {
+                if (watchedUsersRefCounts.TryGetValue(userId, out int watchers) &amp;&amp; watchers &gt; 1)
+                {
+                    watchedUsersRefCounts[userId]--;
+                    return;
+                }
+
+                watchedUsersRefCounts.Remove(userId);
+                watchedUserStates.Remove(userId);
+                StopWatchingUserInternal(userId).FireAndForget();
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Contains the actual implementation of the &quot;begin play&quot; operation.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether the server-side invocation to start play succeeded.&lt;/returns&gt;
+        protected abstract Task&lt;bool&gt; BeginPlayingInternal(long? scoreToken, SpectatorState state);
+
+        protected abstract Task SendFramesInternal(long? scoreToken, FrameDataBundle bundle);
+
+        protected abstract Task EndPlayingInternal(long? scoreToken, SpectatedUserState finalState);
+
+        protected abstract Task WatchUserInternal(int userId);
+
+        protected abstract Task StopWatchingUserInternal(int userId);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (pendingFrames.Count &gt; 0 &amp;&amp; Time.Current - lastPurgeTime &gt; TIME_BETWEEN_SENDS)
+                purgePendingFrames();
+        }
+
+        private void purgePendingFrames()
+        {
+            if (pendingFrames.Count == 0)
+                return;
+
+            if (!isPlaying)
+            {
+                // it is possible for this to happen if the `BeginPlayingInternal()` call takes a long time,
+                // the client accumulates a purgeable bundle of frames in the meantime,
+                // and then `BeginPlayingInternal()` finally fails and `clearScoreState()` is called to abort the streaming session.
+                Logger.Log($&quot;{nameof(SpectatorClient)} dropping pending frames as the user is no longer considered to be playing.&quot;);
+                pendingFrames.Clear();
+                return;
+            }
+
+            Debug.Assert(currentScore != null);
+            Debug.Assert(currentScoreProcessor != null);
+
+            var frames = pendingFrames.ToArray();
+            var bundle = new FrameDataBundle(currentScore.ScoreInfo, currentScoreProcessor, frames);
+
+            pendingFrames.Clear();
+            lastPurgeTime = Time.Current;
+
+            pendingFrameBundles.Enqueue(bundle);
+
+            sendNextBundleIfRequired();
+        }
+
+        private void sendNextBundleIfRequired()
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            if (lastSend?.IsCompleted == false)
+                return;
+
+            if (!pendingFrameBundles.TryPeek(out var bundle))
+                return;
+
+            TaskCompletionSource&lt;bool&gt; tcs = new TaskCompletionSource&lt;bool&gt;();
+
+            lastSend = tcs.Task;
+
+            SendFramesInternal(currentScoreToken, bundle).ContinueWith(t =&gt;
+            {
+                // Handle exception outside of `Schedule` to ensure it doesn&#39;t go unobserved.
+                bool wasSuccessful = t.Exception == null;
+
+                return Schedule(() =&gt;
+                {
+                    // If the last bundle send wasn&#39;t successful, try again without dequeuing.
+                    if (wasSuccessful)
+                        pendingFrameBundles.Dequeue();
+
+                    tcs.SetResult(wasSuccessful);
+                    sendNextBundleIfRequired();
+                });
+            });
+        }
+
+        #region Disconnection handling
+
+        /// &lt;summary&gt;
+        /// Invoked just prior to disconnection.
+        /// &lt;/summary&gt;
+        public event Action? Disconnecting;
+
+        protected abstract Task DisconnectInternal();
+
+        public abstract Task Reconnect();
+
+        Task IStatefulUserHubClient.DisconnectRequested()
+        {
+            Schedule(() =&gt;
+            {
+                Disconnecting?.Invoke();
+                DisconnectInternal().FireAndForget();
+            });
+            return Task.CompletedTask;
+        }
+
+        Task IStatefulUserHubClient.ServerShuttingDown()
+        {
+            this.ReconnectWhenReady(IsConnected, () =&gt; !isPlaying &amp;&amp; watchedUsersRefCounts.Count == 0, Reconnect);
+            return Task.CompletedTask;
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[45,86,45,103,0],[50,62,50,75,0],[55,34,55,38,0],[55,39,55,43,0],[81,9,81,98,0],[83,9,83,132,0],[85,9,85,104,0],[86,9,86,77,0],[93,9,93,100,0],[95,9,95,96,0],[105,9,105,10,0],[106,13,106,55,0],[106,55,107,13,0],[107,13,107,14,0],[107,14,108,17,0],[108,17,108,40,0],[108,40,109,17,0],[109,17,109,18,0],[109,18,111,21,0],[111,21,111,81,0],[111,81,112,21,0],[112,21,112,51,0],[112,51,115,21,0],[115,21,115,28,0],[115,28,115,30,0],[115,30,115,54,0],[115,54,115,55,0],[115,55,115,57,0],[115,57,115,58,0],[115,58,115,63,0],[115,63,116,21,0],[116,21,116,22,0],[116,22,117,30,0],[117,30,117,39,0],[117,39,117,41,0],[117,41,117,53,0],[117,53,117,55,0],[117,55,117,58,0],[117,58,118,29,0],[118,29,118,45,0],[118,45,119,21,0],[119,21,119,22,0],[119,22,122,21,0],[122,21,122,35,0],[122,35,124,25,0],[124,25,124,79,0],[124,79,125,17,0],[125,17,125,18,0],[125,18,127,17,0],[127,17,127,18,0],[127,18,128,21,0],[128,21,128,47,0],[128,47,129,21,0],[129,21,129,43,0],[129,43,130,17,0],[130,17,130,18,0],[130,18,131,13,0],[131,13,131,14,0],[131,14,131,15,0],[131,15,131,23,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,137,13,0],[137,13,137,14,0],[137,14,138,17,0],[138,17,138,63,0],[138,63,139,21,0],[139,21,139,55,0],[139,55,141,17,0],[141,17,141,59,0],[141,59,142,13,0],[142,13,142,14,0],[142,14,142,16,0],[144,13,144,39,0],[145,9,145,10,0],[148,9,148,10,0],[149,13,150,13,0],[150,13,150,14,0],[150,14,151,17,0],[151,17,151,63,0],[151,63,152,21,0],[152,21,152,55,0],[152,55,154,17,0],[154,17,154,62,0],[154,62,155,13,0],[155,13,155,14,0],[155,14,155,16,0],[157,13,157,39,0],[158,9,158,10,0],[161,9,161,10,0],[162,13,162,39,0],[163,17,163,54,0],[165,13,165,28,0],[165,28,165,61,0],[165,61,165,63,0],[167,13,167,39,0],[168,9,168,10,0],[171,9,171,10,0],[172,13,172,28,0],[172,28,172,73,0],[172,73,172,75,0],[174,13,174,39,0],[175,9,175,10,0],[178,9,178,10,0],[179,13,180,13,0],[180,13,180,14,0],[180,14,181,17,0],[181,17,181,24,0],[181,24,181,26,0],[181,26,181,34,0],[181,34,181,35,0],[181,35,181,37,0],[181,37,181,38,0],[181,38,181,43,0],[181,43,182,17,0],[182,17,182,18,0],[182,18,183,21,0],[183,21,183,55,0],[183,55,184,25,0],[184,25,184,49,0],[184,49,185,17,0],[185,17,185,18,0],[185,18,186,13,0],[186,13,186,14,0],[186,14,186,16,0],[188,13,188,39,0],[189,9,189,10,0],[192,9,192,10,0],[193,13,194,13,0],[194,13,194,14,0],[194,14,195,17,0],[195,17,195,46,0],[195,46,195,66,0],[195,66,195,68,0],[195,68,196,13,0],[196,13,196,14,0],[196,14,196,16,0],[198,13,198,39,0],[199,9,199,10,0],[202,9,202,10,0],[204,13,205,13,0],[205,13,205,14,0],[205,14,206,17,0],[206,17,206,31,0],[206,31,207,21,0],[207,21,207,119,0],[207,119,210,17,0],[210,17,210,80,0],[210,80,211,17,0],[211,17,211,68,0],[211,68,212,17,0],[212,17,212,70,0],[212,70,212,83,0],[212,83,212,95,0],[212,95,213,17,0],[213,17,213,65,0],[213,65,214,17,0],[214,17,214,89,0],[214,89,216,17,0],[216,17,216,60,0],[216,60,218,17,0],[218,17,219,17,0],[219,17,219,18,0],[219,18,220,21,0],[220,21,220,56,0],[220,56,222,21,0],[222,21,222,34,0],[222,34,223,21,0],[223,21,223,22,0],[223,22,224,25,0],[224,25,225,25,0],[225,25,225,26,0],[225,26,226,29,0],[226,29,226,51,0],[226,51,227,33,0],[227,33,227,140,0],[227,140,229,29,0],[229,29,229,47,0],[229,47,231,29,0],[231,29,231,59,0],[231,59,232,29,0],[232,29,232,59,0],[232,59,233,29,0],[233,29,233,52,0],[233,52,234,29,0],[234,29,234,74,0],[234,74,235,29,0],[235,29,235,65,0],[235,65,236,25,0],[236,25,236,26,0],[236,26,236,28,0],[236,28,237,21,0],[237,21,237,22,0],[237,22,238,17,0],[238,17,238,18,0],[238,18,238,20,0],[238,20,239,13,0],[239,13,239,14,0],[239,14,239,16,0],[240,9,240,10,0],[242,55,243,9,0],[243,9,243,10,0],[243,10,244,13,0],[244,13,244,28,0],[244,28,245,13,0],[245,13,245,14,0],[245,14,246,17,0],[246,17,246,39,0],[246,39,247,21,0],[247,21,247,127,0],[247,127,248,17,0],[248,17,248,24,0],[248,24,251,13,0],[251,13,251,62,0],[251,62,252,13,0],[252,13,252,14,0],[252,14,253,17,0],[253,17,253,54,0],[253,54,255,17,0],[255,17,255,75,0],[255,75,260,17,0],[260,17,260,91,0],[260,91,261,21,0],[261,21,261,56,0],[261,56,263,21,0],[263,21,263,55,0],[263,55,264,13,0],[264,13,264,14,0],[264,14,266,13,0],[266,13,266,58,0],[266,58,267,17,0],[267,17,267,38,0],[267,38,268,9,0],[268,9,268,10,0],[268,10,268,11,0],[271,9,271,10,0],[274,13,275,13,0],[275,13,275,14,0],[275,14,276,17,0],[276,17,276,32,0],[276,32,277,21,0],[277,21,277,28,0],[277,28,279,17,0],[279,17,279,45,0],[279,45,280,21,0],[280,21,280,42,0],[280,42,282,17,0],[282,17,282,35,0],[282,35,286,17,0],[286,17,286,37,0],[286,37,287,21,0],[287,21,287,60,0],[287,60,288,22,0],[288,22,288,42,0],[288,42,289,21,0],[289,21,289,60,0],[289,60,291,21,0],[291,21,291,58,0],[291,58,293,17,0],[293,17,293,76,0],[293,76,294,13,0],[294,13,294,14,0],[294,14,294,16,0],[295,9,295,10,0],[298,9,298,10,0],[299,13,299,30,0],[301,13,301,44,0],[302,13,302,34,0],[303,13,303,44,0],[304,13,304,58,0],[305,9,305,10,0],[308,9,308,10,0],[309,13,309,31,0],[311,13,311,35,0],[312,13,312,33,0],[313,13,313,42,0],[314,13,314,38,0],[315,9,315,10,0],[318,9,318,10,0],[319,13,319,55,0],[321,13,321,58,0],[322,13,322,14,0],[323,17,323,49,0],[324,17,324,24,0],[327,13,327,55,0],[328,9,328,10,0],[331,9,331,10,0],[334,13,335,13,0],[335,13,335,14,0],[335,14,336,17,0],[336,17,336,97,0],[336,97,337,17,0],[337,17,337,18,0],[337,18,338,21,0],[338,21,338,53,0],[338,53,339,21,0],[339,21,339,28,0],[339,28,342,17,0],[342,17,342,54,0],[342,54,343,17,0],[343,17,343,50,0],[343,50,344,17,0],[344,17,344,66,0],[344,66,345,13,0],[345,13,345,14,0],[345,14,345,16,0],[346,9,346,10,0],[363,9,363,10,0],[364,13,364,27,0],[366,13,366,94,0],[367,17,367,38,0],[368,9,368,10,0],[371,9,371,10,0],[372,13,372,42,0],[373,17,373,24,0],[375,13,375,28,0],[376,13,376,14,0],[380,17,380,133,0],[381,17,381,39,0],[382,17,382,24,0],[385,13,385,48,0],[386,13,386,57,0],[388,13,388,50,0],[389,13,389,101,0],[391,13,391,35,0],[392,13,392,42,0],[394,13,394,49,0],[396,13,396,40,0],[397,9,397,10,0],[400,9,400,10,0],[401,13,401,55,0],[403,13,403,48,0],[404,17,404,24,0],[406,13,406,62,0],[407,17,407,24,0],[409,13,409,79,0],[411,13,411,33,0],[413,13,414,13,0],[414,13,414,14,0],[414,14,416,17,0],[416,17,416,58,0],[416,58,418,17,0],[418,17,419,17,0],[419,17,419,18,0],[419,18,421,21,0],[421,21,421,39,0],[421,39,422,25,0],[422,25,422,55,0],[422,55,424,21,0],[424,21,424,50,0],[424,50,425,21,0],[425,21,425,48,0],[425,48,426,17,0],[426,17,426,18,0],[426,18,426,20,0],[426,20,427,13,0],[427,13,427,14,0],[427,14,427,16,0],[428,9,428,10,0],[442,9,442,10,0],[443,13,444,13,0],[444,13,444,14,0],[444,14,445,17,0],[445,17,445,41,0],[445,41,446,17,0],[446,17,446,54,0],[446,54,447,13,0],[447,13,447,14,0],[447,14,447,16,0],[448,13,448,39,0],[449,9,449,10,0],[452,9,452,10,0],[453,13,453,56,0],[453,56,453,102,0],[453,102,453,115,0],[454,13,454,39,0],[455,9,455,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Menu/LogoVisualisation.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Rendering.Vertices;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Textures;
+using osu.Game.Beatmaps;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Menu
+{
+    /// &lt;summary&gt;
+    /// A visualiser that reacts to music coming from beatmaps.
+    /// &lt;/summary&gt;
+    public partial class LogoVisualisation : Drawable
+    {
+        /// &lt;summary&gt;
+        /// The number of bars to jump each update iteration.
+        /// &lt;/summary&gt;
+        private const int index_change = 5;
+
+        /// &lt;summary&gt;
+        /// The maximum length of each bar in the visualiser. Will be reduced when kiai is not activated.
+        /// &lt;/summary&gt;
+        private const float bar_length = 600;
+
+        /// &lt;summary&gt;
+        /// The number of bars in one rotation of the visualiser.
+        /// &lt;/summary&gt;
+        private const int bars_per_visualiser = 200;
+
+        /// &lt;summary&gt;
+        /// How many times we should stretch around the circumference (overlapping overselves).
+        /// &lt;/summary&gt;
+        private const float visualiser_rounds = 5;
+
+        /// &lt;summary&gt;
+        /// How much should each bar go down each millisecond (based on a full bar).
+        /// &lt;/summary&gt;
+        private const float decay_per_millisecond = 0.0024f;
+
+        /// &lt;summary&gt;
+        /// Number of milliseconds between each amplitude update.
+        /// &lt;/summary&gt;
+        private const float time_between_updates = 50;
+
+        /// &lt;summary&gt;
+        /// The minimum amplitude to show a bar.
+        /// &lt;/summary&gt;
+        private const float amplitude_dead_zone = 1f / bar_length;
+
+        private int indexOffset;
+
+        /// &lt;summary&gt;
+        /// The relative movement of bars based on input amplification. Defaults to 1.
+        /// &lt;/summary&gt;
+        public float Magnitude { get; set; } = 1;
+
+        private readonly float[] frequencyAmplitudes = new float[256];
+
+        private IShader shader = null!;
+        private Texture texture = null!;
+
+        public LogoVisualisation()
+        {
+            Blending = BlendingParameters.Additive;
+        }
+
+        private readonly List&lt;IHasAmplitudes&gt; amplitudeSources = new List&lt;IHasAmplitudes&gt;();
+
+        public void AddAmplitudeSource(IHasAmplitudes amplitudeSource)
+        {
+            amplitudeSources.Add(amplitudeSource);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IRenderer renderer, ShaderManager shaders)
+        {
+            texture = renderer.WhitePixel;
+            shader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+        }
+
+        private readonly float[] temporalAmplitudes = new float[ChannelAmplitudes.AMPLITUDES_SIZE];
+
+        [Resolved]
+        private IBeatSyncProvider beatSyncProvider { get; set; } = null!;
+
+        private void updateAmplitudes()
+        {
+            for (int i = 0; i &lt; temporalAmplitudes.Length; i++)
+                temporalAmplitudes[i] = 0;
+
+            addAmplitudesFromSource(beatSyncProvider);
+
+            foreach (var source in amplitudeSources)
+                addAmplitudesFromSource(source);
+
+            float kiaiMultiplier = beatSyncProvider.CheckIsKiaiTime() ? 1 : 0.5f;
+
+            for (int i = 0; i &lt; bars_per_visualiser; i++)
+            {
+                float targetAmplitude = (temporalAmplitudes[(i + indexOffset) % bars_per_visualiser]) * kiaiMultiplier;
+
+                if (targetAmplitude &gt; frequencyAmplitudes[i])
+                    frequencyAmplitudes[i] = targetAmplitude;
+            }
+
+            indexOffset = (indexOffset + index_change) % bars_per_visualiser;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            var delayed = Scheduler.AddDelayed(updateAmplitudes, time_between_updates, true);
+            delayed.PerformRepeatCatchUpExecutions = false;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            float decayFactor = (float)Time.Elapsed * decay_per_millisecond;
+
+            for (int i = 0; i &lt; bars_per_visualiser; i++)
+            {
+                //3% of extra bar length to make it a little faster when bar is almost at it&#39;s minimum
+                frequencyAmplitudes[i] -= decayFactor * (frequencyAmplitudes[i] + 0.03f);
+                if (frequencyAmplitudes[i] &lt; 0)
+                    frequencyAmplitudes[i] = 0;
+            }
+
+            Invalidate(Invalidation.DrawNode);
+        }
+
+        protected override DrawNode CreateDrawNode() =&gt; new VisualisationDrawNode(this);
+
+        private void addAmplitudesFromSource(IHasAmplitudes source)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+
+            var amplitudes = source.CurrentAmplitudes.FrequencyAmplitudes.Span;
+
+            for (int i = 0; i &lt; amplitudes.Length; i++)
+            {
+                if (i &lt; temporalAmplitudes.Length)
+                    temporalAmplitudes[i] += amplitudes[i];
+            }
+        }
+
+        private class VisualisationDrawNode : DrawNode
+        {
+            protected new LogoVisualisation Source =&gt; (LogoVisualisation)base.Source;
+
+            private IShader shader = null!;
+            private Texture texture = null!;
+
+            // Assuming the logo is a circle, we don&#39;t need a second dimension.
+            private float size;
+
+            private static readonly Color4 transparent_white = Color4.White.Opacity(0.2f);
+
+            private readonly float[] audioData = new float[256];
+
+            private IVertexBatch&lt;TexturedVertex2D&gt;? vertexBatch;
+
+            public VisualisationDrawNode(LogoVisualisation source)
+                : base(source)
+            {
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                shader = Source.shader;
+                texture = Source.texture;
+                size = Source.DrawSize.X;
+
+                Source.frequencyAmplitudes.AsSpan().CopyTo(audioData);
+            }
+
+            protected override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                vertexBatch ??= renderer.CreateQuadBatch&lt;TexturedVertex2D&gt;(100, 10);
+
+                shader.Bind();
+
+                Vector2 inflation = DrawInfo.MatrixInverse.ExtractScale().Xy;
+
+                ColourInfo colourInfo = DrawColourInfo.Colour;
+                colourInfo.ApplyChild(transparent_white);
+
+                for (int j = 0; j &lt; visualiser_rounds; j++)
+                {
+                    for (int i = 0; i &lt; bars_per_visualiser; i++)
+                    {
+                        if (audioData[i] &lt; amplitude_dead_zone)
+                            continue;
+
+                        float rotation = float.DegreesToRadians(i / (float)bars_per_visualiser * 360 + j * 360 / visualiser_rounds);
+                        float rotationCos = MathF.Cos(rotation);
+                        float rotationSin = MathF.Sin(rotation);
+                        // taking the cos and sin to the 0..1 range
+                        var barPosition = new Vector2(rotationCos / 2 + 0.5f, rotationSin / 2 + 0.5f) * size;
+
+                        var barSize = new Vector2(size * MathF.Sqrt(2 * (1 - MathF.Cos(float.DegreesToRadians(360f / bars_per_visualiser)))) / 2f, bar_length * audioData[i]);
+                        // The distance between the position and the sides of the bar.
+                        var bottomOffset = new Vector2(-rotationSin * barSize.X / 2, rotationCos * barSize.X / 2);
+                        // The distance between the bottom side of the bar and the top side.
+                        var amplitudeOffset = new Vector2(rotationCos * barSize.Y, rotationSin * barSize.Y);
+
+                        var rectangle = new Quad(
+                            Vector2Extensions.Transform(barPosition - bottomOffset, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(barPosition - bottomOffset + amplitudeOffset, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(barPosition + bottomOffset, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(barPosition + bottomOffset + amplitudeOffset, DrawInfo.Matrix)
+                        );
+
+                        renderer.DrawQuad(
+                            texture,
+                            rectangle,
+                            colourInfo,
+                            null,
+                            vertexBatch.AddAction,
+                            // barSize by itself will make it smooth more in the X axis than in the Y axis, this reverts that.
+                            Vector2.Divide(inflation, barSize.Yx));
+                    }
+                }
+
+                shader.Unbind();
+            }
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                vertexBatch?.Dispose();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[68,34,68,38,0],[68,39,68,43,0],[68,48,68,49,0],[70,9,70,71,0],[72,9,72,40,0],[73,9,73,41,0],[75,9,75,35,0],[76,9,76,10,0],[77,13,77,52,0],[78,9,78,10,0],[80,9,80,93,0],[83,9,83,10,0],[84,13,84,51,0],[85,9,85,10,0],[89,9,89,10,0],[90,13,90,43,0],[91,13,91,103,0],[92,9,92,10,0],[94,9,94,100,0],[97,54,97,58,0],[97,59,97,63,0],[97,68,97,73,0],[100,9,100,10,0],[101,18,101,27,0],[101,29,101,58,0],[101,60,101,63,0],[102,17,102,43,0],[104,13,104,55,0],[106,13,106,20,0],[106,22,106,32,0],[106,33,106,35,0],[106,36,106,52,0],[107,17,107,49,0],[109,13,109,82,0],[111,18,111,27,0],[111,29,111,52,0],[111,54,111,57,0],[112,13,112,14,0],[113,17,113,120,0],[115,17,115,62,0],[116,21,116,62,0],[117,13,117,14,0],[119,13,119,78,0],[120,9,120,10,0],[123,9,123,10,0],[124,13,124,33,0],[126,13,126,94,0],[127,13,127,60,0],[128,9,128,10,0],[131,9,131,10,0],[132,13,132,27,0],[134,13,134,77,0],[136,18,136,27,0],[136,29,136,52,0],[136,54,136,57,0],[137,13,137,14,0],[139,17,139,90,0],[140,17,140,48,0],[141,21,141,48,0],[142,13,142,14,0],[144,13,144,47,0],[145,9,145,10,0],[147,57,147,88,0],[150,9,150,10,0],[151,13,151,55,0],[153,13,153,80,0],[155,18,155,27,0],[155,29,155,50,0],[155,52,155,55,0],[156,13,156,14,0],[157,17,157,51,0],[158,21,158,60,0],[159,13,159,14,0],[160,9,160,10,0],[164,55,164,85,0],[166,13,166,44,0],[167,13,167,45,0],[172,13,172,91,0],[174,13,174,65,0],[179,19,179,31,0],[180,13,180,14,0],[181,13,181,14,0],[184,13,184,14,0],[185,17,185,35,0],[187,17,187,40,0],[188,17,188,42,0],[189,17,189,42,0],[191,17,191,71,0],[192,13,192,14,0],[195,13,195,14,0],[196,17,196,37,0],[198,17,198,85,0],[200,17,200,31,0],[202,17,202,78,0],[204,17,204,63,0],[205,17,205,58,0],[207,22,207,31,0],[207,33,207,54,0],[207,56,207,59,0],[208,17,208,18,0],[209,26,209,35,0],[209,37,209,60,0],[209,62,209,65,0],[210,21,210,22,0],[211,25,211,64,0],[212,29,212,38,0],[214,25,214,133,0],[215,25,215,65,0],[216,25,216,65,0],[218,25,218,110,0],[220,25,220,175,0],[222,25,222,115,0],[224,25,224,109,0],[226,25,231,27,0],[233,25,240,68,0],[241,21,241,22,0],[242,17,242,18,0],[244,17,244,33,0],[245,13,245,14,0],[248,13,248,14,0],[249,17,249,43,0],[251,17,251,40,0],[252,13,252,14,0]]);
+    </script>
+  </body>
+</html>

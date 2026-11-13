@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/Timeline/TimelineBlueprintContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Screens.Edit.Components.Timelines.Summary.Parts;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Edit.Compose.Components.Timeline
+{
+    [Cached]
+    internal partial class TimelineBlueprintContainer : EditorBlueprintContainer
+    {
+        [Resolved(CanBeNull = true)]
+        private Timeline timeline { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        private EditorClock editorClock { get; set; }
+
+        private Bindable&lt;HitObject&gt; placement;
+        private SelectionBlueprint&lt;HitObject&gt; placementBlueprint;
+
+        private bool hitObjectDragged;
+
+        /// &lt;remarks&gt;
+        /// Positional input must be received outside the container&#39;s bounds,
+        /// in order to handle timeline blueprints which are stacked offscreen.
+        /// &lt;/remarks&gt;
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; timeline.ReceivePositionalInputAt(screenSpacePos);
+
+        public TimelineBlueprintContainer(HitObjectComposer composer)
+            : base(composer)
+        {
+            RelativeSizeAxes = Axes.Both;
+            Anchor = Anchor.Centre;
+            Origin = Anchor.Centre;
+
+            Height = 0.6f;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            AddInternal(new SelectableAreaBackground
+            {
+                Colour = Color4.Black,
+                Depth = float.MaxValue,
+                Blending = BlendingParameters.Additive,
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            placement = Beatmap.PlacementObject.GetBoundCopy();
+            placement.ValueChanged += placementChanged;
+        }
+
+        private void placementChanged(ValueChangedEvent&lt;HitObject&gt; obj)
+        {
+            if (obj.NewValue == null)
+            {
+                if (placementBlueprint != null)
+                {
+                    SelectionBlueprints.Remove(placementBlueprint, true);
+                    placementBlueprint = null;
+                }
+            }
+            else
+            {
+                placementBlueprint = CreateBlueprintFor(obj.NewValue).AsNonNull();
+
+                // just to show the border. using the selection state doesn&#39;t seem to backfire.
+                // if it does then we&#39;ll probably want to just make `new` object above rather than rely on `CreateBlueprintFor`.
+                placementBlueprint.State = SelectionState.Selected;
+
+                // TODO: this is out of order, causing incorrect stacking height.
+                SelectionBlueprints.Add(placementBlueprint);
+            }
+        }
+
+        protected override SelectionBlueprintContainer CreateSelectionBlueprintContainer() =&gt; new TimelineSelectionBlueprintContainer { RelativeSizeAxes = Axes.Both };
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (!base.ReceivePositionalInputAt(e.ScreenSpaceMouseDownPosition))
+                return false;
+
+            return base.OnDragStart(e);
+        }
+
+        protected override bool TryMoveBlueprints(DragEvent e, IList&lt;(SelectionBlueprint&lt;HitObject&gt; blueprint, Vector2[] originalSnapPositions)&gt; blueprints)
+        {
+            Vector2 distanceTravelled = e.ScreenSpaceMousePosition - e.ScreenSpaceMouseDownPosition;
+
+            // The final movement position, relative to movementBlueprintOriginalPosition.
+            Vector2 movePosition = blueprints.First().originalSnapPositions.First() + distanceTravelled;
+
+            // Retrieve a snapped position.
+            var result = timeline?.FindSnappedPositionAndTime(movePosition) ?? new SnapResult(movePosition, null);
+
+            var referenceBlueprint = blueprints.First().blueprint;
+            bool moved = SelectionHandler.HandleMovement(new MoveSelectionEvent&lt;HitObject&gt;(referenceBlueprint, result.ScreenSpacePosition - referenceBlueprint.ScreenSpaceSelectionPoint));
+            if (moved)
+                ApplySnapResultTime(result, referenceBlueprint.Item.StartTime);
+            return moved;
+        }
+
+        private float dragTimeAccumulated;
+
+        protected override void Update()
+        {
+            if (IsDragged || hitObjectDragged)
+                handleScrollViaDrag();
+            else
+                dragTimeAccumulated = 0;
+
+            if (Composer != null &amp;&amp; timeline != null)
+            {
+                Composer.Playfield.PastLifetimeExtension = timeline.VisibleRange / 2;
+                Composer.Playfield.FutureLifetimeExtension = timeline.VisibleRange / 2;
+            }
+
+            base.Update();
+
+            updateSamplePointContractedState();
+            updateStacking();
+        }
+
+        public Bindable&lt;bool&gt; SamplePointContracted = new Bindable&lt;bool&gt;();
+
+        private void updateSamplePointContractedState()
+        {
+            const double absolute_minimum_gap = 31; // assumes single letter bank name for default banks
+            double minimumGap = absolute_minimum_gap;
+
+            if (timeline == null || editorClock == null)
+                return;
+
+            // Find the smallest time gap between any two sample point pieces
+            double smallestTimeGap = double.PositiveInfinity;
+            double lastTime = double.PositiveInfinity;
+
+            // The blueprints are ordered in reverse chronological order
+            foreach (var selectionBlueprint in SelectionBlueprints)
+            {
+                var hitObject = selectionBlueprint.Item;
+
+                // Only check the hit objects which are visible in the timeline
+                // SelectionBlueprints can contain hit objects which are not visible in the timeline due to selection keeping them alive
+                if (hitObject.StartTime &gt; editorClock.CurrentTime + timeline.VisibleRange / 2)
+                    continue;
+
+                if (hitObject.GetEndTime() &lt; editorClock.CurrentTime - timeline.VisibleRange / 2)
+                    break;
+
+                for (int i = 0; i &lt; hitObject.Samples.Count; i++)
+                {
+                    var sample = hitObject.Samples[i];
+
+                    if (!HitSampleInfo.ALL_BANKS.Contains(sample.Bank))
+                        minimumGap = Math.Max(minimumGap, absolute_minimum_gap + sample.Bank.Length * 3);
+                }
+
+                if (hitObject is IHasRepeats hasRepeats)
+                {
+                    smallestTimeGap = Math.Min(smallestTimeGap, hasRepeats.Duration / hasRepeats.SpanCount() / 2);
+
+                    for (int i = 0; i &lt; hasRepeats.NodeSamples.Count; i++)
+                    {
+                        var node = hasRepeats.NodeSamples[i];
+
+                        for (int j = 0; j &lt; node.Count; j++)
+                        {
+                            var sample = node[j];
+
+                            if (!HitSampleInfo.ALL_BANKS.Contains(sample.Bank))
+                                minimumGap = Math.Max(minimumGap, absolute_minimum_gap + sample.Bank.Length * 3);
+                        }
+                    }
+                }
+
+                double gap = lastTime - hitObject.GetEndTime();
+
+                // If the gap is less than 1ms, we can assume that the objects are stacked on top of each other
+                // Contracting doesn&#39;t make sense in this case
+                if (gap &gt; 1 &amp;&amp; gap &lt; smallestTimeGap)
+                    smallestTimeGap = gap;
+
+                lastTime = hitObject.StartTime;
+            }
+
+            double smallestAbsoluteGap = ((TimelineSelectionBlueprintContainer)SelectionBlueprints).ContentRelativeToAbsoluteFactor.X * smallestTimeGap;
+            SamplePointContracted.Value = smallestAbsoluteGap &lt; minimumGap;
+        }
+
+        private readonly Stack&lt;HitObject&gt; currentConcurrentObjects = new Stack&lt;HitObject&gt;();
+
+        private void updateStacking()
+        {
+            // because only blueprints of objects which are alive (via pooling) are displayed in the timeline, it&#39;s feasible to do this every-update.
+
+            const int stack_offset = 5;
+
+            // after the stack gets this tall, we can presume there is space underneath to draw subsequent blueprints.
+            const int stack_reset_count = 3;
+
+            currentConcurrentObjects.Clear();
+
+            for (int i = SelectionBlueprints.Count - 1; i &gt;= 0; i--)
+            {
+                var b = SelectionBlueprints[i];
+
+                // remove objects from the stack as long as their end time is in the past.
+                while (currentConcurrentObjects.TryPeek(out HitObject hitObject))
+                {
+                    if (Precision.AlmostBigger(hitObject.GetEndTime(), b.Item.StartTime, 1))
+                        break;
+
+                    currentConcurrentObjects.Pop();
+                }
+
+                // if the stack gets too high, we should have space below it to display the next batch of objects.
+                // importantly, we only do this if time has incremented, else a stack of hitobjects all at the same time value would start to overlap themselves.
+                if (currentConcurrentObjects.TryPeek(out HitObject h) &amp;&amp; !Precision.AlmostEquals(h.StartTime, b.Item.StartTime, 1))
+                {
+                    if (currentConcurrentObjects.Count &gt;= stack_reset_count)
+                        currentConcurrentObjects.Clear();
+                }
+
+                b.Y = -(stack_offset * currentConcurrentObjects.Count);
+
+                currentConcurrentObjects.Push(b.Item);
+            }
+        }
+
+        protected override SelectionHandler&lt;HitObject&gt; CreateSelectionHandler() =&gt; new TimelineSelectionHandler();
+
+        protected override SelectionBlueprint&lt;HitObject&gt; CreateBlueprintFor(HitObject item)
+        {
+            return new TimelineHitObjectBlueprint(item)
+            {
+                OnDragHandled = e =&gt; hitObjectDragged = e != null,
+            };
+        }
+
+        protected sealed override DragBox CreateDragBox() =&gt; new TimelineDragBox();
+
+        protected override void UpdateSelectionFromDragBox(HashSet&lt;HitObject&gt; selectionBeforeDrag)
+        {
+            Composer.BlueprintContainer.CommitIfPlacementActive();
+
+            var dragBox = (TimelineDragBox)DragBox;
+            double minTime = dragBox.MinTime;
+            double maxTime = dragBox.MaxTime;
+
+            SelectedItems.RemoveAll(hitObject =&gt; !shouldBeSelected(hitObject));
+
+            foreach (var hitObject in Beatmap.HitObjects.Except(SelectedItems).Where(shouldBeSelected))
+            {
+                Composer.Playfield.SetKeepAlive(hitObject, true);
+                SelectedItems.Add(hitObject);
+            }
+
+            bool shouldBeSelected(HitObject hitObject)
+            {
+                if (selectionBeforeDrag.Contains(hitObject))
+                    return true;
+
+                double midTime = (hitObject.StartTime + hitObject.GetEndTime()) / 2;
+                return minTime &lt;= midTime &amp;&amp; midTime &lt;= maxTime;
+            }
+        }
+
+        private void handleScrollViaDrag()
+        {
+            // The amount of time dragging before we reach maximum drag speed.
+            const float time_ramp_multiplier = 5000;
+
+            // A maximum drag speed to ensure things don&#39;t get out of hand.
+            const float max_velocity = 10;
+
+            if (timeline == null) return;
+
+            var mousePos = timeline.ToLocalSpace(InputManager.CurrentState.Mouse.Position);
+
+            // for better UX do not require the user to drag all the way to the edge and beyond to initiate a drag-scroll.
+            // this is especially important in scenarios like fullscreen, where mouse confine will usually be on
+            // and the user physically *won&#39;t be able to* drag beyond the edge of the timeline
+            // (since its left edge is co-incident with the window edge).
+            const float scroll_tolerance = 40;
+
+            float leftBound = timeline.BoundingBox.TopLeft.X + scroll_tolerance;
+            float rightBound = timeline.BoundingBox.TopRight.X - scroll_tolerance;
+
+            float amount = 0;
+
+            if (mousePos.X &gt; rightBound)
+                amount = mousePos.X - rightBound;
+            else if (mousePos.X &lt; leftBound)
+                amount = mousePos.X - leftBound;
+
+            if (amount == 0)
+            {
+                dragTimeAccumulated = 0;
+                return;
+            }
+
+            amount = Math.Sign(amount) * Math.Min(max_velocity, MathF.Pow(Math.Clamp(Math.Abs(amount), 0, scroll_tolerance), 2));
+            dragTimeAccumulated += (float)Clock.ElapsedFrameTime;
+
+            timeline.ScrollBy(amount * (float)Clock.ElapsedFrameTime * Math.Min(1, dragTimeAccumulated / time_ramp_multiplier));
+        }
+
+        private partial class SelectableAreaBackground : CompositeDrawable
+        {
+            [Resolved]
+            private OsuColour colours { get; set; }
+
+            public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+            {
+                float localY = ToLocalSpace(screenSpacePos).Y;
+                return DrawRectangle.Top &lt;= localY &amp;&amp; DrawRectangle.Bottom &gt;= localY;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                RelativeSizeAxes = Axes.Both;
+                Alpha = 0.1f;
+
+                AddRangeInternal(new[]
+                {
+                    // fade out over intro time, outside the valid time bounds.
+                    new Box
+                    {
+                        RelativeSizeAxes = Axes.Y,
+                        Width = 200,
+                        Origin = Anchor.TopRight,
+                        Colour = ColourInfo.GradientHorizontal(Color4.White.Opacity(0), Color4.White),
+                    },
+                    new Box
+                    {
+                        Colour = Color4.White,
+                        RelativeSizeAxes = Axes.Both,
+                    }
+                });
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                this.FadeColour(colours.BlueLighter, 120, Easing.OutQuint);
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                this.FadeColour(Color4.Black, 600, Easing.OutQuint);
+                base.OnHoverLost(e);
+            }
+        }
+
+        protected partial class TimelineSelectionBlueprintContainer : SelectionBlueprintContainer
+        {
+            protected override HitObjectOrderedSelectionContainer Content { get; }
+
+            public Vector2 ContentRelativeToAbsoluteFactor =&gt; Content.RelativeToAbsoluteFactor;
+
+            [Resolved]
+            private EditorBeatmap editorBeatmap { get; set; }
+
+            public TimelineSelectionBlueprintContainer()
+            {
+                AddInternal(new TimelinePart&lt;SelectionBlueprint&lt;HitObject&gt;&gt;(Content = new HitObjectOrderedSelectionContainer { RelativeSizeAxes = Axes.Both }) { RelativeSizeAxes = Axes.Both });
+            }
+
+            public override void ChangeChildDepth(SelectionBlueprint&lt;HitObject&gt; child, float newDepth)
+            {
+                // timeline blueprint container also contains a blueprint for current placement, if present
+                // (see `placementChanged()` callback above).
+                // because the current placement hitobject is generally going to be mutated during the placement,
+                // it is possible for `Content`&#39;s children to become unsorted when the user moves the placement around,
+                // which can culminate in a critical failure when attempting to binary-search children here
+                // using `HitObjectOrderedSelectionContainer`&#39;s custom comparer.
+                // thus, always force a re-sort of objects before attempting to change child depth when a placement is active
+                // to avoid this scenario.
+                if (editorBeatmap.PlacementObject.Value != null)
+                    Content.Sort();
+                base.ChangeChildDepth(child, newDepth);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,37,35,41,0],[35,42,35,46,0],[38,43,38,47,0],[38,48,38,52,0],[49,82,49,131,0],[52,15,52,29,0],[53,9,53,10,0],[54,13,54,42,0],[55,13,55,36,0],[56,13,56,36,0],[58,13,58,27,0],[59,9,59,10,0],[63,9,63,10,0],[64,13,69,16,0],[70,9,70,10,0],[73,9,73,10,0],[74,13,74,33,0],[76,13,76,64,0],[77,13,77,56,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,38,0],[83,13,83,14,0],[84,17,84,48,0],[85,17,85,18,0],[86,21,86,74,0],[87,21,87,47,0],[88,17,88,18,0],[89,13,89,14,0],[91,13,91,14,0],[92,17,92,83,0],[96,17,96,68,0],[99,17,99,61,0],[100,13,100,14,0],[101,9,101,10,0],[103,95,103,167,0],[106,9,106,10,0],[107,13,107,80,0],[108,17,108,30,0],[110,13,110,40,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,101,0],[118,13,118,105,0],[121,13,121,115,0],[123,13,123,67,0],[124,13,124,188,0],[125,13,125,23,0],[126,17,126,80,0],[127,13,127,26,0],[128,9,128,10,0],[133,9,133,10,0],[134,13,134,47,0],[135,17,135,39,0],[137,17,137,41,0],[139,13,139,54,0],[140,13,140,14,0],[141,17,141,86,0],[142,17,142,88,0],[143,13,143,14,0],[145,13,145,27,0],[147,13,147,48,0],[148,13,148,30,0],[149,9,149,10,0],[151,9,151,76,0],[154,9,154,10,0],[156,13,156,54,0],[158,13,158,57,0],[159,17,159,24,0],[162,13,162,62,0],[163,13,163,55,0],[166,13,166,20,0],[166,22,166,44,0],[166,45,166,47,0],[166,48,166,67,0],[167,13,167,14,0],[168,17,168,57,0],[172,17,172,95,0],[173,21,173,30,0],[175,17,175,98,0],[176,21,176,27,0],[178,22,178,31,0],[178,33,178,60,0],[178,62,178,65,0],[179,17,179,18,0],[180,21,180,55,0],[182,21,182,72,0],[183,25,183,106,0],[184,17,184,18,0],[186,17,186,57,0],[187,17,187,18,0],[188,21,188,115,0],[190,26,190,35,0],[190,37,190,69,0],[190,71,190,74,0],[191,21,191,22,0],[192,25,192,62,0],[194,30,194,39,0],[194,41,194,55,0],[194,57,194,60,0],[195,25,195,26,0],[196,29,196,50,0],[198,29,198,80,0],[199,33,199,114,0],[200,25,200,26,0],[201,21,201,22,0],[202,17,202,18,0],[204,17,204,64,0],[208,17,208,54,0],[209,21,209,43,0],[211,17,211,48,0],[212,13,212,14,0],[214,13,214,153,0],[215,13,215,76,0],[216,9,216,10,0],[218,9,218,93,0],[221,9,221,10,0],[229,13,229,46,0],[231,18,231,55,0],[231,57,231,63,0],[231,65,231,68,0],[232,13,232,14,0],[233,17,233,48,0],[236,17,236,82,0],[237,17,237,18,0],[238,21,238,93,0],[239,25,239,31,0],[241,21,241,52,0],[242,17,242,18,0],[246,17,246,132,0],[247,17,247,18,0],[248,21,248,77,0],[249,25,249,58,0],[250,17,250,18,0],[252,17,252,72,0],[254,17,254,55,0],[255,13,255,14,0],[256,9,256,10,0],[258,84,258,114,0],[261,9,261,10,0],[262,13,264,38,0],[264,38,264,66,0],[264,66,265,15,0],[266,9,266,10,0],[268,62,268,83,0],[271,9,271,10,0],[272,13,272,67,0],[274,13,274,52,0],[275,13,275,46,0],[276,13,276,46,0],[278,13,278,50,0],[278,50,278,78,0],[278,78,278,80,0],[280,13,280,20,0],[280,22,280,35,0],[280,36,280,38,0],[280,39,280,103,0],[281,13,281,14,0],[282,17,282,66,0],[283,17,283,46,0],[284,13,284,14,0],[287,13,287,14,0],[288,17,288,61,0],[289,21,289,33,0],[291,17,291,85,0],[292,17,292,65,0],[293,13,293,14,0],[294,9,294,10,0],[297,9,297,10,0],[304,13,304,34,0],[304,35,304,42,0],[306,13,306,92,0],[314,13,314,81,0],[315,13,315,83,0],[317,13,317,30,0],[319,13,319,41,0],[320,17,320,50,0],[321,18,321,45,0],[322,17,322,49,0],[324,13,324,29,0],[325,13,325,14,0],[326,17,326,41,0],[327,17,327,24,0],[330,13,330,130,0],[331,13,331,66,0],[333,13,333,129,0],[334,9,334,10,0],[339,41,339,45,0],[339,46,339,50,0],[342,13,342,14,0],[343,17,343,63,0],[344,17,344,86,0],[345,13,345,14,0],[349,13,349,14,0],[350,17,350,46,0],[351,17,351,30,0],[353,17,368,20,0],[369,13,369,14,0],[372,13,372,14,0],[373,17,373,76,0],[374,17,374,40,0],[375,13,375,14,0],[378,13,378,14,0],[379,17,379,69,0],[380,17,380,37,0],[381,13,381,14,0],[386,77,386,81,0],[388,63,388,95,0],[391,51,391,55,0],[391,56,391,60,0],[393,13,393,57,0],[394,13,394,14,0],[395,17,395,194,0],[396,13,396,14,0],[399,13,399,14,0],[408,17,408,65,0],[409,21,409,36,0],[410,17,410,56,0],[411,13,411,14,0]]);
+    </script>
+  </body>
+</html>

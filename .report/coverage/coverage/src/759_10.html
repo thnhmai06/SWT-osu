@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/Difficulty/CatchLegacyScoreSimulator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Catch.Mods;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Catch.Scoring;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.Scoring.Legacy;
+
+namespace osu.Game.Rulesets.Catch.Difficulty
+{
+    internal class CatchLegacyScoreSimulator : ILegacyScoreSimulator
+    {
+        private readonly ScoreProcessor scoreProcessor = new CatchScoreProcessor();
+
+        private int legacyBonusScore;
+        private int standardisedBonusScore;
+        private int combo;
+
+        private double scoreMultiplier;
+
+        public LegacyScoreAttributes Simulate(IWorkingBeatmap workingBeatmap, IBeatmap playableBeatmap)
+        {
+            IBeatmap baseBeatmap = workingBeatmap.Beatmap;
+
+            int countNormal = 0;
+            int countSlider = 0;
+            int countSpinner = 0;
+
+            foreach (HitObject obj in baseBeatmap.HitObjects)
+            {
+                switch (obj)
+                {
+                    case IHasPath:
+                        countSlider++;
+                        break;
+
+                    case IHasDuration:
+                        countSpinner++;
+                        break;
+
+                    default:
+                        countNormal++;
+                        break;
+                }
+            }
+
+            int objectCount = countNormal + countSlider + countSpinner;
+
+            int drainLength = 0;
+
+            if (baseBeatmap.HitObjects.Count &gt; 0)
+            {
+                int breakLength = baseBeatmap.Breaks.Select(b =&gt; (int)Math.Round(b.EndTime) - (int)Math.Round(b.StartTime)).Sum();
+                drainLength = ((int)Math.Round(baseBeatmap.HitObjects[^1].StartTime) - (int)Math.Round(baseBeatmap.HitObjects[0].StartTime) - breakLength) / 1000;
+            }
+
+            scoreMultiplier = LegacyRulesetExtensions.CalculateDifficultyPeppyStars(baseBeatmap.Difficulty, objectCount, drainLength);
+
+            LegacyScoreAttributes attributes = new LegacyScoreAttributes();
+
+            foreach (var obj in playableBeatmap.HitObjects)
+                simulateHit(obj, ref attributes);
+
+            attributes.BonusScoreRatio = legacyBonusScore == 0 ? 0 : (double)standardisedBonusScore / legacyBonusScore;
+            attributes.BonusScore = legacyBonusScore;
+            attributes.MaxCombo = combo;
+
+            return attributes;
+        }
+
+        private void simulateHit(HitObject hitObject, ref LegacyScoreAttributes attributes)
+        {
+            bool increaseCombo = true;
+            bool addScoreComboMultiplier = false;
+
+            bool isBonus = false;
+            HitResult bonusResult = HitResult.None;
+
+            int scoreIncrease = 0;
+
+            switch (hitObject)
+            {
+                case TinyDroplet:
+                    scoreIncrease = 10;
+                    increaseCombo = false;
+                    break;
+
+                case Droplet:
+                    scoreIncrease = 100;
+                    break;
+
+                case Fruit:
+                    scoreIncrease = 300;
+                    addScoreComboMultiplier = true;
+                    increaseCombo = true;
+                    break;
+
+                case Banana:
+                    scoreIncrease = 1100;
+                    increaseCombo = false;
+                    isBonus = true;
+                    bonusResult = HitResult.LargeBonus;
+                    break;
+
+                case JuiceStream:
+                    foreach (var nested in hitObject.NestedHitObjects)
+                        simulateHit(nested, ref attributes);
+                    return;
+
+                case BananaShower:
+                    foreach (var nested in hitObject.NestedHitObjects)
+                        simulateHit(nested, ref attributes);
+                    return;
+            }
+
+            if (addScoreComboMultiplier)
+            {
+                // ReSharper disable once PossibleLossOfFraction (intentional to match osu-stable...)
+                attributes.ComboScore += (int)(Math.Max(0, combo - 1) * (scoreIncrease / 25 * scoreMultiplier));
+            }
+
+            if (isBonus)
+            {
+                legacyBonusScore += scoreIncrease;
+                standardisedBonusScore += scoreProcessor.GetBaseScoreForResult(bonusResult);
+            }
+            else
+                attributes.AccuracyScore += scoreIncrease;
+
+            if (increaseCombo)
+                combo++;
+        }
+
+        public double GetLegacyScoreMultiplier(IReadOnlyList&lt;Mod&gt; mods, LegacyBeatmapConversionDifficultyInfo difficulty)
+        {
+            bool scoreV2 = mods.Any(m =&gt; m is ModScoreV2);
+
+            double multiplier = 1.0;
+
+            foreach (var mod in mods)
+            {
+                switch (mod)
+                {
+                    case CatchModNoFail:
+                        multiplier *= scoreV2 ? 1.0 : 0.5;
+                        break;
+
+                    case CatchModEasy:
+                        multiplier *= 0.5;
+                        break;
+
+                    case CatchModHalfTime:
+                    case CatchModDaycore:
+                        multiplier *= 0.3;
+                        break;
+
+                    case CatchModHidden:
+                        multiplier *= scoreV2 ? 1.0 : 1.06;
+                        break;
+
+                    case CatchModHardRock:
+                        multiplier *= 1.12;
+                        break;
+
+                    case CatchModDoubleTime:
+                    case CatchModNightcore:
+                        multiplier *= 1.06;
+                        break;
+
+                    case CatchModFlashlight:
+                        multiplier *= 1.12;
+                        break;
+
+                    case CatchModRelax:
+                        return 0;
+                }
+            }
+
+            return multiplier;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,84,1],[31,9,31,10,1],[32,13,32,59,1],[34,13,34,33,1],[35,13,35,33,1],[36,13,36,34,1],[38,13,38,20,1],[38,22,38,35,1],[38,36,38,38,1],[38,39,38,61,1],[39,13,39,14,1],[40,17,40,29,1],[43,25,43,39,1],[44,25,44,31,1],[47,25,47,40,1],[48,25,48,31,1],[51,25,51,39,1],[52,25,52,31,1],[54,13,54,14,1],[56,13,56,72,1],[58,13,58,33,1],[60,13,60,50,1],[61,13,61,14,1],[62,17,62,66,1],[62,66,62,123,1],[62,123,62,131,1],[63,17,63,163,1],[64,13,64,14,1],[66,13,66,135,1],[68,13,68,76,1],[70,13,70,20,1],[70,22,70,29,1],[70,30,70,32,1],[70,33,70,59,1],[71,17,71,50,1],[73,13,73,120,1],[74,13,74,54,1],[75,13,75,41,1],[77,13,77,31,1],[78,9,78,10,1],[81,9,81,10,1],[82,13,82,39,1],[83,13,83,50,1],[85,13,85,34,1],[86,13,86,52,1],[88,13,88,35,1],[90,13,90,31,1],[93,21,93,40,1],[94,21,94,43,1],[95,21,95,27,1],[98,21,98,41,1],[99,21,99,27,1],[102,21,102,41,1],[103,21,103,52,1],[104,21,104,42,1],[105,21,105,27,1],[108,21,108,42,1],[109,21,109,43,1],[110,21,110,36,1],[111,21,111,56,1],[112,21,112,27,1],[115,21,115,28,1],[115,30,115,40,1],[115,41,115,43,1],[115,44,115,70,1],[116,25,116,61,1],[117,21,117,28,1],[120,21,120,28,1],[120,30,120,40,1],[120,41,120,43,1],[120,44,120,70,1],[121,25,121,61,1],[122,21,122,28,1],[125,13,125,41,1],[126,13,126,14,1],[128,17,128,113,1],[129,13,129,14,1],[131,13,131,25,1],[132,13,132,14,1],[133,17,133,51,1],[134,17,134,93,1],[135,13,135,14,1],[137,17,137,59,1],[139,13,139,31,1],[140,17,140,25,1],[141,9,141,10,1],[144,9,144,10,1],[145,13,145,42,1],[145,42,145,57,1],[145,57,145,59,1],[147,13,147,37,1],[149,13,149,20,1],[149,22,149,29,1],[149,30,149,32,1],[149,33,149,37,1],[150,13,150,14,1],[151,17,151,29,1],[154,25,154,59,1],[155,25,155,31,1],[158,25,158,43,1],[159,25,159,31,1],[163,25,163,43,1],[164,25,164,31,1],[167,25,167,60,1],[168,25,168,31,1],[171,25,171,44,1],[172,25,172,31,1],[176,25,176,44,1],[177,25,177,31,1],[180,25,180,44,1],[181,25,181,31,1],[184,25,184,34,1],[186,13,186,14,1],[188,13,188,31,1],[189,9,189,10,1]]);
+    </script>
+  </body>
+</html>

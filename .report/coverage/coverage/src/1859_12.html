@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/Match/MultiplayerSpectateButton.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer.Match
+{
+    public partial class MultiplayerSpectateButton : CompositeDrawable
+    {
+        [Resolved]
+        private OngoingOperationTracker ongoingOperationTracker { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        private readonly RoundedButton button;
+
+        private IBindable&lt;bool&gt; operationInProgress = null!;
+
+        public MultiplayerSpectateButton()
+        {
+            InternalChild = button = new RoundedButton
+            {
+                RelativeSizeAxes = Axes.Both,
+                Size = Vector2.One,
+                Enabled = { Value = true },
+                Action = onClick
+            };
+        }
+
+        private void onClick()
+        {
+            var clickOperation = ongoingOperationTracker.BeginOperation();
+
+            client.ToggleSpectate().ContinueWith(_ =&gt; endOperation());
+
+            void endOperation() =&gt; clickOperation.Dispose();
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            operationInProgress = ongoingOperationTracker.InProgress.GetBoundCopy();
+            operationInProgress.BindValueChanged(_ =&gt; updateState());
+
+            automaticallyDownload = config.GetBindable&lt;bool&gt;(OsuSetting.AutomaticallyDownloadMissingBeatmaps);
+            automaticallyDownload.BindValueChanged(_ =&gt; Scheduler.AddOnce(checkForAutomaticDownload));
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            client.RoomUpdated += onRoomUpdated;
+            updateState();
+        }
+
+        private void onRoomUpdated() =&gt; Scheduler.AddOnce(updateState);
+
+        private void updateState()
+        {
+            switch (client.LocalUser?.State)
+            {
+                default:
+                    button.Text = &quot;Spectate&quot;;
+                    button.BackgroundColour = colours.BlueDark;
+                    break;
+
+                case MultiplayerUserState.Spectating:
+                    button.Text = &quot;Stop spectating&quot;;
+                    button.BackgroundColour = colours.Gray4;
+                    break;
+            }
+
+            button.Enabled.Value = client.Room != null
+                                   &amp;&amp; client.Room.State != MultiplayerRoomState.Closed
+                                   &amp;&amp; !operationInProgress.Value;
+
+            Scheduler.AddOnce(checkForAutomaticDownload);
+        }
+
+        #region Automatic download handling
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapModelDownloader beatmapDownloader { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        private Bindable&lt;bool&gt; automaticallyDownload = null!;
+
+        private CancellationTokenSource? downloadCheckCancellation;
+
+        private int? lastDownloadCheckedBeatmapId;
+
+        private void checkForAutomaticDownload()
+        {
+            if (client.Room == null)
+                return;
+
+            if (!automaticallyDownload.Value)
+                return;
+
+            // While we can support automatic downloads when not spectating, there are some usability concerns.
+            // - In host rotate mode, this could potentially be unwanted by some users (even though they want automatic downloads everywhere else).
+            // - When first joining a room, the expectation should be that the user is checking out the room, and they may not immediately want to download the selected beatmap.
+            //
+            // Rather than over-complicating this flow, let&#39;s only auto-download when spectating for the time being.
+            // A potential path forward would be to have a local auto-download checkbox above the playlist item list area.
+            if (client.LocalUser?.State != MultiplayerUserState.Spectating)
+                return;
+
+            MultiplayerPlaylistItem item = client.Room.CurrentPlaylistItem;
+
+            // This method is called every time anything changes in the room.
+            // This could result in download requests firing far too often, when we only expect them to fire once per beatmap.
+            //
+            // Without this check, we would see especially egregious behaviour when a user has hit the download rate limit.
+            if (lastDownloadCheckedBeatmapId == item.BeatmapID)
+                return;
+
+            lastDownloadCheckedBeatmapId = item.BeatmapID;
+
+            downloadCheckCancellation?.Cancel();
+
+            // In a perfect world we&#39;d use BeatmapAvailability, but there&#39;s no event-driven flow for when a selection changes.
+            // ie. if selection changes from &quot;not downloaded&quot; to another &quot;not downloaded&quot; we wouldn&#39;t get a value changed raised.
+            beatmapLookupCache
+                .GetBeatmapAsync(item.BeatmapID, (downloadCheckCancellation = new CancellationTokenSource()).Token)
+                .ContinueWith(resolved =&gt; Schedule(() =&gt;
+                {
+                    var beatmapSet = resolved.GetResultSafely()?.BeatmapSet;
+
+                    if (beatmapSet == null)
+                        return;
+
+                    if (beatmaps.IsAvailableLocally(new APIBeatmap { OnlineID = item.BeatmapID }))
+                        return;
+
+                    beatmapDownloader.Download(beatmapSet);
+                }));
+        }
+
+        #endregion
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (client.IsNotNull())
+                client.RoomUpdated -= onRoomUpdated;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,67,26,71,0],[26,72,26,76,0],[26,81,26,86,0],[29,37,29,41,0],[29,42,29,46,0],[29,51,29,56,0],[32,44,32,48,0],[32,49,32,53,0],[32,58,32,63,0],[36,9,36,61,0],[38,9,38,43,0],[39,9,39,10,0],[40,13,46,15,0],[47,9,47,10,0],[50,9,50,10,0],[51,13,51,75,0],[53,13,53,55,0],[53,55,53,69,0],[53,69,53,71,0],[55,36,55,60,0],[56,9,56,10,0],[60,9,60,10,0],[61,13,61,85,0],[62,13,62,55,0],[62,55,62,68,0],[62,68,62,70,0],[64,13,64,111,0],[65,13,65,57,0],[65,57,65,101,0],[65,101,65,103,0],[66,9,66,10,0],[69,9,69,10,0],[70,13,70,33,0],[72,13,72,49,0],[73,13,73,27,0],[74,9,74,10,0],[76,41,76,71,0],[79,9,79,10,0],[80,13,80,45,0],[83,21,83,46,0],[84,21,84,64,0],[85,21,85,27,0],[88,21,88,53,0],[89,21,89,61,0],[90,21,90,27,0],[93,13,95,66,0],[97,13,97,58,0],[98,9,98,10,0],[103,57,103,61,0],[103,62,103,66,0],[103,71,103,76,0],[106,60,106,64,0],[106,65,106,69,0],[106,74,106,79,0],[109,43,109,47,0],[109,48,109,52,0],[109,57,109,62,0],[111,9,111,62,0],[118,9,118,10,0],[119,13,119,37,0],[120,17,120,24,0],[122,13,122,46,0],[123,17,123,24,0],[131,13,131,76,0],[132,17,132,24,0],[134,13,134,76,0],[140,13,140,64,0],[141,17,141,24,0],[143,13,143,59,0],[145,13,145,49,0],[149,13,151,43,0],[151,43,152,17,0],[152,17,152,18,0],[152,18,153,21,0],[153,21,153,77,0],[153,77,155,21,0],[155,21,155,44,0],[155,44,156,25,0],[156,25,156,32,0],[156,32,158,21,0],[158,21,158,99,0],[158,99,159,25,0],[159,25,159,32,0],[159,32,161,21,0],[161,21,161,60,0],[161,60,162,17,0],[162,17,162,18,0],[162,18,162,19,0],[162,19,162,21,0],[163,9,163,10,0],[168,9,168,10,0],[169,13,169,39,0],[171,13,171,36,0],[172,17,172,53,0],[173,9,173,10,0]]);
+    </script>
+  </body>
+</html>

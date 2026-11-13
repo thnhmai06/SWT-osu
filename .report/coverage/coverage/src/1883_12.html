@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Dialog;
+using osu.Game.Overlays.Profile;
+using osu.Game.Overlays.Volume;
+using osu.Game.Rulesets;
+using osu.Game.Screens.OnlinePlay.Components;
+using osu.Game.Screens.OnlinePlay.Matchmaking.Match.Gameplay;
+using osu.Game.Screens.OnlinePlay.Matchmaking.Queue;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro;
+using osu.Game.Screens.OnlinePlay.Multiplayer;
+using osu.Game.Users;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay
+{
+    [Cached]
+    public sealed partial class RankedPlayScreen : OsuScreen, IPreviewTrackOwner, IHandlePresentBeatmap
+    {
+        protected override bool InitialBackButtonVisibility =&gt; false;
+
+        public override bool? ApplyModTrackAdjustments =&gt; true;
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        public override bool HideOverlaysOnEnter =&gt; true;
+
+        public RankedPlaySubScreen? ActiveSubScreen { get; private set; }
+
+        private RankedPlayBackgroundScreen rankedPlayBackground = null!;
+
+        protected override BackgroundScreen CreateBackground() =&gt; rankedPlayBackground = new RankedPlayBackgroundScreen
+        {
+            ShowBeatmapBackground = { BindTarget = showBeatmapBackground }
+        };
+
+        public override float BackgroundParallaxAmount =&gt; 0;
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private UserLookupCache users { get; set; } = null!;
+
+        [Resolved]
+        private IDialogOverlay dialogOverlay { get; set; } = null!;
+
+        [Resolved]
+        private IOverlayManager overlayManager { get; set; } = null!;
+
+        [Resolved]
+        private AudioManager audio { get; set; } = null!;
+
+        [Resolved]
+        private PreviewTrackManager previewTrackManager { get; set; } = null!;
+
+        [Resolved]
+        private QueueController? controller { get; set; }
+
+        private readonly MultiplayerRoom room;
+
+        private APIUser localUser = null!;
+        private APIUser opponentUser = null!;
+
+        private readonly Container stageOverlayContainer;
+        private readonly Container&lt;RankedPlaySubScreen&gt; screenContainer;
+
+        private RankedPlayBottomOrnament ornament = null!;
+        private IDisposable? ornamentOverlayRegistration;
+
+        private IBindable&lt;RankedPlayStage&gt; stage = null!;
+
+        private Sample? sampleStart;
+
+        private readonly Bindable&lt;Visibility&gt; cornerPieceVisibility = new Bindable&lt;Visibility&gt;();
+        private readonly Bindable&lt;bool&gt; showBeatmapBackground = new Bindable&lt;bool&gt;();
+
+        private readonly Container content;
+
+        [Cached]
+        private readonly RankedPlayChatDisplay chat;
+
+        [Cached]
+        private readonly RankedPlayMatchInfo matchInfo;
+
+        [Cached]
+        private readonly CardDetailsOverlayContainer overlayContainer;
+
+        [Cached]
+        private readonly SongPreviewParticleContainer particleContainer;
+
+        [Cached]
+        private BackgroundMusicManager backgroundMusic;
+
+        public RankedPlayScreen(MultiplayerRoom room)
+        {
+            this.room = room;
+
+            Activity.Value = new UserActivity.InLobby(room);
+
+            InternalChildren = new Drawable[]
+            {
+                matchInfo = new RankedPlayMatchInfo(),
+                backgroundMusic = new BackgroundMusicManager(),
+                new RankedPlayBeatmapAvailabilityTracker(),
+                new GlobalScrollAdjustsVolume(),
+                content = new InverseScalingDrawSizePreservingFillContainer
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Children = new Drawable[]
+                    {
+                        new PopoverContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Child = new OsuContextMenuContainer
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Children = new Drawable[]
+                                {
+                                    screenContainer = new Container&lt;RankedPlaySubScreen&gt;
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                    },
+                                    new HamburgerMenu
+                                    {
+                                        Size = new Vector2(56),
+                                        ReportRequested = () =&gt; dialogOverlay.Push(new ReportUserDialog(opponentUser)),
+                                    }
+                                }
+                            }
+                        },
+                        stageOverlayContainer = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                        },
+                        overlayContainer = new CardDetailsOverlayContainer(),
+                        particleContainer = new SongPreviewParticleContainer(),
+                    },
+                },
+                chat = new RankedPlayChatDisplay(room)
+                {
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    Margin = new MarginPadding
+                    {
+                        Bottom = 10,
+                        Right = 10
+                    },
+                    State = { Value = Visibility.Hidden }
+                },
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            stage = matchInfo.Stage.GetBoundCopy();
+            sampleStart = audio.Samples.Get(@&quot;SongSelect/confirm-selection&quot;);
+
+            LoadComponent(ornament = new RankedPlayBottomOrnament
+            {
+                Anchor = Anchor.BottomCentre,
+                Origin = Anchor.BottomCentre,
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            client.RoomUpdated += onRoomUpdated;
+            client.UserStateChanged += onUserStateChanged;
+            client.LoadRequested += onLoadRequested;
+
+            Scheduler.AddDelayed(() =&gt; ornament.Show(), VsSequence.INTRO_LENGTH);
+
+            int localUserId = api.LocalUser.Value.OnlineID;
+            int opponentUserId = ((RankedPlayRoomState)client.Room!.MatchState!).Users.Keys.Single(it =&gt; it != localUserId);
+
+            localUser = users.GetUserAsync(localUserId).GetResultSafely() ?? api.LocalUser.Value;
+            opponentUser = users.GetUserAsync(opponentUserId).GetResultSafely() ?? APIUser.UnknownUser(opponentUserId);
+
+            content.AddRange([
+                new RankedPlayCornerPiece(RankedPlayColourScheme.BLUE, Anchor.BottomLeft)
+                {
+                    State = { BindTarget = cornerPieceVisibility },
+                    Child = new RankedPlayUserDisplay(localUser, Anchor.BottomLeft, RankedPlayColourScheme.BLUE)
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Health = { BindTarget = matchInfo.PlayerHealth }
+                    }
+                },
+                new RankedPlayCornerPiece(RankedPlayColourScheme.RED, Anchor.TopRight)
+                {
+                    State = { BindTarget = cornerPieceVisibility },
+                    Child = new RankedPlayUserDisplay(opponentUser, Anchor.TopRight, RankedPlayColourScheme.RED)
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Health = { BindTarget = matchInfo.OpponentHealth }
+                    }
+                },
+            ]);
+
+            ornamentOverlayRegistration = overlayManager.RegisterBlockingOverlay(ornament);
+
+            stage.BindValueChanged(e =&gt; onStageChanged(e.NewValue));
+        }
+
+        public void ShowScreen(RankedPlaySubScreen screen)
+        {
+            if (screen == ActiveSubScreen)
+                return;
+
+            LoadComponent(screen);
+
+            var previousScreen = ActiveSubScreen;
+
+            screenContainer.Add(ActiveSubScreen = screen);
+            screen.OnLoadComplete += _ =&gt;
+            {
+                previousScreen?.OnExiting(screen);
+                screen.OnEntering(previousScreen);
+                previousScreen?.Expire();
+
+                if (previousScreen != null)
+                    cornerPieceVisibility.UnbindFrom(previousScreen.CornerPieceVisibility);
+
+                cornerPieceVisibility.BindTo(screen.CornerPieceVisibility);
+                showBeatmapBackground.Value = screen.ShowBeatmapBackground;
+
+                if (screen.ShowStageOverlay)
+                {
+                    APIUser? pickingUser = null;
+                    RankedPlayColourScheme colourScheme = RankedPlayColourScheme.BLUE;
+
+                    if (matchInfo.Stage.Value == RankedPlayStage.CardPlay &amp;&amp; matchInfo.RoomState.ActiveUser != null)
+                    {
+                        pickingUser = matchInfo.IsOwnTurn ? localUser : opponentUser;
+                        colourScheme = matchInfo.IsOwnTurn ? RankedPlayColourScheme.BLUE : RankedPlayColourScheme.RED;
+                    }
+
+                    stageOverlayContainer.Add(new RankedPlayStageOverlay(screen.StageHeading, colourScheme)
+                    {
+                        PickingUser = pickingUser,
+                    });
+
+                    rankedPlayBackground.ColourScheme = colourScheme;
+                }
+                else
+                {
+                    rankedPlayBackground.ColourScheme = null;
+                }
+            };
+        }
+
+        private void onRoomUpdated()
+        {
+            if (this.IsCurrentScreen() &amp;&amp; client.Room == null)
+            {
+                Logger.Log($&quot;{this} exiting due to loss of room or connection&quot;);
+                exitConfirmed = true;
+                this.Exit();
+            }
+        }
+
+        private void onUserStateChanged(MultiplayerRoomUser user, MultiplayerUserState state)
+        {
+            if (user.Equals(client.LocalUser) &amp;&amp; state == MultiplayerUserState.Idle)
+                this.MakeCurrent();
+        }
+
+        private void onLoadRequested() =&gt; Scheduler.Add(() =&gt;
+        {
+            sampleStart?.Play();
+            this.Push(new MultiplayerPlayerLoader(() =&gt; new ScreenGameplay(new Room(room), new PlaylistItem(client.Room!.CurrentPlaylistItem), room.Users.ToArray())));
+        });
+
+        private void onStageChanged(RankedPlayStage stage)
+        {
+            if (stage is RankedPlayStage.GameplayWarmup or RankedPlayStage.Gameplay)
+                backgroundMusic.Stop();
+            else
+                backgroundMusic.Play();
+
+            if (stage is RankedPlayStage.RoundWarmup &amp;&amp; matchInfo.CurrentRound == 1)
+                chat.State.Value = Visibility.Hidden;
+            else
+                chat.State.Value = Visibility.Visible;
+
+            switch (stage)
+            {
+                case RankedPlayStage.RoundWarmup when matchInfo.CurrentRound == 1:
+                    ShowScreen(new IntroScreen());
+                    break;
+
+                case RankedPlayStage.CardDiscard:
+                    ShowScreen(new DiscardScreen());
+                    break;
+
+                case RankedPlayStage.FinishCardDiscard:
+                    (ActiveSubScreen as DiscardScreen)?.PresentRemainingCards();
+                    break;
+
+                case RankedPlayStage.CardPlay:
+                    ShowScreen(matchInfo.IsOwnTurn ? new PickScreen() : new OpponentPickScreen());
+                    break;
+
+                case RankedPlayStage.FinishCardPlay:
+                    Debug.Assert(ActiveSubScreen is PickScreen || ActiveSubScreen is OpponentPickScreen);
+                    break;
+
+                case RankedPlayStage.GameplayWarmup:
+                    ShowScreen(new GameplayWarmupScreen());
+                    break;
+
+                case RankedPlayStage.Gameplay:
+                    ShowScreen(new GameplayScreen());
+                    break;
+
+                case RankedPlayStage.Results:
+                    ShowScreen(new ResultsScreen());
+                    break;
+
+                case RankedPlayStage.Ended:
+                    ShowScreen(new EndedScreen
+                    {
+                        ExitRequested = retry =&gt;
+                        {
+                            retryRequested = retry;
+                            exitConfirmed = true;
+
+                            if (this.IsCurrentScreen())
+                                this.Exit();
+                        }
+                    });
+                    break;
+            }
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            backgroundMusic.Stop();
+            previewTrackManager.StopAnyPlaying(this);
+
+            base.OnSuspending(e);
+        }
+
+        private bool exitConfirmed;
+        private bool retryRequested;
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            if (exitConfirmed || ActiveSubScreen is EndedScreen)
+            {
+                if (base.OnExiting(e))
+                {
+                    exitConfirmed = false;
+                    return true;
+                }
+
+                ActiveSubScreen?.OnExiting(null);
+                backgroundMusic.Stop();
+                previewTrackManager.StopAnyPlaying(this);
+
+                client.LeaveRoom().FireAndForget();
+
+                ornamentOverlayRegistration?.Dispose();
+                ornamentOverlayRegistration = null;
+
+                if (retryRequested)
+                    controller?.RejoinQueue();
+
+                return false;
+            }
+
+            if (dialogOverlay.CurrentDialog is ConfirmDialog confirmDialog)
+                confirmDialog.PerformOkAction();
+            else
+            {
+                dialogOverlay.Push(new ConfirmExitMultiplayerMatchDialog(() =&gt;
+                {
+                    exitConfirmed = true;
+                    if (this.IsCurrentScreen())
+                        this.Exit();
+                }));
+            }
+
+            return true;
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            if (e.Last is not MultiplayerPlayerLoader playerLoader)
+                return;
+
+            if (!playerLoader.GameplayPassed)
+            {
+                client.AbortGameplay().FireAndForget();
+                return;
+            }
+
+            client.ChangeState(MultiplayerUserState.Idle).FireAndForget();
+        }
+
+        public void PresentBeatmap(WorkingBeatmap beatmap, RulesetInfo ruleset)
+        {
+            // Do nothing to prevent the user from potentially being kicked out
+            // of gameplay due to the screen performer&#39;s internal processes.
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            client.RoomUpdated -= onRoomUpdated;
+            client.UserStateChanged -= onUserStateChanged;
+            client.LoadRequested -= onLoadRequested;
+
+            ornamentOverlayRegistration?.Dispose();
+            ornamentOverlayRegistration = null;
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[46,64,46,69,0],[48,59,48,63,0],[50,71,50,75,0],[52,53,52,57,0],[54,55,54,59,0],[54,60,54,72,0],[56,9,56,73,0],[58,67,61,10,0],[63,59,63,60,0],[66,44,66,48,0],[66,49,66,53,0],[66,58,66,63,0],[69,36,69,40,0],[69,41,69,45,0],[69,50,69,55,0],[72,41,72,45,0],[72,46,72,50,0],[72,55,72,60,0],[75,48,75,52,0],[75,53,75,57,0],[75,62,75,67,0],[78,50,78,54,0],[78,55,78,59,0],[78,64,78,69,0],[81,38,81,42,0],[81,43,81,47,0],[81,52,81,57,0],[84,59,84,63,0],[84,64,84,68,0],[84,73,84,78,0],[87,47,87,51,0],[87,52,87,56,0],[91,9,91,43,0],[92,9,92,46,0],[97,9,97,59,0],[100,9,100,58,0],[104,9,104,98,0],[105,9,105,86,0],[124,9,124,54,0],[125,9,125,10,0],[126,13,126,30,0],[128,13,128,61,0],[130,13,157,65,0],[157,65,157,119,0],[157,119,181,15,0],[182,9,182,10,0],[186,9,186,10,0],[187,13,187,52,0],[188,13,188,78,0],[190,13,194,16,0],[195,9,195,10,0],[198,9,198,10,0],[199,13,199,33,0],[201,13,201,49,0],[202,13,202,59,0],[203,13,203,53,0],[205,13,205,40,0],[205,40,205,55,0],[205,55,205,82,0],[207,13,207,60,0],[208,13,208,106,0],[208,106,208,123,0],[208,123,208,125,0],[210,13,210,98,0],[211,13,211,120,0],[213,13,232,16,0],[234,13,234,92,0],[236,13,236,41,0],[236,41,236,67,0],[236,67,236,69,0],[237,9,237,10,0],[240,9,240,10,0],[241,13,241,43,0],[242,17,242,24,0],[244,13,244,35,0],[246,13,246,50,0],[248,13,248,59,0],[249,13,250,13,0],[250,13,250,14,0],[250,14,251,17,0],[251,17,251,51,0],[251,51,252,17,0],[252,17,252,51,0],[252,51,253,17,0],[253,17,253,42,0],[253,42,255,17,0],[255,17,255,44,0],[255,44,256,21,0],[256,21,256,92,0],[256,92,258,17,0],[258,17,258,76,0],[258,76,259,17,0],[259,17,259,76,0],[259,76,261,17,0],[261,17,261,45,0],[261,45,262,17,0],[262,17,262,18,0],[262,18,263,21,0],[263,21,263,49,0],[263,49,264,21,0],[264,21,264,87,0],[264,87,266,21,0],[266,21,266,117,0],[266,117,267,21,0],[267,21,267,22,0],[267,22,268,25,0],[268,25,268,86,0],[268,86,269,25,0],[269,25,269,119,0],[269,119,270,21,0],[270,21,270,22,0],[270,22,272,21,0],[272,21,275,24,0],[275,24,277,21,0],[277,21,277,70,0],[277,70,278,17,0],[278,17,278,18,0],[278,18,280,17,0],[280,17,280,18,0],[280,18,281,21,0],[281,21,281,62,0],[281,62,282,17,0],[282,17,282,18,0],[282,18,283,13,0],[283,13,283,14,0],[283,14,283,15,0],[284,9,284,10,0],[287,9,287,10,0],[288,13,288,63,0],[289,13,289,14,0],[290,17,290,81,0],[291,17,291,38,0],[292,17,292,29,0],[293,13,293,14,0],[294,9,294,10,0],[297,9,297,10,0],[298,13,298,85,0],[299,17,299,36,0],[300,9,300,10,0],[302,43,303,9,0],[303,9,303,10,0],[303,10,304,13,0],[304,13,304,33,0],[304,33,305,13,0],[305,13,305,57,0],[305,57,305,165,0],[305,165,305,168,0],[305,168,306,9,0],[306,9,306,10,0],[306,10,306,11,0],[309,9,309,10,0],[310,13,310,85,0],[311,17,311,40,0],[313,17,313,40,0],[315,13,315,85,0],[316,17,316,54,0],[318,17,318,55,0],[320,13,320,27,0],[322,50,322,82,0],[323,21,323,51,0],[324,21,324,27,0],[327,21,327,53,0],[328,21,328,27,0],[331,21,331,81,0],[332,21,332,27,0],[335,21,335,99,0],[336,21,336,27,0],[339,21,339,106,0],[340,21,340,27,0],[343,21,343,60,0],[344,21,344,27,0],[347,21,347,54,0],[348,21,348,27,0],[351,21,351,53,0],[352,21,352,27,0],[355,21,358,25,0],[358,25,358,26,0],[358,26,359,29,0],[359,29,359,52,0],[359,52,360,29,0],[360,29,360,50,0],[360,50,362,29,0],[362,29,362,56,0],[362,56,363,33,0],[363,33,363,45,0],[363,45,364,25,0],[364,25,364,26,0],[364,26,365,24,0],[366,21,366,27,0],[368,9,368,10,0],[371,9,371,10,0],[372,13,372,36,0],[373,13,373,54,0],[375,13,375,34,0],[376,9,376,10,0],[382,9,382,10,0],[383,13,383,65,0],[384,13,384,14,0],[385,17,385,39,0],[386,17,386,18,0],[387,21,387,43,0],[388,21,388,33,0],[391,17,391,50,0],[392,17,392,40,0],[393,17,393,58,0],[395,17,395,52,0],[397,17,397,56,0],[398,17,398,52,0],[400,17,400,36,0],[401,21,401,47,0],[403,17,403,30,0],[406,13,406,76,0],[407,17,407,49,0],[409,13,409,14,0],[410,17,411,17,0],[411,17,411,18,0],[411,18,412,21,0],[412,21,412,42,0],[412,42,413,21,0],[413,21,413,48,0],[413,48,414,25,0],[414,25,414,37,0],[414,37,415,17,0],[415,17,415,18,0],[415,18,415,21,0],[416,13,416,14,0],[418,13,418,25,0],[419,9,419,10,0],[422,9,422,10,0],[423,13,423,32,0],[425,13,425,68,0],[426,17,426,24,0],[428,13,428,46,0],[429,13,429,14,0],[430,17,430,56,0],[431,17,431,24,0],[434,13,434,75,0],[435,9,435,10,0],[438,9,438,10,0],[441,9,441,10,0],[444,9,444,10,0],[445,13,445,49,0],[446,13,446,59,0],[447,13,447,53,0],[449,13,449,52,0],[450,13,450,48,0],[452,13,452,39,0],[453,9,453,10,0]]);
+    </script>
+  </body>
+</html>

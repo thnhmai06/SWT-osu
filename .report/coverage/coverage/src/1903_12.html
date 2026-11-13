@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/PlayerHandOfCards.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Input.Events;
+using osu.Game.Audio;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand
+{
+    /// &lt;summary&gt;
+    /// Card hand representing the player&#39;s current hand, intended to be placed at the bottom edge of the screen.
+    /// This version of the card hand reacts to player inputs like hovering a card.
+    /// &lt;/summary&gt;
+    public partial class PlayerHandOfCards : HandOfCards
+    {
+        /// &lt;summary&gt;
+        /// Fired if any card is selected or deselected
+        /// &lt;/summary&gt;
+        public event Action? SelectionChanged;
+
+        /// &lt;summary&gt;
+        /// Fired if a card&#39;s &lt;see cref=&quot;HandOfCards.HandCard.State&quot;/&gt; has changed
+        /// &lt;/summary&gt;
+        public event Action? StateChanged;
+
+        private HandSelectionMode selectionMode;
+
+        /// &lt;summary&gt;
+        /// Current selection mode.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;see cref=&quot;HandSelectionMode.Disabled&quot;/&gt; will disable some of the card&#39;s mouse interactions.
+        /// &lt;/remarks&gt;
+        public HandSelectionMode SelectionMode
+        {
+            get =&gt; selectionMode;
+            set
+            {
+                selectionMode = value;
+                allowSelection.Value = value != HandSelectionMode.Disabled;
+
+                if (value == HandSelectionMode.Disabled)
+                {
+                    foreach (var card in Cards)
+                        card.Selected = false;
+                }
+            }
+        }
+
+        private Action? playCardAction;
+
+        /// &lt;summary&gt;
+        /// When set to non-null, displays a &quot;Play&quot; button on the selected card that invokes this action.
+        /// &lt;/summary&gt;
+        public Action? PlayCardAction
+        {
+            get =&gt; playCardAction;
+            set
+            {
+                playCardAction = value;
+
+                foreach (var card in Cards.OfType&lt;PlayerHandCard&gt;())
+                    card.PlayAction = value;
+            }
+        }
+
+        private IEnumerable&lt;PlayerHandCard&gt; selection =&gt; Cards.OfType&lt;PlayerHandCard&gt;().Where(it =&gt; it.Selected);
+
+        /// &lt;summary&gt;
+        /// Currently selected cards.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;RankedPlayCardWithPlaylistItem&gt; Selection =&gt; selection.Select(it =&gt; it.Card.Item);
+
+        private readonly BindableBool allowSelection = new BindableBool();
+
+        private const int select_samples = 1;
+        private const int deselect_samples = 2;
+
+        private Sample?[]? cardSelectSamples;
+        private Sample?[]? cardDeselectSamples;
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            cardSelectSamples = new Sample?[select_samples];
+            for (int i = 0; i &lt; select_samples; i++)
+                cardSelectSamples[i] = audio.Samples.Get(@$&quot;Multiplayer/Matchmaking/Ranked/card-select-{i + 1}&quot;);
+
+            cardDeselectSamples = new Sample?[deselect_samples];
+            for (int i = 0; i &lt; deselect_samples; i++)
+                cardDeselectSamples[i] = audio.Samples.Get(@$&quot;Multiplayer/Matchmaking/Ranked/card-deselect-{i + 1}&quot;);
+        }
+
+        protected override HandCard CreateHandCard(RankedPlayCard card) =&gt; new PlayerHandCard(card, Flipped)
+        {
+            Clicked = cardClicked,
+            Dragged = cardDragged,
+            AllowSelection = allowSelection.GetBoundCopy(),
+            PlayAction = PlayCardAction,
+        };
+
+        private void cardClicked(PlayerHandCard card)
+        {
+            if (selectionMode == HandSelectionMode.Disabled)
+                return;
+
+            try
+            {
+                if (selectionMode == HandSelectionMode.Single)
+                {
+                    // only play feedback SFX if the selected card has changed
+                    if (!card.Selected)
+                        SamplePlaybackHelper.PlayWithRandomPitch(cardSelectSamples);
+
+                    foreach (var c in Cards)
+                    {
+                        ((PlayerHandCard)c).Selected = c == card;
+                    }
+
+                    return;
+                }
+
+                card.Selected = !card.Selected;
+
+                SamplePlaybackHelper.PlayWithRandomPitch(card.Selected ? cardSelectSamples : cardDeselectSamples);
+            }
+            finally
+            {
+                SelectionChanged?.Invoke();
+            }
+        }
+
+        protected override void OnCardStateChanged(HandCard card, ValueChangedEvent&lt;RankedPlayCardState&gt; evt)
+        {
+            StateChanged?.Invoke();
+
+            base.OnCardStateChanged(card, evt);
+        }
+
+        public Dictionary&lt;Guid, RankedPlayCardState&gt; State =&gt; Cards.Select(static card =&gt; new KeyValuePair&lt;Guid, RankedPlayCardState&gt;(card.Item.Card.ID, card.State)).ToDictionary();
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat || Contracted || Cards.Any(static c =&gt; c.CardDragged))
+                return false;
+
+            if (e.ShiftPressed || e.ControlPressed || e.AltPressed || e.SuperPressed)
+                return false;
+
+            switch (e.Key)
+            {
+                case &gt;= Key.Number1 and &lt;= Key.Number9:
+                {
+                    int index = e.Key - Key.Number1;
+                    if (GetCardsInDisplayOrder().ElementAtOrDefault(index) is HandCard card)
+                        focusCard(card);
+                    return true;
+                }
+
+                case Key.Space:
+                {
+                    if (selectionMode == HandSelectionMode.Disabled)
+                        return false;
+
+                    if (Cards.FirstOrDefault(it =&gt; it.HasFocus) is not PlayerHandCard card)
+                        return false;
+
+                    if (card.Selected &amp;&amp; card.PlayAction != null)
+                        card.PlayButton.TriggerClick();
+                    else
+                        card.TriggerClick();
+
+                    return true;
+                }
+
+                case Key.Left:
+                    moveCardFocus(-1);
+                    return true;
+
+                case Key.Right:
+                    moveCardFocus(1);
+                    return true;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        private void moveCardFocus(int direction)
+        {
+            var cards = GetCardsInDisplayOrder();
+
+            if (cards.Count == 0)
+                return;
+
+            int currentIndex = cards.FindIndex(c =&gt; c.HasFocus);
+
+            // default behaviour is to start from either end of the cards if no card is focused currently
+            // in single-selection mode we can however use the current selection as a fallback index if there&#39;s no focus
+            if (selectionMode == HandSelectionMode.Single &amp;&amp; currentIndex == -1)
+                currentIndex = cards.FindIndex(c =&gt; c.Selected);
+
+            int newIndex = currentIndex + direction;
+
+            if (newIndex &lt; 0)
+                newIndex = cards.Count - 1;
+            else if (newIndex &gt;= cards.Count)
+                newIndex = 0;
+
+            focusCard(cards[newIndex]);
+        }
+
+        private void focusCard(HandCard card)
+        {
+            GetContainingFocusManager()?.ChangeFocus(card);
+
+            if (SelectionMode == HandSelectionMode.Single &amp;&amp; !card.Selected)
+                card.TriggerClick();
+        }
+
+        private void cardDragged(PlayerHandCard card, Vector2 screenSpacePosition)
+        {
+            var cards = GetCardsInDisplayOrder();
+
+            int newIndex = cardIndexInLayout(cards, card.ScreenSpaceDrawQuad.Centre);
+
+            card.Order = newIndex;
+
+            int order = 0;
+
+            foreach (var c in cards)
+            {
+                if (order == newIndex)
+                    order++;
+
+                if (c == card)
+                    continue;
+
+                c.Order = order++;
+            }
+
+            foreach (var c in Cards)
+                c.Item.DisplayOrder = c.Order;
+        }
+
+        private int cardIndexInLayout(IReadOnlyList&lt;HandCard&gt; cards, Vector2 screenSpacePosition)
+        {
+            Debug.Assert(cards.Count &gt; 0);
+
+            var position = ToLocalSpace(screenSpacePosition) - DrawSize / 2;
+
+            int activeIndex = GetActiveCardIndex(cards);
+
+            int minIndex = 0;
+            float minDistance = float.MaxValue;
+
+            for (int i = 0; i &lt; cards.Count; i++)
+            {
+                float distance = MathF.Abs(GetCardX(i, activeIndex) - position.X);
+
+                if (distance &lt; minDistance)
+                {
+                    minDistance = distance;
+                    minIndex = i;
+                }
+            }
+
+            return minIndex;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[47,20,47,33,0],[49,13,49,14,0],[50,17,50,39,0],[51,17,51,76,0],[53,17,53,57,0],[54,17,54,18,0],[55,21,55,28,0],[55,30,55,38,0],[55,39,55,41,0],[55,42,55,47,0],[56,25,56,47,0],[57,17,57,18,0],[58,13,58,14,0],[68,20,68,34,0],[70,13,70,14,0],[71,17,71,40,0],[73,17,73,24,0],[73,26,73,34,0],[73,35,73,37,0],[73,38,73,68,0],[74,21,74,45,0],[75,13,75,14,0],[78,58,78,101,0],[78,101,78,112,0],[78,112,78,113,0],[83,73,83,96,0],[83,96,83,108,0],[83,108,83,109,0],[85,9,85,75,0],[95,9,95,10,0],[96,13,96,61,0],[97,18,97,27,0],[97,29,97,47,0],[97,49,97,52,0],[98,17,98,114,0],[100,13,100,65,0],[101,18,101,27,0],[101,29,101,49,0],[101,51,101,54,0],[102,17,102,118,0],[103,9,103,10,0],[105,76,111,10,0],[114,9,114,10,0],[115,13,115,61,0],[116,17,116,24,0],[119,13,119,14,0],[120,17,120,63,0],[121,17,121,18,0],[123,21,123,40,0],[124,25,124,85,0],[126,21,126,28,0],[126,30,126,35,0],[126,36,126,38,0],[126,39,126,44,0],[127,21,127,22,0],[128,25,128,66,0],[129,21,129,22,0],[131,21,131,28,0],[134,17,134,48,0],[136,17,136,115,0],[137,13,137,14,0],[139,13,139,14,0],[140,17,140,44,0],[141,13,141,14,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,36,0],[148,13,148,48,0],[149,9,149,10,0],[151,63,151,91,0],[151,91,151,165,0],[151,165,151,181,0],[154,9,154,10,0],[155,13,155,65,0],[155,65,155,78,0],[155,78,155,80,0],[156,17,156,30,0],[158,13,158,86,0],[159,17,159,30,0],[161,13,161,27,0],[164,17,164,18,0],[165,21,165,53,0],[166,21,166,93,0],[167,25,167,41,0],[168,21,168,33,0],[172,17,172,18,0],[173,21,173,69,0],[174,25,174,38,0],[176,21,176,52,0],[176,52,176,63,0],[176,63,176,92,0],[177,25,177,38,0],[179,21,179,66,0],[180,25,180,56,0],[182,25,182,45,0],[184,21,184,33,0],[188,21,188,39,0],[189,21,189,33,0],[192,21,192,38,0],[193,21,193,33,0],[196,13,196,38,0],[197,9,197,10,0],[200,9,200,10,0],[201,13,201,50,0],[203,13,203,34,0],[204,17,204,24,0],[206,13,206,53,0],[206,53,206,63,0],[206,63,206,65,0],[210,13,210,81,0],[211,17,211,53,0],[211,53,211,63,0],[211,63,211,65,0],[213,13,213,53,0],[215,13,215,30,0],[216,17,216,44,0],[217,18,217,46,0],[218,17,218,30,0],[220,13,220,40,0],[221,9,221,10,0],[224,9,224,10,0],[225,13,225,60,0],[227,13,227,77,0],[228,17,228,37,0],[229,9,229,10,0],[232,9,232,10,0],[233,13,233,50,0],[235,13,235,86,0],[237,13,237,35,0],[239,13,239,27,0],[241,13,241,20,0],[241,22,241,27,0],[241,28,241,30,0],[241,31,241,36,0],[242,13,242,14,0],[243,17,243,39,0],[244,21,244,29,0],[246,17,246,31,0],[247,21,247,30,0],[249,17,249,35,0],[250,13,250,14,0],[252,13,252,20,0],[252,22,252,27,0],[252,28,252,30,0],[252,31,252,36,0],[253,17,253,47,0],[254,9,254,10,0],[257,9,257,10,0],[258,13,258,43,0],[260,13,260,77,0],[262,13,262,57,0],[264,13,264,30,0],[265,13,265,48,0],[267,18,267,27,0],[267,29,267,44,0],[267,46,267,49,0],[268,13,268,14,0],[269,17,269,83,0],[271,17,271,44,0],[272,17,272,18,0],[273,21,273,44,0],[274,21,274,34,0],[275,17,275,18,0],[276,13,276,14,0],[278,13,278,29,0],[279,9,279,10,0]]);
+    </script>
+  </body>
+</html>

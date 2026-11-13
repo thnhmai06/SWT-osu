@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/WorkingBeatmapCache.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Rendering.Dummy;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.IO.Stores;
+using osu.Framework.Lists;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Statistics;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+
+namespace osu.Game.Beatmaps
+{
+    public class WorkingBeatmapCache : IBeatmapResourceProvider, IWorkingBeatmapCache
+    {
+        private readonly WeakList&lt;BeatmapManagerWorkingBeatmap&gt; workingCache = new WeakList&lt;BeatmapManagerWorkingBeatmap&gt;();
+
+        /// &lt;summary&gt;
+        /// Beatmap files may specify this filename to denote that they don&#39;t have an audio track.
+        /// &lt;/summary&gt;
+        private const string virtual_track_filename = @&quot;virtual&quot;;
+
+        /// &lt;summary&gt;
+        /// A default representation of a WorkingBeatmap to use when no beatmap is available.
+        /// &lt;/summary&gt;
+        public readonly WorkingBeatmap DefaultBeatmap;
+
+        private readonly AudioManager audioManager;
+        private readonly IResourceStore&lt;byte[]&gt; resources;
+        private readonly LargeTextureStore largeTextureStore;
+        private readonly LargeTextureStore beatmapPanelTextureStore;
+        private readonly ITrackStore trackStore;
+        private readonly IResourceStore&lt;byte[]&gt; files;
+        private readonly RealmAccess realm;
+
+        [CanBeNull]
+        private readonly GameHost host;
+
+        public WorkingBeatmapCache(ITrackStore trackStore, AudioManager audioManager, IResourceStore&lt;byte[]&gt; resources, IResourceStore&lt;byte[]&gt; files, WorkingBeatmap defaultBeatmap = null,
+                                   GameHost host = null, RealmAccess realm = null)
+        {
+            DefaultBeatmap = defaultBeatmap;
+
+            this.audioManager = audioManager;
+            this.resources = resources;
+            this.host = host;
+            this.files = files;
+            largeTextureStore = new LargeTextureStore(host?.Renderer ?? new DummyRenderer(), host?.CreateTextureLoaderStore(files));
+            beatmapPanelTextureStore = new LargeTextureStore(host?.Renderer ?? new DummyRenderer(), new BeatmapPanelBackgroundTextureLoaderStore(host?.CreateTextureLoaderStore(files)));
+            this.trackStore = trackStore;
+            this.realm = realm;
+        }
+
+        public void Invalidate(BeatmapSetInfo info)
+        {
+            foreach (var b in info.Beatmaps)
+                Invalidate(b);
+        }
+
+        public void Invalidate(BeatmapInfo info)
+        {
+            lock (workingCache)
+            {
+                var working = workingCache.FirstOrDefault(w =&gt; info.Equals(w.BeatmapInfo));
+
+                if (working != null)
+                {
+                    Logger.Log($&quot;Invalidating working beatmap cache for {info}&quot;);
+                    workingCache.Remove(working);
+                    OnInvalidated?.Invoke(working);
+                }
+            }
+        }
+
+        public event Action&lt;WorkingBeatmap&gt; OnInvalidated;
+
+        public virtual WorkingBeatmap GetWorkingBeatmap([CanBeNull] BeatmapInfo beatmapInfo)
+        {
+            if (beatmapInfo == null || ReferenceEquals(beatmapInfo, DefaultBeatmap.BeatmapInfo))
+                return DefaultBeatmap;
+
+            lock (workingCache)
+            {
+                var working = workingCache.FirstOrDefault(w =&gt; beatmapInfo.Equals(w.BeatmapInfo));
+
+                if (working != null)
+                    return working;
+
+                beatmapInfo = beatmapInfo.Detach();
+
+                // If this ever gets hit, a request has arrived with an outdated BeatmapInfo.
+                // An outdated BeatmapInfo may contain a reference to a previous version of the beatmap&#39;s files on disk.
+                Debug.Assert(confirmFileHashIsUpToDate(beatmapInfo), &quot;working beatmap returned with outdated path&quot;);
+
+                workingCache.Add(working = new BeatmapManagerWorkingBeatmap(beatmapInfo, this));
+
+                // best effort; may be higher than expected.
+                GlobalStatistics.Get&lt;int&gt;(&quot;Beatmaps&quot;, $&quot;Cached {nameof(WorkingBeatmap)}s&quot;).Value = workingCache.Count();
+
+                return working;
+            }
+        }
+
+        private bool confirmFileHashIsUpToDate(BeatmapInfo beatmapInfo)
+        {
+            string refetchPath = realm.Run(r =&gt; r.Find&lt;BeatmapInfo&gt;(beatmapInfo.ID)?.File?.File.Hash);
+            return refetchPath == null || refetchPath == beatmapInfo.File?.File.Hash;
+        }
+
+        #region IResourceStorageProvider
+
+        TextureStore IBeatmapResourceProvider.LargeTextureStore =&gt; largeTextureStore;
+        TextureStore IBeatmapResourceProvider.BeatmapPanelTextureStore =&gt; beatmapPanelTextureStore;
+        ITrackStore IBeatmapResourceProvider.Tracks =&gt; trackStore;
+        IRenderer IStorageResourceProvider.Renderer =&gt; host?.Renderer ?? new DummyRenderer();
+        AudioManager IStorageResourceProvider.AudioManager =&gt; audioManager;
+        RealmAccess IStorageResourceProvider.RealmAccess =&gt; realm;
+        IResourceStore&lt;byte[]&gt; IStorageResourceProvider.Files =&gt; files;
+        IResourceStore&lt;byte[]&gt; IStorageResourceProvider.Resources =&gt; resources;
+        IResourceStore&lt;TextureUpload&gt; IStorageResourceProvider.CreateTextureLoaderStore(IResourceStore&lt;byte[]&gt; underlyingStore) =&gt; host?.CreateTextureLoaderStore(underlyingStore);
+
+        #endregion
+
+        private class BeatmapManagerWorkingBeatmap : WorkingBeatmap
+        {
+            [NotNull]
+            private readonly IBeatmapResourceProvider resources;
+
+            public BeatmapManagerWorkingBeatmap(BeatmapInfo beatmapInfo, [NotNull] IBeatmapResourceProvider resources)
+                : base(beatmapInfo, resources.AudioManager)
+            {
+                this.resources = resources;
+            }
+
+            protected override IBeatmap GetBeatmap()
+            {
+                if (BeatmapInfo.Path == null)
+                    return new Beatmap { BeatmapInfo = BeatmapInfo };
+
+                try
+                {
+                    string fileStorePath = BeatmapSetInfo.GetPathForFile(BeatmapInfo.Path);
+
+                    var stream = GetStream(fileStorePath);
+
+                    if (stream == null)
+                    {
+                        Logger.Log($&quot;Beatmap failed to load (file {BeatmapInfo.Path} not found on disk at expected location {fileStorePath}).&quot;, level: LogLevel.Error);
+                        return null;
+                    }
+
+                    string streamMD5 = stream.ComputeMD5Hash();
+                    string streamSHA2 = stream.ComputeSHA2Hash();
+
+                    if (streamMD5 != BeatmapInfo.MD5Hash)
+                    {
+                        Logger.Log($&quot;Beatmap failed to load (file {BeatmapInfo.Path} does not have the expected hash).&quot;, level: LogLevel.Error);
+                        return null;
+                    }
+
+                    using (var reader = new LineBufferedReader(stream))
+                    {
+                        var beatmap = Decoder.GetDecoder&lt;Beatmap&gt;(reader).Decode(reader);
+
+                        beatmap.BeatmapInfo.MD5Hash = streamMD5;
+                        beatmap.BeatmapInfo.Hash = streamSHA2;
+                        beatmap.BeatmapInfo.UpdateStatisticsFromBeatmap(beatmap);
+
+                        return beatmap;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Beatmap failed to load&quot;);
+                    return null;
+                }
+            }
+
+            public override Texture GetPanelBackground() =&gt; getBackgroundFromStore(resources.BeatmapPanelTextureStore);
+
+            public override Texture GetBackground() =&gt; getBackgroundFromStore(resources.LargeTextureStore);
+
+            private Texture getBackgroundFromStore(TextureStore store)
+            {
+                if (string.IsNullOrEmpty(Metadata?.BackgroundFile))
+                    return null;
+
+                try
+                {
+                    string fileStorePath = BeatmapSetInfo.GetPathForFile(Metadata.BackgroundFile);
+                    var texture = store.Get(fileStorePath);
+
+                    if (texture == null)
+                    {
+                        Logger.Log($&quot;Beatmap background failed to load (file {Metadata.BackgroundFile} not found on disk at expected location {fileStorePath}).&quot;);
+                        return null;
+                    }
+
+                    return texture;
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Background failed to load&quot;);
+                    return null;
+                }
+            }
+
+            protected override Track GetBeatmapTrack()
+            {
+                if (string.IsNullOrEmpty(Metadata?.AudioFile))
+                    return null;
+
+                if (Metadata.AudioFile == virtual_track_filename)
+                    return null;
+
+                try
+                {
+                    string fileStorePath = BeatmapSetInfo.GetPathForFile(Metadata.AudioFile);
+                    var track = resources.Tracks.Get(fileStorePath);
+
+                    if (track == null)
+                    {
+                        Logger.Log($&quot;Beatmap failed to load (file {Metadata.AudioFile} not found on disk at expected location {fileStorePath}).&quot;, level: LogLevel.Error);
+                        return null;
+                    }
+
+                    return track;
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Track failed to load&quot;);
+                    return null;
+                }
+            }
+
+            protected override Waveform GetWaveform()
+            {
+                if (string.IsNullOrEmpty(Metadata?.AudioFile))
+                    return null;
+
+                if (Metadata.AudioFile == virtual_track_filename)
+                    return null;
+
+                try
+                {
+                    string fileStorePath = BeatmapSetInfo.GetPathForFile(Metadata.AudioFile);
+
+                    var trackData = GetStream(fileStorePath);
+
+                    if (trackData == null)
+                    {
+                        Logger.Log($&quot;Beatmap waveform failed to load (file {Metadata.AudioFile} not found on disk at expected location {fileStorePath}).&quot;, level: LogLevel.Error);
+                        return null;
+                    }
+
+                    return new Waveform(trackData);
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Waveform failed to load&quot;);
+                    return null;
+                }
+            }
+
+            protected override Storyboard GetStoryboard()
+            {
+                Storyboard storyboard;
+
+                if (BeatmapInfo.Path == null)
+                    return new Storyboard();
+
+                try
+                {
+                    string fileStorePath = BeatmapSetInfo.GetPathForFile(BeatmapInfo.Path);
+                    var beatmapFileStream = GetStream(fileStorePath);
+
+                    if (beatmapFileStream == null)
+                    {
+                        Logger.Log($&quot;Beatmap failed to load (file {BeatmapInfo.Path} not found on disk at expected location {fileStorePath})&quot;, level: LogLevel.Error);
+                        return new Storyboard();
+                    }
+
+                    using (var reader = new LineBufferedReader(beatmapFileStream))
+                    {
+                        var decoder = Decoder.GetDecoder&lt;Storyboard&gt;(reader);
+
+                        Stream storyboardFileStream = null;
+
+                        string mainStoryboardFilename = getMainStoryboardFilename(BeatmapSetInfo.Metadata);
+
+                        if (BeatmapSetInfo?.Files.FirstOrDefault(f =&gt; f.Filename.Equals(mainStoryboardFilename, StringComparison.OrdinalIgnoreCase))?.Filename is string
+                            storyboardFilename)
+                        {
+                            string storyboardFileStorePath = BeatmapSetInfo?.GetPathForFile(storyboardFilename);
+                            storyboardFileStream = GetStream(storyboardFileStorePath);
+
+                            if (storyboardFileStream == null)
+                                Logger.Log($&quot;Storyboard failed to load (file {storyboardFilename} not found on disk at expected location {storyboardFileStorePath})&quot;, level: LogLevel.Error);
+                        }
+
+                        if (storyboardFileStream != null)
+                        {
+                            // Stand-alone storyboard was found, so parse in addition to the beatmap&#39;s local storyboard.
+                            using (var secondaryReader = new LineBufferedReader(storyboardFileStream))
+                                storyboard = decoder.Decode(reader, secondaryReader);
+                        }
+                        else
+                            storyboard = decoder.Decode(reader);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Storyboard failed to load&quot;);
+                    storyboard = new Storyboard();
+                }
+
+                storyboard.BeatmapInfo = BeatmapInfo;
+
+                return storyboard;
+            }
+
+            protected internal override ISkin GetSkin()
+            {
+                try
+                {
+                    return new LegacyBeatmapSkin(BeatmapInfo, resources);
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, &quot;Skin failed to load&quot;);
+                    return null;
+                }
+            }
+
+            public override Stream GetStream(string storagePath) =&gt; resources.Files.GetStream(storagePath);
+
+            private string getMainStoryboardFilename(IBeatmapMetadataInfo metadata)
+            {
+                // Matches stable implementation, because it&#39;s probably simpler than trying to do anything else.
+                // This may need to be reconsidered after we begin storing storyboards in the new editor.
+                string baseFilename = (metadata.Artist.Length &gt; 0 ? metadata.Artist + @&quot; - &quot; + metadata.Title : Path.GetFileNameWithoutExtension(metadata.AudioFile))
+                                      + (metadata.Author.Username.Length &gt; 0 ? @&quot; (&quot; + metadata.Author.Username + @&quot;)&quot; : string.Empty)
+                                      + @&quot;.osb&quot;;
+                return baseFilename.GetValidFilename();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,125,0],[56,9,57,83,0],[58,9,58,10,0],[59,13,59,45,0],[61,13,61,46,0],[62,13,62,40,0],[63,13,63,30,0],[64,13,64,32,0],[65,13,65,133,0],[66,13,66,186,0],[67,13,67,42,0],[68,13,68,32,0],[69,9,69,10,0],[72,9,72,10,0],[73,13,73,20,0],[73,22,73,27,0],[73,28,73,30,0],[73,31,73,44,0],[74,17,74,31,0],[75,9,75,10,0],[78,9,78,10,0],[79,13,79,32,0],[80,13,80,14,0],[81,17,81,64,0],[81,64,81,90,0],[81,90,81,92,0],[83,17,83,37,0],[84,17,84,18,0],[85,21,85,82,0],[86,21,86,50,0],[87,21,87,52,0],[88,17,88,18,0],[89,13,89,14,0],[90,9,90,10,0],[95,9,95,10,0],[96,13,96,97,0],[97,17,97,39,0],[99,13,99,32,0],[100,13,100,14,0],[101,17,101,64,0],[101,64,101,97,0],[101,97,101,99,0],[103,17,103,37,0],[104,21,104,36,0],[106,17,106,52,0],[110,17,110,117,0],[112,17,112,97,0],[115,17,115,121,0],[117,17,117,32,0],[119,9,119,10,0],[122,9,122,10,0],[123,13,123,49,0],[123,49,123,101,0],[123,101,123,103,0],[124,13,124,86,0],[125,9,125,10,0],[129,68,129,85,0],[130,75,130,99,0],[131,56,131,66,0],[132,56,132,93,0],[133,63,133,75,0],[134,61,134,66,0],[135,66,135,71,0],[136,70,136,79,0],[137,132,137,179,0],[147,19,147,60,0],[148,13,148,14,0],[149,17,149,44,0],[150,13,150,14,0],[153,13,153,14,0],[154,17,154,46,0],[155,21,155,70,0],[158,17,158,18,0],[159,21,159,92,0],[161,21,161,59,0],[163,21,163,40,0],[164,21,164,22,0],[165,25,165,168,0],[166,25,166,37,0],[169,21,169,64,0],[170,21,170,66,0],[172,21,172,58,0],[173,21,173,22,0],[174,25,174,145,0],[175,25,175,37,0],[178,28,178,71,0],[179,21,179,22,0],[180,25,180,90,0],[182,25,182,65,0],[183,25,183,63,0],[184,25,184,82,0],[186,25,186,40,0],[189,17,189,36,0],[190,17,190,18,0],[191,21,191,63,0],[192,21,192,33,0],[194,13,194,14,0],[196,61,196,119,0],[198,56,198,107,0],[201,13,201,14,0],[202,17,202,68,0],[203,21,203,33,0],[206,17,206,18,0],[207,21,207,99,0],[208,21,208,60,0],[210,21,210,41,0],[211,21,211,22,0],[212,25,212,163,0],[213,25,213,37,0],[216,21,216,36,0],[218,17,218,36,0],[219,17,219,18,0],[220,21,220,66,0],[221,21,221,33,0],[223,13,223,14,0],[226,13,226,14,0],[227,17,227,63,0],[228,21,228,33,0],[230,17,230,66,0],[231,21,231,33,0],[234,17,234,18,0],[235,21,235,94,0],[236,21,236,69,0],[238,21,238,39,0],[239,21,239,22,0],[240,25,240,170,0],[241,25,241,37,0],[244,21,244,34,0],[246,17,246,36,0],[247,17,247,18,0],[248,21,248,61,0],[249,21,249,33,0],[251,13,251,14,0],[254,13,254,14,0],[255,17,255,63,0],[256,21,256,33,0],[258,17,258,66,0],[259,21,259,33,0],[262,17,262,18,0],[263,21,263,94,0],[265,21,265,62,0],[267,21,267,43,0],[268,21,268,22,0],[269,25,269,179,0],[270,25,270,37,0],[273,21,273,52,0],[275,17,275,36,0],[276,17,276,18,0],[277,21,277,64,0],[278,21,278,33,0],[280,13,280,14,0],[283,13,283,14,0],[286,17,286,46,0],[287,21,287,45,0],[290,17,290,18,0],[291,21,291,92,0],[292,21,292,70,0],[294,21,294,51,0],[295,21,295,22,0],[296,25,296,167,0],[297,25,297,49,0],[300,28,300,82,0],[301,21,301,22,0],[302,25,302,78,0],[304,25,304,60,0],[306,25,306,108,0],[308,25,308,71,0],[308,71,308,148,0],[308,148,309,48,0],[310,25,310,26,0],[311,29,311,113,0],[312,29,312,87,0],[314,29,314,62,0],[315,33,315,190,0],[316,25,316,26,0],[318,25,318,58,0],[319,25,319,26,0],[321,36,321,102,0],[322,33,322,86,0],[323,25,323,26,0],[325,29,325,65,0],[326,21,326,22,0],[327,17,327,18,0],[328,17,328,36,0],[329,17,329,18,0],[330,21,330,66,0],[331,21,331,51,0],[332,17,332,18,0],[334,17,334,54,0],[336,17,336,35,0],[337,13,337,14,0],[340,13,340,14,0],[342,17,342,18,0],[343,21,343,74,0],[345,17,345,36,0],[346,17,346,18,0],[347,21,347,60,0],[348,21,348,33,0],[350,13,350,14,0],[352,69,352,107,0],[355,13,355,14,0],[358,17,360,49,0],[361,17,361,56,0],[362,13,362,14,0]]);
+    </script>
+  </body>
+</html>

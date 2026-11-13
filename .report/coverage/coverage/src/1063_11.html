@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Objects/Drawables/DrawableOsuHitObject.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Osu.Judgements;
+using osu.Game.Rulesets.Osu.Scoring;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Rulesets.Scoring;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Osu.Objects.Drawables
+{
+    public abstract partial class DrawableOsuHitObject : DrawableHitObject&lt;OsuHitObject&gt;
+    {
+        public readonly IBindable&lt;Vector2&gt; PositionBindable = new Bindable&lt;Vector2&gt;();
+        public readonly IBindable&lt;int&gt; StackHeightBindable = new Bindable&lt;int&gt;();
+        public readonly IBindable&lt;float&gt; ScaleBindable = new BindableFloat();
+        public readonly IBindable&lt;int&gt; IndexInCurrentComboBindable = new Bindable&lt;int&gt;();
+
+        // Must be set to update IsHovered as it&#39;s used in relax mod to detect osu hit objects.
+        public override bool HandlePositionalInput =&gt; true;
+
+        protected override float SamplePlaybackPosition =&gt; CalculateDrawableRelativePosition(this);
+
+        /// &lt;summary&gt;
+        /// What action this &lt;see cref=&quot;DrawableOsuHitObject&quot;/&gt; should take in response to a
+        /// click at the given time value.
+        /// If non-null, judgements will be ignored for return values of &lt;see cref=&quot;ClickAction.Ignore&quot;/&gt;
+        /// and &lt;see cref=&quot;ClickAction.Shake&quot;/&gt;, and this hit object will be shaken for return values of
+        /// &lt;see cref=&quot;ClickAction.Shake&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public Func&lt;DrawableHitObject, double, HitResult, ClickAction&gt; CheckHittable;
+
+        protected DrawableOsuHitObject(OsuHitObject hitObject)
+            : base(hitObject)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Alpha = 0;
+        }
+
+        protected override void OnApply()
+        {
+            base.OnApply();
+
+            IndexInCurrentComboBindable.BindTo(HitObject.IndexInCurrentComboBindable);
+            PositionBindable.BindTo(HitObject.PositionBindable);
+            StackHeightBindable.BindTo(HitObject.StackHeightBindable);
+            ScaleBindable.BindTo(HitObject.ScaleBindable);
+        }
+
+        protected override void OnFree()
+        {
+            base.OnFree();
+
+            IndexInCurrentComboBindable.UnbindFrom(HitObject.IndexInCurrentComboBindable);
+            PositionBindable.UnbindFrom(HitObject.PositionBindable);
+            StackHeightBindable.UnbindFrom(HitObject.StackHeightBindable);
+            ScaleBindable.UnbindFrom(HitObject.ScaleBindable);
+        }
+
+        protected virtual IEnumerable&lt;Drawable&gt; DimmablePieces =&gt; Enumerable.Empty&lt;Drawable&gt;();
+
+        protected override void UpdateInitialTransforms()
+        {
+            base.UpdateInitialTransforms();
+
+            foreach (var piece in DimmablePieces)
+            {
+                // if the specified dimmable piece is a DHO, it is generally not safe to tack transforms onto it directly
+                // as they may be cleared via the `updateState()` DHO flow,
+                // so use `ApplyCustomUpdateState` instead. which does not have this pitfall.
+                if (piece is DrawableHitObject drawableObjectPiece)
+                {
+                    // this method can be called multiple times, and we don&#39;t want to subscribe to the event more than once,
+                    // so this is what it is going to have to be...
+                    drawableObjectPiece.ApplyCustomUpdateState -= applyDimToDrawableHitObject;
+                    drawableObjectPiece.ApplyCustomUpdateState += applyDimToDrawableHitObject;
+                }
+
+                // but at the end apply the transforms now regardless of whether this is a DHO or not.
+                // the above is just to ensure they don&#39;t get overwritten later.
+                applyDim(piece);
+            }
+        }
+
+        protected override void ClearNestedHitObjects()
+        {
+            base.ClearNestedHitObjects();
+
+            // any dimmable pieces that are DHOs will be pooled separately.
+            // `applyDimToDrawableHitObject` is a closure that implicitly captures `this`,
+            // and because of separate pooling of parent and child objects, there is no guarantee that the pieces will be associated with `this` again on re-use.
+            // therefore, clean up the subscription here to avoid crosstalk.
+            // not doing so can result in the callback attempting to read things from `this` when it is in a completely bogus state (not in use or similar).
+            foreach (var piece in DimmablePieces.OfType&lt;DrawableHitObject&gt;())
+                piece.ApplyCustomUpdateState -= applyDimToDrawableHitObject;
+        }
+
+        private void applyDim(Drawable piece)
+        {
+            piece.FadeColour(new Color4(195, 195, 195, 255));
+            using (piece.BeginDelayedSequence(InitialLifetimeOffset - OsuHitWindows.MISS_WINDOW))
+                piece.FadeColour(Color4.White, 100);
+        }
+
+        private void applyDimToDrawableHitObject(DrawableHitObject dho, ArmedState _) =&gt; applyDim(dho);
+
+        protected sealed override double InitialLifetimeOffset =&gt; HitObject.TimePreempt;
+
+        private OsuInputManager osuActionInputManager;
+        internal OsuInputManager OsuActionInputManager =&gt; osuActionInputManager ??= GetContainingInputManager() as OsuInputManager;
+
+        /// &lt;summary&gt;
+        /// Shake the hit object in case it was clicked far too early or late (aka &quot;note lock&quot;).
+        /// &lt;/summary&gt;
+        public virtual void Shake() { }
+
+        /// &lt;summary&gt;
+        /// Causes this &lt;see cref=&quot;DrawableOsuHitObject&quot;/&gt; to get hit, disregarding all conditions in implementations of &lt;see cref=&quot;DrawableHitObject.CheckForResult&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void HitForcefully() =&gt; ApplyMaxResult();
+
+        /// &lt;summary&gt;
+        /// Causes this &lt;see cref=&quot;DrawableOsuHitObject&quot;/&gt; to get missed, disregarding all conditions in implementations of &lt;see cref=&quot;DrawableHitObject.CheckForResult&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void MissForcefully() =&gt; ApplyMinResult();
+
+        // ReSharper disable once FunctionRecursiveOnAllPaths (TODO: remove after fixed https://youtrack.jetbrains.com/issue/RIDER-135036/Incorrect-recursive-on-all-execution-paths-inspection)
+        private RectangleF parentScreenSpaceRectangle =&gt; ((DrawableOsuHitObject)ParentHitObject)?.parentScreenSpaceRectangle ?? Parent!.ScreenSpaceDrawQuad.AABBFloat;
+
+        /// &lt;summary&gt;
+        /// Calculates the position of the given &lt;paramref name=&quot;drawable&quot;/&gt; relative to the playfield area.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;drawable&quot;&gt;The drawable to calculate its relative position.&lt;/param&gt;
+        protected float CalculateDrawableRelativePosition(Drawable drawable) =&gt; (drawable.ScreenSpaceDrawQuad.Centre.X - parentScreenSpaceRectangle.X) / parentScreenSpaceRectangle.Width;
+
+        protected override JudgementResult CreateResult(Judgement judgement) =&gt; new OsuJudgementResult(HitObject, judgement);
+
+        protected void ApplyRepeatFadeIn(Drawable target, double fadeTime)
+        {
+            DrawableSlider slider = (DrawableSlider)ParentHitObject;
+            int repeatIndex = ((SliderEndCircle)HitObject).RepeatIndex;
+
+            Debug.Assert(slider != null);
+
+            // When snaking in is enabled, the first end circle needs to be delayed until the snaking completes.
+            bool delayFadeIn = slider.SliderBody?.SnakingIn.Value == true &amp;&amp; repeatIndex == 0;
+
+            if (repeatIndex &gt; 0)
+                fadeTime = Math.Min(slider.HitObject.SpanDuration, fadeTime);
+
+            target
+                .FadeOut()
+                .Delay(delayFadeIn ? (slider.HitObject.TimePreempt) / 3 : 0)
+                .FadeIn(fadeTime);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,9,27,87,0],[28,9,28,82,0],[29,9,29,78,0],[30,9,30,90,0],[33,55,33,59,0],[35,60,35,99,0],[47,15,47,30,0],[48,9,48,10,0],[49,9,49,10,0],[53,9,53,10,0],[54,13,54,23,0],[55,9,55,10,0],[58,9,58,10,0],[59,13,59,28,0],[61,13,61,87,0],[62,13,62,65,0],[63,13,63,71,0],[64,13,64,59,0],[65,9,65,10,0],[68,9,68,10,0],[69,13,69,27,0],[71,13,71,91,0],[72,13,72,69,0],[73,13,73,75,0],[74,13,74,63,0],[75,9,75,10,0],[77,67,77,95,0],[80,9,80,10,0],[81,13,81,44,0],[83,13,83,20,0],[83,22,83,31,0],[83,32,83,34,0],[83,35,83,49,0],[84,13,84,14,0],[88,17,88,68,0],[89,17,89,18,0],[92,21,92,95,0],[93,21,93,95,0],[94,17,94,18,0],[98,17,98,33,0],[99,13,99,14,0],[100,9,100,10,0],[103,9,103,10,0],[104,13,104,42,0],[111,13,111,20,0],[111,22,111,31,0],[111,32,111,34,0],[111,35,111,77,0],[112,17,112,77,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,62,0],[118,13,118,98,0],[119,17,119,53,0],[120,9,120,10,0],[122,90,122,103,0],[124,67,124,88,0],[127,59,127,131,0],[132,37,132,38,0],[132,39,132,40,0],[137,40,137,56,0],[142,41,142,57,0],[145,58,145,166,0],[151,81,151,186,0],[153,81,153,125,0],[156,9,156,10,0],[157,13,157,69,0],[158,13,158,72,0],[160,13,160,42,0],[163,13,163,95,0],[165,13,165,33,0],[166,17,166,78,0],[168,13,171,35,0],[172,9,172,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Mods/DifficultyBindable.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Bindables;
+using osu.Game.Beatmaps;
+
+namespace osu.Game.Rulesets.Mods
+{
+    public class DifficultyBindable : Bindable&lt;float?&gt;
+    {
+        /// &lt;summary&gt;
+        /// Whether the extended limits should be applied to this bindable.
+        /// &lt;/summary&gt;
+        public readonly BindableBool ExtendedLimits = new BindableBool();
+
+        /// &lt;summary&gt;
+        /// An internal numeric bindable to hold and propagate min/max/precision.
+        /// The value of this bindable should not be set.
+        /// &lt;/summary&gt;
+        internal readonly BindableFloat CurrentNumber = new BindableFloat
+        {
+            MinValue = 0,
+            MaxValue = 10,
+        };
+
+        /// &lt;summary&gt;
+        /// A function that can extract the current value of this setting from a beatmap difficulty for display purposes.
+        /// &lt;/summary&gt;
+        public Func&lt;IBeatmapDifficultyInfo, float&gt;? ReadCurrentFromDifficulty;
+
+        public float Precision
+        {
+            set =&gt; CurrentNumber.Precision = value;
+        }
+
+        private float minValue;
+
+        public float MinValue
+        {
+            get =&gt; minValue;
+            set
+            {
+                if (value == minValue)
+                    return;
+
+                minValue = value;
+                updateExtents();
+            }
+        }
+
+        private float maxValue = 10; // matches default max value of `CurrentNumber`
+
+        public float MaxValue
+        {
+            get =&gt; maxValue;
+            set
+            {
+                if (value == maxValue)
+                    return;
+
+                maxValue = value;
+                updateExtents();
+            }
+        }
+
+        private float? extendedMinValue;
+
+        /// &lt;summary&gt;
+        /// The minimum value to be used when extended limits are applied.
+        /// &lt;/summary&gt;
+        public float? ExtendedMinValue
+        {
+            get =&gt; extendedMinValue;
+            set
+            {
+                if (value == extendedMinValue)
+                    return;
+
+                extendedMinValue = value;
+                updateExtents();
+            }
+        }
+
+        private float? extendedMaxValue;
+
+        /// &lt;summary&gt;
+        /// The maximum value to be used when extended limits are applied.
+        /// &lt;/summary&gt;
+        public float? ExtendedMaxValue
+        {
+            get =&gt; extendedMaxValue;
+            set
+            {
+                if (value == extendedMaxValue)
+                    return;
+
+                extendedMaxValue = value;
+                updateExtents();
+            }
+        }
+
+        public DifficultyBindable()
+            : this(null)
+        {
+        }
+
+        public DifficultyBindable(float? defaultValue = null)
+            : base(defaultValue)
+        {
+            ExtendedLimits.BindValueChanged(_ =&gt; updateExtents());
+        }
+
+        public override float? Value
+        {
+            get =&gt; base.Value;
+            set
+            {
+                // Ensure that in the case serialisation runs in the wrong order (and limit extensions aren&#39;t applied yet) the deserialised value is still propagated.
+                if (value != null)
+                {
+                    CurrentNumber.MinValue = Math.Clamp(MathF.Min(CurrentNumber.MinValue, value.Value), ExtendedMinValue ?? MinValue, MinValue);
+                    CurrentNumber.MaxValue = Math.Clamp(MathF.Max(CurrentNumber.MaxValue, value.Value), MaxValue, ExtendedMaxValue ?? MaxValue);
+
+                    base.Value = Math.Clamp(value.Value, CurrentNumber.MinValue, CurrentNumber.MaxValue);
+                }
+                else
+                    base.Value = value;
+            }
+        }
+
+        private void updateExtents()
+        {
+            CurrentNumber.MinValue = ExtendedLimits.Value &amp;&amp; extendedMinValue != null ? extendedMinValue.Value : minValue;
+            CurrentNumber.MaxValue = ExtendedLimits.Value &amp;&amp; extendedMaxValue != null ? extendedMaxValue.Value : maxValue;
+        }
+
+        public override void CopyTo(Bindable&lt;float?&gt; them)
+        {
+            if (!(them is DifficultyBindable otherDifficultyBindable))
+                throw new InvalidOperationException($&quot;Cannot copy to a non-{nameof(DifficultyBindable)}.&quot;);
+
+            base.CopyTo(them);
+
+            otherDifficultyBindable.ReadCurrentFromDifficulty = ReadCurrentFromDifficulty;
+
+            // the following max value copies are only safe as long as these values are effectively constants.
+            otherDifficultyBindable.MaxValue = maxValue;
+            otherDifficultyBindable.ExtendedMaxValue = extendedMaxValue;
+            otherDifficultyBindable.MinValue = minValue;
+            otherDifficultyBindable.ExtendedMinValue = extendedMinValue;
+        }
+
+        public override void BindTo(Bindable&lt;float?&gt; them)
+        {
+            if (!(them is DifficultyBindable otherDifficultyBindable))
+                throw new InvalidOperationException($&quot;Cannot bind to a non-{nameof(DifficultyBindable)}.&quot;);
+
+            // ensure that MaxValue and ExtendedMaxValue are copied across first before continuing.
+            // not doing so may cause the value of CurrentNumber to be truncated to 10.
+            otherDifficultyBindable.CopyTo(this);
+
+            // set up mutual binding for ExtendedLimits to correctly set the upper bound of CurrentNumber.
+            ExtendedLimits.BindTarget = otherDifficultyBindable.ExtendedLimits;
+
+            // set up mutual binding for CurrentNumber. this must happen after all of the above.
+            CurrentNumber.BindTarget = otherDifficultyBindable.CurrentNumber;
+
+            // finish up the binding by setting up weak references via the base call.
+            // unfortunately this will call `.CopyTo()` again, but fixing that is problematic and messy.
+            base.BindTo(them);
+        }
+
+        public override void UnbindFrom(IUnbindable them)
+        {
+            if (!(them is DifficultyBindable otherDifficultyBindable))
+                throw new InvalidOperationException($&quot;Cannot unbind from a non-{nameof(DifficultyBindable)}.&quot;);
+
+            base.UnbindFrom(them);
+
+            CurrentNumber.UnbindFrom(otherDifficultyBindable.CurrentNumber);
+            ExtendedLimits.UnbindFrom(otherDifficultyBindable.ExtendedLimits);
+        }
+
+        protected override Bindable&lt;float?&gt; CreateInstance() =&gt; new DifficultyBindable();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[15,9,15,74,1],[21,9,25,11,1],[34,20,34,51,1],[41,20,41,28,1],[43,13,43,14,1],[44,17,44,39,1],[45,21,45,28,1],[47,17,47,34,1],[48,17,48,33,1],[49,13,49,14,1],[52,9,52,37,1],[56,20,56,28,1],[58,13,58,14,1],[59,17,59,39,1],[60,21,60,28,1],[62,17,62,34,1],[63,17,63,33,1],[64,13,64,14,1],[74,20,74,36,1],[76,13,76,14,1],[77,17,77,47,1],[78,21,78,28,0],[80,17,80,42,1],[81,17,81,33,1],[82,13,82,14,1],[92,20,92,36,1],[94,13,94,14,1],[95,17,95,47,1],[96,21,96,28,0],[98,17,98,42,1],[99,17,99,33,1],[100,13,100,14,1],[104,15,104,25,1],[105,9,105,10,1],[106,9,106,10,1],[109,15,109,33,1],[110,9,110,10,1],[111,13,111,50,1],[111,50,111,65,0],[111,65,111,67,1],[112,9,112,10,1],[116,20,116,30,1],[118,13,118,14,1],[120,17,120,35,1],[121,17,121,18,1],[122,21,122,145,1],[123,21,123,145,1],[125,21,125,106,1],[126,17,126,18,1],[128,21,128,40,0],[129,13,129,14,1],[133,9,133,10,1],[134,13,134,123,1],[135,13,135,123,1],[136,9,136,10,1],[139,9,139,10,0],[140,13,140,71,0],[141,17,141,108,0],[143,13,143,31,0],[145,13,145,91,0],[148,13,148,57,0],[149,13,149,73,0],[150,13,150,57,0],[151,13,151,73,0],[152,9,152,10,0],[155,9,155,10,0],[156,13,156,71,0],[157,17,157,108,0],[161,13,161,50,0],[164,13,164,80,0],[167,13,167,78,0],[171,13,171,31,0],[172,9,172,10,0],[175,9,175,10,0],[176,13,176,71,0],[177,17,177,112,0],[179,13,179,35,0],[181,13,181,77,0],[182,13,182,79,0],[183,9,183,10,0],[185,65,185,89,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Setup/ResourcesSection.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.IO;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Localisation;
+using osu.Game.Models;
+using osu.Game.Overlays;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Screens.Edit.Components;
+using osu.Game.Storyboards;
+using osu.Game.Utils;
+
+namespace osu.Game.Screens.Edit.Setup
+{
+    public partial class ResourcesSection : SetupSection
+    {
+        private FormBeatmapFileSelector audioTrackChooser = null!;
+        private FormBeatmapFileSelector backgroundChooser = null!;
+        private FormBeatmapFileSelector videoChooser = null!;
+
+        private readonly Bindable&lt;EditorBeatmapSkin.SampleSet?&gt; currentSampleSet = new Bindable&lt;EditorBeatmapSkin.SampleSet?&gt;();
+
+        public override LocalisableString Title =&gt; EditorSetupStrings.ResourcesHeader;
+
+        [Resolved]
+        private MusicController music { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; currentWorkingBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private Editor? editor { get; set; }
+
+        [Resolved]
+        private SetupScreen setupScreen { get; set; } = null!;
+
+        private SetupScreenBackgroundPreview backgroundPreview = null!;
+        private SetupScreenVideoPreview videoPreview = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            backgroundPreview = new SetupScreenBackgroundPreview
+            {
+                RelativeSizeAxes = Axes.X,
+                Height = 110,
+            };
+            videoPreview = new SetupScreenVideoPreview
+            {
+                RelativeSizeAxes = Axes.X,
+                Height = 110,
+            };
+
+            bool beatmapHasMultipleDifficulties = currentWorkingBeatmap.Value.BeatmapSetInfo.Beatmaps.Count &gt; 1;
+
+            Children = new Drawable[]
+            {
+                backgroundChooser = new FormBeatmapFileSelector(beatmapHasMultipleDifficulties, SupportedExtensions.IMAGE_EXTENSIONS)
+                {
+                    Caption = GameplaySettingsStrings.BackgroundHeader,
+                    PlaceholderText = EditorSetupStrings.ClickToSelectBackground,
+                },
+                videoChooser = new FormBeatmapFileSelector(beatmapHasMultipleDifficulties, SupportedExtensions.VIDEO_EXTENSIONS)
+                {
+                    Caption = EditorSetupStrings.Video,
+                    PlaceholderText = EditorSetupStrings.ClickToSelectVideo,
+                    HintText = EditorSetupStrings.VideoHint,
+                    AllowClear = true,
+                },
+                audioTrackChooser = new FormBeatmapFileSelector(beatmapHasMultipleDifficulties, SupportedExtensions.AUDIO_EXTENSIONS)
+                {
+                    Caption = EditorSetupStrings.AudioTrack,
+                    PlaceholderText = EditorSetupStrings.ClickToSelectTrack,
+                },
+                new FormSampleSetChooser
+                {
+                    Current = { BindTarget = currentSampleSet },
+                },
+                new FormSampleSet
+                {
+                    Current = { BindTarget = currentSampleSet },
+                    SampleAddRequested = (file, targetName) =&gt;
+                    {
+                        string actualFilename = string.Concat(targetName, file.Extension);
+                        using var stream = file.OpenRead();
+                        beatmaps.AddFile(currentWorkingBeatmap.Value.BeatmapSetInfo, stream, actualFilename);
+                        return actualFilename;
+                    },
+                    SampleRemoveRequested = filename =&gt;
+                    {
+                        var file = currentWorkingBeatmap.Value.BeatmapSetInfo.GetFile(filename);
+                        if (file != null)
+                            beatmaps.DeleteFile(currentWorkingBeatmap.Value.BeatmapSetInfo, file);
+                    }
+                },
+            };
+
+            backgroundChooser.PreviewContainer.Add(backgroundPreview);
+            videoChooser.PreviewContainer.Add(videoPreview);
+
+            if (!string.IsNullOrEmpty(currentWorkingBeatmap.Value.Metadata.BackgroundFile))
+                backgroundChooser.Current.Value = new FileInfo(currentWorkingBeatmap.Value.Metadata.BackgroundFile);
+
+            if (currentWorkingBeatmap.Value.Storyboard.PrimaryVideo is StoryboardVideo video)
+                videoChooser.Current.Value = new FileInfo(video.Path);
+
+            if (!string.IsNullOrEmpty(currentWorkingBeatmap.Value.Metadata.AudioFile))
+                audioTrackChooser.Current.Value = new FileInfo(currentWorkingBeatmap.Value.Metadata.AudioFile);
+
+            backgroundChooser.Current.BindValueChanged(backgroundChanged);
+            videoChooser.Current.BindValueChanged(videoChanged);
+            audioTrackChooser.Current.BindValueChanged(audioTrackChanged);
+        }
+
+        public bool ChangeBackgroundImage(FileInfo source, bool applyToAllDifficulties)
+        {
+            if (!source.Exists)
+                return false;
+
+            changeResource(source, applyToAllDifficulties, @&quot;bg&quot;,
+                working =&gt; working.BeatmapInfo.Metadata.BackgroundFile,
+                (working, name) =&gt; working.BeatmapInfo.Metadata.BackgroundFile = name.AsNonNull());
+
+            backgroundPreview.UpdateBackground();
+            editor?.ApplyToBackground(bg =&gt; ((EditorBackgroundScreen)bg).RefreshBackgroundAsync());
+            setupScreen.BackgroundChanged?.Invoke();
+            return true;
+        }
+
+        public bool ChangeVideo(FileInfo? source, bool applyToAllDifficulties)
+        {
+            if (source != null &amp;&amp; !source.Exists)
+                return false;
+
+            changeResource(source, applyToAllDifficulties, @&quot;video&quot;,
+                working =&gt; working.Storyboard.PrimaryVideo?.Path ?? string.Empty,
+                (working, name) =&gt;
+                {
+                    var videoLayer = working.Storyboard.GetLayer(@&quot;Video&quot;);
+                    videoLayer.Elements.RemoveAll(elem =&gt; elem is StoryboardVideo);
+                    if (name != null)
+                        videoLayer.Elements.Insert(0, new StoryboardVideo(StoryboardElementSource.Beatmap, name, 0));
+                });
+
+            videoPreview.UpdateVideo();
+            editor?.ApplyToBackground(bg =&gt; ((EditorBackgroundScreen)bg).RefreshBackgroundAsync());
+            return true;
+        }
+
+        public bool ChangeAudioTrack(FileInfo source, bool applyToAllDifficulties)
+        {
+            if (!source.Exists)
+                return false;
+
+            string artist;
+            string title;
+
+            try
+            {
+                using (var tagSource = TagLibUtils.GetTagLibFile(source.FullName))
+                {
+                    artist = tagSource.Tag.JoinedAlbumArtists ?? tagSource.Tag.JoinedPerformers;
+                    title = tagSource.Tag.Title;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;The selected audio track appears to be corrupted. Please select another one.&quot;);
+                return false;
+            }
+
+            changeResource(source, applyToAllDifficulties, @&quot;audio&quot;,
+                working =&gt; working.BeatmapInfo.Metadata.AudioFile,
+                (working, name) =&gt;
+                {
+                    working.BeatmapInfo.Metadata.AudioFile = name.AsNonNull();
+
+                    if (!string.IsNullOrWhiteSpace(artist))
+                    {
+                        working.BeatmapInfo.Metadata.ArtistUnicode = artist;
+                        working.BeatmapInfo.Metadata.Artist = MetadataUtils.StripNonRomanisedCharacters(working.BeatmapInfo.Metadata.ArtistUnicode);
+                    }
+
+                    if (!string.IsNullOrEmpty(title))
+                    {
+                        working.BeatmapInfo.Metadata.TitleUnicode = title;
+                        working.BeatmapInfo.Metadata.Title = MetadataUtils.StripNonRomanisedCharacters(working.BeatmapInfo.Metadata.TitleUnicode);
+                    }
+                });
+
+            music.ReloadCurrentTrack();
+            setupScreen.MetadataChanged?.Invoke();
+            return true;
+        }
+
+        private void changeResource(
+            FileInfo? source,
+            bool applyToAllDifficulties,
+            string baseFilename,
+            Func&lt;WorkingBeatmap, string&gt; readOldFilenameFrom,
+            Action&lt;WorkingBeatmap, string?&gt; writeNewFilenameTo)
+        {
+            var set = currentWorkingBeatmap.Value.BeatmapSetInfo;
+            var currentBeatmapInfo = currentWorkingBeatmap.Value.BeatmapInfo;
+
+            var otherBeatmaps = set.Beatmaps.Where(b =&gt; !b.Equals(currentBeatmapInfo));
+
+            // First, clean up files which will no longer be used.
+            if (applyToAllDifficulties)
+            {
+                foreach (var b in set.Beatmaps)
+                {
+                    var working = beatmaps.GetWorkingBeatmap(b);
+                    if (set.GetFile(readOldFilenameFrom(working)) is RealmNamedFileUsage otherExistingFile)
+                        beatmaps.DeleteFile(set, otherExistingFile);
+                }
+            }
+            else
+            {
+                RealmNamedFileUsage? oldFile = set.GetFile(readOldFilenameFrom(currentWorkingBeatmap.Value));
+
+                if (oldFile != null)
+                {
+                    bool oldFileUsedInOtherDiff = false;
+
+                    foreach (var b in otherBeatmaps)
+                    {
+                        var working = beatmaps.GetWorkingBeatmap(b);
+
+                        if (readOldFilenameFrom(working) == oldFile.Filename)
+                        {
+                            oldFileUsedInOtherDiff = true;
+                            break;
+                        }
+                    }
+
+                    if (!oldFileUsedInOtherDiff)
+                        beatmaps.DeleteFile(set, oldFile);
+                }
+            }
+
+            string? newFilename = null;
+
+            if (source != null)
+            {
+                // Choose a new filename that doesn&#39;t clash with any other existing files.
+                newFilename = $@&quot;{baseFilename}{source.Extension.ToLowerInvariant()}&quot;;
+
+                if (set.GetFile(newFilename) != null)
+                {
+                    string[] existingFilenames = set.Files.Select(f =&gt; f.Filename).Where(f =&gt;
+                        f.StartsWith(baseFilename, StringComparison.OrdinalIgnoreCase) &amp;&amp;
+                        f.EndsWith(source.Extension, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    newFilename = NamingUtils.GetNextBestFilename(existingFilenames, newFilename);
+                }
+
+                using (var stream = source.OpenRead())
+                    beatmaps.AddFile(set, stream, newFilename);
+            }
+
+            if (applyToAllDifficulties)
+            {
+                foreach (var b in otherBeatmaps)
+                {
+                    // save the difficulty to re-encode the .osu file, updating any reference of the old filename.
+                    //
+                    // note that this triggers a full save flow, including triggering a difficulty calculation.
+                    // this is not a cheap operation and should be reconsidered in the future.
+                    var beatmapWorking = beatmaps.GetWorkingBeatmap(b);
+                    writeNewFilenameTo(beatmapWorking, newFilename);
+                    beatmaps.Save(b, beatmapWorking.GetPlayableBeatmap(b.Ruleset), beatmapWorking.GetSkin(), beatmapWorking.Storyboard);
+                }
+            }
+
+            writeNewFilenameTo(currentWorkingBeatmap.Value, newFilename);
+
+            // editor change handler cannot be aware of any file changes or other difficulties having their metadata modified.
+            // for simplicity&#39;s sake, trigger a save when changing any resource to ensure the change is correctly saved.
+            editor?.Save();
+        }
+
+        // to avoid scaring users, both background &amp; audio choosers use fake `FileInfo`s with user-friendly filenames
+        // when displaying an imported beatmap rather than the actual SHA-named file in storage.
+        // however, that means that when a background or audio file is chosen that is broken or doesn&#39;t exist on disk when switching away from the fake files,
+        // the rollback could enter an infinite loop, because the fake `FileInfo`s *also* don&#39;t exist on disk - at least not in the fake location they indicate.
+        // to circumvent this issue, just allow rollback to proceed always without actually running any of the change logic to ensure visual consistency.
+        // note that this means that `Change{BackgroundImage,AudioTrack}()` are required to not have made any modifications to the beatmap files
+        // (or at least cleaned them up properly themselves) if they return `false`.
+        private bool rollingBackBackgroundChange;
+        private bool rollingBackVideoChange;
+        private bool rollingBackAudioChange;
+
+        private void backgroundChanged(ValueChangedEvent&lt;FileInfo?&gt; file)
+        {
+            if (rollingBackBackgroundChange)
+                return;
+
+            if (file.NewValue == null || !ChangeBackgroundImage(file.NewValue, backgroundChooser.ApplyToAllDifficulties.Value))
+            {
+                rollingBackBackgroundChange = true;
+                backgroundChooser.Current.Value = file.OldValue;
+                rollingBackBackgroundChange = false;
+            }
+        }
+
+        private void videoChanged(ValueChangedEvent&lt;FileInfo?&gt; file)
+        {
+            if (rollingBackVideoChange)
+                return;
+
+            if (!ChangeVideo(file.NewValue, videoChooser.ApplyToAllDifficulties.Value))
+            {
+                rollingBackVideoChange = true;
+                videoChooser.Current.Value = file.OldValue;
+                rollingBackVideoChange = false;
+            }
+        }
+
+        private void audioTrackChanged(ValueChangedEvent&lt;FileInfo?&gt; file)
+        {
+            if (rollingBackAudioChange)
+                return;
+
+            if (file.NewValue == null || !ChangeAudioTrack(file.NewValue, audioTrackChooser.ApplyToAllDifficulties.Value))
+            {
+                rollingBackAudioChange = true;
+                audioTrackChooser.Current.Value = file.OldValue;
+                rollingBackAudioChange = false;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,67,0],[27,9,27,67,0],[28,9,28,62,0],[30,9,30,129,0],[32,52,32,86,0],[35,41,35,45,0],[35,46,35,50,0],[35,55,35,60,0],[38,43,38,47,0],[38,48,38,52,0],[38,57,38,62,0],[41,67,41,71,0],[41,72,41,76,0],[41,81,41,86,0],[44,34,44,38,0],[44,39,44,43,0],[47,43,47,47,0],[47,48,47,52,0],[47,57,47,62,0],[49,9,49,72,0],[50,9,50,62,0],[54,9,54,10,0],[55,13,59,15,0],[60,13,64,15,0],[66,13,66,113,0],[68,13,95,21,0],[95,21,95,22,0],[95,22,96,25,0],[96,25,96,91,0],[96,91,97,25,0],[97,25,97,60,0],[97,60,98,25,0],[98,25,98,110,0],[98,110,99,25,0],[99,25,99,47,0],[99,47,100,21,0],[100,21,100,22,0],[100,22,102,21,0],[102,21,102,22,0],[102,22,103,25,0],[103,25,103,97,0],[103,97,104,25,0],[104,25,104,42,0],[104,42,105,29,0],[105,29,105,99,0],[105,99,106,21,0],[106,21,106,22,0],[106,22,108,15,0],[110,13,110,71,0],[111,13,111,61,0],[113,13,113,92,0],[114,17,114,117,0],[116,13,116,94,0],[117,17,117,71,0],[119,13,119,87,0],[120,17,120,112,0],[122,13,122,75,0],[123,13,123,65,0],[124,13,124,75,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,32,0],[130,17,130,30,0],[132,13,133,28,0],[133,28,133,71,0],[133,71,134,36,0],[134,36,134,98,0],[134,98,134,100,0],[136,13,136,50,0],[137,13,137,45,0],[137,45,137,98,0],[137,98,137,100,0],[138,13,138,53,0],[139,13,139,25,0],[140,9,140,10,0],[143,9,143,10,0],[144,13,144,50,0],[145,17,145,30,0],[147,13,148,28,0],[148,28,148,81,0],[148,81,150,17,0],[150,17,150,18,0],[150,18,151,21,0],[151,21,151,76,0],[151,76,152,21,0],[152,21,152,59,0],[152,59,152,82,0],[152,82,152,84,0],[152,84,153,21,0],[153,21,153,38,0],[153,38,154,25,0],[154,25,154,118,0],[154,118,155,17,0],[155,17,155,18,0],[155,18,155,20,0],[157,13,157,40,0],[158,13,158,45,0],[158,45,158,98,0],[158,98,158,100,0],[159,13,159,25,0],[160,9,160,10,0],[163,9,163,10,0],[164,13,164,32,0],[165,17,165,30,0],[171,13,171,14,0],[172,24,172,82,0],[173,17,173,18,0],[174,21,174,97,0],[175,21,175,49,0],[176,17,176,18,0],[177,13,177,14,0],[178,13,178,32,0],[179,13,179,14,0],[180,17,180,113,0],[181,17,181,30,0],[184,13,185,28,0],[185,28,185,66,0],[185,66,187,17,0],[187,17,187,18,0],[187,18,188,21,0],[188,21,188,79,0],[188,79,190,21,0],[190,21,190,60,0],[190,60,191,21,0],[191,21,191,22,0],[191,22,192,25,0],[192,25,192,77,0],[192,77,193,25,0],[193,25,193,149,0],[193,149,194,21,0],[194,21,194,22,0],[194,22,196,21,0],[196,21,196,54,0],[196,54,197,21,0],[197,21,197,22,0],[197,22,198,25,0],[198,25,198,75,0],[198,75,199,25,0],[199,25,199,147,0],[199,147,200,21,0],[200,21,200,22,0],[200,22,201,17,0],[201,17,201,18,0],[201,18,201,20,0],[203,13,203,40,0],[204,13,204,51,0],[205,13,205,25,0],[206,9,206,10,0],[214,9,214,10,0],[215,13,215,66,0],[216,13,216,78,0],[218,13,218,57,0],[218,57,218,86,0],[218,86,218,88,0],[221,13,221,40,0],[222,13,222,14,0],[223,17,223,24,0],[223,26,223,31,0],[223,32,223,34,0],[223,35,223,47,0],[224,17,224,18,0],[225,21,225,65,0],[226,21,226,108,0],[227,25,227,69,0],[228,17,228,18,0],[229,13,229,14,0],[231,13,231,14,0],[232,17,232,110,0],[234,17,234,37,0],[235,17,235,18,0],[236,21,236,57,0],[238,21,238,28,0],[238,30,238,35,0],[238,36,238,38,0],[238,39,238,52,0],[239,21,239,22,0],[240,25,240,69,0],[242,25,242,78,0],[243,25,243,26,0],[244,29,244,59,0],[245,29,245,35,0],[247,21,247,22,0],[249,21,249,49,0],[250,25,250,59,0],[251,17,251,18,0],[252,13,252,14,0],[254,13,254,40,0],[256,13,256,32,0],[257,13,257,14,0],[259,17,259,87,0],[261,17,261,54,0],[262,17,262,18,0],[263,21,263,72,0],[263,72,263,82,0],[263,82,264,25,0],[264,25,265,89,0],[265,89,265,101,0],[266,21,266,99,0],[267,17,267,18,0],[269,24,269,54,0],[270,21,270,64,0],[271,13,271,14,0],[273,13,273,40,0],[274,13,274,14,0],[275,17,275,24,0],[275,26,275,31,0],[275,32,275,34,0],[275,35,275,48,0],[276,17,276,18,0],[281,21,281,72,0],[282,21,282,69,0],[283,21,283,137,0],[284,17,284,18,0],[285,13,285,14,0],[287,13,287,74,0],[291,13,291,28,0],[292,9,292,10,0],[306,9,306,10,0],[307,13,307,45,0],[308,17,308,24,0],[310,13,310,128,0],[311,13,311,14,0],[312,17,312,52,0],[313,17,313,65,0],[314,17,314,53,0],[315,13,315,14,0],[316,9,316,10,0],[319,9,319,10,0],[320,13,320,40,0],[321,17,321,24,0],[323,13,323,88,0],[324,13,324,14,0],[325,17,325,47,0],[326,17,326,60,0],[327,17,327,48,0],[328,13,328,14,0],[329,9,329,10,0],[332,9,332,10,0],[333,13,333,40,0],[334,17,334,24,0],[336,13,336,123,0],[337,13,337,14,0],[338,17,338,47,0],[339,17,339,65,0],[340,17,340,48,0],[341,13,341,14,0],[342,9,342,10,0]]);
+    </script>
+  </body>
+</html>

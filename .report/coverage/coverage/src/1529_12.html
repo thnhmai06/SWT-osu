@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OsuScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Menu;
+using osu.Game.Users;
+
+namespace osu.Game.Screens
+{
+    public abstract partial class OsuScreen : Screen, IOsuScreen, IHasDescription
+    {
+        /// &lt;summary&gt;
+        /// The amount of negative padding that should be applied to game background content which touches both the left and right sides of the screen.
+        /// This allows for the game content to be pushed by the options/notification overlays without causing black areas to appear.
+        /// &lt;/summary&gt;
+        public const float HORIZONTAL_OVERFLOW_PADDING = 50;
+
+        /// &lt;summary&gt;
+        /// A user-facing title for this screen.
+        /// &lt;/summary&gt;
+        public virtual string Title =&gt; GetType().Name;
+
+        public string Description =&gt; Title;
+
+        public virtual bool AllowUserExit =&gt; true;
+
+        public virtual bool ShowFooter =&gt; false;
+
+        public virtual bool AllowExternalScreenChange =&gt; false;
+
+        public virtual bool HideOverlaysOnEnter =&gt; false;
+
+        public virtual bool HideMenuCursorOnNonMouseInput =&gt; false;
+
+        public virtual bool RequiresPortraitOrientation =&gt; false;
+
+        /// &lt;summary&gt;
+        /// The initial overlay activation mode to use when this screen is entered for the first time.
+        /// &lt;/summary&gt;
+        protected virtual OverlayActivation InitialOverlayActivationMode =&gt; OverlayActivation.All;
+
+        public readonly Bindable&lt;OverlayActivation&gt; OverlayActivationMode;
+
+        IBindable&lt;OverlayActivation&gt; IOsuScreen.OverlayActivationMode =&gt; OverlayActivationMode;
+
+        /// &lt;summary&gt;
+        /// The initial visibility state of the back button when this screen is entered for the first time.
+        /// &lt;/summary&gt;
+        protected virtual bool InitialBackButtonVisibility =&gt; AllowUserExit;
+
+        public readonly Bindable&lt;bool&gt; BackButtonVisibility;
+
+        IBindable&lt;bool&gt; IOsuScreen.BackButtonVisibility =&gt; BackButtonVisibility;
+
+        public virtual bool CursorVisible =&gt; true;
+
+        protected new OsuGameBase Game =&gt; base.Game as OsuGameBase;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;UserActivity&quot;/&gt; to set the user&#39;s activity automatically to when this screen is entered.
+        /// &lt;para&gt;This &lt;see cref=&quot;Activity&quot;/&gt; will be automatically set to &lt;see cref=&quot;InitialActivity&quot;/&gt; for this screen on entering for the first time
+        /// unless &lt;see cref=&quot;Activity&quot;/&gt; is manually set before.&lt;/para&gt;
+        /// &lt;/summary&gt;
+        protected virtual UserActivity InitialActivity =&gt; null;
+
+        /// &lt;summary&gt;
+        /// The current &lt;see cref=&quot;UserActivity&quot;/&gt; for this screen.
+        /// &lt;/summary&gt;
+        protected readonly Bindable&lt;UserActivity&gt; Activity = new Bindable&lt;UserActivity&gt;();
+
+        Bindable&lt;UserActivity&gt; IOsuScreen.Activity =&gt; Activity;
+
+        /// &lt;summary&gt;
+        /// Whether to disallow changes to game-wise Beatmap/Ruleset bindables for this screen (and all children).
+        /// &lt;/summary&gt;
+        public virtual bool DisallowExternalBeatmapRulesetChanges =&gt; false;
+
+        private Sample sampleExit;
+
+        protected virtual bool PlayExitSound =&gt; true;
+
+        public virtual float BackgroundParallaxAmount =&gt; 1;
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        public virtual bool? ApplyModTrackAdjustments =&gt; null;
+
+        public virtual bool? AllowGlobalTrackControl =&gt; null;
+
+        public Bindable&lt;WorkingBeatmap&gt; Beatmap { get; private set; } = null!;
+
+        public Bindable&lt;RulesetInfo&gt; Ruleset { get; private set; } = null!;
+
+        public Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; Mods { get; private set; }
+
+        private OsuScreenDependencies screenDependencies;
+
+        private bool? globalMusicControlStateAtSuspend;
+
+        private bool? modTrackAdjustmentStateAtSuspend;
+
+        internal void CreateLeasedDependencies(IReadOnlyDependencyContainer dependencies) =&gt; createDependencies(dependencies);
+
+        internal void LoadComponentsAgainstScreenDependencies(IEnumerable&lt;Drawable&gt; components) =&gt; LoadComponents(components);
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        {
+            if (screenDependencies == null)
+            {
+                if (DisallowExternalBeatmapRulesetChanges)
+                    throw new InvalidOperationException($&quot;Screens that specify {nameof(DisallowExternalBeatmapRulesetChanges)} must be pushed immediately.&quot;);
+
+                createDependencies(parent);
+            }
+
+            return base.CreateChildDependencies(screenDependencies);
+        }
+
+        private void createDependencies(IReadOnlyDependencyContainer dependencies)
+        {
+            screenDependencies = new OsuScreenDependencies(DisallowExternalBeatmapRulesetChanges, dependencies);
+
+            Beatmap = screenDependencies.Beatmap;
+            Ruleset = screenDependencies.Ruleset;
+            Mods = screenDependencies.Mods;
+        }
+
+        /// &lt;summary&gt;
+        /// The background created and owned by this screen. May be null if the background didn&#39;t change.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        private BackgroundScreen ownedBackground;
+
+        [CanBeNull]
+        private BackgroundScreen background;
+
+        [Resolved(canBeNull: true)]
+        [CanBeNull]
+        private BackgroundScreenStack backgroundStack { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private OsuLogo logo { get; set; }
+
+        [Resolved(canBeNull: true)]
+        [CanBeNull]
+        protected ScreenFooter Footer { get; private set; }
+
+        protected OsuScreen()
+        {
+            Anchor = Anchor.Centre;
+            Origin = Anchor.Centre;
+
+            OverlayActivationMode = new Bindable&lt;OverlayActivation&gt;(InitialOverlayActivationMode);
+            BackButtonVisibility = new Bindable&lt;bool&gt;(InitialBackButtonVisibility);
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(AudioManager audio)
+        {
+            sampleExit = audio.Samples.Get(@&quot;UI/screen-back&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            Activity.Value ??= InitialActivity;
+        }
+
+        /// &lt;summary&gt;
+        /// Apply arbitrary changes to the current background screen in a thread safe manner.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;action&quot;&gt;The operation to perform.&lt;/param&gt;
+        public void ApplyToBackground(Action&lt;BackgroundScreen&gt; action)
+        {
+            if (backgroundStack == null)
+                throw new InvalidOperationException(&quot;Attempted to apply to background without a background stack being available.&quot;);
+
+            if (background == null)
+                throw new InvalidOperationException(&quot;Attempted to apply to background before screen is pushed.&quot;);
+
+            background.ApplyToBackground(action);
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            applyArrivingDefaults(true);
+
+            // it&#39;s feasible to resume to a screen if the target screen never loaded successfully.
+            // in such a case there&#39;s no need to restore this value.
+            if (modTrackAdjustmentStateAtSuspend != null)
+                musicController.ApplyModTrackAdjustments = modTrackAdjustmentStateAtSuspend.Value;
+            if (globalMusicControlStateAtSuspend != null)
+                musicController.AllowTrackControl.Value = globalMusicControlStateAtSuspend.Value;
+
+            base.OnResuming(e);
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            modTrackAdjustmentStateAtSuspend = musicController.ApplyModTrackAdjustments;
+            globalMusicControlStateAtSuspend = musicController.AllowTrackControl.Value;
+
+            onSuspendingLogo();
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            applyArrivingDefaults(false);
+
+            if (ApplyModTrackAdjustments != null)
+                musicController.ApplyModTrackAdjustments = ApplyModTrackAdjustments.Value;
+
+            if (AllowGlobalTrackControl != null)
+                musicController.AllowTrackControl.Value = AllowGlobalTrackControl.Value;
+
+            if (backgroundStack?.Push(ownedBackground = CreateBackground()) != true)
+            {
+                // If the constructed instance was not actually pushed to the background stack, we don&#39;t want to track it unnecessarily.
+                ownedBackground?.Dispose();
+                ownedBackground = null;
+            }
+
+            background = backgroundStack?.CurrentScreen as BackgroundScreen;
+            base.OnEntering(e);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            // Only play the exit sound if we are the last screen in the exit sequence.
+            // This stops many sample playbacks from stacking when a huge screen purge happens (ie. returning to menu via the home button
+            // from a deeply nested screen).
+            bool arrivingAtFinalDestination = e.Next == e.Destination;
+
+            if (ValidForResume &amp;&amp; PlayExitSound &amp;&amp; arrivingAtFinalDestination)
+                sampleExit?.Play();
+
+            if (ValidForResume &amp;&amp; logo != null)
+                onExitingLogo();
+
+            if (base.OnExiting(e))
+                return true;
+
+            if (ownedBackground != null &amp;&amp; backgroundStack?.CurrentScreen == ownedBackground)
+                backgroundStack?.Exit();
+
+            return false;
+        }
+
+        /// &lt;summary&gt;
+        /// Fired when this screen was entered or resumed and the logo state is required to be adjusted.
+        /// &lt;/summary&gt;
+        protected virtual void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            logo.Action = null;
+            logo.FadeOut(300, Easing.OutQuint);
+
+            logo.Origin = Anchor.Centre;
+
+            logo.ChangeAnchor(Anchor.TopLeft);
+            logo.RelativePositionAxes = Axes.Both;
+
+            logo.Triangles = true;
+            logo.Ripple = true;
+        }
+
+        private void applyArrivingDefaults(bool isResuming)
+        {
+            logo?.AppendAnimatingAction(() =&gt;
+            {
+                if (this.IsCurrentScreen()) LogoArriving(logo, isResuming);
+            }, true);
+        }
+
+        private void onExitingLogo()
+        {
+            logo?.AppendAnimatingAction(() =&gt; LogoExiting(logo), false);
+        }
+
+        /// &lt;summary&gt;
+        /// Fired when this screen was exited to add any outwards transition to the logo.
+        /// &lt;/summary&gt;
+        protected virtual void LogoExiting(OsuLogo logo)
+        {
+        }
+
+        private void onSuspendingLogo()
+        {
+            logo?.AppendAnimatingAction(() =&gt; LogoSuspending(logo), false);
+        }
+
+        /// &lt;summary&gt;
+        /// Fired when this screen was suspended to add any outwards transition to the logo.
+        /// &lt;/summary&gt;
+        protected virtual void LogoSuspending(OsuLogo logo)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Override to create a BackgroundMode for the current screen.
+        /// Note that the instance created may not be the used instance if it matches the BackgroundMode equality clause.
+        /// &lt;/summary&gt;
+        protected virtual BackgroundScreen CreateBackground() =&gt; null;
+
+        public virtual IReadOnlyList&lt;ScreenFooterButton&gt; CreateFooterButtons() =&gt; Array.Empty&lt;ScreenFooterButton&gt;();
+
+        public virtual bool OnBackButton() =&gt; false;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,40,36,54,0],[38,38,38,43,0],[40,46,40,50,0],[42,43,42,48,0],[44,58,44,63,0],[46,52,46,57,0],[48,62,48,67,0],[50,60,50,65,0],[55,77,55,98,0],[59,74,59,95,0],[64,63,64,76,0],[68,60,68,80,0],[70,46,70,50,0],[72,43,72,67,0],[79,59,79,63,0],[84,9,84,91,0],[86,55,86,63,0],[91,70,91,75,0],[95,49,95,53,0],[97,58,97,59,0],[100,51,100,55,0],[100,56,100,60,0],[102,58,102,62,0],[104,57,104,61,0],[106,51,106,55,0],[106,56,106,68,0],[106,73,106,78,0],[108,48,108,52,0],[108,53,108,65,0],[108,70,108,75,0],[110,52,110,56,0],[110,57,110,69,0],[118,94,118,126,0],[120,100,120,126,0],[123,9,123,10,0],[124,13,124,44,0],[125,13,125,14,0],[126,17,126,59,0],[127,21,127,158,0],[129,17,129,44,0],[130,13,130,14,0],[132,13,132,69,0],[133,9,133,10,0],[136,9,136,10,0],[137,13,137,113,0],[139,13,139,50,0],[140,13,140,50,0],[141,13,141,44,0],[142,9,142,10,0],[155,57,155,61,0],[155,62,155,66,0],[158,32,158,36,0],[158,37,158,41,0],[162,41,162,45,0],[162,46,162,58,0],[164,9,164,30,0],[165,9,165,10,0],[166,13,166,36,0],[167,13,167,36,0],[169,13,169,99,0],[170,13,170,84,0],[171,9,171,10,0],[175,9,175,10,0],[176,13,176,63,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,33,0],[182,13,182,48,0],[183,9,183,10,0],[190,9,190,10,0],[191,13,191,41,0],[192,17,192,133,0],[194,13,194,36,0],[195,17,195,114,0],[197,13,197,50,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,41,0],[206,13,206,58,0],[207,17,207,99,0],[208,13,208,58,0],[209,17,209,98,0],[211,13,211,32,0],[212,9,212,10,0],[215,9,215,10,0],[216,13,216,34,0],[218,13,218,89,0],[219,13,219,88,0],[221,13,221,32,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,42,0],[228,13,228,50,0],[229,17,229,91,0],[231,13,231,49,0],[232,17,232,89,0],[234,13,234,85,0],[235,13,235,14,0],[237,17,237,44,0],[238,17,238,40,0],[239,13,239,14,0],[241,13,241,77,0],[242,13,242,32,0],[243,9,243,10,0],[246,9,246,10,0],[250,13,250,71,0],[252,13,252,79,0],[253,17,253,36,0],[255,13,255,48,0],[256,17,256,33,0],[258,13,258,35,0],[259,17,259,29,0],[261,13,261,94,0],[262,17,262,41,0],[264,13,264,26,0],[265,9,265,10,0],[271,9,271,10,0],[272,13,272,32,0],[273,13,273,48,0],[275,13,275,41,0],[277,13,277,47,0],[278,13,278,51,0],[280,13,280,35,0],[281,13,281,32,0],[282,9,282,10,0],[285,9,285,10,0],[286,13,287,13,0],[287,13,287,14,0],[287,14,288,17,0],[288,17,288,44,0],[288,44,288,45,0],[288,45,288,76,0],[288,76,289,13,0],[289,13,289,14,0],[289,14,289,22,0],[290,9,290,10,0],[293,9,293,10,0],[294,13,294,47,0],[294,47,294,64,0],[294,64,294,73,0],[295,9,295,10,0],[301,9,301,10,0],[302,9,302,10,0],[305,9,305,10,0],[306,13,306,47,0],[306,47,306,67,0],[306,67,306,76,0],[307,9,307,10,0],[313,9,313,10,0],[314,9,314,10,0],[320,66,320,70,0],[322,83,322,116,0],[324,47,324,52,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/RulesetInputManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Input.StateChanges;
+using osu.Framework.Input.StateChanges.Events;
+using osu.Framework.Input.States;
+using osu.Game.Configuration;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.Input.Handlers;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Screens.Play.HUD.ClicksPerSecond;
+using osuTK;
+using static osu.Game.Input.Handlers.ReplayInputHandler;
+
+namespace osu.Game.Rulesets.UI
+{
+    public abstract partial class RulesetInputManager&lt;T&gt; : PassThroughInputManager, ICanAttachHUDPieces, IHasReplayHandler, IHasRecordingHandler
+        where T : struct
+    {
+        protected override bool AllowRightClickFromLongTouch =&gt; false;
+
+        public readonly KeyBindingContainer&lt;T&gt; KeyBindingContainer;
+
+        [Resolved]
+        private ScoreProcessor? scoreProcessor { get; set; }
+
+        private ReplayRecorder? recorder;
+
+        public ReplayRecorder? Recorder
+        {
+            get =&gt; recorder;
+            set
+            {
+                if (value == recorder)
+                    return;
+
+                if (value != null &amp;&amp; recorder != null)
+                    throw new InvalidOperationException(&quot;Cannot attach more than one recorder&quot;);
+
+                recorder?.Expire();
+                recorder = value;
+
+                if (recorder != null)
+                    KeyBindingContainer.Add(recorder);
+            }
+        }
+
+        protected override InputState CreateInitialState() =&gt; new RulesetInputManagerInputState&lt;T&gt;(base.CreateInitialState());
+
+        protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+        private readonly Container content;
+
+        protected RulesetInputManager(RulesetInfo ruleset, int variant, SimultaneousBindingMode unique)
+        {
+            InternalChild = KeyBindingContainer =
+                CreateKeyBindingContainer(ruleset, variant, unique)
+                    .WithChild(content = new Container { RelativeSizeAxes = Axes.Both });
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuConfigManager config)
+        {
+            mouseDisabled = config.GetBindable&lt;bool&gt;(OsuSetting.MouseDisableButtons);
+            tapsDisabled = config.GetBindable&lt;bool&gt;(OsuSetting.TouchDisableGameplayTaps);
+        }
+
+        #region Action mapping (for replays)
+
+        public override void HandleInputStateChange(InputStateChangeEvent inputStateChange)
+        {
+            switch (inputStateChange)
+            {
+                case ReplayStateChangeEvent&lt;T&gt; stateChangeEvent:
+                    foreach (var action in stateChangeEvent.ReleasedActions)
+                        KeyBindingContainer.TriggerReleased(action);
+
+                    foreach (var action in stateChangeEvent.PressedActions)
+                        KeyBindingContainer.TriggerPressed(action);
+                    break;
+
+                case ReplayStatisticsFrameEvent statisticsStateChangeEvent:
+                    scoreProcessor?.ResetFromReplayFrame(statisticsStateChangeEvent.Frame);
+                    break;
+
+                default:
+                    base.HandleInputStateChange(inputStateChange);
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region IHasReplayHandler
+
+        private ReplayInputHandler? replayInputHandler;
+
+        public ReplayInputHandler? ReplayInputHandler
+        {
+            get =&gt; replayInputHandler;
+            set
+            {
+                if (replayInputHandler == value)
+                    return;
+
+                if (replayInputHandler != null)
+                    RemoveHandler(replayInputHandler);
+
+                // ensures that all replay keys are released, that the last replay state is correctly cleared,
+                // and that all user-pressed keys are released, so that the replay handler may trigger them itself
+                // setting `UseParentInput` will only sync releases (https://github.com/ppy/osu-framework/blob/17d65f476d51cc5f2aaea818534f8fbac47e5fe6/osu.Framework/Input/PassThroughInputManager.cs#L179-L182)
+                new ReplayStateReset().Apply(CurrentState, this);
+
+                replayInputHandler = value;
+                UseParentInput = replayInputHandler == null;
+
+                if (replayInputHandler != null)
+                    AddHandler(replayInputHandler);
+            }
+        }
+
+        #endregion
+
+        #region Setting application (disables etc.)
+
+        private Bindable&lt;bool&gt; mouseDisabled = null!;
+        private Bindable&lt;bool&gt; tapsDisabled = null!;
+
+        protected override bool Handle(UIEvent e)
+        {
+            switch (e)
+            {
+                case MouseDownEvent:
+                    if (mouseDisabled.Value)
+                        return true; // importantly, block upwards propagation so global bindings also don&#39;t fire.
+
+                    break;
+
+                case MouseUpEvent mouseUp:
+                    if (!CurrentState.Mouse.IsPressed(mouseUp.Button))
+                        return false;
+
+                    break;
+            }
+
+            return base.Handle(e);
+        }
+
+        protected override bool HandleMouseTouchStateChange(TouchStateChangeEvent e)
+        {
+            if (tapsDisabled.Value)
+            {
+                // Only propagate positional data when taps are disabled.
+                e = new TouchStateChangeEvent(e.State, e.Input, e.Touch, false, e.LastPosition);
+            }
+
+            return base.HandleMouseTouchStateChange(e);
+        }
+
+        #endregion
+
+        #region Key Counter Attachment
+
+        public void Attach(InputCountController inputCountController)
+        {
+            var triggers = KeyBindingContainer.DefaultKeyBindings
+                                              .Select(b =&gt; b.GetAction&lt;T&gt;())
+                                              .Distinct()
+                                              .Select(action =&gt; new KeyCounterActionTrigger&lt;T&gt;(action))
+                                              .ToArray();
+
+            KeyBindingContainer.AddRange(triggers);
+            inputCountController.AddRange(triggers);
+        }
+
+        #endregion
+
+        #region Keys per second Counter Attachment
+
+        public void Attach(ClicksPerSecondController controller) =&gt; KeyBindingContainer.Add(new ActionListener(controller));
+
+        private partial class ActionListener : Component, IKeyBindingHandler&lt;T&gt;
+        {
+            private readonly ClicksPerSecondController controller;
+
+            public ActionListener(ClicksPerSecondController controller)
+            {
+                this.controller = controller;
+            }
+
+            public bool OnPressed(KeyBindingPressEvent&lt;T&gt; e)
+            {
+                controller.AddInputTimestamp();
+                return false;
+            }
+
+            public void OnReleased(KeyBindingReleaseEvent&lt;T&gt; e)
+            {
+            }
+        }
+
+        #endregion
+
+        protected virtual KeyBindingContainer&lt;T&gt; CreateKeyBindingContainer(RulesetInfo ruleset, int variant, SimultaneousBindingMode unique)
+            =&gt; new RulesetKeyBindingContainer(ruleset, variant, unique);
+
+        public partial class RulesetKeyBindingContainer : DatabasedKeyBindingContainer&lt;T&gt;
+        {
+            protected override bool HandleRepeats =&gt; false;
+
+            public RulesetKeyBindingContainer(RulesetInfo ruleset, int variant, SimultaneousBindingMode unique)
+                : base(ruleset, variant, unique)
+            {
+            }
+
+            protected override void ReloadMappings(IQueryable&lt;RealmKeyBinding&gt; realmKeyBindings)
+            {
+                base.ReloadMappings(realmKeyBindings);
+
+                KeyBindings = KeyBindings.Where(static b =&gt; RealmKeyBindingStore.CheckValidForGameplay(b.KeyCombination)).ToList();
+                RealmKeyBindingStore.ClearDuplicateBindings(KeyBindings);
+            }
+        }
+
+        private class ReplayStateReset : IInput
+        {
+            public void Apply(InputState state, IInputStateChangeHandler handler)
+            {
+                if (!(state is RulesetInputManagerInputState&lt;T&gt; inputState))
+                    throw new InvalidOperationException($&quot;{nameof(ReplayState&lt;&gt;)} should only be applied to a {nameof(RulesetInputManagerInputState&lt;&gt;)}&quot;);
+
+                new MouseButtonInput([], state.Mouse.Buttons).Apply(state, handler);
+                new KeyboardKeyInput([], state.Keyboard.Keys).Apply(state, handler);
+                new TouchInput(Enum.GetValues&lt;TouchSource&gt;().Select(s =&gt; new Touch(s, Vector2.Zero)), false).Apply(state, handler);
+                new JoystickButtonInput([], state.Joystick.Buttons).Apply(state, handler);
+                new MidiKeyInput(new MidiState(), state.Midi).Apply(state, handler);
+                new TabletPenButtonInput([], state.Tablet.PenButtons).Apply(state, handler);
+                new TabletAuxiliaryButtonInput([], state.Tablet.AuxiliaryButtons).Apply(state, handler);
+
+                handler.HandleInputStateChange(new ReplayStateChangeEvent&lt;T&gt;(state, this, inputState.LastReplayState?.PressedActions.ToArray() ?? [], []));
+                inputState.LastReplayState = null;
+            }
+        }
+    }
+
+    public class RulesetInputManagerInputState&lt;T&gt; : InputState
+        where T : struct
+    {
+        public ReplayState&lt;T&gt;? LastReplayState;
+
+        public RulesetInputManagerInputState(InputState state)
+            : base(state)
+        {
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,65,31,70,0],[36,50,36,54,0],[36,55,36,59,0],[42,20,42,28,0],[44,13,44,14,0],[45,17,45,39,0],[46,21,46,28,0],[48,17,48,55,0],[49,21,49,97,0],[51,17,51,36,0],[52,17,52,34,0],[54,17,54,38,0],[55,21,55,55,0],[56,13,56,14,0],[59,63,59,126,0],[61,59,61,66,0],[65,9,65,104,0],[66,9,66,10,0],[67,13,69,90,0],[70,9,70,10,0],[74,9,74,10,0],[75,13,75,86,0],[76,13,76,90,0],[77,9,77,10,0],[82,9,82,10,0],[83,13,83,38,0],[86,21,86,28,0],[86,30,86,40,0],[86,41,86,43,0],[86,44,86,76,0],[87,25,87,69,0],[89,21,89,28,0],[89,30,89,40,0],[89,41,89,43,0],[89,44,89,75,0],[90,25,90,68,0],[91,21,91,27,0],[94,21,94,92,0],[95,21,95,27,0],[98,21,98,67,0],[99,21,99,27,0],[101,9,101,10,0],[111,20,111,38,0],[113,13,113,14,0],[114,17,114,49,0],[115,21,115,28,0],[117,17,117,48,0],[118,21,118,55,0],[123,17,123,66,0],[125,17,125,44,0],[126,17,126,61,0],[128,17,128,48,0],[129,21,129,52,0],[130,13,130,14,0],[137,9,137,54,0],[138,9,138,53,0],[141,9,141,10,0],[142,13,142,23,0],[145,21,145,45,0],[146,25,146,37,0],[148,21,148,27,0],[151,21,151,71,0],[152,25,152,38,0],[154,21,154,27,0],[157,13,157,35,0],[158,9,158,10,0],[161,9,161,10,0],[162,13,162,36,0],[163,13,163,14,0],[165,17,165,97,0],[166,13,166,14,0],[168,13,168,56,0],[169,9,169,10,0],[176,9,176,10,0],[177,13,178,60,0],[178,60,178,76,0],[178,76,180,65,0],[180,65,180,103,0],[180,103,181,58,0],[183,13,183,52,0],[184,13,184,53,0],[185,9,185,10,0],[191,69,191,124,0],[197,13,197,72,0],[198,13,198,14,0],[199,17,199,46,0],[200,13,200,14,0],[203,13,203,14,0],[204,17,204,48,0],[205,17,205,30,0],[206,13,206,14,0],[209,13,209,14,0],[210,13,210,14,0],[216,16,216,72,0],[220,54,220,59,0],[223,19,223,49,0],[224,13,224,14,0],[225,13,225,14,0],[228,13,228,14,0],[229,17,229,55,0],[231,17,231,61,0],[231,61,231,121,0],[231,121,231,132,0],[232,17,232,74,0],[233,13,233,14,0],[239,13,239,14,0],[240,17,240,77,0],[241,21,241,155,0],[243,17,243,85,0],[244,17,244,85,0],[245,17,245,74,0],[245,74,245,100,0],[245,100,245,132,0],[246,17,246,91,0],[247,17,247,85,0],[248,17,248,93,0],[249,17,249,105,0],[251,17,251,156,0],[252,17,252,51,0],[253,13,253,14,0],[263,15,263,26,0],[264,9,264,10,0],[265,9,265,10,0]]);
+    </script>
+  </body>
+</html>

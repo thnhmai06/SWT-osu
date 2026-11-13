@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/DailyChallenge/DailyChallenge.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Metadata;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.OnlinePlay.DailyChallenge.Events;
+using osu.Game.Screens.OnlinePlay.Match;
+using osu.Game.Screens.OnlinePlay.Match.Components;
+using osu.Game.Screens.OnlinePlay.Playlists;
+using osu.Game.Screens.Play;
+using osu.Game.Users;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.DailyChallenge
+{
+    public partial class DailyChallenge : OsuScreen, IPreviewTrackOwner, IHandlePresentBeatmap
+    {
+        private readonly Room room;
+        private readonly PlaylistItem playlistItem;
+
+        /// &lt;summary&gt;
+        /// Any mods applied by/to the local user.
+        /// &lt;/summary&gt;
+        private readonly Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; userMods = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;(Array.Empty&lt;Mod&gt;());
+
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+        private readonly IBindable&lt;DailyChallengeInfo?&gt; dailyChallengeInfo = new Bindable&lt;DailyChallengeInfo?&gt;();
+
+        private OnlinePlayScreenWaveContainer waves = null!;
+        private DailyChallengeLeaderboard leaderboard = null!;
+        private RoomModSelectOverlay userModsSelectOverlay = null!;
+        private Sample? sampleStart;
+        private IDisposable? userModsSelectOverlayRegistration;
+
+        private DailyChallengeScoreBreakdown breakdown = null!;
+        private DailyChallengeTotalsDisplay totals = null!;
+        private DailyChallengeEventFeed feed = null!;
+
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Plum);
+
+        [Cached(typeof(OnlinePlayBeatmapAvailabilityTracker))]
+        private readonly DailyChallengeBeatmapAvailabilityTracker beatmapAvailabilityTracker;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; } = null!;
+
+        [Resolved]
+        private MusicController musicController { get; set; } = null!;
+
+        [Resolved]
+        private IOverlayManager? overlayManager { get; set; }
+
+        [Resolved]
+        private MetadataClient metadataClient { get; set; } = null!;
+
+        [Resolved]
+        private UserLookupCache userLookupCache { get; set; } = null!;
+
+        [Resolved]
+        protected IAPIProvider API { get; private set; } = null!;
+
+        [Resolved]
+        private PreviewTrackManager previewTrackManager { get; set; } = null!;
+
+        [Resolved]
+        private INotificationOverlay? notificationOverlay { get; set; }
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        public override bool? ApplyModTrackAdjustments =&gt; true;
+
+        protected override UserActivity InitialActivity =&gt; new UserActivity.InDailyChallengeLobby();
+
+        public DailyChallenge(Room room)
+        {
+            this.room = room;
+
+            playlistItem = room.Playlist.Single();
+            Padding = new MarginPadding { Horizontal = -HORIZONTAL_OVERFLOW_PADDING };
+
+            beatmapAvailabilityTracker = new DailyChallengeBeatmapAvailabilityTracker(playlistItem);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            sampleStart = audio.Samples.Get(@&quot;SongSelect/confirm-selection&quot;);
+
+            FillFlowContainer footerButtons;
+
+            InternalChild = waves = new OnlinePlayScreenWaveContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    beatmapAvailabilityTracker,
+                    new ScreenStack(new RoomBackgroundScreen(playlistItem))
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    createHeader(),
+                    new PopoverContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Child = new GridContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Padding = new MarginPadding
+                            {
+                                Horizontal = WaveOverlayContainer.WIDTH_PADDING,
+                                Top = Header.HEIGHT,
+                            },
+                            RowDimensions =
+                            [
+                                new Dimension(GridSizeMode.AutoSize),
+                                new Dimension(GridSizeMode.Absolute, 10),
+                                new Dimension(),
+                                new Dimension(GridSizeMode.Absolute, 30),
+                                new Dimension(GridSizeMode.Absolute, 50)
+                            ],
+                            Content = new[]
+                            {
+                                new Drawable[]
+                                {
+                                    new DrawableRoomPlaylistItem(playlistItem, true)
+                                    {
+                                        RelativeSizeAxes = Axes.X,
+                                        AllowReordering = false,
+                                        Scale = new Vector2(1.4f),
+                                        Width = 1 / 1.4f,
+                                    }
+                                },
+                                null,
+                                [
+                                    new OsuContextMenuContainer
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Masking = true,
+                                        CornerRadius = 10,
+                                        Children = new Drawable[]
+                                        {
+                                            new Box
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Colour = colourProvider.Background4,
+                                            },
+                                            new GridContainer
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Padding = new MarginPadding(10),
+                                                ColumnDimensions =
+                                                [
+                                                    new Dimension(),
+                                                    new Dimension(GridSizeMode.Absolute, 10),
+                                                    new Dimension(),
+                                                    new Dimension(GridSizeMode.Absolute, 10),
+                                                    new Dimension()
+                                                ],
+                                                Content = new[]
+                                                {
+                                                    new Drawable?[]
+                                                    {
+                                                        new GridContainer
+                                                        {
+                                                            RelativeSizeAxes = Axes.Both,
+                                                            Anchor = Anchor.Centre,
+                                                            Origin = Anchor.Centre,
+                                                            RowDimensions =
+                                                            [
+                                                                new Dimension(),
+                                                                new Dimension()
+                                                            ],
+                                                            Content = new[]
+                                                            {
+                                                                new Drawable[]
+                                                                {
+                                                                    new DailyChallengeCarousel
+                                                                    {
+                                                                        RelativeSizeAxes = Axes.Both,
+                                                                        Anchor = Anchor.Centre,
+                                                                        Origin = Anchor.Centre,
+                                                                        Children = new Drawable[]
+                                                                        {
+                                                                            new DailyChallengeTimeRemainingRing(room),
+                                                                            breakdown = new DailyChallengeScoreBreakdown(),
+                                                                            totals = new DailyChallengeTotalsDisplay(),
+                                                                        }
+                                                                    }
+                                                                },
+                                                                [
+                                                                    feed = new DailyChallengeEventFeed
+                                                                    {
+                                                                        RelativeSizeAxes = Axes.Both,
+                                                                        PresentScore = presentScore
+                                                                    }
+                                                                ],
+                                                            },
+                                                        },
+                                                        null,
+                                                        // Middle column (leaderboard)
+                                                        leaderboard = new DailyChallengeLeaderboard(room, playlistItem)
+                                                        {
+                                                            RelativeSizeAxes = Axes.Both,
+                                                            PresentScore = presentScore,
+                                                            SelectedMods = { BindTarget = userMods },
+                                                        },
+                                                        // Spacer
+                                                        null,
+                                                        // Main right column
+                                                        new GridContainer
+                                                        {
+                                                            RelativeSizeAxes = Axes.Both,
+                                                            Content = new[]
+                                                            {
+                                                                new Drawable[]
+                                                                {
+                                                                    new SectionHeader(OnlinePlayStrings.Chat)
+                                                                },
+                                                                [new MatchChatDisplay(room) { RelativeSizeAxes = Axes.Both }]
+                                                            },
+                                                            RowDimensions =
+                                                            [
+                                                                new Dimension(GridSizeMode.AutoSize),
+                                                                new Dimension()
+                                                            ]
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ],
+                                null,
+                                [
+                                    new Container
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Padding = new MarginPadding
+                                        {
+                                            Horizontal = -WaveOverlayContainer.WIDTH_PADDING,
+                                        },
+                                        Children = new Drawable[]
+                                        {
+                                            new Box
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Colour = colourProvider.Background5,
+                                            },
+                                            footerButtons = new FillFlowContainer
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Direction = FillDirection.Horizontal,
+                                                Padding = new MarginPadding(5),
+                                                Spacing = new Vector2(10),
+                                                Children = new Drawable[]
+                                                {
+                                                    new PlaylistsReadyButton(room)
+                                                    {
+                                                        Anchor = Anchor.Centre,
+                                                        Origin = Anchor.Centre,
+                                                        RelativeSizeAxes = Axes.Y,
+                                                        Size = new Vector2(250, 1),
+                                                        Action = startPlay
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                }
+            };
+
+            LoadComponent(userModsSelectOverlay = new RoomModSelectOverlay
+            {
+                Beatmap = { BindTarget = Beatmap },
+                SelectedMods = { BindTarget = userMods },
+                Ruleset = { BindTarget = Ruleset },
+                IsValidMod = _ =&gt; false
+            });
+
+            if (playlistItem.AllowedMods.Any())
+            {
+                footerButtons.Insert(-1, new UserModSelectButton
+                {
+                    Text = OnlinePlayStrings.FooterButtonFreemods,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Y,
+                    Size = new Vector2(250, 1),
+                    Action = () =&gt; userModsSelectOverlay.Show(),
+                });
+
+                var rulesetInstance = rulesets.GetRuleset(playlistItem.RulesetID)!.CreateInstance();
+                var allowedMods = playlistItem.AllowedMods.Select(m =&gt; m.ToMod(rulesetInstance));
+                userModsSelectOverlay.IsValidMod = leaderboard.IsValidMod = m =&gt; allowedMods.Any(a =&gt; a.GetType() == m.GetType());
+            }
+
+            metadataClient.MultiplayerRoomScoreSet += onRoomScoreSet;
+            dailyChallengeInfo.BindTo(metadataClient.DailyChallengeInfo);
+
+            ((IBindable&lt;MultiplayerScore?&gt;)breakdown.UserBestScore).BindTo(leaderboard.UserBestScore);
+        }
+
+        private void presentScore(long id)
+        {
+            if (this.IsCurrentScreen())
+                this.Push(new PlaylistItemScoreResultsScreen(id, room.RoomID!.Value, playlistItem));
+        }
+
+        private void onRoomScoreSet(MultiplayerRoomScoreSetEvent e)
+        {
+            if (e.RoomID != room.RoomID || e.PlaylistItemID != playlistItem.ID)
+                return;
+
+            userLookupCache.GetUserAsync(e.UserID).ContinueWith(t =&gt;
+            {
+                if (t.Exception != null)
+                {
+                    Logger.Log($@&quot;Could not display room score set event: {t.Exception}&quot;, LoggingTarget.Network);
+                    return;
+                }
+
+                APIUser? user = t.GetResultSafely();
+                if (user == null) return;
+
+                var ev = new NewScoreEvent(e.ScoreID, user, e.TotalScore, e.NewRank);
+                Schedule(() =&gt;
+                {
+                    breakdown.AddNewScore(ev);
+                    totals.AddNewScore(ev);
+                    feed.AddNewScore(ev);
+
+                    if (e.NewRank &lt;= 50)
+                        Scheduler.AddOnce(() =&gt; leaderboard.RefetchScores());
+                });
+            });
+        }
+
+        private Container createHeader()
+        {
+            var titleFlow = new FillFlowContainer
+            {
+                Anchor = Anchor.CentreLeft,
+                Origin = Anchor.CentreLeft,
+                AutoSizeAxes = Axes.Both,
+                Direction = FillDirection.Horizontal,
+                Spacing = new Vector2(6, 0),
+                Children = new Drawable[]
+                {
+                    new OsuHoverContainer
+                    {
+                        AutoSizeAxes = Axes.Both,
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        Action = () =&gt; game?.ShowWiki(@&quot;Gameplay/Daily_challenge&quot;),
+                        Child = new OsuSpriteText
+                        {
+                            Font = OsuFont.TorusAlternate.With(size: 24),
+                            Text = ButtonSystemStrings.DailyChallenge.ToSentence(),
+                        }
+                    }
+                }
+            };
+
+            if (!string.IsNullOrEmpty(room.Description))
+            {
+                var subtitleFont = OsuFont.TorusAlternate.With(size: 16);
+
+                titleFlow.AddRange(new Drawable[]
+                {
+                    new OsuSpriteText
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        Font = subtitleFont,
+                        Text = &quot;&#183;&quot;,
+                        Colour = colourProvider.Content2,
+                        Margin = new MarginPadding { Bottom = 3 },
+                    },
+                    new TruncatingSpriteText
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        Font = subtitleFont,
+                        Text = room.Description,
+                        Colour = colourProvider.Content2,
+                        Margin = new MarginPadding { Bottom = 3 },
+                    }
+                });
+            }
+
+            return new Container
+            {
+                RelativeSizeAxes = Axes.X,
+                Height = Header.HEIGHT,
+                Padding = new MarginPadding { Left = WaveOverlayContainer.WIDTH_PADDING },
+                Child = titleFlow,
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            beatmapAvailabilityTracker.Availability.BindValueChanged(_ =&gt; TrySetDailyChallengeBeatmap(this, beatmapManager, rulesets, musicController, playlistItem), true);
+
+            userModsSelectOverlayRegistration = overlayManager?.RegisterBlockingOverlay(userModsSelectOverlay);
+            userModsSelectOverlay.SelectedItem.Value = playlistItem;
+            userMods.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateMods), true);
+
+            apiState.BindTo(API.State);
+            apiState.BindValueChanged(onlineStateChanged, true);
+
+            dailyChallengeInfo.BindValueChanged(dailyChallengeChanged);
+        }
+
+        private void onlineStateChanged(ValueChangedEvent&lt;APIState&gt; state) =&gt; Schedule(() =&gt;
+        {
+            if (state.NewValue != APIState.Online)
+                Schedule(forcefullyExit);
+        });
+
+        private void dailyChallengeChanged(ValueChangedEvent&lt;DailyChallengeInfo?&gt; change)
+        {
+            if (change.OldValue?.RoomID == room.RoomID &amp;&amp; change.NewValue == null &amp;&amp; metadataClient.IsConnected.Value)
+            {
+                notificationOverlay?.Post(new SimpleNotification { Text = DailyChallengeStrings.ChallengeEndedNotification });
+            }
+        }
+
+        private void forcefullyExit()
+        {
+            Logger.Log(@$&quot;{this} forcefully exiting due to loss of API connection&quot;);
+
+            // This is temporary since we don&#39;t currently have a way to force screens to be exited
+            // See also: `OnlinePlayScreen.forcefullyExit()`
+            if (this.IsCurrentScreen())
+            {
+                while (this.IsCurrentScreen())
+                    this.Exit();
+            }
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            waves.Show();
+            API.Queue(new JoinRoomRequest(room, null));
+            startLoopingTrack(this, musicController);
+
+            metadataClient.BeginWatchingMultiplayerRoom(room.RoomID!.Value).ContinueWith(t =&gt;
+            {
+                if (t.Exception != null)
+                {
+                    Logger.Error(t.Exception, @&quot;Failed to subscribe to room updates&quot;, LoggingTarget.Network);
+                    return;
+                }
+
+                MultiplayerPlaylistItemStats[] stats = t.GetResultSafely();
+                var itemStats = stats.SingleOrDefault(item =&gt; item.PlaylistItemID == playlistItem.ID);
+
+                if (itemStats == null) return;
+
+                Schedule(() =&gt;
+                {
+                    breakdown.SetInitialCounts(itemStats.TotalScoreDistribution);
+                    totals.SetInitialCounts(itemStats.TotalScoreDistribution.Sum(c =&gt; c), itemStats.CumulativeScore);
+                });
+            }, TaskContinuationOptions.OnlyOnRanToCompletion);
+
+            userModsSelectOverlay.SelectedItem.Value = playlistItem;
+
+            TrySetDailyChallengeBeatmap(this, beatmapManager, rulesets, musicController, playlistItem);
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+            startLoopingTrack(this, musicController);
+            // re-apply mods as they may have been changed by a child screen
+            // (one known instance of this is showing a replay).
+            updateMods();
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            userModsSelectOverlay.Hide();
+            cancelTrackLooping();
+            previewTrackManager.StopAnyPlaying(this);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            waves.Hide();
+            userModsSelectOverlay.Hide();
+            cancelTrackLooping();
+            previewTrackManager.StopAnyPlaying(this);
+            this.Delay(WaveContainer.DISAPPEAR_DURATION).FadeOut();
+
+            API.Queue(new PartRoomRequest(room));
+            metadataClient.EndWatchingMultiplayerRoom(room.RoomID!.Value).FireAndForget();
+
+            return base.OnExiting(e);
+        }
+
+        public static void TrySetDailyChallengeBeatmap(OsuScreen screen, BeatmapManager beatmaps, RulesetStore rulesets, MusicController music, PlaylistItem item)
+        {
+            if (!screen.IsCurrentScreen())
+                return;
+
+            var beatmap = beatmaps.QueryOnlineBeatmapId(item.Beatmap.OnlineID);
+
+            screen.Beatmap.Value = beatmaps.GetWorkingBeatmap(beatmap); // this will gracefully fall back to dummy beatmap if missing locally.
+            screen.Ruleset.Value = rulesets.GetRuleset(item.RulesetID);
+
+            startLoopingTrack(screen, music);
+        }
+
+        private static void startLoopingTrack(OsuScreen screen, MusicController music)
+        {
+            if (!screen.IsCurrentScreen())
+                return;
+
+            var track = screen.Beatmap.Value?.Track;
+
+            if (track != null)
+            {
+                screen.Beatmap.Value?.PrepareTrackForPreview(true);
+                music.EnsurePlayingSomething();
+            }
+        }
+
+        private void cancelTrackLooping()
+        {
+            var track = Beatmap.Value?.Track;
+
+            track?.Looping = false;
+        }
+
+        private void updateMods()
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            Mods.Value = userMods.Value.Concat(playlistItem.RequiredMods.Select(m =&gt; m.ToMod(Ruleset.Value.CreateInstance()))).ToList();
+        }
+
+        private void startPlay()
+        {
+            sampleStart?.Play();
+            this.Push(new PlayerLoader(() =&gt; new DailyChallengePlayer(room, playlistItem)
+            {
+                Exited = () =&gt; Scheduler.AddOnce(() =&gt; leaderboard.RefetchScores())
+            }));
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            userModsSelectOverlayRegistration?.Dispose();
+
+            if (metadataClient.IsNotNull())
+                metadataClient.MultiplayerRoomScoreSet -= onRoomScoreSet;
+        }
+
+        public void PresentBeatmap(WorkingBeatmap beatmap, RulesetInfo ruleset)
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            // We can only handle the current daily challenge beatmap.
+            // If the import was for a different beatmap, pass the duty off to global handling.
+            if (beatmap.BeatmapSetInfo.OnlineID != playlistItem.Beatmap.BeatmapSet!.OnlineID)
+            {
+                this.Exit();
+                game?.PresentBeatmap(beatmap.BeatmapSetInfo, b =&gt; b.ID == beatmap.BeatmapInfo.ID);
+            }
+
+            // And if we&#39;re handling, we don&#39;t really have much to do here.
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[57,9,57,119,0],[59,9,59,82,0],[60,9,60,114,0],[62,9,62,61,0],[63,9,63,63,0],[64,9,64,68,0],[68,9,68,64,0],[69,9,69,60,0],[70,9,70,54,0],[73,9,73,117,0],[79,33,79,37,0],[79,38,79,42,0],[82,49,82,53,0],[82,54,82,58,0],[82,63,82,68,0],[85,41,85,45,0],[85,46,85,50,0],[85,55,85,60,0],[88,51,88,55,0],[88,56,88,60,0],[88,65,88,70,0],[91,51,91,55,0],[91,56,91,60,0],[94,49,94,53,0],[94,54,94,58,0],[94,63,94,68,0],[97,51,97,55,0],[97,56,97,60,0],[97,65,97,70,0],[100,38,100,42,0],[100,43,100,55,0],[100,60,100,65,0],[103,59,103,63,0],[103,64,103,68,0],[103,73,103,78,0],[106,61,106,65,0],[106,66,106,70,0],[108,71,108,75,0],[110,59,110,63,0],[112,60,112,100,0],[114,9,114,41,0],[115,9,115,10,0],[116,13,116,30,0],[118,13,118,51,0],[119,13,119,87,0],[121,13,121,101,0],[122,9,122,10,0],[126,9,126,10,0],[127,13,127,78,0],[131,13,314,15,0],[316,13,321,35,0],[321,35,321,40,0],[321,40,322,16,0],[324,13,324,48,0],[325,13,325,14,0],[326,17,333,36,0],[333,36,333,64,0],[333,64,334,20,0],[336,17,336,101,0],[337,17,337,72,0],[337,72,337,96,0],[337,96,337,98,0],[338,17,338,82,0],[338,82,338,103,0],[338,103,338,129,0],[338,129,338,130,0],[338,130,338,131,0],[339,13,339,14,0],[341,13,341,70,0],[342,13,342,74,0],[344,13,344,103,0],[345,9,345,10,0],[348,9,348,10,0],[349,13,349,40,0],[350,17,350,101,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,80,0],[356,17,356,24,0],[358,13,359,13,0],[359,13,359,14,0],[359,14,360,17,0],[360,17,360,41,0],[360,41,361,17,0],[361,17,361,18,0],[361,18,362,21,0],[362,21,362,114,0],[362,114,363,21,0],[363,21,363,28,0],[363,28,366,17,0],[366,17,366,53,0],[366,53,367,17,0],[367,17,367,34,0],[367,34,367,35,0],[367,35,367,42,0],[367,42,369,17,0],[369,17,369,86,0],[369,86,370,17,0],[370,17,371,17,0],[371,17,371,18,0],[371,18,372,21,0],[372,21,372,47,0],[372,47,373,21,0],[373,21,373,44,0],[373,44,374,21,0],[374,21,374,42,0],[374,42,376,21,0],[376,21,376,41,0],[376,41,377,25,0],[377,25,377,49,0],[377,49,377,76,0],[377,76,377,78,0],[377,78,378,17,0],[378,17,378,18,0],[378,18,378,20,0],[378,20,379,13,0],[379,13,379,14,0],[379,14,379,16,0],[380,9,380,10,0],[383,9,383,10,0],[384,13,398,40,0],[398,40,398,83,0],[398,83,406,15,0],[408,13,408,57,0],[409,13,409,14,0],[410,17,410,74,0],[412,17,432,20,0],[433,13,433,14,0],[435,13,441,15,0],[442,9,442,10,0],[445,9,445,10,0],[446,13,446,33,0],[448,13,448,75,0],[448,75,448,165,0],[448,165,448,173,0],[450,13,450,112,0],[451,13,451,69,0],[452,13,452,44,0],[452,44,452,73,0],[452,73,452,81,0],[454,13,454,40,0],[455,13,455,65,0],[457,13,457,72,0],[458,9,458,10,0],[460,79,461,9,0],[461,9,461,10,0],[461,10,462,13,0],[462,13,462,51,0],[462,51,463,17,0],[463,17,463,42,0],[463,42,464,9,0],[464,9,464,10,0],[464,10,464,11,0],[467,9,467,10,0],[468,13,468,119,0],[469,13,469,14,0],[470,17,470,127,0],[471,13,471,14,0],[472,9,472,10,0],[475,9,475,10,0],[476,13,476,85,0],[480,13,480,40,0],[481,13,481,14,0],[482,17,482,47,0],[483,21,483,33,0],[484,13,484,14,0],[485,9,485,10,0],[488,9,488,10,0],[489,13,489,32,0],[491,13,491,26,0],[492,13,492,56,0],[493,13,493,54,0],[495,13,496,13,0],[496,13,496,14,0],[496,14,497,17,0],[497,17,497,41,0],[497,41,498,17,0],[498,17,498,18,0],[498,18,499,21,0],[499,21,499,110,0],[499,110,500,21,0],[500,21,500,28,0],[500,28,503,17,0],[503,17,503,76,0],[503,76,504,17,0],[504,17,504,63,0],[504,63,504,101,0],[504,101,504,103,0],[504,103,506,17,0],[506,17,506,39,0],[506,39,506,40,0],[506,40,506,47,0],[506,47,508,17,0],[508,17,509,17,0],[509,17,509,18,0],[509,18,510,21,0],[510,21,510,82,0],[510,82,511,21,0],[511,21,511,87,0],[511,87,511,88,0],[511,88,511,118,0],[511,118,512,17,0],[512,17,512,18,0],[512,18,512,20,0],[512,20,513,13,0],[513,13,513,14,0],[513,14,513,63,0],[515,13,515,69,0],[517,13,517,104,0],[518,9,518,10,0],[521,9,521,10,0],[522,13,522,32,0],[523,13,523,54,0],[526,13,526,26,0],[527,9,527,10,0],[530,9,530,10,0],[531,13,531,34,0],[533,13,533,42,0],[534,13,534,34,0],[535,13,535,54,0],[536,9,536,10,0],[539,9,539,10,0],[540,13,540,26,0],[541,13,541,42,0],[542,13,542,34,0],[543,13,543,54,0],[544,13,544,68,0],[546,13,546,50,0],[547,13,547,91,0],[549,13,549,38,0],[550,9,550,10,0],[553,9,553,10,0],[554,13,554,43,0],[555,17,555,24,0],[557,13,557,80,0],[559,13,559,72,0],[560,13,560,72,0],[562,13,562,46,0],[563,9,563,10,0],[566,9,566,10,0],[567,13,567,43,0],[568,17,568,24,0],[570,13,570,53,0],[572,13,572,31,0],[573,13,573,14,0],[574,17,574,68,0],[575,17,575,48,0],[576,13,576,14,0],[577,9,577,10,0],[580,9,580,10,0],[581,13,581,46,0],[583,13,583,36,0],[584,9,584,10,0],[587,9,587,10,0],[588,13,588,41,0],[589,17,589,24,0],[591,13,591,86,0],[591,86,591,125,0],[591,125,591,137,0],[592,9,592,10,0],[595,9,595,10,0],[596,13,596,33,0],[597,13,597,46,0],[597,46,599,32,0],[599,32,599,56,0],[599,56,599,83,0],[599,83,599,84,0],[599,84,600,14,0],[600,14,600,17,0],[601,9,601,10,0],[604,9,604,10,0],[605,13,605,39,0],[607,13,607,58,0],[609,13,609,44,0],[610,17,610,74,0],[611,9,611,10,0],[614,9,614,10,0],[615,13,615,41,0],[616,17,616,24,0],[620,13,620,94,0],[621,13,621,14,0],[622,17,622,29,0],[623,17,623,67,0],[623,67,623,97,0],[623,97,623,99,0],[624,13,624,14,0],[627,9,627,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osuTK;
+using osu.Game.Rulesets.Objects.Types;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Audio;
+using System.Linq;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Skinning;
+using osu.Game.Utils;
+using System.Buffers;
+
+namespace osu.Game.Rulesets.Objects.Legacy
+{
+    /// &lt;summary&gt;
+    /// A HitObjectParser to parse legacy Beatmaps.
+    /// &lt;/summary&gt;
+    public class ConvertHitObjectParser : HitObjectParser
+    {
+        /// &lt;summary&gt;
+        /// The offset to apply to all time values.
+        /// &lt;/summary&gt;
+        private readonly double offset;
+
+        /// &lt;summary&gt;
+        /// The .osu format (beatmap) version.
+        /// &lt;/summary&gt;
+        private readonly int formatVersion;
+
+        /// &lt;summary&gt;
+        /// Whether the current hitobject is the first hitobject in the beatmap.
+        /// &lt;/summary&gt;
+        private bool firstObject = true;
+
+        /// &lt;summary&gt;
+        /// The last parsed hitobject.
+        /// &lt;/summary&gt;
+        private ConvertHitObject? lastObject;
+
+        internal ConvertHitObjectParser(double offset, int formatVersion)
+        {
+            this.offset = offset;
+            this.formatVersion = formatVersion;
+        }
+
+        public override HitObject Parse(string text)
+        {
+            string[] split = text.Split(&#39;,&#39;);
+
+            Vector2 pos =
+                formatVersion &gt;= LegacyBeatmapEncoder.FIRST_LAZER_VERSION
+                    ? new Vector2(Parsing.ParseFloat(split[0], Parsing.MAX_COORDINATE_VALUE), Parsing.ParseFloat(split[1], Parsing.MAX_COORDINATE_VALUE))
+                    : new Vector2((int)Parsing.ParseFloat(split[0], Parsing.MAX_COORDINATE_VALUE), (int)Parsing.ParseFloat(split[1], Parsing.MAX_COORDINATE_VALUE));
+
+            double startTime = Parsing.ParseDouble(split[2]) + offset;
+
+            LegacyHitObjectType type = (LegacyHitObjectType)Parsing.ParseInt(split[3]);
+
+            int comboOffset = (int)(type &amp; LegacyHitObjectType.ComboOffset) &gt;&gt; 4;
+            type &amp;= ~LegacyHitObjectType.ComboOffset;
+
+            bool combo = type.HasFlag(LegacyHitObjectType.NewCombo);
+            type &amp;= ~LegacyHitObjectType.NewCombo;
+
+            var soundType = (LegacyHitSoundType)Parsing.ParseInt(split[4]);
+            var bankInfo = new SampleBankInfo();
+
+            ConvertHitObject? result = null;
+
+            if (type.HasFlag(LegacyHitObjectType.Circle))
+            {
+                result = createHitCircle(pos, combo, comboOffset);
+
+                if (split.Length &gt; 5)
+                    readCustomSampleBanks(split[5], bankInfo);
+            }
+            else if (type.HasFlag(LegacyHitObjectType.Slider))
+            {
+                double? length = null;
+
+                int repeatCount = Parsing.ParseInt(split[6]);
+
+                if (repeatCount &gt; 9000)
+                    throw new FormatException(@&quot;Repeat count is way too high&quot;);
+
+                // osu-stable treated the first span of the slider as a repeat, but no repeats are happening
+                repeatCount = Math.Max(0, repeatCount - 1);
+
+                if (split.Length &gt; 7)
+                {
+                    length = Math.Max(0, Parsing.ParseDouble(split[7], Parsing.MAX_COORDINATE_VALUE));
+                    if (length == 0)
+                        length = null;
+                }
+
+                if (split.Length &gt; 10)
+                    readCustomSampleBanks(split[10], bankInfo, true);
+
+                // One node for each repeat + the start and end nodes
+                int nodes = repeatCount + 2;
+
+                // Populate node sample bank infos with the default hit object sample bank
+                var nodeBankInfos = new List&lt;SampleBankInfo&gt;();
+                for (int i = 0; i &lt; nodes; i++)
+                    nodeBankInfos.Add(bankInfo.Clone());
+
+                // Read any per-node sample banks
+                if (split.Length &gt; 9 &amp;&amp; split[9].Length &gt; 0)
+                {
+                    string[] sets = split[9].Split(&#39;|&#39;);
+
+                    for (int i = 0; i &lt; nodes; i++)
+                    {
+                        if (i &gt;= sets.Length)
+                            break;
+
+                        SampleBankInfo info = nodeBankInfos[i];
+                        readCustomSampleBanks(sets[i], info);
+                    }
+                }
+
+                // Populate node sound types with the default hit object sound type
+                var nodeSoundTypes = new List&lt;LegacyHitSoundType&gt;();
+                for (int i = 0; i &lt; nodes; i++)
+                    nodeSoundTypes.Add(soundType);
+
+                // Read any per-node sound types
+                if (split.Length &gt; 8 &amp;&amp; split[8].Length &gt; 0)
+                {
+                    string[] adds = split[8].Split(&#39;|&#39;);
+
+                    for (int i = 0; i &lt; nodes; i++)
+                    {
+                        if (i &gt;= adds.Length)
+                            break;
+
+                        int.TryParse(adds[i], out int sound);
+                        nodeSoundTypes[i] = (LegacyHitSoundType)sound;
+                    }
+                }
+
+                // Generate the final per-node samples
+                var nodeSamples = new List&lt;IList&lt;HitSampleInfo&gt;&gt;(nodes);
+                for (int i = 0; i &lt; nodes; i++)
+                    nodeSamples.Add(convertSoundType(nodeSoundTypes[i], nodeBankInfos[i]));
+
+                result = createSlider(pos, combo, comboOffset, convertPathString(split[5], pos), length, repeatCount, nodeSamples);
+            }
+            else if (type.HasFlag(LegacyHitObjectType.Spinner))
+            {
+                double duration = Math.Max(0, Parsing.ParseDouble(split[5]) + offset - startTime);
+
+                result = createSpinner(new Vector2(512, 384) / 2, combo, duration);
+
+                if (split.Length &gt; 6)
+                    readCustomSampleBanks(split[6], bankInfo);
+            }
+            else if (type.HasFlag(LegacyHitObjectType.Hold))
+            {
+                // Note: Hold is generated by BMS converts
+
+                double endTime = Math.Max(startTime, Parsing.ParseDouble(split[2]));
+
+                if (split.Length &gt; 5 &amp;&amp; !string.IsNullOrEmpty(split[5]))
+                {
+                    string[] ss = split[5].Split(&#39;:&#39;);
+                    endTime = Math.Max(startTime, Parsing.ParseDouble(ss[0]));
+                    readCustomSampleBanks(string.Join(&#39;:&#39;, ss.Skip(1)), bankInfo);
+                }
+
+                result = createHold(pos, endTime + offset - startTime);
+            }
+
+            if (result == null)
+                throw new InvalidDataException($&quot;Unknown hit object type: {split[3]}&quot;);
+
+            result.StartTime = startTime;
+            result.LegacyType = type;
+
+            if (result.Samples.Count == 0)
+                result.Samples = convertSoundType(soundType, bankInfo);
+
+            firstObject = false;
+
+            return result;
+        }
+
+        private void readCustomSampleBanks(string str, SampleBankInfo bankInfo, bool banksOnly = false)
+        {
+            if (string.IsNullOrEmpty(str))
+                return;
+
+            string[] split = str.Split(&#39;:&#39;);
+
+            var bank = (LegacySampleBank)Parsing.ParseInt(split[0]);
+            if (!Enum.IsDefined(bank))
+                bank = LegacySampleBank.Normal;
+
+            var addBank = (LegacySampleBank)Parsing.ParseInt(split[1]);
+            if (!Enum.IsDefined(addBank))
+                addBank = LegacySampleBank.Normal;
+
+            string? stringBank = bank.ToString().ToLowerInvariant();
+            string? stringAddBank = addBank.ToString().ToLowerInvariant();
+
+            if (stringBank == @&quot;none&quot;)
+                stringBank = null;
+
+            if (stringAddBank == @&quot;none&quot;)
+            {
+                bankInfo.EditorAutoBank = true;
+                stringAddBank = null;
+            }
+            else
+                bankInfo.EditorAutoBank = false;
+
+            bankInfo.BankForNormal = stringBank;
+            bankInfo.BankForAdditions = string.IsNullOrEmpty(stringAddBank) ? stringBank : stringAddBank;
+
+            if (banksOnly) return;
+
+            if (split.Length &gt; 2)
+                bankInfo.CustomSampleBank = Parsing.ParseInt(split[2]);
+
+            if (split.Length &gt; 3)
+                bankInfo.Volume = Math.Max(0, Parsing.ParseInt(split[3]));
+
+            bankInfo.Filename = split.Length &gt; 4 ? split[4] : null;
+        }
+
+        private PathType convertPathType(string input)
+        {
+            switch (input[0])
+            {
+                default:
+                case &#39;C&#39;:
+                    return PathType.CATMULL;
+
+                case &#39;B&#39;:
+                    if (input.Length &gt; 1 &amp;&amp; int.TryParse(input.AsSpan(1), out int degree) &amp;&amp; degree &gt; 0)
+                        return PathType.BSpline(degree);
+
+                    return PathType.BEZIER;
+
+                case &#39;L&#39;:
+                    return PathType.LINEAR;
+
+                case &#39;P&#39;:
+                    return PathType.PERFECT_CURVE;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Converts a given point string into a set of path control points.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// A point string takes the form: X|1:1|2:2|2:2|3:3|Y|1:1|2:2.
+        /// This has three segments:
+        /// &lt;list type=&quot;number&quot;&gt;
+        ///     &lt;item&gt;
+        ///         &lt;description&gt;X: { (1,1), (2,2) } (implicit segment)&lt;/description&gt;
+        ///     &lt;/item&gt;
+        ///     &lt;item&gt;
+        ///         &lt;description&gt;X: { (2,2), (3,3) } (implicit segment)&lt;/description&gt;
+        ///     &lt;/item&gt;
+        ///     &lt;item&gt;
+        ///         &lt;description&gt;Y: { (3,3), (1,1), (2, 2) } (explicit segment)&lt;/description&gt;
+        ///     &lt;/item&gt;
+        /// &lt;/list&gt;
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;pointString&quot;&gt;The point string.&lt;/param&gt;
+        /// &lt;param name=&quot;offset&quot;&gt;The positional offset to apply to the control points.&lt;/param&gt;
+        /// &lt;returns&gt;All control points in the resultant path.&lt;/returns&gt;
+        private PathControlPoint[] convertPathString(string pointString, Vector2 offset)
+        {
+            // This code takes on the responsibility of handling explicit segments of the path (&quot;X&quot; &amp; &quot;Y&quot; from above). Implicit segments are handled by calls to convertPoints().
+            string[] pointStringSplit = pointString.Split(&#39;|&#39;);
+
+            var pointsBuffer = ArrayPool&lt;Vector2&gt;.Shared.Rent(pointStringSplit.Length);
+            var segmentsBuffer = ArrayPool&lt;(PathType Type, int StartIndex)&gt;.Shared.Rent(pointStringSplit.Length);
+            int currentPointsIndex = 0;
+            int currentSegmentsIndex = 0;
+
+            try
+            {
+                foreach (string s in pointStringSplit)
+                {
+                    if (char.IsLetter(s[0]))
+                    {
+                        // The start of a new segment(indicated by having an alpha character at position 0).
+                        var pathType = convertPathType(s);
+                        segmentsBuffer[currentSegmentsIndex++] = (pathType, currentPointsIndex);
+
+                        // First segment is prepended by an extra zero point
+                        if (currentPointsIndex == 0)
+                            pointsBuffer[currentPointsIndex++] = Vector2.Zero;
+                    }
+                    else
+                    {
+                        pointsBuffer[currentPointsIndex++] = readPoint(s, offset);
+                    }
+                }
+
+                int pointsCount = currentPointsIndex;
+                int segmentsCount = currentSegmentsIndex;
+                var controlPoints = new List&lt;ArraySegment&lt;PathControlPoint&gt;&gt;(pointsCount);
+                var allPoints = new ArraySegment&lt;Vector2&gt;(pointsBuffer, 0, pointsCount);
+
+                for (int i = 0; i &lt; segmentsCount; i++)
+                {
+                    if (i &lt; segmentsCount - 1)
+                    {
+                        int startIndex = segmentsBuffer[i].StartIndex;
+                        int endIndex = segmentsBuffer[i + 1].StartIndex;
+                        controlPoints.AddRange(convertPoints(segmentsBuffer[i].Type, allPoints.Slice(startIndex, endIndex - startIndex), pointsBuffer[endIndex]));
+                    }
+                    else
+                    {
+                        int startIndex = segmentsBuffer[i].StartIndex;
+                        controlPoints.AddRange(convertPoints(segmentsBuffer[i].Type, allPoints.Slice(startIndex), null));
+                    }
+                }
+
+                return mergeControlPointsLists(controlPoints);
+            }
+            finally
+            {
+                ArrayPool&lt;Vector2&gt;.Shared.Return(pointsBuffer);
+                ArrayPool&lt;(PathType, int)&gt;.Shared.Return(segmentsBuffer);
+            }
+
+            Vector2 readPoint(string value, Vector2 startPos)
+            {
+                string[] vertexSplit = value.Split(&#39;:&#39;);
+
+                Vector2 pos = formatVersion &gt;= LegacyBeatmapEncoder.FIRST_LAZER_VERSION
+                    ? new Vector2(Parsing.ParseFloat(vertexSplit[0], Parsing.MAX_COORDINATE_VALUE), Parsing.ParseFloat(vertexSplit[1], Parsing.MAX_COORDINATE_VALUE))
+                    : new Vector2((int)Parsing.ParseFloat(vertexSplit[0], Parsing.MAX_COORDINATE_VALUE), (int)Parsing.ParseFloat(vertexSplit[1], Parsing.MAX_COORDINATE_VALUE));
+                pos -= startPos;
+                return pos;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Converts a given point list into a set of path segments.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;type&quot;&gt;The path type of the point list.&lt;/param&gt;
+        /// &lt;param name=&quot;points&quot;&gt;The point list.&lt;/param&gt;
+        /// &lt;param name=&quot;endPoint&quot;&gt;Any extra endpoint to consider as part of the points. This will NOT be returned.&lt;/param&gt;
+        /// &lt;returns&gt;The set of points contained by &lt;paramref name=&quot;points&quot;/&gt; as one or more segments of the path.&lt;/returns&gt;
+        private IEnumerable&lt;ArraySegment&lt;PathControlPoint&gt;&gt; convertPoints(PathType type, ArraySegment&lt;Vector2&gt; points, Vector2? endPoint)
+        {
+            var vertices = new PathControlPoint[points.Count];
+
+            // Parse into control points.
+            for (int i = 0; i &lt; points.Count; i++)
+                vertices[i] = new PathControlPoint { Position = points[i] };
+
+            // Edge-case rules (to match stable).
+            if (type == PathType.PERFECT_CURVE)
+            {
+                int endPointLength = endPoint == null ? 0 : 1;
+
+                if (formatVersion &lt; LegacyBeatmapEncoder.FIRST_LAZER_VERSION)
+                {
+                    if (vertices.Length + endPointLength != 3)
+                        type = PathType.BEZIER;
+                    else if (isLinear(points[0], points[1], endPoint ?? points[2]))
+                    {
+                        // osu-stable special-cased colinear perfect curves to a linear path
+                        type = PathType.LINEAR;
+                    }
+                }
+                else if (vertices.Length + endPointLength &gt; 3)
+                    // Lazer supports perfect curves with less than 3 points and colinear points
+                    type = PathType.BEZIER;
+            }
+
+            // The first control point must have a definite type.
+            vertices[0].Type = type;
+
+            // A path can have multiple implicit segments of the same type if there are two sequential control points with the same position.
+            // To handle such cases, this code may return multiple path segments with the final control point in each segment having a non-null type.
+            // For the point string X|1:1|2:2|2:2|3:3, this code returns the segments:
+            // X: { (1,1), (2, 2) }
+            // X: { (3, 3) }
+            // Note: (2, 2) is not returned in the second segments, as it is implicit in the path.
+            int startIndex = 0;
+            int endIndex = 0;
+
+            while (++endIndex &lt; vertices.Length)
+            {
+                // Keep incrementing while an implicit segment doesn&#39;t need to be started.
+                if (vertices[endIndex].Position != vertices[endIndex - 1].Position)
+                    continue;
+
+                // Legacy CATMULL sliders don&#39;t support multiple segments, so adjacent CATMULL segments should be treated as a single one.
+                // Importantly, this is not applied to the first control point, which may duplicate the slider path&#39;s position
+                // resulting in a duplicate (0,0) control point in the resultant list.
+                if (type == PathType.CATMULL &amp;&amp; endIndex &gt; 1 &amp;&amp; formatVersion &lt; LegacyBeatmapEncoder.FIRST_LAZER_VERSION)
+                    continue;
+
+                // The last control point of each segment is not allowed to start a new implicit segment.
+                if (endIndex == vertices.Length - 1)
+                    continue;
+
+                // Force a type on the last point, and return the current control point set as a segment.
+                vertices[endIndex - 1].Type = type;
+                yield return new ArraySegment&lt;PathControlPoint&gt;(vertices, startIndex, endIndex - startIndex);
+
+                // Skip the current control point - as it&#39;s the same as the one that&#39;s just been returned.
+                startIndex = endIndex + 1;
+            }
+
+            if (startIndex &lt; endIndex)
+                yield return new ArraySegment&lt;PathControlPoint&gt;(vertices, startIndex, endIndex - startIndex);
+
+            static bool isLinear(Vector2 p0, Vector2 p1, Vector2 p2)
+                =&gt; Precision.AlmostEquals(0, (p1.Y - p0.Y) * (p2.X - p0.X)
+                                             - (p1.X - p0.X) * (p2.Y - p0.Y));
+        }
+
+        private PathControlPoint[] mergeControlPointsLists(List&lt;ArraySegment&lt;PathControlPoint&gt;&gt; controlPointList)
+        {
+            int totalCount = 0;
+
+            foreach (var arr in controlPointList)
+                totalCount += arr.Count;
+
+            var mergedArray = new PathControlPoint[totalCount];
+            int copyIndex = 0;
+
+            foreach (var arr in controlPointList)
+            {
+                arr.AsSpan().CopyTo(mergedArray.AsSpan(copyIndex));
+                copyIndex += arr.Count;
+            }
+
+            return mergedArray;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a legacy Hit-type hit object.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position of the hit object.&lt;/param&gt;
+        /// &lt;param name=&quot;newCombo&quot;&gt;Whether the hit object creates a new combo.&lt;/param&gt;
+        /// &lt;param name=&quot;comboOffset&quot;&gt;When starting a new combo, the offset of the new combo relative to the current one.&lt;/param&gt;
+        /// &lt;returns&gt;The hit object.&lt;/returns&gt;
+        private ConvertHitObject createHitCircle(Vector2 position, bool newCombo, int comboOffset)
+        {
+            return lastObject = new ConvertHitCircle
+            {
+                Position = position,
+                NewCombo = firstObject || lastObject is ConvertSpinner || newCombo,
+                ComboOffset = newCombo ? comboOffset : 0
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Creats a legacy Slider-type hit object.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position of the hit object.&lt;/param&gt;
+        /// &lt;param name=&quot;newCombo&quot;&gt;Whether the hit object creates a new combo.&lt;/param&gt;
+        /// &lt;param name=&quot;comboOffset&quot;&gt;When starting a new combo, the offset of the new combo relative to the current one.&lt;/param&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The slider control points.&lt;/param&gt;
+        /// &lt;param name=&quot;length&quot;&gt;The slider length.&lt;/param&gt;
+        /// &lt;param name=&quot;repeatCount&quot;&gt;The slider repeat count.&lt;/param&gt;
+        /// &lt;param name=&quot;nodeSamples&quot;&gt;The samples to be played when the slider nodes are hit. This includes the head and tail of the slider.&lt;/param&gt;
+        /// &lt;returns&gt;The hit object.&lt;/returns&gt;
+        private ConvertHitObject createSlider(Vector2 position, bool newCombo, int comboOffset, PathControlPoint[] controlPoints, double? length, int repeatCount,
+                                              IList&lt;IList&lt;HitSampleInfo&gt;&gt; nodeSamples)
+        {
+            var path = new SliderPath(controlPoints, length);
+
+            // there are known instances of beatmaps (https://osu.ppy.sh/beatmapsets/594828#osu/1258033) which contain zero-length sliders with non-zero numbers of repeats.
+            // this was exploiting a bug in stable in which the slider repeats would be generated as objects but never actually judged as a hit *or* miss during gameplay,
+            // therefore increasing the theoretical possible max combo to be gained from a slider while in practice never giving that extra combo.
+            // due to lazer ensuring that an object has its nested part fully judged, this would result in broken behaviours
+            // (either the zero-length slider giving hundreds of combo for nothing if the repeats are judged as hit, or insta-failing the player due to HP if judged as miss).
+            // to remedy this in a way that seems least damaging, detect this situation via a heuristic and reset the number of repeats to zero.
+            // this technically *does not* match stable beatmap parsing or conversion, *does not* match in-gameplay behaviour of such broken sliders,
+            // and *will* fail conversion mapping tests, but again, this is supposed to be a least-worst measure to prevent exploits.
+            // it is also applied centrally to all rulesets rather than in specific ruleset converters because this failure scenario
+            // translates across rulesets (osu! and catch are both affected).
+            if (Precision.AlmostEquals(path.Distance, 0))
+            {
+                repeatCount = 0;
+                nodeSamples = [nodeSamples[0], nodeSamples[^1]];
+            }
+
+            return lastObject = new ConvertSlider
+            {
+                Position = position,
+                NewCombo = firstObject || lastObject is ConvertSpinner || newCombo,
+                ComboOffset = newCombo ? comboOffset : 0,
+                Path = path,
+                NodeSamples = nodeSamples,
+                RepeatCount = repeatCount
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a legacy Spinner-type hit object.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position of the hit object.&lt;/param&gt;
+        /// &lt;param name=&quot;newCombo&quot;&gt;Whether the hit object creates a new combo.&lt;/param&gt;
+        /// &lt;param name=&quot;duration&quot;&gt;The spinner duration.&lt;/param&gt;
+        /// &lt;returns&gt;The hit object.&lt;/returns&gt;
+        private ConvertHitObject createSpinner(Vector2 position, bool newCombo, double duration)
+        {
+            return lastObject = new ConvertSpinner
+            {
+                Position = position,
+                Duration = duration,
+                NewCombo = newCombo
+                // Spinners cannot have combo offset.
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a legacy Hold-type hit object.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position of the hit object.&lt;/param&gt;
+        /// &lt;param name=&quot;duration&quot;&gt;The hold duration.&lt;/param&gt;
+        private ConvertHitObject createHold(Vector2 position, double duration)
+        {
+            return lastObject = new ConvertHold
+            {
+                Position = position,
+                Duration = duration
+            };
+        }
+
+        private List&lt;HitSampleInfo&gt; convertSoundType(LegacyHitSoundType type, SampleBankInfo bankInfo)
+        {
+            var soundTypes = new List&lt;HitSampleInfo&gt;();
+
+            if (string.IsNullOrEmpty(bankInfo.Filename))
+            {
+                soundTypes.Add(new LegacyHitSampleInfo(HitSampleInfo.HIT_NORMAL, bankInfo.BankForNormal, bankInfo.Volume, true, bankInfo.CustomSampleBank,
+                    // if the sound type doesn&#39;t have the Normal flag set, attach it anyway as a layered sample.
+                    // None also counts as a normal non-layered sample: https://osu.ppy.sh/help/wiki/osu!_File_Formats/Osu_(file_format)#hitsounds
+                    type != LegacyHitSoundType.None &amp;&amp; !type.HasFlag(LegacyHitSoundType.Normal)));
+            }
+            else
+            {
+                soundTypes.Add(new FileHitSampleInfo(bankInfo.Filename, bankInfo.Volume));
+            }
+
+            if (type.HasFlag(LegacyHitSoundType.Finish))
+                soundTypes.Add(new LegacyHitSampleInfo(HitSampleInfo.HIT_FINISH, bankInfo.BankForAdditions, bankInfo.Volume, bankInfo.EditorAutoBank, bankInfo.CustomSampleBank));
+
+            if (type.HasFlag(LegacyHitSoundType.Whistle))
+                soundTypes.Add(new LegacyHitSampleInfo(HitSampleInfo.HIT_WHISTLE, bankInfo.BankForAdditions, bankInfo.Volume, bankInfo.EditorAutoBank, bankInfo.CustomSampleBank));
+
+            if (type.HasFlag(LegacyHitSoundType.Clap))
+                soundTypes.Add(new LegacyHitSampleInfo(HitSampleInfo.HIT_CLAP, bankInfo.BankForAdditions, bankInfo.Volume, bankInfo.EditorAutoBank, bankInfo.CustomSampleBank));
+
+            return soundTypes;
+        }
+
+        private class SampleBankInfo
+        {
+            /// &lt;summary&gt;
+            /// An optional overriding filename which causes all bank/sample specifications to be ignored.
+            /// &lt;/summary&gt;
+            public string? Filename;
+
+            /// &lt;summary&gt;
+            /// The bank identifier to use for the base (&quot;hitnormal&quot;) sample.
+            /// Transferred to &lt;see cref=&quot;HitSampleInfo.Bank&quot;/&gt; when appropriate.
+            /// &lt;/summary&gt;
+            public string? BankForNormal;
+
+            /// &lt;summary&gt;
+            /// The bank identifier to use for additions (&quot;hitwhistle&quot;, &quot;hitfinish&quot;, &quot;hitclap&quot;).
+            /// Transferred to &lt;see cref=&quot;HitSampleInfo.Bank&quot;/&gt; when appropriate.
+            /// &lt;/summary&gt;
+            public string? BankForAdditions;
+
+            /// &lt;summary&gt;
+            /// Hit sample volume (0-100).
+            /// See &lt;see cref=&quot;HitSampleInfo.Volume&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public int Volume;
+
+            /// &lt;summary&gt;
+            /// The index of the custom sample bank. Is only used if 2 or above for &quot;reasons&quot;.
+            /// This will add a suffix to lookups, allowing extended bank lookups (ie. &quot;normal-hitnormal-2&quot;).
+            /// See &lt;see cref=&quot;HitSampleInfo.Suffix&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public int CustomSampleBank;
+
+            /// &lt;summary&gt;
+            /// Whether the bank for additions should be inherited from the normal sample in edit.
+            /// &lt;/summary&gt;
+            public bool EditorAutoBank = true;
+
+            public SampleBankInfo Clone() =&gt; (SampleBankInfo)MemberwiseClone();
+        }
+
+        public class LegacyHitSampleInfo : HitSampleInfo, IEquatable&lt;LegacyHitSampleInfo&gt;
+        {
+            public int CustomSampleBank
+            {
+                get
+                {
+                    if (Suffix != null)
+                        return int.Parse(Suffix);
+
+                    return UseBeatmapSamples ? 1 : 0;
+                }
+            }
+
+            /// &lt;summary&gt;
+            /// Whether this hit sample is layered.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// Layered hit samples are automatically added in all modes (except osu!mania), but can be disabled
+            /// using the &lt;see cref=&quot;SkinConfiguration.LegacySetting.LayeredHitSounds&quot;/&gt; skin config option.
+            /// &lt;/remarks&gt;
+            public readonly bool IsLayered;
+
+            /// &lt;summary&gt;
+            /// Whether a bank was specified locally to the relevant hitobject.
+            /// If &lt;c&gt;false&lt;/c&gt;, a bank will be retrieved from the closest control point.
+            /// &lt;/summary&gt;
+            public bool BankSpecified;
+
+            public LegacyHitSampleInfo(string name, string? bank = null, int volume = 0, bool editorAutoBank = false, int customSampleBank = 0, bool isLayered = false)
+                : base(
+                    name,
+                    bank ?? SampleControlPoint.DEFAULT_BANK,
+                    suffix: customSampleBank &gt;= 2 ? customSampleBank.ToString() : null,
+                    volume,
+                    editorAutoBank,
+                    useBeatmapSamples: customSampleBank &gt;= 1)
+            {
+                BankSpecified = !string.IsNullOrEmpty(bank);
+                IsLayered = isLayered;
+            }
+
+            public sealed override HitSampleInfo With(Optional&lt;string&gt; newName = default, Optional&lt;string&gt; newBank = default, Optional&lt;string?&gt; newSuffix = default, Optional&lt;int&gt; newVolume = default,
+                                                      Optional&lt;bool&gt; newEditorAutoBank = default, Optional&lt;bool&gt; newUseBeatmapSamples = default)
+            {
+                string? suffix = newSuffix.GetOr(Suffix);
+                bool useBeatmapSamples = newUseBeatmapSamples.GetOr(UseBeatmapSamples);
+                int newCustomSampleBank = 0;
+
+                if (suffix != null)
+                    _ = int.TryParse(suffix, out newCustomSampleBank);
+
+                if (newCustomSampleBank == 0 &amp;&amp; useBeatmapSamples)
+                    newCustomSampleBank = 1;
+
+                return With(newName, newBank, newVolume, newEditorAutoBank, newCustomSampleBank);
+            }
+
+            public virtual LegacyHitSampleInfo With(Optional&lt;string&gt; newName = default, Optional&lt;string&gt; newBank = default, Optional&lt;int&gt; newVolume = default,
+                                                    Optional&lt;bool&gt; newEditorAutoBank = default, Optional&lt;int&gt; newCustomSampleBank = default, Optional&lt;bool&gt; newIsLayered = default)
+                =&gt; new LegacyHitSampleInfo(newName.GetOr(Name), newBank.GetOr(Bank), newVolume.GetOr(Volume), newEditorAutoBank.GetOr(EditorAutoBank), newCustomSampleBank.GetOr(CustomSampleBank),
+                    newIsLayered.GetOr(IsLayered));
+
+            public bool Equals(LegacyHitSampleInfo? other)
+                // The additions to equality checks here are *required* to ensure that pooling works correctly.
+                // Of note, `IsLayered` may cause the usage of `SampleVirtual` instead of an actual sample (in cases playback is not required).
+                // Removing it would cause samples which may actually require playback to potentially source for a `SampleVirtual` sample pool.
+                =&gt; base.Equals(other) &amp;&amp; CustomSampleBank == other.CustomSampleBank &amp;&amp; IsLayered == other.IsLayered;
+
+            public override bool Equals(object? obj)
+                =&gt; obj is LegacyHitSampleInfo other &amp;&amp; Equals(other);
+
+            public override int GetHashCode() =&gt; HashCode.Combine(base.GetHashCode(), CustomSampleBank, IsLayered);
+        }
+
+        public class FileHitSampleInfo : LegacyHitSampleInfo, IEquatable&lt;FileHitSampleInfo&gt;
+        {
+            public readonly string Filename;
+
+            public FileHitSampleInfo(string filename, int volume)
+                // Force CSS=1 to make sure that the LegacyBeatmapSkin does not fall back to the user skin.
+                : base(HIT_NORMAL, SampleControlPoint.DEFAULT_BANK, customSampleBank: 1, volume: volume)
+            {
+                Filename = filename;
+            }
+
+            public override IEnumerable&lt;string&gt; LookupNames =&gt; new[]
+            {
+                Filename,
+                Path.ChangeExtension(Filename, null)
+            }.Concat(base.LookupNames);
+
+            public sealed override LegacyHitSampleInfo With(Optional&lt;string&gt; newName = default, Optional&lt;string&gt; newBank = default, Optional&lt;int&gt; newVolume = default,
+                                                            Optional&lt;bool&gt; newEditorAutoBank = default, Optional&lt;int&gt; newCustomSampleBank = default, Optional&lt;bool&gt; newIsLayered = default)
+                =&gt; new FileHitSampleInfo(Filename, newVolume.GetOr(Volume));
+
+            public bool Equals(FileHitSampleInfo? other)
+                =&gt; base.Equals(other) &amp;&amp; Filename == other.Filename;
+
+            public override bool Equals(object? obj)
+                =&gt; obj is FileHitSampleInfo other &amp;&amp; Equals(other);
+
+            public override int GetHashCode() =&gt; HashCode.Combine(base.GetHashCode(), Filename);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,9,39,41,1],[46,9,46,74,1],[47,9,47,10,1],[48,13,48,34,1],[49,13,49,48,1],[50,9,50,10,1],[53,9,53,10,1],[54,13,54,46,1],[56,13,59,165,1],[61,13,61,71,1],[63,13,63,88,1],[65,13,65,82,1],[66,13,66,54,1],[68,13,68,69,1],[69,13,69,51,1],[71,13,71,76,1],[72,13,72,49,1],[74,13,74,45,1],[76,13,76,58,1],[77,13,77,14,1],[78,17,78,67,1],[80,17,80,38,1],[81,21,81,63,1],[82,13,82,14,1],[83,18,83,63,1],[84,13,84,14,1],[85,17,85,39,1],[87,17,87,62,1],[89,17,89,40,1],[90,21,90,80,0],[93,17,93,60,1],[95,17,95,38,1],[96,17,96,18,1],[97,21,97,103,1],[98,21,98,37,1],[99,25,99,39,0],[100,17,100,18,1],[102,17,102,39,1],[103,21,103,70,1],[106,17,106,45,1],[109,17,109,64,1],[110,22,110,31,1],[110,33,110,42,1],[110,44,110,47,1],[111,21,111,57,1],[114,17,114,61,1],[115,17,115,18,1],[116,21,116,57,1],[118,26,118,35,1],[118,37,118,46,1],[118,48,118,51,1],[119,21,119,22,1],[120,25,120,46,1],[121,29,121,35,0],[123,25,123,64,1],[124,25,124,62,1],[125,21,125,22,1],[126,17,126,18,1],[129,17,129,69,1],[130,22,130,31,1],[130,33,130,42,1],[130,44,130,47,1],[131,21,131,51,1],[134,17,134,61,1],[135,17,135,18,1],[136,21,136,57,1],[138,26,138,35,1],[138,37,138,46,1],[138,48,138,51,1],[139,21,139,22,1],[140,25,140,46,1],[141,29,141,35,0],[143,25,143,62,1],[144,25,144,71,1],[145,21,145,22,1],[146,17,146,18,1],[149,17,149,73,1],[150,22,150,31,1],[150,33,150,42,1],[150,44,150,47,1],[151,21,151,92,1],[153,17,153,132,1],[154,13,154,14,1],[155,18,155,64,0],[156,13,156,14,0],[157,17,157,99,0],[159,17,159,84,0],[161,17,161,38,0],[162,21,162,63,0],[163,13,163,14,0],[164,18,164,61,0],[165,13,165,14,0],[168,17,168,85,0],[170,17,170,73,0],[171,17,171,18,0],[172,21,172,55,0],[173,21,173,79,0],[174,21,174,83,0],[175,17,175,18,0],[177,17,177,72,0],[178,13,178,14,0],[180,13,180,32,1],[181,17,181,88,0],[183,13,183,42,1],[184,13,184,38,1],[186,13,186,43,1],[187,17,187,72,1],[189,13,189,33,1],[191,13,191,27,1],[192,9,192,10,1],[195,9,195,10,1],[196,13,196,43,1],[197,17,197,24,0],[199,13,199,45,1],[201,13,201,69,1],[202,13,202,39,1],[203,17,203,48,0],[205,13,205,72,1],[206,13,206,42,1],[207,17,207,51,0],[209,13,209,69,1],[210,13,210,75,1],[212,13,212,39,1],[213,17,213,35,1],[215,13,215,42,1],[216,13,216,14,1],[217,17,217,48,1],[218,17,218,38,1],[219,13,219,14,1],[221,17,221,49,0],[223,13,223,49,1],[224,13,224,106,1],[226,13,226,27,1],[226,28,226,35,1],[228,13,228,34,1],[229,17,229,72,1],[231,13,231,34,1],[232,17,232,75,1],[234,13,234,68,1],[235,9,235,10,1],[238,9,238,10,1],[239,13,239,30,1],[243,21,243,45,0],[246,21,246,105,0],[247,25,247,57,0],[249,21,249,44,0],[252,21,252,44,1],[255,21,255,51,0],[257,9,257,10,1],[281,9,281,10,1],[283,13,283,64,1],[285,13,285,88,1],[286,13,286,114,1],[287,13,287,40,1],[288,13,288,42,1],[291,13,291,14,1],[292,17,292,24,1],[292,26,292,34,1],[292,35,292,37,1],[292,38,292,54,1],[293,17,293,18,1],[294,21,294,45,1],[295,21,295,22,1],[297,25,297,59,1],[298,25,298,97,1],[301,25,301,53,1],[302,29,302,79,1],[303,21,303,22,1],[305,21,305,22,1],[306,25,306,83,1],[307,21,307,22,1],[308,17,308,18,1],[310,17,310,54,1],[311,17,311,58,1],[312,17,312,91,1],[313,17,313,89,1],[315,22,315,31,1],[315,33,315,50,1],[315,52,315,55,1],[316,17,316,18,1],[317,21,317,47,1],[318,21,318,22,0],[319,25,319,71,0],[320,25,320,73,0],[321,25,321,163,0],[322,21,322,22,0],[324,21,324,22,1],[325,25,325,71,1],[326,25,326,122,1],[327,21,327,22,1],[328,17,328,18,1],[330,17,330,63,1],[333,13,333,14,1],[334,17,334,64,1],[335,17,335,74,1],[336,13,336,14,1],[339,13,339,14,1],[340,17,340,57,1],[342,17,344,177,1],[345,17,345,33,1],[346,17,346,28,1],[347,13,347,14,1],[348,9,348,10,1],[358,9,358,10,1],[359,13,359,63,1],[362,18,362,27,1],[362,29,362,45,1],[362,47,362,50,1],[363,17,363,77,1],[366,13,366,48,1],[367,13,367,14,0],[368,17,368,63,0],[370,17,370,78,0],[371,17,371,18,0],[372,21,372,63,0],[373,25,373,48,0],[374,26,374,84,0],[375,21,375,22,0],[377,25,377,48,0],[378,21,378,22,0],[379,17,379,18,0],[380,22,380,63,0],[382,21,382,44,0],[383,13,383,14,0],[386,13,386,37,1],[394,13,394,32,1],[395,13,395,30,1],[397,13,397,49,1],[398,13,398,14,1],[400,17,400,84,1],[401,21,401,30,1],[406,17,406,122,0],[407,21,407,30,0],[410,17,410,53,0],[411,21,411,30,0],[414,17,414,52,0],[415,17,415,110,0],[418,17,418,43,0],[419,13,419,14,0],[421,13,421,39,1],[422,17,422,110,1],[425,20,426,78,0],[427,9,427,10,1],[430,9,430,10,1],[431,13,431,32,1],[433,13,433,20,1],[433,22,433,29,1],[433,30,433,32,1],[433,33,433,49,1],[434,17,434,41,1],[436,13,436,64,1],[437,13,437,31,1],[439,13,439,20,1],[439,22,439,29,1],[439,30,439,32,1],[439,33,439,49,1],[440,13,440,14,1],[441,17,441,68,1],[442,17,442,40,1],[443,13,443,14,1],[445,13,445,32,1],[446,9,446,10,1],[456,9,456,10,1],[457,13,462,15,1],[463,9,463,10,1],[478,9,478,10,1],[479,13,479,62,1],[491,13,491,58,1],[492,13,492,14,0],[493,17,493,33,0],[494,17,494,65,0],[495,13,495,14,0],[497,13,505,15,1],[506,9,506,10,1],[516,9,516,10,0],[517,13,523,15,0],[524,9,524,10,0],[532,9,532,10,0],[533,13,537,15,0],[538,9,538,10,0],[541,9,541,10,1],[542,13,542,56,1],[544,13,544,57,1],[545,13,545,14,1],[546,17,549,99,1],[550,13,550,14,1],[552,13,552,14,0],[553,17,553,91,0],[554,13,554,14,0],[556,13,556,57,1],[557,17,557,179,1],[559,13,559,58,1],[560,17,560,180,0],[562,13,562,55,1],[563,17,563,177,0],[565,13,565,31,1],[566,9,566,10,1],[603,13,603,47,1],[605,46,605,79,1],[613,17,613,18,1],[614,21,614,40,1],[615,25,615,50,0],[617,21,617,54,1],[618,17,618,18,1],[637,19,643,62,1],[644,13,644,14,1],[645,17,645,61,1],[646,17,646,39,1],[647,13,647,14,1],[651,13,651,14,1],[652,17,652,58,1],[653,17,653,88,1],[654,17,654,45,1],[656,17,656,36,1],[657,21,657,71,0],[659,17,659,67,1],[660,21,660,45,0],[662,17,662,98,1],[663,13,663,14,1],[667,20,668,51,1],[674,20,674,116,0],[677,20,677,69,0],[679,50,679,115,0],[688,19,688,105,0],[689,13,689,14,0],[690,17,690,37,0],[691,13,691,14,0],[693,64,697,39,0],[701,20,701,76,0],[704,20,704,68,0],[707,20,707,67,0],[709,50,709,96,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/IO/OsuStorage.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Configuration;
+
+namespace osu.Game.IO
+{
+    public class OsuStorage : MigratableStorage
+    {
+        /// &lt;summary&gt;
+        /// Indicates the error (if any) that occurred when initialising the custom storage during initial startup.
+        /// &lt;/summary&gt;
+        public readonly OsuStorageError Error;
+
+        /// &lt;summary&gt;
+        /// The custom storage path as selected by the user.
+        /// &lt;/summary&gt;
+        public string? CustomStoragePath =&gt; storageConfig.Get&lt;string&gt;(StorageConfig.FullPath);
+
+        /// &lt;summary&gt;
+        /// The default storage path to be used if a custom storage path hasn&#39;t been selected or is not accessible.
+        /// &lt;/summary&gt;
+        public string DefaultStoragePath =&gt; defaultStorage.GetFullPath(&quot;.&quot;);
+
+        private readonly GameHost host;
+        private readonly StorageConfigManager storageConfig;
+        private readonly Storage defaultStorage;
+
+        public override string[] IgnoreDirectories =&gt; new[]
+        {
+            &quot;cache&quot;,
+        };
+
+        public override string[] IgnoreFiles =&gt; new[]
+        {
+            &quot;framework.ini&quot;,
+            &quot;storage.ini&quot;,
+
+            // These may not be safe to move around.
+            &quot;AuthNative.dll&quot;,
+            &quot;AuthNative.so&quot;,
+            &quot;AuthNative.dylib&quot;
+        };
+
+        public override string[] IgnoreSuffixes =&gt; new[]
+        {
+            // Realm pipe files don&#39;t play well with copy operations
+            &quot;.note&quot;,
+            &quot;.lock&quot;,
+            &quot;.management&quot;,
+        };
+
+        public OsuStorage(GameHost host, Storage defaultStorage)
+            : base(defaultStorage, string.Empty)
+        {
+            this.host = host;
+            this.defaultStorage = defaultStorage;
+
+            storageConfig = new StorageConfigManager(defaultStorage);
+
+            if (!string.IsNullOrEmpty(CustomStoragePath))
+                TryChangeToCustomStorage(out Error);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the &lt;see cref=&quot;Storage&quot;/&gt; used for storing exported files.
+        /// &lt;/summary&gt;
+        public virtual Storage GetExportStorage() =&gt; GetStorageForDirectory(@&quot;exports&quot;);
+
+        /// &lt;summary&gt;
+        /// Resets the custom storage path, changing the target storage to the default location.
+        /// &lt;/summary&gt;
+        public void ResetCustomStoragePath()
+        {
+            ChangeDataPath(string.Empty);
+
+            ChangeTargetStorage(defaultStorage);
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the target data path without immediately switching.
+        /// This does NOT migrate any data.
+        /// The game should immediately be restarted after calling this.
+        /// &lt;/summary&gt;
+        public void ChangeDataPath(string newPath)
+        {
+            storageConfig.SetValue(StorageConfig.FullPath, newPath);
+            storageConfig.Save();
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to change to the user&#39;s custom storage path.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;error&quot;&gt;The error that occurred.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the custom storage path was used successfully. If not, &lt;paramref name=&quot;error&quot;/&gt; will be populated with the reason.&lt;/returns&gt;
+        public bool TryChangeToCustomStorage(out OsuStorageError error)
+        {
+            Debug.Assert(!string.IsNullOrEmpty(CustomStoragePath));
+
+            error = OsuStorageError.None;
+            Storage lastStorage = UnderlyingStorage;
+
+            Logger.Log($&quot;Attempting to use custom storage location {CustomStoragePath}&quot;);
+
+            try
+            {
+                Storage userStorage = host.GetStorage(CustomStoragePath);
+
+                if (!userStorage.ExistsDirectory(&quot;.&quot;) || !userStorage.GetFiles(&quot;.&quot;).Any())
+                    error = OsuStorageError.AccessibleButEmpty;
+
+                ChangeTargetStorage(userStorage);
+                Logger.Log($&quot;Storage successfully changed to {CustomStoragePath}.&quot;);
+            }
+            catch
+            {
+                error = OsuStorageError.NotAccessible;
+                ChangeTargetStorage(lastStorage);
+            }
+
+            if (error != OsuStorageError.None)
+                Logger.Log($&quot;Custom storage location could not be used ({error}).&quot;);
+
+            return error == OsuStorageError.None;
+        }
+
+        protected override void ChangeTargetStorage(Storage newStorage)
+        {
+            var lastStorage = UnderlyingStorage;
+            base.ChangeTargetStorage(newStorage);
+
+            if (lastStorage != null)
+            {
+                // for now we assume that if there was a previous storage, this is a migration operation.
+                // the logger shouldn&#39;t be set during initialisation as it can cause cross-talk in tests (due to being static).
+                Logger.Storage = UnderlyingStorage.GetStorageForDirectory(&quot;logs&quot;);
+            }
+        }
+
+        public override bool Migrate(Storage newStorage)
+        {
+            bool cleanupSucceeded = base.Migrate(newStorage);
+
+            ChangeDataPath(newStorage.GetFullPath(&quot;.&quot;));
+
+            return cleanupSucceeded;
+        }
+    }
+
+    public enum OsuStorageError
+    {
+        /// &lt;summary&gt;
+        /// No error.
+        /// &lt;/summary&gt;
+        None,
+
+        /// &lt;summary&gt;
+        /// Occurs when the target storage directory is accessible but does not already contain game files.
+        /// Only happens when the user changes the storage directory and then moves the files manually or mounts a different device to the same path.
+        /// &lt;/summary&gt;
+        AccessibleButEmpty,
+
+        /// &lt;summary&gt;
+        /// Occurs when the target storage directory cannot be accessed at all.
+        /// &lt;/summary&gt;
+        NotAccessible,
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,45,22,94,0],[27,45,27,76,0],[33,55,36,10,0],[38,49,47,10,0],[49,52,55,10,0],[58,15,58,49,0],[59,9,59,10,0],[60,13,60,30,0],[61,13,61,50,0],[63,13,63,70,0],[65,13,65,58,0],[66,17,66,53,0],[67,9,67,10,0],[72,54,72,88,0],[78,9,78,10,0],[79,13,79,42,0],[81,13,81,49,0],[82,9,82,10,0],[90,9,90,10,0],[91,13,91,69,0],[92,13,92,34,0],[93,9,93,10,0],[101,9,101,10,0],[102,13,102,68,0],[104,13,104,42,0],[105,13,105,53,0],[107,13,107,90,0],[110,13,110,14,0],[111,17,111,74,0],[113,17,113,91,0],[114,21,114,64,0],[116,17,116,50,0],[117,17,117,85,0],[118,13,118,14,0],[119,13,119,18,0],[120,13,120,14,0],[121,17,121,55,0],[122,17,122,50,0],[123,13,123,14,0],[125,13,125,47,0],[126,17,126,85,0],[128,13,128,50,0],[129,9,129,10,0],[132,9,132,10,0],[133,13,133,49,0],[134,13,134,50,0],[136,13,136,37,0],[137,13,137,14,0],[140,17,140,83,0],[141,13,141,14,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,62,0],[148,13,148,57,0],[150,13,150,37,0],[151,9,151,10,0]]);
+    </script>
+  </body>
+</html>

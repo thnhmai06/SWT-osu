@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Mods/ModColumn.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Humanizer;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Overlays.Mods.Input;
+using osu.Game.Rulesets.Mods;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.Mods
+{
+    public partial class ModColumn : ModSelectColumn
+    {
+        public readonly ModType ModType;
+
+        private IReadOnlyList&lt;ModState&gt; availableMods = Array.Empty&lt;ModState&gt;();
+
+        /// &lt;summary&gt;
+        /// Sets the list of mods to show in this column.
+        /// &lt;/summary&gt;
+        public IReadOnlyList&lt;ModState&gt; AvailableMods
+        {
+            get =&gt; availableMods;
+            set
+            {
+                Debug.Assert(value.All(mod =&gt; mod.Mod.Type == ModType));
+
+                availableMods = value;
+
+                foreach (var mod in availableMods)
+                {
+                    mod.Active.BindValueChanged(_ =&gt; updateState());
+                    mod.MatchingTextFilter.BindValueChanged(_ =&gt; updateState());
+                    mod.ValidForSelection.BindValueChanged(_ =&gt; updateState());
+                }
+
+                updateState();
+
+                if (IsLoaded)
+                    asyncLoadPanels();
+            }
+        }
+
+        protected virtual ModPanel CreateModPanel(ModState mod) =&gt; new ModPanel(mod);
+
+        private readonly bool allowIncompatibleSelection;
+
+        private readonly ToggleAllCheckbox? toggleAllCheckbox;
+
+        private Bindable&lt;ModSelectHotkeyStyle&gt; hotkeyStyle = null!;
+        private IModHotkeyHandler hotkeyHandler = null!;
+
+        private Task? latestLoadTask;
+        private ModPanel[]? latestLoadedPanels;
+        internal bool ItemsLoaded =&gt; latestLoadTask?.IsCompleted == true &amp;&amp; allPanelsLoaded;
+        private bool? wasPresent;
+
+        private bool allPanelsLoaded
+        {
+            get
+            {
+                if (latestLoadedPanels == null)
+                    return false;
+
+                foreach (var panel in latestLoadedPanels)
+                {
+                    if (panel.Parent == null)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
+        public override bool IsPresent =&gt; base.IsPresent || Scheduler.HasPendingTasks;
+
+        public ModColumn(ModType modType, bool allowIncompatibleSelection)
+        {
+            ModType = modType;
+            this.allowIncompatibleSelection = allowIncompatibleSelection;
+
+            HeaderText = ModType.Humanize(LetterCasing.Title);
+
+            if (allowIncompatibleSelection)
+            {
+                ControlContainer.Height = 35;
+                ControlContainer.Add(toggleAllCheckbox = new ToggleAllCheckbox(this)
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Scale = new Vector2(0.8f),
+                    RelativeSizeAxes = Axes.X,
+                    Shear = -OsuGame.SHEAR
+                });
+                ItemsFlow.Padding = new MarginPadding
+                {
+                    Top = 0,
+                    Bottom = 7,
+                    Horizontal = 7
+                };
+            }
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, OsuConfigManager configManager)
+        {
+            AccentColour = colours.ForModType(ModType);
+
+            if (toggleAllCheckbox != null)
+            {
+                toggleAllCheckbox.AccentColour = AccentColour;
+                toggleAllCheckbox.AccentHoverColour = AccentColour.Lighten(0.3f);
+            }
+
+            hotkeyStyle = configManager.GetBindable&lt;ModSelectHotkeyStyle&gt;(OsuSetting.ModSelectHotkeyStyle);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            toggleAllCheckbox?.Current.BindValueChanged(_ =&gt; updateToggleAllText(), true);
+            hotkeyStyle.BindValueChanged(val =&gt; hotkeyHandler = createHotkeyHandler(val.NewValue), true);
+            asyncLoadPanels();
+        }
+
+        private void updateToggleAllText()
+        {
+            Debug.Assert(toggleAllCheckbox != null);
+            toggleAllCheckbox.LabelText = toggleAllCheckbox.Current.Value ? CommonStrings.DeselectAll : CommonStrings.SelectAll;
+        }
+
+        private CancellationTokenSource? cancellationTokenSource;
+
+        private void asyncLoadPanels()
+        {
+            cancellationTokenSource?.Cancel();
+
+            var panels = availableMods.Select(mod =&gt; CreateModPanel(mod).With(panel =&gt; panel.Shear = Vector2.Zero)).ToArray();
+            latestLoadedPanels = panels;
+
+            latestLoadTask = LoadComponentsAsync(panels, loaded =&gt;
+            {
+                ItemsFlow.ChildrenEnumerable = loaded;
+                updateState();
+            }, (cancellationTokenSource = new CancellationTokenSource()).Token);
+        }
+
+        private void updateState()
+        {
+            Alpha = availableMods.All(mod =&gt; !mod.Visible) ? 0 : 1;
+
+            if (toggleAllCheckbox != null &amp;&amp; !SelectionAnimationRunning)
+            {
+                bool anyPanelsVisible = availableMods.Any(panel =&gt; panel.Visible);
+
+                toggleAllCheckbox.Alpha = anyPanelsVisible ? 1 : 0;
+
+                // checking `anyPanelsVisible` is important since `.All()` returns `true` for empty enumerables.
+                if (anyPanelsVisible)
+                    toggleAllCheckbox.Current.Value = availableMods.Where(panel =&gt; panel.Visible).All(panel =&gt; panel.Active.Value);
+            }
+        }
+
+        #region Bulk select / deselect
+
+        private const double initial_multiple_selection_delay = 120;
+
+        private double selectionDelay = initial_multiple_selection_delay;
+        private double lastSelection;
+
+        private readonly Queue&lt;Action&gt; pendingSelectionOperations = new Queue&lt;Action&gt;();
+
+        internal bool SelectionAnimationRunning =&gt; pendingSelectionOperations.Count &gt; 0;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // we override `IsPresent` to include the scheduler&#39;s pending task state to make async loads work correctly when columns are masked away
+            // (see description of https://github.com/ppy/osu/pull/19783).
+            // however, because of that we must also ensure that we signal correct invalidations (https://github.com/ppy/osu-framework/issues/5129).
+            // failing to do so causes columns to be stuck in &quot;present&quot; mode despite actually not being present themselves.
+            // this works because `Update()` will always run after a scheduler update, which is what causes the presence state change responsible for the failure.
+            if (wasPresent != null &amp;&amp; wasPresent != IsPresent)
+                Invalidate(Invalidation.Presence);
+            wasPresent = IsPresent;
+
+            if (selectionDelay == initial_multiple_selection_delay || Time.Current - lastSelection &gt;= selectionDelay)
+            {
+                if (pendingSelectionOperations.TryDequeue(out var dequeuedAction))
+                {
+                    dequeuedAction();
+
+                    // each time we play an animation, we decrease the time until the next animation (to ramp the visual and audible elements).
+                    selectionDelay = Math.Max(ModSelectPanel.SAMPLE_PLAYBACK_DELAY, selectionDelay * 0.8f);
+                    lastSelection = Time.Current;
+                }
+                else
+                {
+                    // reset the selection delay after all animations have been completed.
+                    // this will cause the next action to be immediately performed.
+                    selectionDelay = initial_multiple_selection_delay;
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Selects all mods.
+        /// &lt;/summary&gt;
+        public void SelectAll()
+        {
+            pendingSelectionOperations.Clear();
+
+            foreach (var button in availableMods.Where(b =&gt; !b.Active.Value &amp;&amp; b.Visible))
+                pendingSelectionOperations.Enqueue(() =&gt; button.Active.Value = true);
+        }
+
+        /// &lt;summary&gt;
+        /// Deselects all mods.
+        /// &lt;/summary&gt;
+        public void DeselectAll()
+        {
+            pendingSelectionOperations.Clear();
+
+            foreach (var button in availableMods.Where(b =&gt; b.Active.Value))
+            {
+                if (!button.Visible)
+                    button.Active.Value = false;
+                else
+                    pendingSelectionOperations.Enqueue(() =&gt; button.Active.Value = false);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Run any delayed selections (due to animation) immediately to leave mods in a good (final) state.
+        /// &lt;/summary&gt;
+        public void FlushPendingSelections()
+        {
+            while (pendingSelectionOperations.TryDequeue(out var dequeuedAction))
+                dequeuedAction();
+        }
+
+        private partial class ToggleAllCheckbox : OsuCheckbox
+        {
+            private Color4 accentColour;
+
+            public Color4 AccentColour
+            {
+                get =&gt; accentColour;
+                set
+                {
+                    accentColour = value;
+                    updateState();
+                }
+            }
+
+            private Color4 accentHoverColour;
+
+            public Color4 AccentHoverColour
+            {
+                get =&gt; accentHoverColour;
+                set
+                {
+                    accentHoverColour = value;
+                    updateState();
+                }
+            }
+
+            private readonly ModColumn column;
+
+            public ToggleAllCheckbox(ModColumn column)
+                : base(false)
+            {
+                this.column = column;
+            }
+
+            protected override void ApplyLabelParameters(SpriteText text)
+            {
+                base.ApplyLabelParameters(text);
+                text.Font = text.Font.With(weight: FontWeight.SemiBold);
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                updateState();
+            }
+
+            private void updateState()
+            {
+                Nub.AccentColour = AccentColour;
+                Nub.GlowingAccentColour = AccentHoverColour;
+                Nub.GlowColour = AccentHoverColour.Opacity(0.2f);
+            }
+
+            protected override void OnUserChange(bool value)
+            {
+                if (value)
+                    column.SelectAll();
+                else
+                    column.DeselectAll();
+            }
+        }
+
+        #endregion
+
+        #region Keyboard selection support
+
+        /// &lt;summary&gt;
+        /// Creates an appropriate &lt;see cref=&quot;IModHotkeyHandler&quot;/&gt; for this column&#39;s &lt;see cref=&quot;ModType&quot;/&gt; and
+        /// the supplied &lt;paramref name=&quot;hotkeyStyle&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private IModHotkeyHandler createHotkeyHandler(ModSelectHotkeyStyle hotkeyStyle)
+        {
+            switch (ModType)
+            {
+                case ModType.DifficultyReduction:
+                case ModType.DifficultyIncrease:
+                case ModType.Automation:
+                    return hotkeyStyle == ModSelectHotkeyStyle.Sequential
+                        ? SequentialModHotkeyHandler.Create(ModType)
+                        : new ClassicModHotkeyHandler(allowIncompatibleSelection);
+
+                default:
+                    return new NoopModHotkeyHandler();
+            }
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.ControlPressed || e.AltPressed || e.SuperPressed || e.Repeat)
+                return false;
+
+            return hotkeyHandler.HandleModHotkeyPressed(e, availableMods);
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,9,32,81,0],[39,20,39,33,0],[41,13,41,14,0],[42,17,42,47,0],[42,47,42,70,0],[42,70,42,73,0],[44,17,44,39,0],[46,17,46,24,0],[46,26,46,33,0],[46,34,46,36,0],[46,37,46,50,0],[47,17,47,18,0],[48,21,48,54,0],[48,54,48,67,0],[48,67,48,69,0],[49,21,49,66,0],[49,66,49,79,0],[49,79,49,81,0],[50,21,50,65,0],[50,65,50,78,0],[50,78,50,80,0],[51,17,51,18,0],[53,17,53,31,0],[55,17,55,30,0],[56,21,56,39,0],[57,13,57,14,0],[60,68,60,85,0],[66,9,66,68,0],[67,9,67,57,0],[71,38,71,92,0],[77,13,77,14,0],[78,17,78,48,0],[79,21,79,34,0],[81,17,81,24,0],[81,26,81,35,0],[81,36,81,38,0],[81,39,81,57,0],[82,17,82,18,0],[83,21,83,46,0],[84,25,84,38,0],[85,17,85,18,0],[87,17,87,29,0],[88,13,88,14,0],[91,43,91,86,0],[93,9,93,75,0],[94,9,94,10,0],[95,13,95,31,0],[96,13,96,74,0],[98,13,98,63,0],[100,13,100,44,0],[101,13,101,14,0],[102,17,102,46,0],[103,17,110,20,0],[111,17,116,19,0],[117,13,117,14,0],[118,9,118,10,0],[122,9,122,10,0],[123,13,123,56,0],[125,13,125,43,0],[126,13,126,14,0],[127,17,127,63,0],[128,17,128,82,0],[129,13,129,14,0],[131,13,131,108,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,33,0],[138,13,138,62,0],[138,62,138,83,0],[138,83,138,91,0],[139,13,139,49,0],[139,49,139,98,0],[139,98,139,106,0],[140,13,140,31,0],[141,9,141,10,0],[144,9,144,10,0],[145,13,145,53,0],[146,13,146,129,0],[147,9,147,10,0],[152,9,152,10,0],[153,13,153,47,0],[155,13,155,54,0],[155,54,155,88,0],[155,88,155,114,0],[155,114,155,115,0],[155,115,155,127,0],[156,13,156,41,0],[158,13,159,13,0],[159,13,159,14,0],[159,14,160,17,0],[160,17,160,55,0],[160,55,161,17,0],[161,17,161,31,0],[161,31,162,13,0],[162,13,162,14,0],[162,14,162,81,0],[163,9,163,10,0],[166,9,166,10,0],[167,13,167,46,0],[167,46,167,58,0],[167,58,167,68,0],[169,13,169,73,0],[170,13,170,14,0],[171,17,171,68,0],[171,68,171,81,0],[171,81,171,83,0],[173,17,173,68,0],[176,17,176,38,0],[177,21,177,84,0],[177,84,177,97,0],[177,97,177,112,0],[177,112,177,130,0],[177,130,177,132,0],[178,13,178,14,0],[179,9,179,10,0],[185,9,185,74,0],[188,9,188,89,0],[190,52,190,88,0],[193,9,193,10,0],[194,13,194,27,0],[201,13,201,63,0],[202,17,202,51,0],[203,13,203,36,0],[205,13,205,118,0],[206,13,206,14,0],[207,17,207,83,0],[208,17,208,18,0],[209,21,209,38,0],[212,21,212,108,0],[213,21,213,50,0],[214,17,214,18,0],[216,17,216,18,0],[219,21,219,71,0],[220,17,220,18,0],[221,13,221,14,0],[222,9,222,10,0],[228,9,228,10,0],[229,13,229,48,0],[231,13,231,20,0],[231,22,231,32,0],[231,33,231,35,0],[231,36,231,61,0],[231,61,231,89,0],[231,89,231,90,0],[232,17,232,58,0],[232,58,232,84,0],[232,84,232,86,0],[233,9,233,10,0],[239,9,239,10,0],[240,13,240,48,0],[242,13,242,20,0],[242,22,242,32,0],[242,33,242,35,0],[242,36,242,61,0],[242,61,242,75,0],[242,75,242,76,0],[243,13,243,14,0],[244,17,244,37,0],[245,21,245,49,0],[247,21,247,62,0],[247,62,247,89,0],[247,89,247,91,0],[248,13,248,14,0],[249,9,249,10,0],[255,9,255,10,0],[256,13,256,82,0],[257,17,257,34,0],[258,9,258,10,0],[266,24,266,36,0],[268,17,268,18,0],[269,21,269,42,0],[270,21,270,35,0],[271,17,271,18,0],[278,24,278,41,0],[280,17,280,18,0],[281,21,281,47,0],[282,21,282,35,0],[283,17,283,18,0],[289,19,289,30,0],[290,13,290,14,0],[291,17,291,38,0],[292,13,292,14,0],[295,13,295,14,0],[296,17,296,49,0],[297,17,297,73,0],[298,13,298,14,0],[302,13,302,14,0],[303,17,303,31,0],[304,13,304,14,0],[307,13,307,14,0],[308,17,308,49,0],[309,17,309,61,0],[310,17,310,66,0],[311,13,311,14,0],[314,13,314,14,0],[315,17,315,27,0],[316,21,316,40,0],[318,21,318,42,0],[319,13,319,14,0],[331,9,331,10,0],[332,13,332,29,0],[337,21,339,83,0],[342,21,342,55,0],[344,9,344,10,0],[347,9,347,10,0],[348,13,348,80,0],[349,17,349,30,0],[351,13,351,75,0],[352,9,352,10,0]]);
+    </script>
+  </body>
+</html>

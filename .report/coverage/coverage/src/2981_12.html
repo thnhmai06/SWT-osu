@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Rooms/PlaylistItem.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using Newtonsoft.Json;
+using osu.Framework.Bindables;
+using osu.Game.Beatmaps;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Utils;
+
+namespace osu.Game.Online.Rooms
+{
+    [JsonObject(MemberSerialization.OptIn)]
+    public class PlaylistItem : IEquatable&lt;PlaylistItem&gt;
+    {
+        [JsonProperty(&quot;id&quot;)]
+        public long ID { get; set; }
+
+        [JsonProperty(&quot;owner_id&quot;)]
+        public int OwnerID { get; set; }
+
+        [JsonProperty(&quot;ruleset_id&quot;)]
+        public int RulesetID { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;PlaylistItem&quot;/&gt; is still a valid selection for the &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/summary&gt;
+        [JsonProperty(&quot;expired&quot;)]
+        public bool Expired { get; set; }
+
+        [JsonProperty(&quot;playlist_order&quot;)]
+        public ushort? PlaylistOrder { get; set; }
+
+        [JsonProperty(&quot;played_at&quot;)]
+        public DateTimeOffset? PlayedAt { get; set; }
+
+        /// &lt;summary&gt;
+        /// Mods that participants are allowed to apply at their own discretion.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This will be empty when &lt;see cref=&quot;Freestyle&quot;/&gt; is &lt;c&gt;true&lt;/c&gt;, but participants may still select any mods from their choice of ruleset,
+        /// provided the mod is &lt;see cref=&quot;ModUtils.CheckCompatibleSet(IEnumerable{Mod})&quot;&gt;compatible&lt;/see&gt; with the rest of the user&#39;s selection.
+        /// &lt;/remarks&gt;
+        [JsonProperty(&quot;allowed_mods&quot;)]
+        public APIMod[] AllowedMods { get; set; } = Array.Empty&lt;APIMod&gt;();
+
+        /// &lt;summary&gt;
+        /// Mods that should be applied for every participant in the room.
+        /// &lt;/summary&gt;
+        [JsonProperty(&quot;required_mods&quot;)]
+        public APIMod[] RequiredMods { get; set; } = Array.Empty&lt;APIMod&gt;();
+
+        /// &lt;summary&gt;
+        /// Used for deserialising from the API.
+        /// &lt;/summary&gt;
+        [JsonProperty(&quot;beatmap&quot;)]
+        private APIBeatmap apiBeatmap
+        {
+            // This getter is required/used internally by JSON.NET during deserialisation to do default-value comparisons. It is never used during serialisation (see: ShouldSerializeapiBeatmap()).
+            // It will always return a null value on deserialisation, which JSON.NET will handle gracefully.
+            get =&gt; (APIBeatmap)Beatmap;
+            set =&gt; Beatmap = value;
+        }
+
+        /// &lt;summary&gt;
+        /// Used for serialising to the API.
+        /// &lt;/summary&gt;
+        [JsonProperty(&quot;beatmap_id&quot;)]
+        private int onlineBeatmapId
+        {
+            get =&gt; Beatmap.OnlineID;
+            // This setter is only required for client-side serialise-then-deserialise operations.
+            // Serialisation is supposed to emit only a `beatmap_id`, but a (non-null) `beatmap` is required on deserialise.
+            set =&gt; Beatmap = new APIBeatmap { OnlineID = value };
+        }
+
+        /// &lt;summary&gt;
+        /// Indicates whether participants in the room are able to pick their own choice of beatmap difficulty, ruleset, and mods.
+        /// &lt;/summary&gt;
+        [JsonProperty(&quot;freestyle&quot;)]
+        public bool Freestyle { get; set; }
+
+        /// &lt;summary&gt;
+        /// A beatmap representing this playlist item.
+        /// In many cases, this will *not* contain any usable information apart from OnlineID.
+        /// &lt;/summary&gt;
+        [JsonIgnore]
+        public IBeatmapInfo Beatmap { get; private set; }
+
+        [JsonIgnore]
+        public IBindable&lt;bool&gt; Valid =&gt; valid;
+
+        private readonly Bindable&lt;bool&gt; valid = new BindableBool(true);
+
+        [JsonIgnore]
+        public IBindable&lt;bool&gt; Completed =&gt; completed;
+
+        private readonly Bindable&lt;bool&gt; completed = new BindableBool(false);
+
+        [JsonConstructor]
+        private PlaylistItem()
+            : this(new APIBeatmap())
+        {
+        }
+
+        public PlaylistItem(IBeatmapInfo beatmap)
+        {
+            Beatmap = beatmap;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;PlaylistItem&quot;/&gt; from a &lt;see cref=&quot;MultiplayerPlaylistItem&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This will create unique instances of the &lt;see cref=&quot;RequiredMods&quot;/&gt; and &lt;see cref=&quot;AllowedMods&quot;/&gt; arrays but NOT unique instances of the contained &lt;see cref=&quot;APIMod&quot;/&gt;s.
+        /// &lt;/remarks&gt;
+        public PlaylistItem(MultiplayerPlaylistItem item)
+            : this(new APIBeatmap { OnlineID = item.BeatmapID, StarRating = item.StarRating, Checksum = item.BeatmapChecksum })
+        {
+            ID = item.ID;
+            OwnerID = item.OwnerID;
+            RulesetID = item.RulesetID;
+            Expired = item.Expired;
+            PlaylistOrder = item.PlaylistOrder;
+            PlayedAt = item.PlayedAt;
+            RequiredMods = item.RequiredMods.ToArray();
+            AllowedMods = item.AllowedMods.ToArray();
+            Freestyle = item.Freestyle;
+        }
+
+        public void MarkInvalid() =&gt; valid.Value = false;
+
+        public void MarkCompleted() =&gt; completed.Value = true;
+
+        #region Newtonsoft.Json implicit ShouldSerialize() methods
+
+        // The properties in this region are used implicitly by Newtonsoft.Json to not serialise certain fields in some cases.
+        // They rely on being named exactly the same as the corresponding fields (casing included) and as such should NOT be renamed
+        // unless the fields are also renamed.
+
+        [UsedImplicitly]
+        public bool ShouldSerializeID() =&gt; false;
+
+        // ReSharper disable once IdentifierTypo
+        [UsedImplicitly]
+        public bool ShouldSerializeapiBeatmap() =&gt; false;
+
+        #endregion
+
+        public PlaylistItem With(Optional&lt;long&gt; id = default, Optional&lt;IBeatmapInfo&gt; beatmap = default, Optional&lt;ushort?&gt; playlistOrder = default, Optional&lt;int&gt; ruleset = default)
+        {
+            return new PlaylistItem(beatmap.GetOr(Beatmap))
+            {
+                ID = id.GetOr(ID),
+                OwnerID = OwnerID,
+                RulesetID = ruleset.GetOr(RulesetID),
+                Expired = Expired,
+                PlaylistOrder = playlistOrder.GetOr(PlaylistOrder),
+                PlayedAt = PlayedAt,
+                AllowedMods = AllowedMods,
+                RequiredMods = RequiredMods,
+                Freestyle = Freestyle,
+                valid = { Value = Valid.Value },
+            };
+        }
+
+        public bool Equals(PlaylistItem? other)
+            =&gt; ID == other?.ID
+               &amp;&amp; Beatmap.OnlineID == other.Beatmap.OnlineID
+               &amp;&amp; RulesetID == other.RulesetID
+               &amp;&amp; Expired == other.Expired
+               &amp;&amp; PlaylistOrder == other.PlaylistOrder
+               &amp;&amp; AllowedMods.SequenceEqual(other.AllowedMods)
+               &amp;&amp; RequiredMods.SequenceEqual(other.RequiredMods)
+               &amp;&amp; Freestyle == other.Freestyle;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,26,22,30,0],[22,31,22,35,0],[25,30,25,34,0],[25,35,25,39,0],[28,32,28,36,0],[28,37,28,41,0],[34,31,34,35,0],[34,36,34,40,0],[37,40,37,44,0],[37,45,37,49,0],[40,43,40,47,0],[40,48,40,52,0],[50,39,50,43,0],[50,44,50,48,0],[50,53,50,74,0],[56,40,56,44,0],[56,45,56,49,0],[56,54,56,75,0],[66,20,66,39,0],[67,20,67,35,0],[76,20,76,36,0],[79,20,79,65,0],[86,33,86,37,0],[86,38,86,42,0],[93,39,93,43,0],[93,44,93,56,0],[96,41,96,46,0],[98,9,98,72,0],[101,45,101,54,0],[103,9,103,77,0],[107,15,107,37,0],[108,9,108,10,0],[109,9,109,10,0],[111,9,111,50,0],[112,9,112,10,0],[113,13,113,31,0],[114,9,114,10,0],[123,15,123,128,0],[124,9,124,10,0],[125,13,125,26,0],[126,13,126,36,0],[127,13,127,40,0],[128,13,128,36,0],[129,13,129,48,0],[130,13,130,38,0],[131,13,131,56,0],[132,13,132,54,0],[133,13,133,40,0],[134,9,134,10,0],[136,38,136,57,0],[138,40,138,62,0],[147,44,147,49,0],[151,52,151,57,0],[156,9,156,10,0],[157,13,169,15,0],[170,9,170,10,0],[173,16,180,47,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/Formats/LegacyStoryboardEncoder.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Storyboards;
+using osu.Game.Storyboards.Commands;
+
+namespace osu.Game.Beatmaps.Formats
+{
+    public class LegacyStoryboardEncoder
+    {
+        private readonly Storyboard storyboard;
+
+        public LegacyStoryboardEncoder(Storyboard storyboard)
+        {
+            this.storyboard = storyboard;
+        }
+
+        #region Storyboards embedded in beatmaps
+
+        public void EncodeGeneralToBeatmap(TextWriter writer)
+        {
+            writer.WriteLine(FormattableString.Invariant($@&quot;UseSkinSprites: {(storyboard.UseSkinSprites ? &#39;1&#39; : &#39;0&#39;)}&quot;));
+            writer.WriteLine(FormattableString.Invariant($@&quot;WidescreenStoryboard: {(storyboard.Beatmap.WidescreenStoryboard ? &#39;1&#39; : &#39;0&#39;)}&quot;));
+        }
+
+        public void EncodeEventsToBeatmap(TextWriter writer)
+            =&gt; encodeEvents(writer, StoryboardElementSource.Beatmap);
+
+        #endregion
+
+        #region Standalone storyboards
+
+        public void EncodeStandaloneStoryboard(TextWriter writer)
+        {
+            writer.WriteLine(@&quot;[Events]&quot;);
+            encodeEvents(writer, StoryboardElementSource.Shared);
+        }
+
+        #endregion
+
+        private void encodeEvents(TextWriter writer, StoryboardElementSource target)
+        {
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameModes/Edit/Modes/EditorModeDesign.cs#L189
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/Events/EventManager.cs#L368
+            writer.WriteLine(@&quot;// Background and Video events&quot;);
+
+            if (target == StoryboardElementSource.Beatmap)
+            {
+                // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1499
+                writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                    @&quot;{0},{1},&quot;&quot;{2}&quot;&quot;,{3},{4}&quot;,
+                    (int)LegacyEventType.Background, 0, storyboard.BeatmapInfo.Metadata.BackgroundFile, storyboard.BackgroundOffset.X, storyboard.BackgroundOffset.Y));
+            }
+
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1496
+            foreach (var video in storyboard.GetLayer(@&quot;Video&quot;).Elements.OfType&lt;StoryboardVideo&gt;().Where(v =&gt; v.Source == target))
+            {
+                writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                    @&quot;{0},{1},&quot;&quot;{2}&quot;&quot;&quot;,
+                    nameof(LegacyEventType.Video), video.StartTime, video.Path));
+                encodeCommands(writer, video);
+            }
+
+            foreach (var legacyLayer in Enum.GetValues&lt;LegacyStoryLayer&gt;().Except(LegacyStoryLayer.Video.Yield()))
+            {
+                writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                    @&quot;// Storyboard Layer {0} ({1})&quot;,
+                    (int)legacyLayer,
+                    legacyLayer));
+                string layerName = legacyLayer.ToString();
+                var layer = storyboard.GetLayer(layerName);
+                encodeSpritesFromLayer(writer, layer, target);
+            }
+
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1478-L1481
+            writer.WriteLine(@&quot;// Storyboard Sound Samples&quot;);
+
+            foreach (var legacyLayer in Enum.GetValues&lt;LegacyStoryLayer&gt;().Except(LegacyStoryLayer.Video.Yield()))
+            {
+                string layerName = legacyLayer.ToString();
+                var layer = storyboard.GetLayer(layerName);
+
+                foreach (var sample in layer.Elements.OfType&lt;StoryboardSampleInfo&gt;().Where(s =&gt; s.Source == target))
+                {
+                    writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                        @&quot;{0},{1},{2},&quot;&quot;{3}&quot;&quot;,{4}&quot;,
+                        nameof(LegacyEventType.Sample),
+                        sample.StartTime,
+                        (int)legacyLayer,
+                        sample.Path,
+                        sample.Volume));
+                }
+            }
+        }
+
+        private void encodeSpritesFromLayer(TextWriter writer, StoryboardLayer layer, StoryboardElementSource target)
+        {
+            foreach (var element in layer.Elements.Where(elem =&gt; elem.Source == target))
+            {
+                LegacyOrigins origin;
+
+                switch (element)
+                {
+                    case StoryboardAnimation animation:
+                    {
+                        origin = convertOrigin(animation.Origin);
+                        // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1505-L1507
+                        writer.WriteLine(string.Format(
+                            CultureInfo.InvariantCulture,
+                            @&quot;{0},{1},{2},&quot;&quot;{3}&quot;&quot;,{4},{5},{6},{7},{8}&quot;,
+                            nameof(LegacyEventType.Animation),
+                            layer.Name,
+                            origin,
+                            animation.Path,
+                            animation.InitialPosition.X,
+                            animation.InitialPosition.Y,
+                            animation.FrameCount,
+                            animation.FrameDelay,
+                            animation.LoopType));
+
+                        encodeCommands(writer, animation);
+                        break;
+                    }
+
+                    case StoryboardSprite sprite:
+                    {
+                        origin = convertOrigin(sprite.Origin);
+                        // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1502
+                        writer.WriteLine(string.Format(
+                            CultureInfo.InvariantCulture,
+                            @&quot;{0},{1},{2},&quot;&quot;{3}&quot;&quot;,{4},{5}&quot;,
+                            nameof(LegacyEventType.Sprite),
+                            layer.Name,
+                            origin,
+                            sprite.Path,
+                            sprite.InitialPosition.X,
+                            sprite.InitialPosition.Y));
+
+                        encodeCommands(writer, sprite);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void encodeCommands(TextWriter writer, StoryboardSprite sprite)
+        {
+            foreach (var loopingGroup in sprite.LoopingGroups)
+            {
+                writer.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    @&quot; L,{0},{1}&quot;,
+                    loopingGroup.StartTime, loopingGroup.TotalIterations));
+                foreach (var command in loopingGroup.AllCommands)
+                    // see `StoryboardLoopingCommand` ctor for why `relativeToTime` is passed
+                    encodeCommand(writer, command, 2, relativeToTime: loopingGroup.StartTime);
+            }
+
+            foreach (var command in sprite.Commands.AllCommands)
+                encodeCommand(writer, command, 1);
+
+            foreach (var triggerGroup in sprite.TriggerGroups)
+            {
+                // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1564-L1572
+                writer.Write(string.Format(
+                    CultureInfo.InvariantCulture,
+                    @&quot; T,{0}&quot;,
+                    triggerGroup.TriggerName));
+
+                if (triggerGroup.TriggerEndTime != 0)
+                {
+                    writer.Write(string.Format(
+                        CultureInfo.InvariantCulture,
+                        @&quot;,{0},{1}&quot;,
+                        triggerGroup.TriggerStartTime, triggerGroup.TriggerEndTime));
+                }
+
+                if (triggerGroup.GroupNumber != 0)
+                {
+                    writer.Write(string.Format(CultureInfo.InvariantCulture, @&quot;,{0}&quot;, -triggerGroup.GroupNumber));
+                }
+
+                writer.WriteLine();
+
+                foreach (var command in triggerGroup.AllCommands)
+                    encodeCommand(writer, command, 2);
+            }
+        }
+
+        private void encodeCommand(TextWriter writer, IStoryboardCommand command, int depth, double relativeToTime = 0)
+        {
+            for (int i = 0; i &lt; depth; ++i)
+                writer.Write(&#39; &#39;);
+
+            string typeAcronym;
+            string details;
+
+            if (command is IStoryboardLoopingCommand loopingCommand)
+                command = loopingCommand.OriginalCommand;
+
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1546-L1550
+            // https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1690-L1730
+            switch (command)
+            {
+                case StoryboardVectorScaleCommand vectorScale:
+                    typeAcronym = @&quot;V&quot;;
+                    details = vectorScale.StartValue == vectorScale.EndValue
+                        ? string.Format(CultureInfo.InvariantCulture, @&quot;{0},{1}&quot;, vectorScale.StartValue.X, vectorScale.StartValue.Y)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1},{2},{3}&quot;,
+                            vectorScale.StartValue.X, vectorScale.StartValue.Y, vectorScale.EndValue.X, vectorScale.EndValue.Y);
+                    break;
+
+                case StoryboardAlphaCommand fade:
+                    typeAcronym = @&quot;F&quot;;
+                    details = fade.StartValue == fade.EndValue
+                        ? fade.StartValue.ToString(CultureInfo.InvariantCulture)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1}&quot;,
+                            fade.StartValue,
+                            fade.EndValue);
+                    break;
+
+                case StoryboardRotationCommand rotation:
+                    typeAcronym = @&quot;R&quot;;
+                    details = rotation.StartValue == rotation.EndValue
+                        ? rotation.StartValue.ToString(CultureInfo.InvariantCulture)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1}&quot;,
+                            float.DegreesToRadians(rotation.StartValue),
+                            float.DegreesToRadians(rotation.EndValue));
+                    break;
+
+                case StoryboardScaleCommand scale:
+                    typeAcronym = @&quot;S&quot;;
+                    details = scale.StartValue == scale.EndValue
+                        ? scale.StartValue.ToString(CultureInfo.InvariantCulture)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1}&quot;,
+                            scale.StartValue,
+                            scale.EndValue);
+                    break;
+
+                // stable has M commands that combine X and Y movement, but we decompose those into X/Y with no way to undo
+
+                case StoryboardXCommand movementX:
+                    typeAcronym = @&quot;MX&quot;;
+                    details = movementX.StartValue == movementX.EndValue
+                        ? movementX.StartValue.ToString(CultureInfo.InvariantCulture)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1}&quot;,
+                            movementX.StartValue,
+                            movementX.EndValue);
+                    break;
+
+                case StoryboardYCommand movementY:
+                    typeAcronym = @&quot;MY&quot;;
+                    details = movementY.StartValue == movementY.EndValue
+                        ? movementY.StartValue.ToString(CultureInfo.InvariantCulture)
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1}&quot;,
+                            movementY.StartValue,
+                            movementY.EndValue);
+                    break;
+
+                case StoryboardColourCommand colour:
+                    typeAcronym = @&quot;C&quot;;
+                    details = colour.StartValue == colour.EndValue
+                        ? string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1},{2}&quot;,
+                            (int)(colour.StartValue.R * 255), (int)(colour.StartValue.G * 255), (int)(colour.StartValue.B * 255))
+                        : string.Format(CultureInfo.InvariantCulture,
+                            @&quot;{0},{1},{2},{3},{4},{5}&quot;,
+                            (int)(colour.StartValue.R * 255), (int)(colour.StartValue.G * 255), (int)(colour.StartValue.B * 255),
+                            (int)(colour.EndValue.R * 255), (int)(colour.EndValue.G * 255), (int)(colour.EndValue.B * 255));
+                    break;
+
+                case StoryboardFlipHCommand:
+                    typeAcronym = @&quot;P&quot;;
+                    details = @&quot;H&quot;;
+                    break;
+
+                case StoryboardFlipVCommand:
+                    typeAcronym = @&quot;P&quot;;
+                    details = @&quot;V&quot;;
+                    break;
+
+                case StoryboardBlendingParametersCommand:
+                    typeAcronym = @&quot;P&quot;;
+                    details = @&quot;A&quot;;
+                    break;
+
+                default:
+                    return;
+            }
+
+            writer.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                @&quot;{0},{1},{2},{3},{4}&quot;,
+                typeAcronym,
+                (int)command.Easing,
+                command.StartTime - relativeToTime,
+                command.StartTime == command.EndTime ? null : command.EndTime - relativeToTime,
+                details));
+        }
+
+        private LegacyOrigins convertOrigin(Anchor anchor)
+        {
+            switch (anchor)
+            {
+                case Anchor.TopLeft:
+                    return LegacyOrigins.TopLeft;
+
+                case Anchor.TopCentre:
+                    return LegacyOrigins.TopCentre;
+
+                case Anchor.TopRight:
+                    return LegacyOrigins.TopRight;
+
+                case Anchor.CentreLeft:
+                    return LegacyOrigins.CentreLeft;
+
+                case Anchor.Centre:
+                    return LegacyOrigins.Centre;
+
+                case Anchor.CentreRight:
+                    return LegacyOrigins.CentreRight;
+
+                case Anchor.BottomLeft:
+                    return LegacyOrigins.BottomLeft;
+
+                case Anchor.BottomCentre:
+                    return LegacyOrigins.BottomCentre;
+
+                case Anchor.BottomRight:
+                    return LegacyOrigins.BottomRight;
+
+                default:
+                    return LegacyOrigins.TopLeft;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,62,0],[21,9,21,10,0],[22,13,22,42,0],[23,9,23,10,0],[28,9,28,10,0],[29,13,29,122,0],[30,13,30,142,0],[31,9,31,10,0],[34,16,34,69,0],[41,9,41,10,0],[42,13,42,43,0],[43,13,43,66,0],[44,9,44,10,0],[49,9,49,10,0],[52,13,52,65,0],[54,13,54,59,0],[55,13,55,14,0],[57,17,59,168,0],[60,13,60,14,0],[63,13,63,20,0],[63,22,63,31,0],[63,32,63,34,0],[63,35,63,111,0],[63,111,63,129,0],[63,129,63,130,0],[64,13,64,14,0],[65,17,67,82,0],[68,17,68,47,0],[69,13,69,14,0],[71,13,71,20,0],[71,22,71,37,0],[71,38,71,40,0],[71,41,71,114,0],[72,13,72,14,0],[73,17,76,35,0],[77,17,77,59,0],[78,17,78,60,0],[79,17,79,63,0],[80,13,80,14,0],[83,13,83,62,0],[85,13,85,20,0],[85,22,85,37,0],[85,38,85,40,0],[85,41,85,114,0],[86,13,86,14,0],[87,17,87,59,0],[88,17,88,60,0],[90,17,90,24,0],[90,26,90,36,0],[90,37,90,39,0],[90,40,90,97,0],[90,97,90,115,0],[90,115,90,116,0],[91,17,91,18,0],[92,21,98,41,0],[99,17,99,18,0],[100,13,100,14,0],[101,9,101,10,0],[104,9,104,10,0],[105,13,105,20,0],[105,22,105,33,0],[105,34,105,36,0],[105,37,105,66,0],[105,66,105,87,0],[105,87,105,88,0],[106,13,106,14,0],[109,17,109,33,0],[112,21,112,22,0],[113,25,113,66,0],[115,25,126,50,0],[128,25,128,59,0],[129,25,129,31,0],[133,21,133,22,0],[134,25,134,63,0],[136,25,144,56,0],[146,25,146,56,0],[147,25,147,31,0],[150,13,150,14,0],[151,9,151,10,0],[154,9,154,10,0],[155,13,155,20,0],[155,22,155,38,0],[155,39,155,41,0],[155,42,155,62,0],[156,13,156,14,0],[157,17,160,76,0],[161,17,161,24,0],[161,26,161,37,0],[161,38,161,40,0],[161,41,161,65,0],[163,21,163,95,0],[164,13,164,14,0],[166,13,166,20,0],[166,22,166,33,0],[166,34,166,36,0],[166,37,166,64,0],[167,17,167,51,0],[169,13,169,20,0],[169,22,169,38,0],[169,39,169,41,0],[169,42,169,62,0],[170,13,170,14,0],[172,17,175,48,0],[177,17,177,54,0],[178,17,178,18,0],[179,21,182,86,0],[183,17,183,18,0],[185,17,185,51,0],[186,17,186,18,0],[187,21,187,115,0],[188,17,188,18,0],[190,17,190,36,0],[192,17,192,24,0],[192,26,192,37,0],[192,38,192,40,0],[192,41,192,65,0],[193,21,193,55,0],[194,13,194,14,0],[195,9,195,10,0],[198,9,198,10,0],[199,18,199,27,0],[199,29,199,38,0],[199,40,199,43,0],[200,17,200,35,0],[205,13,205,69,0],[206,17,206,58,0],[210,13,210,29,0],[213,21,213,40,0],[214,21,218,129,0],[219,21,219,27,0],[222,21,222,40,0],[223,21,228,44,0],[229,21,229,27,0],[232,21,232,40,0],[233,21,238,72,0],[239,21,239,27,0],[242,21,242,40,0],[243,21,248,45,0],[249,21,249,27,0],[254,21,254,41,0],[255,21,260,49,0],[261,21,261,27,0],[264,21,264,41,0],[265,21,270,49,0],[271,21,271,27,0],[274,21,274,40,0],[275,21,282,125,0],[283,21,283,27,0],[286,21,286,40,0],[287,21,287,36,0],[288,21,288,27,0],[291,21,291,40,0],[292,21,292,36,0],[293,21,293,27,0],[296,21,296,40,0],[297,21,297,36,0],[298,21,298,27,0],[301,21,301,28,0],[304,13,310,27,0],[311,9,311,10,0],[314,9,314,10,0],[315,13,315,28,0],[318,21,318,50,0],[321,21,321,52,0],[324,21,324,51,0],[327,21,327,53,0],[330,21,330,49,0],[333,21,333,54,0],[336,21,336,53,0],[339,21,339,55,0],[342,21,342,54,0],[345,21,345,50,0],[347,9,347,10,0]]);
+    </script>
+  </body>
+</html>

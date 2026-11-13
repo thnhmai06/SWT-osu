@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/BeatmapDifficultyCache.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Lists;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Difficulty;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Scoring;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+
+namespace osu.Game.Beatmaps
+{
+    /// &lt;summary&gt;
+    /// A component which performs and acts as a central cache for difficulty calculations of beatmap/ruleset/mod combinations.
+    /// Currently not persisted between game sessions.
+    /// &lt;/summary&gt;
+    public partial class BeatmapDifficultyCache : MemoryCachingComponent&lt;BeatmapDifficultyCache.DifficultyCacheLookup, StarDifficulty?&gt;
+    {
+        // Too many simultaneous updates can lead to stutters. One thread seems to work fine for song select display purposes.
+        private readonly ThreadedTaskScheduler updateScheduler = new ThreadedTaskScheduler(1, nameof(BeatmapDifficultyCache));
+
+        /// &lt;summary&gt;
+        /// All bindables that should be updated along with the current ruleset + mods.
+        /// &lt;/summary&gt;
+        private readonly WeakList&lt;BindableStarDifficulty&gt; trackedBindables = new WeakList&lt;BindableStarDifficulty&gt;();
+
+        /// &lt;summary&gt;
+        /// Cancellation sources used by tracked bindables.
+        /// &lt;/summary&gt;
+        private readonly List&lt;CancellationTokenSource&gt; linkedCancellationSources = new List&lt;CancellationTokenSource&gt;();
+
+        /// &lt;summary&gt;
+        /// Lock to be held when operating on &lt;see cref=&quot;trackedBindables&quot;/&gt; or &lt;see cref=&quot;linkedCancellationSources&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private readonly Lock bindableUpdateLock = new Lock();
+
+        private CancellationTokenSource trackedUpdateCancellationSource = new CancellationTokenSource();
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        [Resolved]
+        private Bindable&lt;RulesetInfo&gt; currentRuleset { get; set; } = null!;
+
+        [Resolved]
+        private Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; currentMods { get; set; } = null!;
+
+        private ModSettingChangeTracker? modSettingChangeTracker;
+        private ScheduledDelegate? debouncedModSettingsChange;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            currentRuleset.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateTrackedBindables));
+
+            currentMods.BindValueChanged(mods =&gt;
+            {
+                // A change in bindable here doesn&#39;t guarantee that mods have actually changed.
+                // However, we *do* want to make sure that the mod *references* are the same;
+                // `SequenceEqual()` without a comparer would fall back to `IEquatable`.
+                // Failing to ensure reference equality can cause setting change tracking to fail later.
+                if (mods.OldValue.SequenceEqual(mods.NewValue, ReferenceEqualityComparer.Instance))
+                    return;
+
+                modSettingChangeTracker?.Dispose();
+
+                Scheduler.AddOnce(updateTrackedBindables);
+
+                modSettingChangeTracker = new ModSettingChangeTracker(mods.NewValue);
+                modSettingChangeTracker.SettingChanged += _ =&gt;
+                {
+                    lock (bindableUpdateLock)
+                    {
+                        debouncedModSettingsChange?.Cancel();
+                        debouncedModSettingsChange = Scheduler.AddDelayed(updateTrackedBindables, 100);
+                    }
+                };
+            }, true);
+        }
+
+        /// &lt;summary&gt;
+        /// Notify this cache that a beatmap has been invalidated/updated.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;oldBeatmap&quot;&gt;The old beatmap model.&lt;/param&gt;
+        /// &lt;param name=&quot;newBeatmap&quot;&gt;The updated beatmap model.&lt;/param&gt;
+        public void Invalidate(IBeatmapInfo oldBeatmap, IBeatmapInfo newBeatmap)
+        {
+            base.Invalidate(lookup =&gt; lookup.BeatmapInfo.Equals(oldBeatmap));
+
+            lock (bindableUpdateLock)
+            {
+                bool trackedBindablesRefreshRequired = false;
+
+                foreach (var bsd in trackedBindables.Where(bsd =&gt; bsd.BeatmapInfo.Equals(oldBeatmap)))
+                {
+                    bsd.BeatmapInfo = newBeatmap;
+                    trackedBindablesRefreshRequired = true;
+                }
+
+                if (trackedBindablesRefreshRequired)
+                    Scheduler.AddOnce(updateTrackedBindables);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves a bindable containing the star difficulty of a &lt;see cref=&quot;BeatmapInfo&quot;/&gt; that follows the currently-selected ruleset and mods.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmapInfo&quot;&gt;The &lt;see cref=&quot;BeatmapInfo&quot;/&gt; to get the difficulty of.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional &lt;see cref=&quot;CancellationToken&quot;/&gt; which stops updating the star difficulty for the given &lt;see cref=&quot;BeatmapInfo&quot;/&gt;.&lt;/param&gt;
+        /// &lt;param name=&quot;computationDelay&quot;&gt;A delay in milliseconds before performing the &lt;/param&gt;
+        /// &lt;returns&gt;A bindable that is updated to contain the star difficulty when it becomes available. May be an approximation while in an initial calculating state.&lt;/returns&gt;
+        public IBindable&lt;StarDifficulty&gt; GetBindableDifficulty(IBeatmapInfo beatmapInfo, CancellationToken cancellationToken = default, int computationDelay = 0)
+        {
+            var bindable = new BindableStarDifficulty(beatmapInfo, cancellationToken)
+            {
+                // Start with an approximate known value instead of zero.
+                Value = new StarDifficulty(beatmapInfo.StarRating, 0)
+            };
+
+            lock (bindableUpdateLock)
+            {
+                var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(trackedUpdateCancellationSource.Token, cancellationToken);
+                linkedCancellationSources.Add(linkedSource);
+
+                updateBindable(bindable, currentRuleset.Value, currentMods.Value, linkedSource, computationDelay);
+
+                trackedBindables.Add(bindable);
+            }
+
+            return bindable;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the difficulty of a &lt;see cref=&quot;IBeatmapInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmapInfo&quot;&gt;The &lt;see cref=&quot;IBeatmapInfo&quot;/&gt; to get the difficulty of.&lt;/param&gt;
+        /// &lt;param name=&quot;rulesetInfo&quot;&gt;The &lt;see cref=&quot;IRulesetInfo&quot;/&gt; to get the difficulty with.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to get the difficulty with.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional &lt;see cref=&quot;CancellationToken&quot;/&gt; which stops computing the star difficulty.&lt;/param&gt;
+        /// &lt;param name=&quot;computationDelay&quot;&gt;In the case a cached lookup was not possible, a value in milliseconds of to wait until performing potentially intensive lookup.&lt;/param&gt;
+        /// &lt;returns&gt;
+        /// The requested &lt;see cref=&quot;StarDifficulty&quot;/&gt;, if non-&lt;see langword=&quot;null&quot;/&gt;.
+        /// A &lt;see langword=&quot;null&quot;/&gt; return value indicates that the difficulty process failed or was interrupted early,
+        /// and as such there is no usable star difficulty value to be returned.
+        /// &lt;/returns&gt;
+        public virtual Task&lt;StarDifficulty?&gt; GetDifficultyAsync(IBeatmapInfo beatmapInfo, IRulesetInfo? rulesetInfo = null, IEnumerable&lt;Mod&gt;? mods = null,
+                                                                CancellationToken cancellationToken = default, int computationDelay = 0)
+        {
+            // In the case that the user hasn&#39;t given us a ruleset, use the beatmap&#39;s default ruleset.
+            rulesetInfo ??= beatmapInfo.Ruleset;
+
+            var localBeatmapInfo = beatmapInfo as BeatmapInfo;
+            var localRulesetInfo = rulesetInfo as RulesetInfo;
+
+            // Difficulty can only be computed if the beatmap and ruleset are locally available.
+            if (localBeatmapInfo == null || localRulesetInfo == null)
+            {
+                // If not, fall back to the existing star difficulty (e.g. from an online source).
+                return Task.FromResult&lt;StarDifficulty?&gt;(new StarDifficulty(beatmapInfo.StarRating, (beatmapInfo as IBeatmapOnlineInfo)?.MaxCombo ?? 0));
+            }
+
+            return GetAsync(new DifficultyCacheLookup(localBeatmapInfo, localRulesetInfo, mods), cancellationToken, computationDelay);
+        }
+
+        protected override Task&lt;StarDifficulty?&gt; ComputeValueAsync(DifficultyCacheLookup lookup, CancellationToken cancellationToken = default)
+        {
+            return Task.Factory.StartNew(() =&gt;
+            {
+                if (CheckExists(lookup, out var existing))
+                    return existing;
+
+                return computeDifficulty(lookup, cancellationToken);
+            }, cancellationToken, TaskCreationOptions.HideScheduler | TaskCreationOptions.RunContinuationsAsynchronously, updateScheduler);
+        }
+
+        protected override bool CacheNullValues =&gt; false;
+
+        public Task&lt;List&lt;TimedDifficultyAttributes&gt;&gt; GetTimedDifficultyAttributesAsync(IWorkingBeatmap beatmap, Ruleset ruleset, Mod[] mods, CancellationToken cancellationToken = default)
+        {
+            return Task.Factory.StartNew(() =&gt; ruleset.CreateDifficultyCalculator(beatmap).CalculateTimed(mods, cancellationToken),
+                cancellationToken,
+                TaskCreationOptions.HideScheduler | TaskCreationOptions.RunContinuationsAsynchronously,
+                updateScheduler);
+        }
+
+        /// &lt;summary&gt;
+        /// Updates all tracked &lt;see cref=&quot;BindableStarDifficulty&quot;/&gt; using the current ruleset and mods.
+        /// &lt;/summary&gt;
+        private void updateTrackedBindables()
+        {
+            lock (bindableUpdateLock)
+            {
+                cancelTrackedBindableUpdate();
+
+                foreach (var b in trackedBindables)
+                {
+                    var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(trackedUpdateCancellationSource.Token, b.CancellationToken);
+                    linkedCancellationSources.Add(linkedSource);
+
+                    updateBindable(b, currentRuleset.Value, currentMods.Value, linkedSource);
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Cancels the existing update of all tracked &lt;see cref=&quot;BindableStarDifficulty&quot;/&gt; via &lt;see cref=&quot;updateTrackedBindables&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private void cancelTrackedBindableUpdate()
+        {
+            lock (bindableUpdateLock)
+            {
+                debouncedModSettingsChange?.Cancel();
+                debouncedModSettingsChange = null;
+
+                trackedUpdateCancellationSource.Cancel();
+                trackedUpdateCancellationSource = new CancellationTokenSource();
+
+                foreach (var c in linkedCancellationSources)
+                    c.Dispose();
+
+                linkedCancellationSources.Clear();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the value of a &lt;see cref=&quot;BindableStarDifficulty&quot;/&gt; with a given ruleset + mods.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;bindable&quot;&gt;The &lt;see cref=&quot;BindableStarDifficulty&quot;/&gt; to update.&lt;/param&gt;
+        /// &lt;param name=&quot;rulesetInfo&quot;&gt;The &lt;see cref=&quot;IRulesetInfo&quot;/&gt; to update with.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to update with.&lt;/param&gt;
+        /// &lt;param name=&quot;linkedCancellationTokenSource&quot;&gt;
+        /// A cancellation token source that may be used to cancel this update.
+        /// This token will be cancelled in one of two scenarios:
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;The owner of the bindable has requested the cancellation.&lt;/item&gt;
+        /// &lt;item&gt;An &lt;see cref=&quot;Invalidate&quot;/&gt; call has been issued, and as such ongoing calculations must be aborted to avoid stale values being potentially written to bindables.&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;computationDelay&quot;&gt;In the case a cached lookup was not possible, a value in milliseconds of to wait until performing potentially intensive lookup.&lt;/param&gt;
+        private void updateBindable(BindableStarDifficulty bindable, IRulesetInfo? rulesetInfo, IEnumerable&lt;Mod&gt;? mods, CancellationTokenSource linkedCancellationTokenSource, int computationDelay = 0)
+        {
+            // GetDifficultyAsync will fall back to existing data from IBeatmapInfo if not locally available
+            // (contrary to GetAsync)
+            GetDifficultyAsync(bindable.BeatmapInfo, rulesetInfo, mods, linkedCancellationTokenSource.Token, computationDelay)
+                .ContinueWith(task =&gt;
+                    {
+                        // We&#39;re on a threadpool thread, but we should exit back to the update thread so consumers can safely handle value-changed events.
+                        Schedule(() =&gt;
+                        {
+                            if (!linkedCancellationTokenSource.IsCancellationRequested)
+                            {
+                                StarDifficulty? starDifficulty = task.GetResultSafely();
+
+                                if (starDifficulty != null)
+                                    bindable.Value = starDifficulty.Value;
+                            }
+
+                            // Once the linked cancellation token source is of no remaining use to anybody, clean it up.
+                            lock (bindableUpdateLock)
+                            {
+                                linkedCancellationSources.Remove(linkedCancellationTokenSource);
+                                linkedCancellationTokenSource.Dispose();
+                            }
+                        });
+                    },
+                    // This continuation MUST run even if the antecedent `GetDifficultyAsync()` call was canceled in order to clean up `linkedCancellationTokenSource`.
+                    // Due to this, `ContinueWith()` CANNOT accept `linkedCancellationTokenSource.Token` here, because if it did, then in an event of a cancellation,
+                    // the continuation would never be scheduled for execution.
+                    CancellationToken.None);
+        }
+
+        /// &lt;summary&gt;
+        /// Computes the difficulty defined by a &lt;see cref=&quot;DifficultyCacheLookup&quot;/&gt; key, and stores it to the timed cache.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;key&quot;&gt;The &lt;see cref=&quot;DifficultyCacheLookup&quot;/&gt; that defines the computation parameters.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;StarDifficulty&quot;/&gt;.&lt;/returns&gt;
+        private StarDifficulty? computeDifficulty(in DifficultyCacheLookup key, CancellationToken cancellationToken = default)
+        {
+            // In the case that the user hasn&#39;t given us a ruleset, use the beatmap&#39;s default ruleset.
+            var beatmapInfo = key.BeatmapInfo;
+            var rulesetInfo = key.Ruleset;
+
+            try
+            {
+                var ruleset = rulesetInfo.CreateInstance();
+                Debug.Assert(ruleset != null);
+
+                PlayableCachedWorkingBeatmap workingBeatmap = new PlayableCachedWorkingBeatmap(beatmapManager.GetWorkingBeatmap(key.BeatmapInfo));
+                IBeatmap playableBeatmap = workingBeatmap.GetPlayableBeatmap(ruleset.RulesetInfo, key.OrderedMods, cancellationToken);
+
+                var difficulty = ruleset.CreateDifficultyCalculator(workingBeatmap).Calculate(key.OrderedMods, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var performanceCalculator = ruleset.CreatePerformanceCalculator();
+                if (performanceCalculator == null)
+                    return new StarDifficulty(difficulty, new PerformanceAttributes());
+
+                ScoreProcessor scoreProcessor = ruleset.CreateScoreProcessor();
+                scoreProcessor.Mods.Value = key.OrderedMods;
+                scoreProcessor.ApplyBeatmap(playableBeatmap);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                ScoreInfo perfectScore = new ScoreInfo(key.BeatmapInfo, ruleset.RulesetInfo)
+                {
+                    Passed = true,
+                    Accuracy = 1,
+                    Mods = key.OrderedMods,
+                    MaxCombo = scoreProcessor.MaximumCombo,
+                    Combo = scoreProcessor.MaximumCombo,
+                    TotalScore = scoreProcessor.MaximumTotalScore,
+                    Statistics = scoreProcessor.MaximumStatistics,
+                    MaximumStatistics = scoreProcessor.MaximumStatistics
+                };
+
+                var performance = performanceCalculator.Calculate(perfectScore, difficulty);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                return new StarDifficulty(difficulty, performance);
+            }
+            catch (OperationCanceledException)
+            {
+                // no need to log, cancellations are expected as part of normal operation.
+                return null;
+            }
+            catch (BeatmapInvalidForRulesetException invalidForRuleset)
+            {
+                if (rulesetInfo.Equals(beatmapInfo.Ruleset))
+                    Logger.Error(invalidForRuleset, $&quot;Failed to convert {beatmapInfo.OnlineID} to the beatmap&#39;s default ruleset ({beatmapInfo.Ruleset}).&quot;);
+
+                return null;
+            }
+            catch (Exception unknownException)
+            {
+                Logger.Error(unknownException, &quot;Failed to calculate beatmap difficulty&quot;);
+
+                return null;
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            modSettingChangeTracker?.Dispose();
+
+            cancelTrackedBindableUpdate();
+            updateScheduler.Dispose();
+        }
+
+        public readonly struct DifficultyCacheLookup : IEquatable&lt;DifficultyCacheLookup&gt;
+        {
+            public readonly BeatmapInfo BeatmapInfo;
+            public readonly RulesetInfo Ruleset;
+            public readonly Mod[] OrderedMods;
+
+            public DifficultyCacheLookup(BeatmapInfo beatmapInfo, RulesetInfo? ruleset, IEnumerable&lt;Mod&gt;? mods)
+            {
+                BeatmapInfo = beatmapInfo;
+                // In the case that the user hasn&#39;t given us a ruleset, use the beatmap&#39;s default ruleset.
+                Ruleset = ruleset ?? BeatmapInfo.Ruleset;
+                OrderedMods = mods?.OrderBy(m =&gt; m.Acronym).Select(mod =&gt; mod.DeepClone()).ToArray() ?? Array.Empty&lt;Mod&gt;();
+            }
+
+            public bool Equals(DifficultyCacheLookup other)
+                =&gt; BeatmapInfo.Equals(other.BeatmapInfo)
+                   &amp;&amp; Ruleset.Equals(other.Ruleset)
+                   &amp;&amp; OrderedMods.SequenceEqual(other.OrderedMods);
+
+            public override int GetHashCode()
+            {
+                var hashCode = new HashCode();
+
+                hashCode.Add(BeatmapInfo.ID);
+                hashCode.Add(Ruleset.ShortName);
+
+                foreach (var mod in OrderedMods)
+                    hashCode.Add(mod);
+
+                return hashCode.ToHashCode();
+            }
+        }
+
+        private class BindableStarDifficulty : Bindable&lt;StarDifficulty&gt;
+        {
+            public IBeatmapInfo BeatmapInfo;
+            public readonly CancellationToken CancellationToken;
+
+            public BindableStarDifficulty(IBeatmapInfo beatmapInfo, CancellationToken cancellationToken)
+            {
+                BeatmapInfo = beatmapInfo;
+                CancellationToken = cancellationToken;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// A working beatmap that caches its playable representation.
+        /// This is intended as single-use for when it is guaranteed that the playable beatmap can be reused.
+        /// &lt;/summary&gt;
+        private class PlayableCachedWorkingBeatmap : IWorkingBeatmap
+        {
+            private readonly IWorkingBeatmap working;
+            private IBeatmap? playable;
+
+            public PlayableCachedWorkingBeatmap(IWorkingBeatmap working)
+            {
+                this.working = working;
+            }
+
+            public IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList&lt;Mod&gt; mods)
+                =&gt; playable ??= working.GetPlayableBeatmap(ruleset, mods);
+
+            public IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList&lt;Mod&gt; mods, CancellationToken cancellationToken)
+                =&gt; playable ??= working.GetPlayableBeatmap(ruleset, mods, cancellationToken);
+
+            IBeatmapInfo IWorkingBeatmap.BeatmapInfo =&gt; working.BeatmapInfo;
+            bool IWorkingBeatmap.BeatmapLoaded =&gt; working.BeatmapLoaded;
+            bool IWorkingBeatmap.TrackLoaded =&gt; working.TrackLoaded;
+            IBeatmap IWorkingBeatmap.Beatmap =&gt; working.Beatmap;
+            Texture IWorkingBeatmap.GetBackground() =&gt; working.GetBackground();
+            Texture IWorkingBeatmap.GetPanelBackground() =&gt; working.GetPanelBackground();
+            Waveform IWorkingBeatmap.Waveform =&gt; working.Waveform;
+            Storyboard IWorkingBeatmap.Storyboard =&gt; working.Storyboard;
+            ISkin IWorkingBeatmap.Skin =&gt; working.Skin;
+            Track IWorkingBeatmap.Track =&gt; working.Track;
+            Track IWorkingBeatmap.LoadTrack() =&gt; working.LoadTrack();
+            Stream IWorkingBeatmap.GetStream(string storagePath) =&gt; working.GetStream(storagePath);
+            void IWorkingBeatmap.BeginAsyncLoad() =&gt; working.BeginAsyncLoad();
+            void IWorkingBeatmap.CancelAsyncLoad() =&gt; working.CancelAsyncLoad();
+            void IWorkingBeatmap.PrepareTrackForPreview(bool looping, double? offsetFromPreviewPoint) =&gt; working.PrepareTrackForPreview(looping, offsetFromPreviewPoint);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,9,39,127,0],[44,9,44,117,0],[49,9,49,120,0],[54,9,54,63,0],[56,9,56,105,0],[59,49,59,53,0],[59,54,59,58,0],[59,63,59,68,0],[62,56,62,60,0],[62,61,62,65,0],[62,70,62,75,0],[65,60,65,64,0],[65,65,65,69,0],[65,74,65,79,0],[71,9,71,10,0],[72,13,72,33,0],[74,13,74,50,0],[74,50,74,91,0],[74,91,74,93,0],[76,13,77,13,0],[77,13,77,14,0],[77,14,82,17,0],[82,17,82,100,0],[82,100,83,21,0],[83,21,83,28,0],[83,28,85,17,0],[85,17,85,52,0],[85,52,87,17,0],[87,17,87,59,0],[87,59,89,17,0],[89,17,89,86,0],[89,86,90,17,0],[90,17,91,17,0],[91,17,91,18,0],[91,18,93,21,0],[93,21,93,22,0],[93,22,94,25,0],[94,25,94,62,0],[94,62,95,25,0],[95,25,95,104,0],[95,104,96,21,0],[96,21,96,22,0],[96,22,97,17,0],[97,17,97,18,0],[97,18,97,19,0],[97,19,98,13,0],[98,13,98,14,0],[98,14,98,22,0],[99,9,99,10,0],[107,9,107,10,0],[108,13,108,39,0],[108,39,108,76,0],[108,76,108,78,0],[111,13,111,14,0],[112,17,112,62,0],[114,17,114,24,0],[114,26,114,33,0],[114,34,114,36,0],[114,37,114,67,0],[114,67,114,101,0],[114,101,114,102,0],[115,17,115,18,0],[116,21,116,50,0],[117,21,117,60,0],[118,17,118,18,0],[120,17,120,53,0],[121,21,121,63,0],[122,13,122,14,0],[123,9,123,10,0],[133,9,133,10,0],[134,13,138,15,0],[141,13,141,14,0],[142,17,142,142,0],[143,17,143,61,0],[145,17,145,115,0],[147,17,147,48,0],[148,13,148,14,0],[150,13,150,29,0],[151,9,151,10,0],[168,9,168,10,0],[170,13,170,49,0],[172,13,172,63,0],[173,13,173,63,0],[176,13,176,70,0],[177,13,177,14,0],[179,17,179,153,0],[182,13,182,135,0],[183,9,183,10,0],[186,9,186,10,0],[187,13,188,13,0],[188,13,188,14,0],[188,14,189,17,0],[189,17,189,59,0],[189,59,190,21,0],[190,21,190,37,0],[190,37,192,17,0],[192,17,192,69,0],[192,69,193,13,0],[193,13,193,14,0],[193,14,193,140,0],[194,9,194,10,0],[196,52,196,57,0],[199,9,199,10,0],[200,13,200,48,0],[200,48,200,131,0],[200,131,203,34,0],[204,9,204,10,0],[210,9,210,10,0],[212,13,212,14,0],[213,17,213,47,0],[215,17,215,24,0],[215,26,215,31,0],[215,32,215,34,0],[215,35,215,51,0],[216,17,216,18,0],[217,21,217,148,0],[218,21,218,65,0],[220,21,220,94,0],[221,17,221,18,0],[222,13,222,14,0],[223,9,223,10,0],[229,9,229,10,0],[231,13,231,14,0],[232,17,232,54,0],[233,17,233,51,0],[235,17,235,58,0],[236,17,236,81,0],[238,17,238,24,0],[238,26,238,31,0],[238,32,238,34,0],[238,35,238,60,0],[239,21,239,33,0],[241,17,241,51,0],[242,13,242,14,0],[243,9,243,10,0],[261,9,261,10,0],[264,13,266,21,0],[266,21,266,22,0],[266,22,268,25,0],[268,25,269,25,0],[269,25,269,26,0],[269,26,270,29,0],[270,29,270,88,0],[270,88,271,29,0],[271,29,271,30,0],[271,30,272,33,0],[272,33,272,89,0],[272,89,274,33,0],[274,33,274,60,0],[274,60,275,37,0],[275,37,275,75,0],[275,75,276,29,0],[276,29,276,30,0],[276,30,280,29,0],[280,29,280,30,0],[280,30,281,33,0],[281,33,281,97,0],[281,97,282,33,0],[282,33,282,73,0],[282,73,283,29,0],[283,29,283,30,0],[283,30,284,25,0],[284,25,284,26,0],[284,26,284,28,0],[284,28,285,21,0],[285,21,285,22,0],[285,22,289,45,0],[290,9,290,10,0],[299,9,299,10,0],[301,13,301,47,0],[302,13,302,43,0],[305,13,305,14,0],[306,17,306,60,0],[307,17,307,47,0],[309,17,309,147,0],[310,17,310,135,0],[312,17,312,131,0],[313,17,313,66,0],[315,17,315,83,0],[316,17,316,51,0],[317,21,317,88,0],[319,17,319,80,0],[320,17,320,61,0],[321,17,321,62,0],[322,17,322,66,0],[324,17,334,19,0],[336,17,336,93,0],[337,17,337,66,0],[339,17,339,68,0],[341,13,341,47,0],[342,13,342,14,0],[344,17,344,29,0],[346,13,346,72,0],[347,13,347,14,0],[348,17,348,61,0],[349,21,349,156,0],[351,17,351,29,0],[353,13,353,47,0],[354,13,354,14,0],[355,17,355,90,0],[357,17,357,29,0],[359,9,359,10,0],[362,9,362,10,0],[363,13,363,39,0],[365,13,365,48,0],[367,13,367,43,0],[368,13,368,39,0],[369,9,369,10,0],[378,13,378,14,0],[379,17,379,43,0],[381,17,381,58,0],[382,17,382,50,0],[382,50,382,59,0],[382,59,382,75,0],[382,75,382,90,0],[382,90,382,124,0],[383,13,383,14,0],[386,20,388,67,0],[391,13,391,14,0],[392,17,392,47,0],[394,17,394,46,0],[395,17,395,49,0],[397,17,397,24,0],[397,26,397,33,0],[397,34,397,36,0],[397,37,397,48,0],[398,21,398,39,0],[400,17,400,46,0],[401,13,401,14,0],[409,13,409,105,0],[410,13,410,14,0],[411,17,411,43,0],[412,17,412,55,0],[413,13,413,14,0],[425,13,425,73,0],[426,13,426,14,0],[427,17,427,40,0],[428,13,428,14,0],[431,20,431,74,0],[434,20,434,93,0],[436,57,436,76,0],[437,51,437,72,0],[438,49,438,68,0],[439,49,439,64,0],[440,56,440,79,0],[441,61,441,89,0],[442,50,442,66,0],[443,54,443,72,0],[444,43,444,55,0],[445,44,445,57,0],[446,50,446,69,0],[447,69,447,99,0],[448,54,448,78,0],[449,55,449,80,0],[450,106,450,169,0]]);
+    </script>
+  </body>
+</html>

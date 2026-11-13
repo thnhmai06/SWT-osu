@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/LegacyHealthDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Utils;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Skinning
+{
+    public partial class LegacyHealthDisplay : HealthDisplay, ISerialisableDrawable
+    {
+        private const double epic_cutoff = 0.5;
+
+        private LegacyHealthPiece fill;
+        private LegacyHealthPiece marker;
+
+        private float maxFillWidth;
+
+        private bool isNewStyle;
+
+        public bool UsesFixedAnchor { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(ISkinSource source)
+        {
+            AutoSizeAxes = Axes.Both;
+
+            var skin = source.FindProvider(s =&gt; getTexture(s, &quot;bg&quot;) != null);
+
+            // the marker lookup to decide which display style must be performed on the source of the bg, which is the most common element.
+            isNewStyle = getTexture(skin, &quot;marker&quot;) != null;
+
+            // background implementation is the same for both versions.
+            AddInternal(new Sprite { Texture = getTexture(skin, &quot;bg&quot;) });
+
+            if (isNewStyle)
+            {
+                AddRangeInternal(new[]
+                {
+                    fill = new LegacyNewStyleFill(skin),
+                    marker = new LegacyNewStyleMarker(skin),
+                });
+            }
+            else
+            {
+                AddRangeInternal(new[]
+                {
+                    fill = new LegacyOldStyleFill(skin),
+                    marker = new LegacyOldStyleMarker(skin),
+                });
+            }
+
+            fill.Current.BindTo(Current);
+            marker.Current.BindTo(Current);
+
+            maxFillWidth = fill.Width;
+            fill.Width = 0;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            fill.Width = Interpolation.ValueAt(
+                Math.Clamp(Clock.ElapsedFrameTime, 0, 200),
+                fill.Width, (float)Current.Value * maxFillWidth, 0, 200, Easing.OutQuint);
+
+            marker.Position = fill.Position + new Vector2(fill.DrawWidth, isNewStyle ? fill.DrawHeight / 2 : 0);
+        }
+
+        protected override void HealthChanged(bool increase)
+        {
+            if (increase)
+                marker.Bulge();
+            base.HealthChanged(increase);
+        }
+
+        protected override void Flash() =&gt; marker.Flash(Current.Value &gt;= epic_cutoff);
+
+        private static Texture getTexture(ISkin skin, string name) =&gt; skin?.GetTexture($&quot;scorebar-{name}&quot;);
+
+        private static Color4 getFillColour(double hp)
+        {
+            if (hp &lt; 0.2)
+                return LegacyUtils.InterpolateNonLinear(0.2 - hp, Color4.Black, Color4.Red, 0, 0.2);
+
+            if (hp &lt; epic_cutoff)
+                return LegacyUtils.InterpolateNonLinear(0.5 - hp, Color4.White, Color4.Black, 0, 0.5);
+
+            return Color4.White;
+        }
+
+        public partial class LegacyOldStyleMarker : LegacyMarker
+        {
+            private readonly Texture normalTexture;
+            private readonly Texture dangerTexture;
+            private readonly Texture superDangerTexture;
+
+            public LegacyOldStyleMarker(ISkin skin)
+            {
+                normalTexture = getTexture(skin, &quot;ki&quot;);
+                dangerTexture = getTexture(skin, &quot;kidanger&quot;);
+                superDangerTexture = getTexture(skin, &quot;kidanger2&quot;);
+            }
+
+            public override Sprite CreateSprite() =&gt; new Sprite
+            {
+                Texture = normalTexture,
+                Origin = Anchor.Centre,
+            };
+
+            protected override void Update()
+            {
+                base.Update();
+
+                if (Current.Value &lt; 0.2f)
+                    Main.Texture = superDangerTexture;
+                else if (Current.Value &lt; epic_cutoff)
+                    Main.Texture = dangerTexture;
+                else
+                    Main.Texture = normalTexture;
+            }
+        }
+
+        public partial class LegacyNewStyleMarker : LegacyMarker
+        {
+            private readonly ISkin skin;
+
+            public LegacyNewStyleMarker(ISkin skin)
+            {
+                this.skin = skin;
+            }
+
+            public override Sprite CreateSprite() =&gt; new Sprite
+            {
+                Texture = getTexture(skin, &quot;marker&quot;),
+                Origin = Anchor.Centre,
+            };
+
+            protected override void Update()
+            {
+                base.Update();
+
+                Main.Colour = getFillColour(Current.Value);
+                Main.Blending = Current.Value &lt; epic_cutoff ? BlendingParameters.Inherit : BlendingParameters.Additive;
+            }
+        }
+
+        internal abstract partial class LegacyFill : LegacyHealthPiece
+        {
+            protected LegacyFill(ISkin skin)
+            {
+                // required for sizing correctly..
+                var firstFrame = getTexture(skin, &quot;colour-0&quot;);
+
+                if (firstFrame == null)
+                {
+                    InternalChild = new Sprite { Texture = getTexture(skin, &quot;colour&quot;) };
+                    Size = InternalChild.Size;
+                }
+                else
+                {
+                    InternalChild = skin.GetAnimation(&quot;scorebar-colour&quot;, true, true, startAtCurrentTime: false, applyConfigFrameRate: true) ?? Empty();
+                    Size = new Vector2(firstFrame.DisplayWidth, firstFrame.DisplayHeight);
+                }
+
+                Masking = true;
+            }
+        }
+
+        internal partial class LegacyOldStyleFill : LegacyFill
+        {
+            public LegacyOldStyleFill(ISkin skin)
+                : base(skin)
+            {
+                Position = new Vector2(3, 10) * LegacySkin.STABLE_MAGIC_SCALE_FACTOR;
+            }
+        }
+
+        internal partial class LegacyNewStyleFill : LegacyFill
+        {
+            public LegacyNewStyleFill(ISkin skin)
+                : base(skin)
+            {
+                Position = new Vector2(7.5f, 7.8f) * LegacySkin.STABLE_MAGIC_SCALE_FACTOR;
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                Colour = getFillColour(Current.Value);
+            }
+        }
+
+        public abstract partial class LegacyMarker : LegacyHealthPiece
+        {
+            protected Sprite Main;
+
+            private Sprite explode;
+
+            protected LegacyMarker()
+            {
+                Origin = Anchor.Centre;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                InternalChildren = new Drawable[]
+                {
+                    Main = CreateSprite(),
+                    explode = CreateSprite().With(s =&gt;
+                    {
+                        s.Alpha = 0;
+                        s.Blending = BlendingParameters.Additive;
+                    }),
+                };
+            }
+
+            public abstract Sprite CreateSprite();
+
+            public override void Flash(bool isEpic)
+            {
+                Bulge();
+                explode.Texture = Main.Texture;
+                explode.Blending = isEpic ? BlendingParameters.Additive : BlendingParameters.Inherit;
+                explode.ScaleTo(1).Then().ScaleTo(isEpic ? 2 : 1.6f, 120, Easing.Out);
+                explode.FadeOutFromOne(120, Easing.Out);
+            }
+
+            public override void Bulge()
+            {
+                base.Bulge();
+                Main.ScaleTo(1.2f).Then().ScaleTo(0.8f, 150);
+            }
+        }
+
+        public partial class LegacyHealthPiece : CompositeDrawable
+        {
+            public Bindable&lt;double&gt; Current { get; } = new Bindable&lt;double&gt;();
+
+            public virtual void Bulge()
+            {
+            }
+
+            public virtual void Flash(bool isEpic)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,39,32,43,0],[32,44,32,48,0],[36,9,36,10,0],[37,13,37,38,0],[39,13,39,49,0],[39,49,39,76,0],[39,76,39,78,0],[42,13,42,61,0],[45,13,45,74,0],[47,13,47,28,0],[48,13,48,14,0],[49,17,53,20,0],[54,13,54,14,0],[56,13,56,14,0],[57,17,61,20,0],[62,13,62,14,0],[64,13,64,42,0],[65,13,65,44,0],[67,13,67,39,0],[68,13,68,28,0],[69,9,69,10,0],[72,9,72,10,0],[73,13,73,27,0],[75,13,77,91,0],[79,13,79,113,0],[80,9,80,10,0],[83,9,83,10,0],[84,13,84,26,0],[85,17,85,32,0],[86,13,86,42,0],[87,9,87,10,0],[89,44,89,86,0],[91,71,91,107,0],[94,9,94,10,0],[95,13,95,26,0],[96,17,96,101,0],[98,13,98,34,0],[99,17,99,103,0],[101,13,101,33,0],[102,9,102,10,0],[110,13,110,52,0],[111,13,111,14,0],[112,17,112,56,0],[113,17,113,62,0],[114,17,114,68,0],[115,13,115,14,0],[117,54,121,14,0],[124,13,124,14,0],[125,17,125,31,0],[127,17,127,42,0],[128,21,128,55,0],[129,22,129,54,0],[130,21,130,50,0],[132,21,132,50,0],[133,13,133,14,0],[140,13,140,52,0],[141,13,141,14,0],[142,17,142,34,0],[143,13,143,14,0],[145,54,149,14,0],[152,13,152,14,0],[153,17,153,31,0],[155,17,155,60,0],[156,17,156,120,0],[157,13,157,14,0],[162,13,162,45,0],[163,13,163,14,0],[165,17,165,63,0],[167,17,167,40,0],[168,17,168,18,0],[169,21,169,89,0],[170,21,170,47,0],[171,17,171,18,0],[173,17,173,18,0],[174,21,174,152,0],[175,21,175,91,0],[176,17,176,18,0],[178,17,178,32,0],[179,13,179,14,0],[185,19,185,29,0],[186,13,186,14,0],[187,17,187,86,0],[188,13,188,14,0],[194,19,194,29,0],[195,13,195,14,0],[196,17,196,91,0],[197,13,197,14,0],[200,13,200,14,0],[201,17,201,31,0],[202,17,202,55,0],[203,13,203,14,0],[212,13,212,37,0],[213,13,213,14,0],[214,17,214,40,0],[215,13,215,14,0],[219,13,219,14,0],[220,17,224,21,0],[224,21,224,22,0],[224,22,225,25,0],[225,25,225,37,0],[225,37,226,25,0],[226,25,226,66,0],[226,66,227,21,0],[227,21,227,22,0],[227,22,228,19,0],[229,13,229,14,0],[234,13,234,14,0],[235,17,235,25,0],[236,17,236,48,0],[237,17,237,102,0],[238,17,238,87,0],[239,17,239,57,0],[240,13,240,14,0],[243,13,243,14,0],[244,17,244,30,0],[245,17,245,62,0],[246,13,246,14,0],[251,47,251,51,0],[251,56,251,78,0],[254,13,254,14,0],[255,13,255,14,0],[258,13,258,14,0],[259,13,259,14,0]]);
+    </script>
+  </body>
+</html>

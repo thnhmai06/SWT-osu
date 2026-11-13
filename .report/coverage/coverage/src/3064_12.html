@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Leaderboards/LeaderboardManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play.Leaderboards;
+using Realms;
+
+namespace osu.Game.Online.Leaderboards
+{
+    public partial class LeaderboardManager : Component
+    {
+        /// &lt;summary&gt;
+        /// The latest leaderboard scores fetched by the criteria in &lt;see cref=&quot;CurrentCriteria&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IBindable&lt;LeaderboardScores?&gt; Scores =&gt; scores;
+
+        private readonly Bindable&lt;LeaderboardScores?&gt; scores = new Bindable&lt;LeaderboardScores?&gt;();
+
+        public LeaderboardCriteria? CurrentCriteria { get; private set; }
+
+        private IDisposable? localScoreSubscription;
+        private GetScoresRequest? inFlightOnlineRequest;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; } = null!;
+
+        /// &lt;summary&gt;
+        /// Fetch leaderboard content with the new criteria specified in the background.
+        /// On completion, &lt;see cref=&quot;Scores&quot;/&gt; will be updated with the results from this call (unless a more recent call with a different criteria has completed).
+        /// &lt;/summary&gt;
+        public void FetchWithCriteria(LeaderboardCriteria newCriteria, bool forceRefresh = false)
+        {
+            if (!ThreadSafety.IsUpdateThread)
+                throw new InvalidOperationException(@$&quot;{nameof(FetchWithCriteria)} must be called from the update thread.&quot;);
+
+            if (!forceRefresh &amp;&amp; CurrentCriteria?.Equals(newCriteria) == true &amp;&amp; scores.Value?.FailState == null)
+                return;
+
+            CurrentCriteria = newCriteria;
+            localScoreSubscription?.Dispose();
+            inFlightOnlineRequest?.Cancel();
+            scores.Value = null;
+
+            if (newCriteria.Beatmap == null || newCriteria.Ruleset == null)
+            {
+                scores.Value = LeaderboardScores.Failure(LeaderboardFailState.NoneSelected);
+                return;
+            }
+
+            switch (newCriteria.Scope)
+            {
+                case BeatmapLeaderboardScope.Local:
+                {
+                    localScoreSubscription = realm.RegisterForNotifications(r =&gt;
+                        r.All&lt;ScoreInfo&gt;().Filter($&quot;{nameof(ScoreInfo.BeatmapInfo)}.{nameof(BeatmapInfo.ID)} == $0&quot;
+                                                  + $&quot; AND {nameof(ScoreInfo.BeatmapInfo)}.{nameof(BeatmapInfo.Hash)} == {nameof(ScoreInfo.BeatmapHash)}&quot;
+                                                  + $&quot; AND {nameof(ScoreInfo.Ruleset)}.{nameof(RulesetInfo.ShortName)} == $1&quot;
+                                                  + $&quot; AND {nameof(ScoreInfo.DeletePending)} == false&quot;
+                            , newCriteria.Beatmap.ID, newCriteria.Ruleset.ShortName), localScoresChanged);
+                    return;
+                }
+
+                default:
+                {
+                    if (newCriteria.Sorting != LeaderboardSortMode.Score)
+                        throw new NotSupportedException($@&quot;Requesting online scores with a {nameof(LeaderboardSortMode)} other than {nameof(LeaderboardSortMode.Score)} is not supported&quot;);
+
+                    if (!api.IsLoggedIn)
+                    {
+                        scores.Value = LeaderboardScores.Failure(LeaderboardFailState.NotLoggedIn);
+                        return;
+                    }
+
+                    if (!newCriteria.Ruleset.IsLegacyRuleset())
+                    {
+                        scores.Value = LeaderboardScores.Failure(LeaderboardFailState.RulesetUnavailable);
+                        return;
+                    }
+
+                    if (newCriteria.Beatmap.OnlineID &lt;= 0 || newCriteria.Beatmap.Status &lt;= BeatmapOnlineStatus.Pending)
+                    {
+                        scores.Value = LeaderboardScores.Failure(LeaderboardFailState.BeatmapUnavailable);
+                        return;
+                    }
+
+                    if ((newCriteria.Scope.RequiresSupporter(newCriteria.ExactMods != null)) &amp;&amp; !api.LocalUser.Value.IsSupporter)
+                    {
+                        scores.Value = LeaderboardScores.Failure(LeaderboardFailState.NotSupporter);
+                        return;
+                    }
+
+                    if (newCriteria.Scope == BeatmapLeaderboardScope.Team &amp;&amp; api.LocalUser.Value.Team == null)
+                    {
+                        scores.Value = LeaderboardScores.Failure(LeaderboardFailState.NoTeam);
+                        return;
+                    }
+
+                    IReadOnlyList&lt;Mod&gt;? requestMods = null;
+
+                    if (newCriteria.ExactMods != null)
+                    {
+                        if (!newCriteria.ExactMods.Any())
+                            // add nomod for the request
+                            requestMods = new Mod[] { new ModNoMod() };
+                        else
+                            requestMods = newCriteria.ExactMods;
+                    }
+
+                    var newRequest = new GetScoresRequest(newCriteria.Beatmap, newCriteria.Ruleset, newCriteria.Scope, requestMods);
+                    newRequest.Success += response =&gt;
+                    {
+                        if (inFlightOnlineRequest != null &amp;&amp; !newRequest.Equals(inFlightOnlineRequest))
+                            return;
+
+                        var result = LeaderboardScores.Success
+                        (
+                            response.Scores.Select(s =&gt; s.ToScoreInfo(rulesets, newCriteria.Beatmap))
+                                    .OrderByTotalScore()
+                                    .Select((s, idx) =&gt;
+                                    {
+                                        s.Position = idx + 1;
+                                        return s;
+                                    })
+                                    .ToArray(),
+                            scoresRequested: newRequest.ScoresRequested,
+                            totalScores: response.ScoresCount,
+                            response.UserScore?.CreateScoreInfo(rulesets, newCriteria.Beatmap)
+                        );
+                        inFlightOnlineRequest = null;
+                        scores.Value = result;
+                    };
+                    newRequest.Failure += ex =&gt;
+                    {
+                        Logger.Log($@&quot;Failed to fetch leaderboards when displaying results: {ex}&quot;, LoggingTarget.Network);
+                        if (ex is not OperationCanceledException)
+                            scores.Value = LeaderboardScores.Failure(LeaderboardFailState.NetworkFailure);
+                    };
+
+                    api.Queue(inFlightOnlineRequest = newRequest);
+                    break;
+                }
+            }
+        }
+
+        private void localScoresChanged(IRealmCollection&lt;ScoreInfo&gt; sender, ChangeSet? changes)
+        {
+            Debug.Assert(CurrentCriteria != null);
+
+            // This subscription may fire from changes to linked beatmaps, which we don&#39;t care about.
+            // It&#39;s currently not possible for a score to be modified after insertion, so we can safely ignore callbacks with only modifications.
+            if (changes?.HasCollectionChanges() == false)
+                return;
+
+            var newScores = sender.AsEnumerable();
+
+            if (CurrentCriteria.ExactMods != null)
+            {
+                if (!CurrentCriteria.ExactMods.Any())
+                {
+                    // we need to filter out all scores that have any mods to get all local nomod scores
+                    newScores = newScores.Where(s =&gt; !s.Mods.Any());
+                }
+                else
+                {
+                    // otherwise find all the scores that have all of the currently selected mods (similar to how web applies mod filters)
+                    // we&#39;re creating and using a string HashSet representation of selected mods so that it can be translated into the DB query itself
+                    var selectedMods = CurrentCriteria.ExactMods.Select(m =&gt; m.Acronym).ToHashSet();
+
+                    newScores = newScores.Where(s =&gt; selectedMods.SetEquals(s.Mods.Select(m =&gt; m.Acronym)));
+                }
+            }
+
+            newScores = newScores.Detach().OrderByCriteria(CurrentCriteria.Sorting);
+
+            var newScoresArray = newScores.ToArray();
+            scores.Value = LeaderboardScores.Success(newScoresArray, scoresRequested: newScoresArray.Length, totalScores: newScoresArray.Length, null);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            localScoreSubscription?.Dispose();
+        }
+    }
+
+    public record LeaderboardCriteria(
+        BeatmapInfo? Beatmap,
+        RulesetInfo? Ruleset,
+        BeatmapLeaderboardScope Scope,
+        Mod[]? ExactMods,
+        LeaderboardSortMode Sorting = LeaderboardSortMode.Score
+    );
+
+    public record LeaderboardScores
+    {
+        /// &lt;summary&gt;
+        /// The collection of all scores received through the leaderboard lookup.
+        /// &lt;/summary&gt;
+        public ICollection&lt;ScoreInfo&gt; TopScores { get; }
+
+        /// &lt;summary&gt;
+        /// The number of scores which was requested.
+        /// Used to determine whether the returned leaderboard can be judged to be a partial or full leaderboard
+        /// (i.e. whether &lt;see cref=&quot;TopScores&quot;/&gt; contains all scores that it could ever contain).
+        /// &lt;/summary&gt;
+        public int ScoresRequested { get; }
+
+        /// &lt;summary&gt;
+        /// The number of all scores that exist on the leaderboard.
+        /// &lt;/summary&gt;
+        public int TotalScores { get; }
+
+        public bool IsPartial =&gt; ScoresRequested &lt; TotalScores;
+
+        /// &lt;summary&gt;
+        /// The local user&#39;s best score.
+        /// &lt;/summary&gt;
+        public ScoreInfo? UserScore { get; }
+
+        /// &lt;summary&gt;
+        /// The failure state that occurred when attempting to retrieve the leaderboard.
+        /// &lt;/summary&gt;
+        public LeaderboardFailState? FailState { get; }
+
+        public IEnumerable&lt;ScoreInfo&gt; AllScores
+        {
+            get
+            {
+                foreach (var score in TopScores)
+                    yield return score;
+
+                if (UserScore != null &amp;&amp; TopScores.All(topScore =&gt; !topScore.Equals(UserScore) &amp;&amp; !topScore.MatchesOnlineID(UserScore)))
+                    yield return UserScore;
+            }
+        }
+
+        private LeaderboardScores(ICollection&lt;ScoreInfo&gt; topScores, int scoresRequested, int totalScores, ScoreInfo? userScore, LeaderboardFailState? failState)
+        {
+            TopScores = topScores;
+            ScoresRequested = scoresRequested;
+            TotalScores = totalScores;
+            UserScore = userScore;
+            FailState = failState;
+        }
+
+        public static LeaderboardScores Success(ICollection&lt;ScoreInfo&gt; topScores, int scoresRequested, int totalScores, ScoreInfo? userScore)
+            =&gt; new LeaderboardScores(topScores, scoresRequested, totalScores, userScore, null);
+
+        public static LeaderboardScores Failure(LeaderboardFailState failState)
+            =&gt; new LeaderboardScores([], scoresRequested: 0, totalScores: 0, null, failState);
+    }
+
+    public enum LeaderboardFailState
+    {
+        NetworkFailure = -1,
+        BeatmapUnavailable = -2,
+        RulesetUnavailable = -3,
+        NoneSelected = -4,
+        NotLoggedIn = -5,
+        NotSupporter = -6,
+        NoTeam = -7
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,56,31,62,0],[33,9,33,99,0],[35,55,35,59,0],[35,60,35,72,0],[41,36,41,40,0],[41,41,41,45,0],[41,50,41,55,0],[44,37,44,41,0],[44,42,44,46,0],[44,51,44,56,0],[47,41,47,45,0],[47,46,47,50,0],[47,55,47,60,0],[54,9,54,10,0],[55,13,55,46,0],[56,17,56,125,0],[58,13,58,114,0],[59,17,59,24,0],[61,13,61,43,0],[62,13,62,47,0],[63,13,63,45,0],[64,13,64,33,0],[66,13,66,76,0],[67,13,67,14,0],[68,17,68,93,0],[69,17,69,24,0],[72,13,72,39,0],[75,17,75,18,0],[76,21,77,25,0],[77,25,81,85,0],[81,85,81,107,0],[82,21,82,28,0],[86,17,86,18,0],[87,21,87,74,0],[88,25,88,188,0],[90,21,90,41,0],[91,21,91,22,0],[92,25,92,100,0],[93,25,93,32,0],[96,21,96,64,0],[97,21,97,22,0],[98,25,98,107,0],[99,25,99,32,0],[102,21,102,120,0],[103,21,103,22,0],[104,25,104,107,0],[105,25,105,32,0],[108,21,108,130,0],[109,21,109,22,0],[110,25,110,101,0],[111,25,111,32,0],[114,21,114,111,0],[115,21,115,22,0],[116,25,116,95,0],[117,25,117,32,0],[120,21,120,60,0],[122,21,122,55,0],[123,21,123,22,0],[124,25,124,58,0],[126,29,126,72,0],[128,29,128,65,0],[129,21,129,22,0],[131,21,131,133,0],[132,21,133,21,0],[133,21,133,22,0],[133,22,134,25,0],[134,25,134,104,0],[134,104,135,29,0],[135,29,135,36,0],[135,36,137,25,0],[137,25,139,57,0],[139,57,139,101,0],[139,101,142,37,0],[142,37,142,38,0],[142,38,143,41,0],[143,41,143,62,0],[143,62,144,41,0],[144,41,144,50,0],[144,50,145,37,0],[145,37,145,38,0],[145,38,150,27,0],[150,27,151,25,0],[151,25,151,54,0],[151,54,152,25,0],[152,25,152,47,0],[152,47,153,21,0],[153,21,153,22,0],[153,22,153,23,0],[154,21,155,21,0],[155,21,155,22,0],[155,22,156,25,0],[156,25,156,123,0],[156,123,157,25,0],[157,25,157,66,0],[157,66,158,29,0],[158,29,158,107,0],[158,107,159,21,0],[159,21,159,22,0],[159,22,159,23,0],[161,21,161,67,0],[162,21,162,27,0],[165,9,165,10,0],[168,9,168,10,0],[169,13,169,51,0],[173,13,173,58,0],[174,17,174,24,0],[176,13,176,51,0],[178,13,178,51,0],[179,13,179,14,0],[180,17,180,54,0],[181,17,181,18,0],[183,21,183,54,0],[183,54,183,67,0],[183,67,183,69,0],[184,17,184,18,0],[186,17,186,18,0],[189,21,189,78,0],[189,78,189,87,0],[189,87,189,101,0],[191,21,191,54,0],[191,54,191,96,0],[191,96,191,105,0],[191,105,191,107,0],[191,107,191,109,0],[192,17,192,18,0],[193,13,193,14,0],[195,13,195,85,0],[197,13,197,54,0],[198,13,198,152,0],[199,9,199,10,0],[202,9,202,10,0],[203,13,203,39,0],[205,13,205,47,0],[206,9,206,10,0],[222,51,222,55,0],[229,38,229,42,0],[234,34,234,38,0],[236,34,236,63,0],[241,39,241,43,0],[246,50,246,54,0],[251,13,251,14,0],[252,17,252,24,0],[252,26,252,35,0],[252,36,252,38,0],[252,39,252,48,0],[253,21,253,40,0],[255,17,255,68,0],[255,68,255,135,0],[255,135,255,137,0],[256,21,256,44,0],[257,13,257,14,0],[260,9,260,161,0],[261,9,261,10,0],[262,13,262,35,0],[263,13,263,47,0],[264,13,264,39,0],[265,13,265,35,0],[266,13,266,35,0],[267,9,267,10,0],[270,16,270,95,0],[273,16,273,94,0]]);
+    </script>
+  </body>
+</html>

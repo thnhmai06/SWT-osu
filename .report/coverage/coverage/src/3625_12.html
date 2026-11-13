@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/BeatmapImporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Collections;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.IO.Archives;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Objects.Types;
+using Realms;
+
+namespace osu.Game.Beatmaps
+{
+    /// &lt;summary&gt;
+    /// Handles the storage and retrieval of Beatmaps/WorkingBeatmaps.
+    /// &lt;/summary&gt;
+    public class BeatmapImporter : RealmArchiveModelImporter&lt;BeatmapSetInfo&gt;
+    {
+        public override IEnumerable&lt;string&gt; HandledExtensions =&gt; new[] { &quot;.osz&quot;, &quot;.olz&quot; };
+
+        protected override string[] HashableFileTypes =&gt; new[] { &quot;.osu&quot; };
+
+        public ProcessBeatmapDelegate? ProcessBeatmap { private get; set; }
+
+        public BeatmapImporter(Storage storage, RealmAccess realm)
+            : base(storage, realm)
+        {
+        }
+
+        public override async Task&lt;Live&lt;BeatmapSetInfo&gt;?&gt; ImportAsUpdate(ProgressNotification notification, ImportTask importTask, BeatmapSetInfo original)
+        {
+            var originalDateAdded = original.DateAdded;
+
+            Guid originalId = original.ID;
+
+            var imported = await Import(notification, new[] { importTask }).ConfigureAwait(false);
+
+            if (!imported.Any())
+                return null;
+
+            Debug.Assert(imported.Count() == 1);
+
+            var first = imported.First();
+
+            // If there were no changes, ensure we don&#39;t accidentally nuke ourselves.
+            if (first.ID == originalId)
+            {
+                first.PerformWrite(s =&gt;
+                {
+                    // Transfer local values which should be persisted across a beatmap update.
+                    s.DateAdded = originalDateAdded;
+
+                    // Re-run processing even in this case. We might have outdated metadata.
+                    ProcessBeatmap?.Invoke(s, MetadataLookupScope.OnlineFirst);
+                });
+                return first;
+            }
+
+            first.PerformWrite(updated =&gt;
+            {
+                try
+                {
+                    var realm = updated.Realm;
+
+                    // Re-fetch as we are likely on a different thread.
+                    original = realm!.Find&lt;BeatmapSetInfo&gt;(originalId)!;
+
+                    // Generally the import process will do this for us if the OnlineIDs match,
+                    // but that isn&#39;t a guarantee (ie. if the .osu file doesn&#39;t have OnlineIDs populated).
+                    original.DeletePending = true;
+
+                    // Transfer local values which should be persisted across a beatmap update.
+                    updated.DateAdded = originalDateAdded;
+
+                    transferCollectionReferences(realm, original, updated);
+
+                    foreach (var beatmap in original.Beatmaps.ToArray())
+                    {
+                        var updatedBeatmap = updated.Beatmaps.FirstOrDefault(b =&gt; b.Hash == beatmap.Hash);
+
+                        if (updatedBeatmap != null)
+                        {
+                            // If the updated beatmap matches an existing one, transfer any user data across..
+                            if (beatmap.Scores.Any())
+                            {
+                                Logger.Log($&quot;Transferring {beatmap.Scores.Count()} scores for unchanged difficulty \&quot;{beatmap}\&quot;&quot;, LoggingTarget.Database);
+
+                                foreach (var score in beatmap.Scores)
+                                    score.BeatmapInfo = updatedBeatmap;
+                            }
+
+                            // ..then nuke the old beatmap completely.
+                            // this is done instead of a soft deletion to avoid a user potentially creating weird
+                            // interactions, like restoring the outdated beatmap then updating a second time
+                            // (causing user data to be wiped).
+                            original.Beatmaps.Remove(beatmap);
+
+                            realm.Remove(beatmap.Metadata);
+                            realm.Remove(beatmap);
+                        }
+                        else
+                        {
+                            // If the beatmap differs in the original, leave it in a soft-deleted state but reset online info.
+                            // This caters to the case where a user has made modifications they potentially want to restore,
+                            // but after restoring we want to ensure it can&#39;t be used to trigger an update of the beatmap.
+                            beatmap.ResetOnlineInfo();
+                        }
+                    }
+
+                    // If the original has no beatmaps left, delete the set as well.
+                    if (!original.Beatmaps.Any())
+                        realm.Remove(original);
+
+                    Logger.Log($&quot;Beatmap \&quot;{updated}\&quot; update completed successfully&quot;, LoggingTarget.Database);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, $&quot;Failed to update beatmap \&quot;{updated}\&quot;&quot;, LoggingTarget.Database);
+                    throw;
+                }
+            });
+
+            return first;
+        }
+
+        private static void transferCollectionReferences(Realm realm, BeatmapSetInfo original, BeatmapSetInfo updated)
+        {
+            // First check if every beatmap in the original set is in any collections.
+            // In this case, we will assume they also want any newly added difficulties added to the collection.
+            foreach (var c in realm.All&lt;BeatmapCollection&gt;())
+            {
+                if (original.Beatmaps.Select(b =&gt; b.MD5Hash).All(c.BeatmapMD5Hashes.Contains))
+                {
+                    foreach (var b in original.Beatmaps)
+                        c.BeatmapMD5Hashes.Remove(b.MD5Hash);
+
+                    foreach (var b in updated.Beatmaps)
+                        c.BeatmapMD5Hashes.Add(b.MD5Hash);
+                }
+            }
+
+            // Handle collections using permissive difficulty name to track difficulties.
+            foreach (var originalBeatmap in original.Beatmaps)
+            {
+                updated.Beatmaps
+                       .FirstOrDefault(b =&gt; b.DifficultyName == originalBeatmap.DifficultyName)?
+                       .TransferCollectionReferences(realm, originalBeatmap.MD5Hash);
+            }
+        }
+
+        protected override bool ShouldDeleteArchive(string path) =&gt; HandledExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
+
+        protected override void Populate(BeatmapSetInfo beatmapSet, ArchiveReader? archive, Realm realm, CancellationToken cancellationToken = default)
+        {
+            if (archive != null)
+                beatmapSet.Beatmaps.AddRange(createBeatmapDifficulties(beatmapSet, realm));
+
+            beatmapSet.DateAdded = getDateAdded(archive);
+
+            foreach (BeatmapInfo b in beatmapSet.Beatmaps)
+            {
+                b.BeatmapSet = beatmapSet;
+
+                // ensure we aren&#39;t trying to add a new ruleset to the database
+                // this can happen in tests, mostly
+                if (!b.Ruleset.IsManaged)
+                    b.Ruleset = realm.Find&lt;RulesetInfo&gt;(b.Ruleset.ShortName) ?? throw new ArgumentNullException(nameof(b.Ruleset));
+            }
+
+            validateOnlineIds(beatmapSet, realm);
+
+            bool hadOnlineIDs = beatmapSet.Beatmaps.Any(b =&gt; b.OnlineID &gt; 0);
+
+            // TODO: this may no longer be valid as we aren&#39;t doing an online population at this point.
+            // ensure at least one beatmap was able to retrieve or keep an online ID, else drop the set ID.
+            if (hadOnlineIDs &amp;&amp; !beatmapSet.Beatmaps.Any(b =&gt; b.OnlineID &gt; 0))
+            {
+                if (beatmapSet.OnlineID &gt; 0)
+                {
+                    beatmapSet.OnlineID = -1;
+                    LogForModel(beatmapSet, &quot;Disassociating beatmap set ID due to loss of all beatmap IDs&quot;);
+                }
+            }
+        }
+
+        protected override void PreImport(BeatmapSetInfo beatmapSet, Realm realm)
+        {
+            // We are about to import a new beatmap. Before doing so, ensure that no other set shares the online IDs used by the new one.
+            // Note that this means if the previous beatmap is restored by the user, it will no longer be linked to its online IDs.
+            // If this is ever an issue, we can consider marking as pending delete but not resetting the IDs (but care will be required for
+            // beatmaps, which don&#39;t have their own `DeletePending` state).
+
+            if (beatmapSet.OnlineID &gt; 0)
+            {
+                // Required local for iOS. Will cause runtime crash if inlined.
+                int onlineId = beatmapSet.OnlineID;
+
+                // OnlineID should really be unique, but to avoid catastrophic failure let&#39;s iterate just to be sure.
+                foreach (var existingSetWithSameOnlineID in realm.All&lt;BeatmapSetInfo&gt;().Where(b =&gt; b.OnlineID == onlineId))
+                {
+                    existingSetWithSameOnlineID.DeletePending = true;
+                    existingSetWithSameOnlineID.OnlineID = -1;
+
+                    foreach (var b in existingSetWithSameOnlineID.Beatmaps)
+                        b.ResetOnlineInfo();
+
+                    LogForModel(beatmapSet, $&quot;Found existing beatmap set with same OnlineID ({beatmapSet.OnlineID}). It will be disassociated and marked for deletion.&quot;);
+                }
+            }
+        }
+
+        protected override void PostImport(BeatmapSetInfo model, Realm realm, ImportParameters parameters)
+        {
+            base.PostImport(model, realm, parameters);
+
+            // Scores are stored separately from beatmaps, and persist even when a beatmap is modified or deleted.
+            // Let&#39;s reattach any matching scores that exist in the database, based on hash.
+            foreach (BeatmapInfo beatmap in model.Beatmaps)
+            {
+                beatmap.UpdateLocalScores(realm);
+            }
+
+            ProcessBeatmap?.Invoke(model, parameters.Batch ? MetadataLookupScope.LocalCacheFirst : MetadataLookupScope.OnlineFirst);
+        }
+
+        private void validateOnlineIds(BeatmapSetInfo beatmapSet, Realm realm)
+        {
+            var beatmapIds = beatmapSet.Beatmaps.Where(b =&gt; b.OnlineID &gt; 0).Select(b =&gt; b.OnlineID).ToList();
+
+            // ensure all IDs are unique
+            if (beatmapIds.GroupBy(b =&gt; b).Any(g =&gt; g.Count() &gt; 1))
+            {
+                LogForModel(beatmapSet, &quot;Found non-unique IDs, resetting...&quot;);
+                resetIds();
+                return;
+            }
+
+            // find any existing beatmaps in the database that have matching online ids
+            List&lt;BeatmapInfo&gt; existingBeatmaps = new List&lt;BeatmapInfo&gt;();
+
+            foreach (int id in beatmapIds)
+                existingBeatmaps.AddRange(realm.All&lt;BeatmapInfo&gt;().Where(b =&gt; b.OnlineID == id));
+
+            if (existingBeatmaps.Any())
+            {
+                // reset the import ids (to force a re-fetch) *unless* they match the candidate CheckForExisting set.
+                // we can ignore the case where the new ids are contained by the CheckForExisting set as it will either be used (import skipped) or deleted.
+
+                var existing = CheckForExisting(beatmapSet, realm);
+
+                if (existing == null || existingBeatmaps.Any(b =&gt; !existing.Beatmaps.Contains(b)))
+                {
+                    LogForModel(beatmapSet, &quot;Found existing import with online IDs already, resetting...&quot;);
+                    resetIds();
+                }
+            }
+
+            void resetIds() =&gt; beatmapSet.Beatmaps.ForEach(b =&gt; b.ResetOnlineInfo());
+        }
+
+        protected override bool CanSkipImport(BeatmapSetInfo existing, BeatmapSetInfo import)
+        {
+            if (!base.CanSkipImport(existing, import))
+                return false;
+
+            return existing.Beatmaps.Any(b =&gt; b.OnlineID &gt; 0);
+        }
+
+        protected override bool CanReuseExisting(BeatmapSetInfo existing, BeatmapSetInfo import)
+        {
+            if (!base.CanReuseExisting(existing, import))
+                return false;
+
+            var existingIds = existing.Beatmaps.Select(b =&gt; b.OnlineID).Order();
+            var importIds = import.Beatmaps.Select(b =&gt; b.OnlineID).Order();
+
+            // force re-import if we are not in a sane state.
+            return existing.OnlineID == import.OnlineID &amp;&amp; existingIds.SequenceEqual(importIds);
+        }
+
+        protected override void UndeleteForReuse(BeatmapSetInfo existing)
+        {
+            if (!existing.DeletePending)
+                return;
+
+            base.UndeleteForReuse(existing);
+            existing.DateAdded = DateTimeOffset.UtcNow;
+        }
+
+        public override string HumanisedModelName =&gt; &quot;beatmap&quot;;
+
+        protected override BeatmapSetInfo? CreateModel(ArchiveReader reader, ImportParameters parameters)
+        {
+            // let&#39;s make sure there are actually .osu files to import.
+            string? mapName = reader.Filenames.FirstOrDefault(f =&gt; f.EndsWith(&quot;.osu&quot;, StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrEmpty(mapName))
+            {
+                Logger.Log($&quot;No beatmap files found in the beatmap archive ({reader.Name}).&quot;, LoggingTarget.Database);
+                return null;
+            }
+
+            Beatmap beatmap;
+
+            using (var stream = new LineBufferedReader(reader.GetStream(mapName)))
+            {
+                if (stream.PeekLine() == null)
+                {
+                    Logger.Log($&quot;No content found in first .osu file of beatmap archive ({reader.Name} / {mapName})&quot;, LoggingTarget.Database);
+                    return null;
+                }
+
+                beatmap = Decoder.GetDecoder&lt;Beatmap&gt;(stream).Decode(stream);
+            }
+
+            return new BeatmapSetInfo
+            {
+                OnlineID = beatmap.BeatmapInfo.BeatmapSet?.OnlineID ?? -1,
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Determine the date a given beatmapset has been added to the game.
+        /// For legacy imports, we can use the oldest file write time for any `.osu` file in the directory.
+        /// For any other import types, use &quot;now&quot;.
+        /// &lt;/summary&gt;
+        private DateTimeOffset getDateAdded(ArchiveReader? reader)
+        {
+            DateTimeOffset dateAdded = DateTimeOffset.UtcNow;
+
+            if (reader is DirectoryArchiveReader legacyReader)
+            {
+                var beatmaps = reader.Filenames.Where(f =&gt; f.EndsWith(&quot;.osu&quot;, StringComparison.OrdinalIgnoreCase));
+
+                dateAdded = File.GetLastWriteTimeUtc(legacyReader.GetFullPath(beatmaps.First()));
+
+                foreach (string beatmapName in beatmaps)
+                {
+                    var currentDateAdded = File.GetLastWriteTimeUtc(legacyReader.GetFullPath(beatmapName));
+
+                    if (currentDateAdded &lt; dateAdded)
+                        dateAdded = currentDateAdded;
+                }
+            }
+
+            return dateAdded;
+        }
+
+        /// &lt;summary&gt;
+        /// Create all required &lt;see cref=&quot;BeatmapInfo&quot;/&gt;s for the provided archive.
+        /// &lt;/summary&gt;
+        private List&lt;BeatmapInfo&gt; createBeatmapDifficulties(BeatmapSetInfo beatmapSet, Realm realm)
+        {
+            var beatmaps = new List&lt;BeatmapInfo&gt;();
+
+            // stable appears to ignore `.osu` files which are not placed at the top level of the beatmap archive.
+            // the logic that achieves this is very difficult to make sense of, but appears to be located somewhere around
+            // https://github.com/peppy/osu-stable-reference/blob/67795dba3c308e7d0493b296149dcb073ca47ecb/osu!/GameplayElements/Beatmaps/BeatmapManager.cs#L207-L208
+            // only testing the `/` path separator character is sufficient as `RealmNamedFileUsage`s are normalised to use the front slash unix path separator convention
+            foreach (var file in beatmapSet.Files.Where(f =&gt; !f.Filename.Contains(&#39;/&#39;) &amp;&amp; f.Filename.EndsWith(@&quot;.osu&quot;, StringComparison.OrdinalIgnoreCase)))
+            {
+                using (var memoryStream = new MemoryStream(Files.Store.Get(file.File.GetStoragePath()))) // we need a memory stream so we can seek
+                {
+                    IBeatmap decoded;
+
+                    using (var lineReader = new LineBufferedReader(memoryStream, true))
+                    {
+                        if (lineReader.PeekLine() == null)
+                        {
+                            LogForModel(beatmapSet, $&quot;No content found in beatmap file {file.Filename}.&quot;);
+                            continue;
+                        }
+
+                        decoded = Decoder.GetDecoder&lt;Beatmap&gt;(lineReader).Decode(lineReader);
+                    }
+
+                    string hash = memoryStream.ComputeSHA2Hash();
+
+                    if (beatmaps.Any(b =&gt; b.Hash == hash))
+                    {
+                        LogForModel(beatmapSet, $&quot;Skipping import of {file.Filename} due to duplicate file content.&quot;);
+                        continue;
+                    }
+
+                    var decodedInfo = decoded.BeatmapInfo;
+                    var decodedDifficulty = decodedInfo.Difficulty;
+
+                    var ruleset = realm.All&lt;RulesetInfo&gt;().FirstOrDefault(r =&gt; r.OnlineID == decodedInfo.Ruleset.OnlineID);
+
+                    if (ruleset?.Available != true)
+                    {
+                        LogForModel(beatmapSet, $&quot;Skipping import of {file.Filename} due to missing local ruleset {decodedInfo.Ruleset.OnlineID}.&quot;);
+                        continue;
+                    }
+
+                    var difficulty = new BeatmapDifficulty
+                    {
+                        DrainRate = decodedDifficulty.DrainRate,
+                        CircleSize = decodedDifficulty.CircleSize,
+                        OverallDifficulty = decodedDifficulty.OverallDifficulty,
+                        ApproachRate = decodedDifficulty.ApproachRate,
+                        SliderMultiplier = decodedDifficulty.SliderMultiplier,
+                        SliderTickRate = decodedDifficulty.SliderTickRate
+                    };
+
+                    var metadata = new BeatmapMetadata
+                    {
+                        Title = decoded.Metadata.Title,
+                        TitleUnicode = decoded.Metadata.TitleUnicode,
+                        Artist = decoded.Metadata.Artist,
+                        ArtistUnicode = decoded.Metadata.ArtistUnicode,
+                        Author =
+                        {
+                            OnlineID = decoded.Metadata.Author.OnlineID,
+                            Username = decoded.Metadata.Author.Username
+                        },
+                        Source = decoded.Metadata.Source,
+                        Tags = decoded.Metadata.Tags,
+                        PreviewTime = decoded.Metadata.PreviewTime,
+                        AudioFile = decoded.Metadata.AudioFile,
+                        BackgroundFile = decoded.Metadata.BackgroundFile,
+                    };
+
+                    var beatmap = new BeatmapInfo(ruleset, difficulty, metadata)
+                    {
+                        Hash = hash,
+                        DifficultyName = decodedInfo.DifficultyName,
+                        OnlineID = decodedInfo.OnlineID,
+                        BeatDivisor = decodedInfo.BeatDivisor,
+                        MD5Hash = memoryStream.ComputeMD5Hash(),
+                        EndTimeObjectCount = decoded.HitObjects.Count(h =&gt; h is IHasDuration),
+                        TotalObjectCount = decoded.HitObjects.Count
+                    };
+
+                    beatmaps.Add(beatmap);
+                }
+            }
+
+            if (!beatmaps.Any())
+                throw new ArgumentException(&quot;No valid beatmap files found in the beatmap archive.&quot;);
+
+            return beatmaps;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,66,33,90,0],[35,58,35,74,0],[37,57,37,69,0],[37,70,37,74,0],[40,15,40,35,0],[41,9,41,10,0],[42,9,42,10,0],[45,9,45,10,0],[46,13,46,56,0],[48,13,48,43,0],[50,13,50,99,0],[52,13,52,33,0],[53,17,53,29,0],[55,13,55,49,0],[57,13,57,42,0],[60,13,60,40,0],[61,13,61,14,0],[62,17,63,17,0],[63,17,63,18,0],[63,18,65,21,0],[65,21,65,53,0],[65,53,68,21,0],[68,21,68,80,0],[68,80,69,17,0],[69,17,69,18,0],[69,18,69,20,0],[70,17,70,30,0],[73,13,74,13,0],[74,13,74,14,0],[74,14,76,17,0],[76,17,76,18,0],[76,18,77,21,0],[77,21,77,47,0],[77,47,80,21,0],[80,21,80,73,0],[80,73,84,21,0],[84,21,84,51,0],[84,51,87,21,0],[87,21,87,59,0],[87,59,89,21,0],[89,21,89,76,0],[89,76,91,21,0],[91,21,91,28,0],[91,28,91,30,0],[91,30,91,41,0],[91,41,91,42,0],[91,42,91,44,0],[91,44,91,45,0],[91,45,91,72,0],[91,72,92,21,0],[92,21,92,22,0],[92,22,93,25,0],[93,25,93,83,0],[93,83,93,105,0],[93,105,93,107,0],[93,107,95,25,0],[95,25,95,52,0],[95,52,96,25,0],[96,25,96,26,0],[96,26,98,29,0],[98,29,98,54,0],[98,54,99,29,0],[99,29,99,30,0],[99,30,100,33,0],[100,33,100,156,0],[100,156,102,33,0],[102,33,102,40,0],[102,40,102,42,0],[102,42,102,51,0],[102,51,102,52,0],[102,52,102,54,0],[102,54,102,55,0],[102,55,102,69,0],[102,69,103,37,0],[103,37,103,72,0],[103,72,104,29,0],[104,29,104,30,0],[104,30,110,29,0],[110,29,110,63,0],[110,63,112,29,0],[112,29,112,60,0],[112,60,113,29,0],[113,29,113,51,0],[113,51,114,25,0],[114,25,114,26,0],[114,26,116,25,0],[116,25,116,26,0],[116,26,120,29,0],[120,29,120,55,0],[120,55,121,25,0],[121,25,121,26,0],[121,26,122,21,0],[122,21,122,22,0],[122,22,125,21,0],[125,21,125,50,0],[125,50,126,25,0],[126,25,126,48,0],[126,48,128,21,0],[128,21,128,112,0],[128,112,129,17,0],[129,17,129,18,0],[129,18,130,17,0],[130,17,130,37,0],[130,37,131,17,0],[131,17,131,18,0],[131,18,132,21,0],[132,21,132,105,0],[132,105,133,21,0],[133,21,133,27,0],[133,27,135,13,0],[135,13,135,14,0],[135,14,135,16,0],[137,13,137,26,0],[138,9,138,10,0],[141,9,141,10,0],[144,13,144,20,0],[144,22,144,27,0],[144,28,144,30,0],[144,31,144,61,0],[145,13,145,14,0],[146,17,146,51,0],[146,51,146,60,0],[146,60,146,95,0],[147,17,147,18,0],[148,21,148,28,0],[148,30,148,35,0],[148,36,148,38,0],[148,39,148,56,0],[149,25,149,62,0],[151,21,151,28,0],[151,30,151,35,0],[151,36,151,38,0],[151,39,151,55,0],[152,25,152,59,0],[153,17,153,18,0],[154,13,154,14,0],[157,13,157,20,0],[157,22,157,41,0],[157,42,157,44,0],[157,45,157,62,0],[158,13,158,14,0],[159,17,160,45,0],[160,45,160,95,0],[160,95,161,86,0],[162,13,162,14,0],[163,9,163,10,0],[165,69,165,139,0],[168,9,168,10,0],[169,13,169,33,0],[170,17,170,92,0],[172,13,172,58,0],[174,13,174,20,0],[174,22,174,35,0],[174,36,174,38,0],[174,39,174,58,0],[175,13,175,14,0],[176,17,176,43,0],[180,17,180,42,0],[181,21,181,132,0],[182,13,182,14,0],[184,13,184,50,0],[186,13,186,62,0],[186,62,186,76,0],[186,76,186,78,0],[190,13,190,63,0],[190,63,190,77,0],[190,77,190,79,0],[191,13,191,14,0],[192,17,192,45,0],[193,17,193,18,0],[194,21,194,46,0],[195,21,195,109,0],[196,17,196,18,0],[197,13,197,14,0],[198,9,198,10,0],[201,9,201,10,0],[207,13,207,41,0],[208,13,208,14,0],[210,17,210,52,0],[213,17,213,24,0],[213,26,213,57,0],[213,58,213,60,0],[213,61,213,123,0],[214,17,214,18,0],[215,21,215,70,0],[216,21,216,63,0],[218,21,218,28,0],[218,30,218,35,0],[218,36,218,38,0],[218,39,218,75,0],[219,25,219,45,0],[221,21,221,170,0],[222,17,222,18,0],[223,13,223,14,0],[224,9,224,10,0],[227,9,227,10,0],[228,13,228,55,0],[232,13,232,20,0],[232,22,232,41,0],[232,42,232,44,0],[232,45,232,59,0],[233,13,233,14,0],[234,17,234,50,0],[235,13,235,14,0],[237,13,237,133,0],[238,9,238,10,0],[241,9,241,10,0],[242,13,242,61,0],[242,61,242,75,0],[242,75,242,89,0],[242,89,242,99,0],[242,99,242,110,0],[245,13,245,41,0],[245,41,245,42,0],[245,42,245,53,0],[245,53,245,66,0],[245,66,245,68,0],[246,13,246,14,0],[247,17,247,79,0],[248,17,248,28,0],[249,17,249,24,0],[253,13,253,74,0],[255,13,255,20,0],[255,22,255,28,0],[255,29,255,31,0],[255,32,255,42,0],[256,17,256,98,0],[258,13,258,40,0],[259,13,259,14,0],[263,17,263,68,0],[265,17,265,67,0],[265,67,265,97,0],[265,97,265,99,0],[266,17,266,18,0],[267,21,267,108,0],[268,21,268,32,0],[269,17,269,18,0],[270,13,270,14,0],[272,32,272,65,0],[272,65,272,84,0],[272,84,272,85,0],[273,9,273,10,0],[276,9,276,10,0],[277,13,277,55,0],[278,17,278,30,0],[280,13,280,47,0],[280,47,280,61,0],[280,61,280,63,0],[281,9,281,10,0],[284,9,284,10,0],[285,13,285,58,0],[286,17,286,30,0],[288,13,288,61,0],[288,61,288,71,0],[288,71,288,81,0],[289,13,289,57,0],[289,57,289,67,0],[289,67,289,77,0],[292,13,292,97,0],[293,9,293,10,0],[296,9,296,10,0],[297,13,297,41,0],[298,17,298,24,0],[300,13,300,45,0],[301,13,301,56,0],[302,9,302,10,0],[304,54,304,63,0],[307,9,307,10,0],[309,13,309,68,0],[309,68,309,122,0],[309,122,309,124,0],[311,13,311,47,0],[312,13,312,14,0],[313,17,313,119,0],[314,17,314,29,0],[319,20,319,82,0],[320,13,320,14,0],[321,17,321,47,0],[322,17,322,18,0],[323,21,323,143,0],[324,21,324,33,0],[327,17,327,78,0],[328,13,328,14,0],[330,13,333,15,0],[334,9,334,10,0],[342,9,342,10,0],[343,13,343,62,0],[345,13,345,63,0],[346,13,346,14,0],[347,17,347,60,0],[347,60,347,114,0],[347,114,347,116,0],[349,17,349,98,0],[351,17,351,24,0],[351,26,351,44,0],[351,45,351,47,0],[351,48,351,56,0],[352,17,352,18,0],[353,21,353,108,0],[355,21,355,54,0],[356,25,356,54,0],[357,17,357,18,0],[358,13,358,14,0],[360,13,360,30,0],[361,9,361,10,0],[367,9,367,10,0],[368,13,368,52,0],[374,13,374,20,0],[374,22,374,30,0],[374,31,374,33,0],[374,34,374,62,0],[374,62,374,155,0],[374,155,374,156,0],[375,13,375,14,0],[376,24,376,104,0],[377,17,377,18,0],[380,28,380,87,0],[381,21,381,22,0],[382,25,382,59,0],[383,25,383,26,0],[384,29,384,107,0],[385,29,385,38,0],[388,25,388,94,0],[389,21,389,22,0],[391,21,391,66,0],[393,21,393,43,0],[393,43,393,57,0],[393,57,393,59,0],[394,21,394,22,0],[395,25,395,119,0],[396,25,396,34,0],[399,21,399,59,0],[400,21,400,68,0],[402,21,402,124,0],[404,21,404,52,0],[405,21,405,22,0],[406,25,406,149,0],[407,25,407,34,0],[410,21,418,23,0],[420,21,436,23,0],[438,21,445,76,0],[445,76,445,93,0],[445,93,447,23,0],[449,21,449,43,0],[450,17,450,18,0],[451,13,451,14,0],[453,13,453,33,0],[454,17,454,101,0],[456,13,456,29,0],[457,9,457,10,0]]);
+    </script>
+  </body>
+</html>

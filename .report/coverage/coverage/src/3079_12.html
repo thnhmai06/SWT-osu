@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Chat/MessageNotifier.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using System.Text.RegularExpressions;
+using Humanizer;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Platform;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Resources.Localisation.Web;
+
+namespace osu.Game.Online.Chat
+{
+    /// &lt;summary&gt;
+    /// Component that handles creating and posting notifications for incoming messages.
+    /// &lt;/summary&gt;
+    public partial class MessageNotifier : Component
+    {
+        [Resolved]
+        private INotificationOverlay notifications { get; set; }
+
+        [Resolved]
+        private ChatOverlay chatOverlay { get; set; }
+
+        [Resolved]
+        private ChannelManager channelManager { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Resolved]
+        private GameHost host { get; set; }
+
+        private Bindable&lt;bool&gt; notifyOnUsername;
+        private Bindable&lt;bool&gt; notifyOnPrivateMessage;
+
+        private readonly IBindable&lt;APIUser&gt; localUser = new Bindable&lt;APIUser&gt;();
+        private readonly IBindableList&lt;Channel&gt; joinedChannels = new BindableList&lt;Channel&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            notifyOnUsername = config.GetBindable&lt;bool&gt;(OsuSetting.NotifyOnUsernameMentioned);
+            notifyOnPrivateMessage = config.GetBindable&lt;bool&gt;(OsuSetting.NotifyOnPrivateMessage);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            joinedChannels.BindCollectionChanged(channelsChanged, true);
+
+            localUser.BindTo(api.LocalUser);
+            joinedChannels.BindTo(channelManager.JoinedChannels);
+        }
+
+        private void channelsChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                    Debug.Assert(e.NewItems != null);
+
+                    foreach (var channel in e.NewItems.Cast&lt;Channel&gt;())
+                        channel.NewMessagesArrived += checkNewMessages;
+
+                    break;
+
+                case NotifyCollectionChangedAction.Remove:
+                    Debug.Assert(e.OldItems != null);
+
+                    foreach (var channel in e.OldItems.Cast&lt;Channel&gt;())
+                        channel.NewMessagesArrived -= checkNewMessages;
+
+                    break;
+            }
+        }
+
+        private void checkNewMessages(IEnumerable&lt;Message&gt; messages)
+        {
+            if (!messages.Any())
+                return;
+
+            var channel = channelManager.JoinedChannels.SingleOrDefault(c =&gt; c.Id &gt; 0 &amp;&amp; c.Id == messages.First().ChannelId);
+
+            if (channel == null)
+                return;
+
+            // Only send notifications if ChatOverlay or the target channel aren&#39;t visible, or if the window is unfocused
+            if (chatOverlay.IsPresent &amp;&amp; channelManager.CurrentChannel.Value == channel &amp;&amp; host.IsActive.Value)
+                return;
+
+            foreach (var message in messages.OrderByDescending(m =&gt; m.Id))
+            {
+                // ignore messages that already have been read
+                if (message.Id &lt;= channel.LastReadId)
+                    return;
+
+                // ignore notifications triggered by local user&#39;s own chat messages
+                if (message.Sender.Id == localUser.Value.Id)
+                    continue;
+
+                // check for private messages first to avoid both posting two notifications about the same message
+                if (checkForPMs(channel, message))
+                    continue;
+
+                checkForMentions(channel, message);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Checks whether the user enabled private message notifications and whether specified &lt;paramref name=&quot;message&quot;/&gt; is a direct message.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel associated to the &lt;paramref name=&quot;message&quot;/&gt;&lt;/param&gt;
+        /// &lt;param name=&quot;message&quot;&gt;The message to be checked&lt;/param&gt;
+        /// &lt;returns&gt;Whether a notification was fired.&lt;/returns&gt;
+        private bool checkForPMs(Channel channel, Message message)
+        {
+            if (!notifyOnPrivateMessage.Value || channel.Type != ChannelType.PM)
+                return false;
+
+            notifications.Post(new PrivateMessageNotification(message, channel));
+            return true;
+        }
+
+        private void checkForMentions(Channel channel, Message message)
+        {
+            if (!notifyOnUsername.Value)
+                return;
+
+            var match = MatchUsername(message.Content, localUser.Value.Username);
+            if (!match.Success)
+                return;
+
+            notifications.Post(new MentionNotification(message, channel, match));
+        }
+
+        /// &lt;summary&gt;
+        /// Checks if &lt;paramref name=&quot;message&quot;/&gt; mentions &lt;paramref name=&quot;username&quot;/&gt;.
+        /// This will match against the case where underscores are used instead of spaces (which is how osu-stable handles usernames with spaces).
+        /// &lt;/summary&gt;
+        public static Match MatchUsername(string message, string username)
+        {
+            string fullName = Regex.Escape(username);
+            string underscoreName = Regex.Escape(username.Replace(&#39; &#39;, &#39;_&#39;));
+            return Regex.Match(message, $@&quot;(^|\W)({fullName}|{underscoreName})($|\W)&quot;, RegexOptions.IgnoreCase);
+        }
+
+        private const int truncate_length = 60;
+
+        public partial class PrivateMessageNotification : UserAvatarNotification
+        {
+            private readonly Message message;
+            private readonly Channel channel;
+
+            public PrivateMessageNotification(Message message, Channel channel)
+                : base(message.Sender)
+            {
+                this.message = message;
+                this.channel = channel;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(ChatOverlay chatOverlay, INotificationOverlay notificationOverlay, OverlayColourProvider colourProvider)
+            {
+                TextFlow.AddText(NotificationsStrings.ItemChannelChannelDefault.ToUpper(), s =&gt; s.Font = OsuFont.Style.Caption2.With(weight: FontWeight.Bold));
+                TextFlow.NewLine();
+                TextFlow.AddText($&quot;{message.Sender.Username}&quot;, s =&gt;
+                {
+                    s.Font = OsuFont.Style.Caption2.With(weight: FontWeight.SemiBold);
+                    s.Colour = colourProvider.Content2;
+                });
+                TextFlow.AddParagraph($&quot;\&quot;{message.Content.Truncate(truncate_length)}\&quot;&quot;);
+
+                Avatar.Colour = OsuColour.Gray(0.4f);
+                Icon = FontAwesome.Solid.Comments;
+
+                Activated = delegate
+                {
+                    notificationOverlay.Hide();
+                    chatOverlay.HighlightMessage(message, channel);
+                    return true;
+                };
+            }
+        }
+
+        public partial class MentionNotification : UserAvatarNotification
+        {
+            public override string PopInSampleName =&gt; &quot;UI/notification-mention&quot;;
+
+            private readonly Message message;
+            private readonly Channel channel;
+            private readonly Match match;
+
+            public MentionNotification(Message message, Channel channel, Match match)
+                : base(message.Sender)
+            {
+                this.message = message;
+                this.channel = channel;
+                this.match = match;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(ChatOverlay chatOverlay, INotificationOverlay notificationOverlay, OverlayColourProvider colourProvider)
+            {
+                TextFlow.AddText(Localisation.NotificationsStrings.Mention.ToUpper(), s =&gt; s.Font = OsuFont.Style.Caption2.With(weight: FontWeight.Bold));
+                TextFlow.NewLine();
+                TextFlow.AddText(Localisation.NotificationsStrings.MentionDetails(message.Sender.Username, channel.Name), s =&gt;
+                {
+                    s.Font = OsuFont.Style.Caption2.With(weight: FontWeight.SemiBold);
+                    s.Colour = colourProvider.Content2;
+                });
+
+                int start = match.Index;
+                int end = match.Index + match.Length;
+
+                TextFlow.AddParagraph($&quot;\&quot;{message.Content[..start].Truncate(truncate_length / 2, &quot;…&quot;, from: TruncateFrom.Left)}&quot;);
+                TextFlow.AddText(message.Content[start..end], s =&gt;
+                {
+                    s.Font = s.Font.With(weight: FontWeight.SemiBold);
+                    s.Colour = colourProvider.Colour0;
+                });
+                TextFlow.AddText($&quot;{message.Content[end..].Truncate(truncate_length / 2, &quot;…&quot;, from: TruncateFrom.Right)}\&quot;&quot;);
+
+                Avatar.Colour = OsuColour.Gray(0.4f);
+                Icon = FontAwesome.Solid.At;
+
+                Activated = delegate
+                {
+                    notificationOverlay.Hide();
+                    chatOverlay.HighlightMessage(message, channel);
+                    return true;
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,54,34,58,0],[34,59,34,63,0],[37,43,37,47,0],[37,48,37,52,0],[40,49,40,53,0],[40,54,40,58,0],[43,36,43,40,0],[43,41,43,45,0],[46,33,46,37,0],[46,38,46,42,0],[51,9,51,81,0],[52,9,52,94,0],[56,9,56,10,0],[57,13,57,95,0],[58,13,58,98,0],[59,9,59,10,0],[62,9,62,10,0],[63,13,63,33,0],[64,13,64,73,0],[66,13,66,45,0],[67,13,67,66,0],[68,9,68,10,0],[71,9,71,10,0],[72,13,72,30,0],[75,21,75,54,0],[77,21,77,28,0],[77,30,77,41,0],[77,42,77,44,0],[77,45,77,71,0],[78,25,78,72,0],[80,21,80,27,0],[83,21,83,54,0],[85,21,85,28,0],[85,30,85,41,0],[85,42,85,44,0],[85,45,85,71,0],[86,25,86,72,0],[88,21,88,27,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,33,0],[95,17,95,24,0],[97,13,97,78,0],[97,78,97,124,0],[97,124,97,126,0],[99,13,99,33,0],[100,17,100,24,0],[103,13,103,112,0],[104,17,104,24,0],[106,13,106,20,0],[106,22,106,33,0],[106,34,106,36,0],[106,37,106,69,0],[106,69,106,73,0],[106,73,106,74,0],[107,13,107,14,0],[109,17,109,54,0],[110,21,110,28,0],[113,17,113,61,0],[114,21,114,30,0],[117,17,117,51,0],[118,21,118,30,0],[120,17,120,52,0],[121,13,121,14,0],[122,9,122,10,0],[131,9,131,10,0],[132,13,132,81,0],[133,17,133,30,0],[135,13,135,82,0],[136,13,136,25,0],[137,9,137,10,0],[140,9,140,10,0],[141,13,141,41,0],[142,17,142,24,0],[144,13,144,82,0],[145,13,145,32,0],[146,17,146,24,0],[148,13,148,82,0],[149,9,149,10,0],[156,9,156,10,0],[157,13,157,54,0],[158,13,158,78,0],[159,13,159,113,0],[160,9,160,10,0],[170,19,170,39,0],[171,13,171,14,0],[172,17,172,40,0],[173,17,173,40,0],[174,13,174,14,0],[178,13,178,14,0],[179,17,179,97,0],[179,97,179,158,0],[179,158,179,160,0],[180,17,180,36,0],[181,17,182,17,0],[182,17,182,18,0],[182,18,183,21,0],[183,21,183,87,0],[183,87,184,21,0],[184,21,184,56,0],[184,56,185,17,0],[185,17,185,18,0],[185,18,185,20,0],[186,17,186,91,0],[188,17,188,54,0],[189,17,189,51,0],[191,17,192,17,0],[192,17,192,18,0],[192,18,193,21,0],[193,21,193,48,0],[193,48,194,21,0],[194,21,194,68,0],[194,68,195,21,0],[195,21,195,33,0],[195,33,196,17,0],[196,17,196,18,0],[196,18,196,19,0],[197,13,197,14,0],[202,55,202,80,0],[209,19,209,39,0],[210,13,210,14,0],[211,17,211,40,0],[212,17,212,40,0],[213,17,213,36,0],[214,13,214,14,0],[218,13,218,14,0],[219,17,219,92,0],[219,92,219,153,0],[219,153,219,155,0],[220,17,220,36,0],[221,17,222,17,0],[222,17,222,18,0],[222,18,223,21,0],[223,21,223,87,0],[223,87,224,21,0],[224,21,224,56,0],[224,56,225,17,0],[225,17,225,18,0],[225,18,225,20,0],[227,17,227,41,0],[228,17,228,54,0],[230,17,230,132,0],[231,17,232,17,0],[232,17,232,18,0],[232,18,233,21,0],[233,21,233,71,0],[233,71,234,21,0],[234,21,234,55,0],[234,55,235,17,0],[235,17,235,18,0],[235,18,235,20,0],[236,17,236,126,0],[238,17,238,54,0],[239,17,239,45,0],[241,17,242,17,0],[242,17,242,18,0],[242,18,243,21,0],[243,21,243,48,0],[243,48,244,21,0],[244,21,244,68,0],[244,68,245,21,0],[245,21,245,33,0],[245,33,246,17,0],[246,17,246,18,0],[246,18,246,19,0],[247,13,247,14,0]]);
+    </script>
+  </body>
+</html>

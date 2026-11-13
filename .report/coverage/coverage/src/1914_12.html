@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCard.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Logging;
+using osu.Game.Audio;
+using osu.Game.Database;
+using osu.Game.Online.Rooms;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card
+{
+    [Cached]
+    public partial class RankedPlayCard : CompositeDrawable
+    {
+        public static readonly Vector2 SIZE = new Vector2(120, 200);
+
+        public static readonly float CORNER_RADIUS = 6;
+
+        public readonly RankedPlayCardWithPlaylistItem Item;
+
+        private readonly IBindable&lt;MultiplayerPlaylistItem?&gt; playlistItem;
+
+        public readonly Bindable&lt;bool&gt; SongPreviewEnabled = new BindableBool(true);
+
+        private readonly Container content;
+        private readonly Container cardContent;
+        private readonly Container shadow;
+        private readonly SelectionOutline selectionOutline;
+        private readonly SongPreviewContainer songPreviewContainer;
+
+        public bool ShowSelectionOutline
+        {
+            set =&gt; selectionOutline.FadeTo(value ? 1 : 0, 50);
+        }
+
+        public bool PlayAudioPreview
+        {
+            set =&gt; songPreviewContainer.CardHovered.Value = value;
+        }
+
+        public float Elevation;
+
+        public bool PreviewTrackLoaded =&gt; songPreviewContainer.TrackLoaded;
+        public bool PreviewTrackRunning =&gt; songPreviewContainer.IsRunning;
+
+        private Sample? cardFlipSample;
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        public RankedPlayCard(RankedPlayCardWithPlaylistItem item)
+        {
+            Item = item;
+
+            Size = SIZE;
+
+            playlistItem = item.PlaylistItem.GetBoundCopy();
+
+            InternalChild = songPreviewContainer = new SongPreviewContainer
+            {
+                Enabled = { BindTarget = SongPreviewEnabled },
+                RelativeSizeAxes = Axes.Both,
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Children =
+                [
+                    shadow = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Masking = true,
+                        CornerRadius = CORNER_RADIUS,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        EdgeEffect = new EdgeEffectParameters
+                        {
+                            Type = EdgeEffectType.Shadow,
+                            Radius = 5,
+                            Colour = Color4.Black.Opacity(0.1f),
+                        },
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Alpha = 0,
+                            AlwaysPresent = true,
+                        }
+                    },
+                    content = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Children =
+                        [
+                            new RankedPlayCardBackSide(),
+                            cardContent = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Child = Empty(),
+                            },
+                            selectionOutline = new SelectionOutline
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Alpha = 0,
+                            }
+                        ]
+                    }
+                ]
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            cardFlipSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/card-flip-1&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            playlistItem.BindValueChanged(e =&gt; onPlaylistItemChanged(e.NewValue), true);
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            shadow.Scale = content.Scale;
+            shadow.Size = new Vector2(1 - Elevation * 0.25f);
+            shadow.Position = new Vector2(-25, 20) * Elevation;
+        }
+
+        #region beatmap fetching logic &amp; card flip
+
+        private readonly TaskCompletionSource cardRevealed = new TaskCompletionSource();
+
+        public Task CardRevealed =&gt; cardRevealed.Task;
+
+        private void onPlaylistItemChanged(MultiplayerPlaylistItem? playlistItem)
+        {
+            if (playlistItem == null)
+            {
+                SetContent(null);
+                return;
+            }
+
+            loadCardContentAsync(playlistItem);
+        }
+
+        private void loadCardContentAsync(MultiplayerPlaylistItem playlistItem) =&gt; Task.Run(async () =&gt;
+        {
+            var beatmap = await beatmapLookupCache.GetBeatmapAsync(playlistItem.BeatmapID).ConfigureAwait(false);
+
+            cardRevealed.TrySetResult();
+
+            if (beatmap == null)
+            {
+                Logger.Log($&quot;Failed to load beatmap {playlistItem.BeatmapID} for playlistItem {playlistItem.ID}.&quot;, level: LogLevel.Error);
+                return;
+            }
+
+            Schedule(() =&gt;
+            {
+                SetContent(new RankedPlayCardContent(beatmap));
+                songPreviewContainer.LoadPreview(beatmap);
+            });
+        });
+
+        private bool hasContent;
+
+        public void SetContent(Drawable? newContent)
+        {
+            if (newContent == null &amp;&amp; !hasContent)
+                return;
+
+            hasContent = newContent != null;
+            content.ScaleTo(new Vector2(0, 1), 100, Easing.In)
+                   .Then()
+                   .Schedule(() =&gt; cardContent.Child = newContent ?? Empty())
+                   .ScaleTo(new Vector2(1), 300, Easing.OutElasticQuarter);
+
+            SamplePlaybackHelper.PlayWithRandomPitch(cardFlipSample);
+        }
+
+        #endregion
+
+        public void PopOutAndExpire()
+        {
+            content.ScaleTo(0, 500, Easing.In);
+
+            this.FadeOut(500)
+                .Expire();
+        }
+
+        private partial class SelectionOutline : CompositeDrawable
+        {
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                const float border_width = 4;
+
+                InternalChild = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    // anti-aliasing would create a gap between the border &amp; card here if we used border_width directly
+                    Padding = new MarginPadding(-(border_width - 1)),
+                    Child = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Masking = true,
+                        CornerRadius = CORNER_RADIUS + border_width,
+                        BorderThickness = border_width,
+                        BorderColour = Color4Extensions.FromHex(&quot;72D5FF&quot;),
+                        Blending = BlendingParameters.Additive,
+                        EdgeEffect = new EdgeEffectParameters
+                        {
+                            Type = EdgeEffectType.Glow,
+                            Radius = 30,
+                            Colour = Color4Extensions.FromHex(&quot;72D5FF&quot;).Opacity(0.2f),
+                            Hollow = true,
+                            Roundness = 10
+                        },
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Alpha = 0,
+                            AlwaysPresent = true
+                        }
+                    }
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,69,0],[28,9,28,56,0],[34,9,34,84,0],[44,20,44,62,0],[49,20,49,66,0],[54,43,54,75,0],[55,44,55,74,0],[60,57,60,61,0],[60,62,60,66,0],[60,71,60,76,0],[62,9,62,67,0],[63,9,63,10,0],[64,13,64,25,0],[66,13,66,25,0],[68,13,68,61,0],[70,13,119,15,0],[120,9,120,10,0],[124,9,124,10,0],[125,13,125,95,0],[126,9,126,10,0],[129,9,129,10,0],[130,13,130,33,0],[132,13,132,48,0],[132,48,132,81,0],[132,81,132,89,0],[133,9,133,10,0],[136,9,136,10,0],[137,13,137,40,0],[139,13,139,42,0],[140,13,140,62,0],[141,13,141,64,0],[142,9,142,10,0],[146,9,146,89,0],[148,37,148,54,0],[151,9,151,10,0],[152,13,152,38,0],[153,13,153,14,0],[154,17,154,34,0],[155,17,155,24,0],[158,13,158,48,0],[159,9,159,10,0],[161,84,162,9,0],[162,9,162,10,0],[162,10,163,13,0],[163,13,163,114,0],[163,114,165,13,0],[165,13,165,41,0],[165,41,167,13,0],[167,13,167,33,0],[167,33,168,13,0],[168,13,168,14,0],[168,14,169,17,0],[169,17,169,139,0],[169,139,170,17,0],[170,17,170,24,0],[170,24,173,13,0],[173,13,174,13,0],[174,13,174,14,0],[174,14,175,17,0],[175,17,175,64,0],[175,64,176,17,0],[176,17,176,59,0],[176,59,177,13,0],[177,13,177,14,0],[177,14,177,16,0],[177,16,178,9,0],[178,9,178,10,0],[178,10,178,11,0],[183,9,183,10,0],[184,13,184,51,0],[185,17,185,24,0],[187,13,187,45,0],[188,13,190,36,0],[190,36,190,77,0],[190,77,191,76,0],[193,13,193,70,0],[194,9,194,10,0],[199,9,199,10,0],[200,13,200,48,0],[202,13,203,27,0],[204,9,204,10,0],[210,13,210,14,0],[213,17,241,19,0],[242,13,242,14,0]]);
+    </script>
+  </body>
+</html>

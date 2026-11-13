@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/Checks/CheckMutedObjects.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Edit.Checks.Components;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+
+namespace osu.Game.Rulesets.Edit.Checks
+{
+    public class CheckMutedObjects : ICheck
+    {
+        /// &lt;summary&gt;
+        /// Volume percentages lower than or equal to this are typically inaudible.
+        /// &lt;/summary&gt;
+        private const int muted_threshold = 5;
+
+        /// &lt;summary&gt;
+        /// Volume percentages lower than or equal to this can sometimes be inaudible depending on sample used and music volume.
+        /// &lt;/summary&gt;
+        private const int low_volume_threshold = 20;
+
+        private enum EdgeType
+        {
+            Head,
+            Repeat,
+            Tail,
+            None
+        }
+
+        public CheckMetadata Metadata { get; } = new CheckMetadata(CheckCategory.Audio, &quot;Low volume hitobjects&quot;);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
+        {
+            new IssueTemplateMutedActive(this),
+            new IssueTemplateLowVolumeActive(this),
+            new IssueTemplateMutedPassive(this)
+        };
+
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            foreach (var hitObject in context.CurrentDifficulty.Playable.HitObjects)
+            {
+                // Worth keeping in mind: The samples of an object always play at its end time.
+                // Objects like spinners have no sound at its start because of this, while hold notes have nested objects to accomplish this.
+                foreach (var nestedHitObject in hitObject.NestedHitObjects)
+                {
+                    foreach (var issue in getVolumeIssues(hitObject, nestedHitObject))
+                        yield return issue;
+                }
+
+                foreach (var issue in getVolumeIssues(hitObject))
+                    yield return issue;
+            }
+        }
+
+        private IEnumerable&lt;Issue&gt; getVolumeIssues(HitObject hitObject, HitObject? sampledHitObject = null)
+        {
+            sampledHitObject ??= hitObject;
+            if (!sampledHitObject.Samples.Any())
+                yield break;
+
+            // Samples that allow themselves to be overridden by control points have a volume of 0.
+            int maxVolume = sampledHitObject.Samples.Max(sample =&gt; sample.Volume);
+            double samplePlayTime = sampledHitObject.GetEndTime();
+
+            EdgeType edgeType = getEdgeAtTime(hitObject, samplePlayTime);
+            // We only care about samples played on the edges of objects, not ones like spinnerspin or slidertick.
+            if (edgeType == EdgeType.None)
+                yield break;
+
+            string postfix = hitObject is IHasDuration ? edgeType.ToString().ToLowerInvariant() : string.Empty;
+
+            if (maxVolume &lt;= muted_threshold)
+            {
+                if (edgeType == EdgeType.Head)
+                    yield return new IssueTemplateMutedActive(this).Create(hitObject, maxVolume / 100f, sampledHitObject.GetEndTime(), postfix);
+                else
+                    yield return new IssueTemplateMutedPassive(this).Create(hitObject, maxVolume / 100f, sampledHitObject.GetEndTime(), postfix);
+            }
+            else if (maxVolume &lt;= low_volume_threshold &amp;&amp; edgeType == EdgeType.Head)
+            {
+                yield return new IssueTemplateLowVolumeActive(this).Create(hitObject, maxVolume / 100f, sampledHitObject.GetEndTime(), postfix);
+            }
+        }
+
+        private EdgeType getEdgeAtTime(HitObject hitObject, double time)
+        {
+            if (Precision.AlmostEquals(time, hitObject.StartTime, 1f))
+                return EdgeType.Head;
+            if (Precision.AlmostEquals(time, hitObject.GetEndTime(), 1f))
+                return EdgeType.Tail;
+
+            if (hitObject is IHasRepeats hasRepeats)
+            {
+                double spanDuration = hasRepeats.Duration / hasRepeats.SpanCount();
+                if (spanDuration &lt;= 0)
+                    // Prevents undefined behaviour in cases like where zero/negative-length sliders/hold notes exist.
+                    return EdgeType.None;
+
+                double spans = (time - hitObject.StartTime) / spanDuration;
+                double acceptableDifference = 1 / spanDuration; // 1 ms of acceptable difference, as with head/tail above.
+
+                if (Precision.AlmostEquals(spans, Math.Ceiling(spans), acceptableDifference) ||
+                    Precision.AlmostEquals(spans, Math.Floor(spans), acceptableDifference))
+                {
+                    return EdgeType.Repeat;
+                }
+            }
+
+            return EdgeType.None;
+        }
+
+        public abstract class IssueTemplateMuted : IssueTemplate
+        {
+            protected IssueTemplateMuted(ICheck check, IssueType type, string unformattedMessage)
+                : base(check, type, unformattedMessage)
+            {
+            }
+
+            public Issue Create(HitObject hitobject, double volume, double time, string postfix = &quot;&quot;)
+            {
+                string objectName = hitobject.GetType().Name;
+                if (!string.IsNullOrEmpty(postfix))
+                    objectName += &quot; &quot; + postfix;
+
+                return new Issue(hitobject, this, objectName, volume) { Time = time };
+            }
+        }
+
+        public class IssueTemplateMutedActive : IssueTemplateMuted
+        {
+            public IssueTemplateMutedActive(ICheck check)
+                : base(check, IssueType.Problem, &quot;{0} has a volume of {1:0%}. Clickable objects must have clearly audible feedback.&quot;)
+            {
+            }
+        }
+
+        public class IssueTemplateLowVolumeActive : IssueTemplateMuted
+        {
+            public IssueTemplateLowVolumeActive(ICheck check)
+                : base(check, IssueType.Warning, &quot;{0} has a volume of {1:0%}, ensure this is audible.&quot;)
+            {
+            }
+        }
+
+        public class IssueTemplateMutedPassive : IssueTemplateMuted
+        {
+            public IssueTemplateMutedPassive(ICheck check)
+                : base(check, IssueType.Negligible, &quot;{0} has a volume of {1:0%}, ensure there is no distinct sound here in the song if inaudible.&quot;)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,41,34,45,0],[34,50,34,113,0],[36,64,41,10,0],[44,9,44,10,0],[45,13,45,20,0],[45,22,45,35,0],[45,36,45,38,0],[45,39,45,84,0],[46,13,46,14,0],[49,17,49,24,0],[49,26,49,45,0],[49,46,49,48,0],[49,49,49,75,0],[50,17,50,18,0],[51,21,51,28,0],[51,30,51,39,0],[51,40,51,42,0],[51,43,51,86,0],[52,25,52,44,0],[53,17,53,18,0],[55,17,55,24,0],[55,26,55,35,0],[55,36,55,38,0],[55,39,55,65,0],[56,21,56,40,0],[57,13,57,14,0],[58,9,58,10,0],[61,9,61,10,0],[62,13,62,44,0],[63,13,63,49,0],[64,17,64,29,0],[67,13,67,68,0],[67,68,67,81,0],[67,81,67,83,0],[68,13,68,67,0],[70,13,70,74,0],[72,13,72,43,0],[73,17,73,29,0],[75,13,75,112,0],[77,13,77,46,0],[78,13,78,14,0],[79,17,79,47,0],[80,21,80,145,0],[82,21,82,146,0],[83,13,83,14,0],[84,18,84,85,0],[85,13,85,14,0],[86,17,86,145,0],[87,13,87,14,0],[88,9,88,10,0],[91,9,91,10,0],[92,13,92,71,0],[93,17,93,38,0],[94,13,94,74,0],[95,17,95,38,0],[97,13,97,53,0],[98,13,98,14,0],[99,17,99,84,0],[100,17,100,39,0],[102,21,102,42,0],[104,17,104,76,0],[105,17,105,64,0],[107,17,108,92,0],[109,17,109,18,0],[110,21,110,44,0],[112,13,112,14,0],[114,13,114,34,0],[115,9,115,10,0],[120,19,120,56,0],[121,13,121,14,0],[122,13,122,14,0],[125,13,125,14,0],[126,17,126,62,0],[127,17,127,52,0],[128,21,128,49,0],[130,17,130,87,0],[131,13,131,14,0],[137,19,137,134,0],[138,13,138,14,0],[139,13,139,14,0],[145,19,145,104,0],[146,13,146,14,0],[147,13,147,14,0],[153,19,153,148,0],[154,13,154,14,0],[155,13,155,14,0]]);
+    </script>
+  </body>
+</html>

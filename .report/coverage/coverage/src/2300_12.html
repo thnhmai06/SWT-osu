@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/Pooling/PooledDrawableWithLifetimeContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Extensions.ListExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Performance;
+using osu.Framework.Lists;
+
+namespace osu.Game.Rulesets.Objects.Pooling
+{
+    /// &lt;summary&gt;
+    /// A container of &lt;typeparamref name=&quot;TDrawable&quot;/&gt;s dynamically added/removed by model &lt;typeparamref name=&quot;TEntry&quot;/&gt;s.
+    /// When an entry became alive, a drawable corresponding to the entry is obtained (potentially pooled), and added to this container.
+    /// The drawable is removed when the entry became dead.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;TEntry&quot;&gt;The type of entries managed by this container.&lt;/typeparam&gt;
+    /// &lt;typeparam name=&quot;TDrawable&quot;&gt;The type of drawables corresponding to the entries.&lt;/typeparam&gt;
+    public abstract partial class PooledDrawableWithLifetimeContainer&lt;TEntry, TDrawable&gt; : CompositeDrawable
+        where TEntry : LifetimeEntry
+        where TDrawable : Drawable
+    {
+        /// &lt;summary&gt;
+        /// All entries added to this container, including dead entries.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The enumeration order is undefined.
+        /// &lt;/remarks&gt;
+        public IEnumerable&lt;TEntry&gt; Entries =&gt; allEntries;
+
+        /// &lt;summary&gt;
+        /// All alive entries and drawables corresponding to the entries.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The enumeration order is undefined.
+        /// &lt;/remarks&gt;
+        public readonly SlimReadOnlyDictionaryWrapper&lt;TEntry, TDrawable&gt; AliveEntries;
+
+        /// &lt;summary&gt;
+        /// Whether to remove an entry when clock goes backward and crossed its &lt;see cref=&quot;LifetimeEntry.LifetimeStart&quot;/&gt;.
+        /// Used when entries are dynamically added at its &lt;see cref=&quot;LifetimeEntry.LifetimeStart&quot;/&gt; to prevent duplicated entries.
+        /// &lt;/summary&gt;
+        protected virtual bool RemoveRewoundEntry =&gt; false;
+
+        /// &lt;summary&gt;
+        /// The amount of time prior to the current time within which entries should be considered alive.
+        /// &lt;/summary&gt;
+        internal double PastLifetimeExtension { get; set; }
+
+        /// &lt;summary&gt;
+        /// The amount of time after the current time within which entries should be considered alive.
+        /// &lt;/summary&gt;
+        internal double FutureLifetimeExtension { get; set; }
+
+        private readonly Dictionary&lt;TEntry, TDrawable&gt; aliveDrawableMap = new Dictionary&lt;TEntry, TDrawable&gt;();
+        private readonly HashSet&lt;TEntry&gt; allEntries = new HashSet&lt;TEntry&gt;();
+
+        private readonly LifetimeEntryManager lifetimeManager = new LifetimeEntryManager();
+
+        protected PooledDrawableWithLifetimeContainer()
+        {
+            lifetimeManager.EntryBecameAlive += entryBecameAlive;
+            lifetimeManager.EntryBecameDead += entryBecameDead;
+            lifetimeManager.EntryCrossedBoundary += entryCrossedBoundary;
+
+            AliveEntries = aliveDrawableMap.AsSlimReadOnly();
+        }
+
+        /// &lt;summary&gt;
+        /// Add a &lt;typeparamref name=&quot;TEntry&quot;/&gt; to be managed by this container.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The aliveness of the entry is not updated until &lt;see cref=&quot;CheckChildrenLife&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        public virtual void Add(TEntry entry)
+        {
+            allEntries.Add(entry);
+            lifetimeManager.AddEntry(entry);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove a &lt;typeparamref name=&quot;TEntry&quot;/&gt; from this container.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If the entry was alive, the corresponding drawable is removed.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;Whether the entry was in this container.&lt;/returns&gt;
+        public virtual bool Remove(TEntry entry)
+        {
+            if (!lifetimeManager.RemoveEntry(entry)) return false;
+
+            allEntries.Remove(entry);
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Initialize new &lt;typeparamref name=&quot;TDrawable&quot;/&gt; corresponding &lt;paramref name=&quot;entry&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The &lt;typeparamref name=&quot;TDrawable&quot;/&gt; corresponding to the entry.&lt;/returns&gt;
+        protected abstract TDrawable GetDrawable(TEntry entry);
+
+        private void entryBecameAlive(LifetimeEntry lifetimeEntry)
+        {
+            var entry = (TEntry)lifetimeEntry;
+            Debug.Assert(!aliveDrawableMap.ContainsKey(entry));
+
+            TDrawable drawable = GetDrawable(entry);
+            aliveDrawableMap[entry] = drawable;
+            AddDrawable(entry, drawable);
+        }
+
+        /// &lt;summary&gt;
+        /// Add a &lt;typeparamref name=&quot;TDrawable&quot;/&gt; corresponding to &lt;paramref name=&quot;entry&quot;/&gt; to this container.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Invoked when the entry became alive and a &lt;typeparamref name=&quot;TDrawable&quot;/&gt; is obtained by &lt;see cref=&quot;GetDrawable&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        protected virtual void AddDrawable(TEntry entry, TDrawable drawable) =&gt; AddInternal(drawable);
+
+        private void entryBecameDead(LifetimeEntry lifetimeEntry)
+        {
+            var entry = (TEntry)lifetimeEntry;
+            Debug.Assert(aliveDrawableMap.ContainsKey(entry));
+
+            TDrawable drawable = aliveDrawableMap[entry];
+            aliveDrawableMap.Remove(entry);
+            RemoveDrawable(entry, drawable);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove a &lt;typeparamref name=&quot;TDrawable&quot;/&gt; corresponding to &lt;paramref name=&quot;entry&quot;/&gt; from this container.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Invoked when the entry became dead.
+        /// &lt;/remarks&gt;
+        protected virtual void RemoveDrawable(TEntry entry, TDrawable drawable) =&gt; RemoveInternal(drawable, false);
+
+        private void entryCrossedBoundary(LifetimeEntry lifetimeEntry, LifetimeBoundaryKind kind, LifetimeBoundaryCrossingDirection direction)
+        {
+            if (RemoveRewoundEntry &amp;&amp; kind == LifetimeBoundaryKind.Start &amp;&amp; direction == LifetimeBoundaryCrossingDirection.Backward)
+                Remove((TEntry)lifetimeEntry);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove all &lt;typeparamref name=&quot;TEntry&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        public void Clear()
+        {
+            foreach (var entry in Entries.ToArray())
+                Remove(entry);
+
+            Debug.Assert(aliveDrawableMap.Count == 0);
+        }
+
+        protected override bool CheckChildrenLife()
+        {
+            if (!IsPresent)
+                return false;
+
+            bool aliveChanged = lifetimeManager.Update(Time.Current - PastLifetimeExtension, Time.Current + FutureLifetimeExtension);
+            aliveChanged |= base.CheckChildrenLife();
+            return aliveChanged;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,47,32,57,0],[46,54,46,59,0],[51,49,51,53,0],[51,54,51,58,0],[56,51,56,55,0],[56,56,56,60,0],[58,9,58,111,0],[59,9,59,77,0],[61,9,61,92,0],[63,9,63,56,0],[64,9,64,10,0],[65,13,65,66,0],[66,13,66,64,0],[67,13,67,74,0],[69,13,69,62,0],[70,9,70,10,0],[79,9,79,10,0],[80,13,80,35,0],[81,13,81,45,0],[82,9,82,10,0],[92,9,92,10,0],[93,13,93,53,0],[93,54,93,67,0],[95,13,95,38,0],[96,13,96,25,0],[97,9,97,10,0],[106,9,106,10,0],[107,13,107,47,0],[108,13,108,64,0],[110,13,110,53,0],[111,13,111,48,0],[112,13,112,42,0],[113,9,113,10,0],[121,81,121,102,0],[124,9,124,10,0],[125,13,125,47,0],[126,13,126,63,0],[128,13,128,58,0],[129,13,129,44,0],[130,13,130,45,0],[131,9,131,10,0],[139,84,139,115,0],[142,9,142,10,0],[143,13,143,133,0],[144,17,144,47,0],[145,9,145,10,0],[151,9,151,10,0],[152,13,152,20,0],[152,22,152,31,0],[152,32,152,34,0],[152,35,152,52,0],[153,17,153,31,0],[155,13,155,55,0],[156,9,156,10,0],[159,9,159,10,0],[160,13,160,28,0],[161,17,161,30,0],[163,13,163,134,0],[164,13,164,54,0],[165,13,165,33,0],[166,9,166,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Taiko/Difficulty/Evaluators/RhythmEvaluator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Taiko.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Taiko.Difficulty.Preprocessing.Rhythm;
+using osu.Game.Rulesets.Taiko.Difficulty.Preprocessing.Rhythm.Data;
+using osu.Game.Rulesets.Taiko.Objects;
+
+namespace osu.Game.Rulesets.Taiko.Difficulty.Evaluators
+{
+    public static class RhythmEvaluator
+    {
+        /// &lt;summary&gt;
+        /// Evaluate the difficulty of a hitobject considering its interval change.
+        /// &lt;/summary&gt;
+        public static double EvaluateDifficultyOf(DifficultyHitObject hitObject)
+        {
+            if (hitObject.BaseObject is not Hit)
+                return 0;
+
+            TaikoRhythmData rhythmData = ((TaikoDifficultyHitObject)hitObject).RhythmData;
+            double difficulty = 0.0d;
+
+            double sameRhythm = 0;
+            double samePattern = 0;
+            double intervalPenalty = 0;
+            double gapPenalty = 0;
+
+            double hitWindow = hitObject.HitWindowGreat;
+
+            if (rhythmData.SameRhythmGroupedHitObjects?.FirstHitObject == hitObject) // Difficulty for SameRhythmGroupedHitObjects
+            {
+                sameRhythm += 10.0 * evaluateDifficultyOf(rhythmData.SameRhythmGroupedHitObjects, hitWindow);
+                intervalPenalty = repeatedIntervalPenalty(rhythmData.SameRhythmGroupedHitObjects, hitWindow);
+                gapPenalty = longGapPenalty(rhythmData.SameRhythmGroupedHitObjects.Previous);
+            }
+
+            if (rhythmData.SamePatternsGroupedHitObjects?.FirstHitObject == hitObject) // Difficulty for SamePatternsGroupedHitObjects
+                samePattern += 1.15 * ratioDifficulty(rhythmData.SamePatternsGroupedHitObjects.IntervalRatio);
+
+            difficulty += Math.Max(sameRhythm, samePattern) * intervalPenalty * gapPenalty;
+
+            return difficulty;
+        }
+
+        private static double evaluateDifficultyOf(SameRhythmHitObjectGrouping sameRhythmGroupedHitObjects, double hitWindow)
+        {
+            double intervalDifficulty = ratioDifficulty(sameRhythmGroupedHitObjects.HitObjectIntervalRatio);
+            double? previousInterval = sameRhythmGroupedHitObjects.Previous?.HitObjectInterval;
+
+            intervalDifficulty *= repeatedIntervalPenalty(sameRhythmGroupedHitObjects, hitWindow);
+
+            // If a previous interval exists and there are multiple hit objects in the sequence:
+            if (previousInterval != null &amp;&amp; sameRhythmGroupedHitObjects.HitObjects.Count &gt; 1)
+            {
+                double expectedDurationFromPrevious = (double)previousInterval * sameRhythmGroupedHitObjects.HitObjects.Count;
+                double durationDifference = sameRhythmGroupedHitObjects.Duration - expectedDurationFromPrevious;
+
+                if (durationDifference &gt; 0)
+                {
+                    intervalDifficulty *= DiffUtils.Logistic(
+                        durationDifference / hitWindow,
+                        midpointOffset: 0.35,
+                        multiplier: 2,
+                        maxValue: 1);
+                }
+            }
+
+            // Penalise patterns that can be hit within a single hit window.
+            intervalDifficulty *= DiffUtils.Logistic(
+                sameRhythmGroupedHitObjects.Duration / hitWindow,
+                midpointOffset: 0.3,
+                multiplier: 2,
+                maxValue: 1);
+
+            return DiffUtils.Pow(intervalDifficulty, 0.75);
+        }
+
+        /// &lt;summary&gt;
+        /// Determines if the changes in hit object intervals is consistent based on a given threshold.
+        /// &lt;/summary&gt;
+        private static double repeatedIntervalPenalty(SameRhythmHitObjectGrouping sameRhythmGroupedHitObjects, double hitWindow, double threshold = 0.1)
+        {
+            double longIntervalPenalty = sameInterval(sameRhythmGroupedHitObjects, 3);
+
+            double shortIntervalPenalty = sameRhythmGroupedHitObjects.HitObjects.Count &lt; 6
+                ? sameInterval(sameRhythmGroupedHitObjects, 4)
+                : 1.0; // Returns a non-penalty if there are 6 or more notes within an interval.
+
+            // The duration penalty is based on hit object duration relative to hitWindow.
+            double durationPenalty = Math.Max(1 - sameRhythmGroupedHitObjects.Duration * 2 / hitWindow, 0.5);
+
+            return Math.Min(longIntervalPenalty, shortIntervalPenalty) * durationPenalty;
+
+            double sameInterval(SameRhythmHitObjectGrouping startObject, int intervalCount)
+            {
+                List&lt;double?&gt; intervals = new List&lt;double?&gt;();
+                var currentObject = startObject;
+
+                for (int i = 0; i &lt; intervalCount &amp;&amp; currentObject != null; i++)
+                {
+                    intervals.Add(currentObject.HitObjectInterval);
+                    currentObject = currentObject.Previous;
+                }
+
+                intervals.RemoveAll(interval =&gt; interval == null);
+
+                if (intervals.Count &lt; intervalCount)
+                    return 1.0; // No penalty if there aren&#39;t enough valid intervals.
+
+                for (int i = 0; i &lt; intervals.Count; i++)
+                {
+                    for (int j = i + 1; j &lt; intervals.Count; j++)
+                    {
+                        double ratio = intervals[i]!.Value / intervals[j]!.Value;
+                        if (Math.Abs(1 - ratio) &lt;= threshold) // If any two intervals are similar, apply a penalty.
+                            return 0.80;
+                    }
+                }
+
+                return 1.0; // No penalty if all intervals are different.
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Frequent rhythm changes containing long gaps (i.e. 1/4 + 1/6 with 1/2 gaps) award more difficulty than expected.
+        /// Due to limitations of the current rhythm evaluation, these cases are targeted and penalised.
+        /// The previous hit object grouping is used as often the rhythm change *two* rhythms after a long gap awards the unexpected difficulty.
+        /// &lt;/summary&gt;
+        private static double longGapPenalty(SameRhythmHitObjectGrouping? previous)
+        {
+            if (previous == null)
+                return 1.0;
+
+            double gapInterval = previous.FirstHitObject.DeltaTime;
+            double rhythmInterval = previous.HitObjectInterval ?? gapInterval;
+            double rhythmLength = previous.HitObjects.Count;
+
+            // The ratio of the gap before this rhythm to the rhythm itself.
+            double gapRatio = gapInterval / Math.Max(rhythmInterval, 1);
+
+            // The gap ratio normalised to represent if the gap is long.
+            double gapFactor = DiffUtils.Logistic(gapRatio, 1.75, 20);
+
+            // The length in objects of this rhythm normalised to represent if the rhythm change is frequent enough to be penalised.
+            double lengthFactor = DiffUtils.ReverseLerp(rhythmLength, 8, 2);
+
+            return 1.0 - 0.75 * gapFactor * lengthFactor;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of a given ratio using a combination of periodic penalties and bonuses.
+        /// &lt;/summary&gt;
+        private static double ratioDifficulty(double ratio, int terms = 8)
+        {
+            double difficulty = 0;
+
+            // Validate the ratio by ensuring it is a normal number in cases where maps breach regular mapping conditions.
+            ratio = double.IsNormal(ratio) ? ratio : 0;
+
+            for (int i = 1; i &lt;= terms; ++i)
+            {
+                difficulty += termPenalty(ratio, i, 4, 1);
+            }
+
+            difficulty += terms / (1 + ratio);
+
+            // Give bonus to near-1 ratios
+            difficulty += DiffUtils.BellCurve(ratio, 1, 0.5);
+
+            // Penalize ratios that are VERY near 1
+            difficulty -= DiffUtils.BellCurve(ratio, 1, 0.3);
+
+            difficulty = Math.Max(difficulty, 0);
+            difficulty /= Math.Sqrt(8);
+
+            return difficulty;
+        }
+
+        /// &lt;summary&gt;
+        /// Multiplier for a given denominator term.
+        /// &lt;/summary&gt;
+        private static double termPenalty(double ratio, int denominator, double power, double multiplier) =&gt;
+            -multiplier * DiffUtils.Pow(Math.Cos(denominator * Math.PI * ratio), power);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,9,21,10,1],[22,13,22,49,1],[23,17,23,26,1],[25,13,25,91,1],[26,13,26,38,1],[28,13,28,35,1],[29,13,29,36,1],[30,13,30,40,1],[31,13,31,35,1],[33,13,33,57,1],[35,13,35,85,1],[36,13,36,14,1],[37,17,37,110,1],[38,17,38,110,1],[39,17,39,94,1],[40,13,40,14,1],[42,13,42,87,1],[43,17,43,111,1],[45,13,45,92,1],[47,13,47,31,1],[48,9,48,10,1],[51,9,51,10,1],[52,13,52,109,1],[53,13,53,96,1],[55,13,55,99,1],[58,13,58,94,1],[59,13,59,14,1],[60,17,60,127,1],[61,17,61,113,1],[63,17,63,44,1],[64,17,64,18,1],[65,21,69,38,1],[70,17,70,18,1],[71,13,71,14,1],[74,13,78,30,1],[80,13,80,60,1],[81,9,81,10,1],[87,9,87,10,1],[88,13,88,87,1],[90,13,92,23,1],[95,13,95,110,1],[97,13,97,90,1],[100,13,100,14,1],[101,17,101,63,1],[102,17,102,49,1],[104,22,104,31,1],[104,33,104,75,1],[104,77,104,80,1],[105,17,105,18,1],[106,21,106,68,1],[107,21,107,60,1],[108,17,108,18,1],[110,17,110,49,1],[110,49,110,65,1],[110,65,110,67,1],[112,17,112,53,1],[113,21,113,32,1],[115,22,115,31,1],[115,33,115,52,1],[115,54,115,57,0],[116,17,116,18,1],[117,26,117,39,1],[117,41,117,60,1],[117,62,117,65,1],[118,21,118,22,1],[119,25,119,82,1],[120,25,120,62,1],[121,29,121,41,1],[122,21,122,22,1],[123,17,123,18,0],[125,17,125,28,0],[126,13,126,14,1],[127,9,127,10,1],[135,9,135,10,1],[136,13,136,34,1],[137,17,137,28,1],[139,13,139,68,1],[140,13,140,79,1],[141,13,141,61,1],[144,13,144,73,1],[147,13,147,71,1],[150,13,150,77,1],[152,13,152,58,1],[153,9,153,10,1],[159,9,159,10,1],[160,13,160,35,1],[163,13,163,56,1],[165,18,165,27,1],[165,29,165,39,1],[165,41,165,44,1],[166,13,166,14,1],[167,17,167,59,1],[168,13,168,14,1],[170,13,170,47,1],[173,13,173,62,1],[176,13,176,62,1],[178,13,178,50,1],[179,13,179,40,1],[181,13,181,31,1],[182,9,182,10,1],[188,13,188,88,1]]);
+    </script>
+  </body>
+</html>

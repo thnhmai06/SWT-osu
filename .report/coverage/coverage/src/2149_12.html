@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/EditorBlueprintContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+
+namespace osu.Game.Screens.Edit.Compose.Components
+{
+    public abstract partial class EditorBlueprintContainer : BlueprintContainer&lt;HitObject&gt;
+    {
+        [Resolved]
+        protected EditorClock EditorClock { get; private set; }
+
+        [Resolved]
+        protected EditorBeatmap Beatmap { get; private set; }
+
+        protected readonly HitObjectComposer Composer;
+
+        private HitObjectUsageEventBuffer usageEventBuffer;
+
+        protected InputManager InputManager { get; private set; }
+
+        protected EditorBlueprintContainer(HitObjectComposer composer)
+        {
+            Composer = composer;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            SelectedItems.BindTo(Beatmap.SelectedHitObjects);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            InputManager = GetContainingInputManager();
+
+            Beatmap.HitObjectAdded += AddBlueprintFor;
+            Beatmap.HitObjectRemoved += RemoveBlueprintFor;
+            Beatmap.SelectedHitObjects.CollectionChanged += updateSelectionLifetime;
+
+            if (Composer != null)
+            {
+                foreach (var obj in Composer.HitObjects)
+                    AddBlueprintFor(obj.HitObject);
+
+                usageEventBuffer = new HitObjectUsageEventBuffer(Composer.Playfield);
+                usageEventBuffer.HitObjectUsageBegan += AddBlueprintFor;
+                usageEventBuffer.HitObjectUsageFinished += RemoveBlueprintFor;
+                usageEventBuffer.HitObjectUsageTransferred += TransferBlueprintFor;
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+            usageEventBuffer?.Update();
+        }
+
+        protected override IEnumerable&lt;SelectionBlueprint&lt;HitObject&gt;&gt; SortForMovement(IReadOnlyList&lt;SelectionBlueprint&lt;HitObject&gt;&gt; blueprints)
+            =&gt; blueprints.OrderBy(b =&gt; b.Item.StartTime);
+
+        protected void ApplySnapResultTime(SnapResult result, double referenceTime)
+        {
+            if (!result.Time.HasValue)
+                return;
+
+            // Apply the start time at the newly snapped-to position
+            double offset = result.Time.Value - referenceTime;
+
+            if (offset != 0)
+                Beatmap.PerformOnSelection(obj =&gt; obj.StartTime += offset);
+        }
+
+        protected override void AddBlueprintFor(HitObject item)
+        {
+            if (item is IBarLine)
+                return;
+
+            base.AddBlueprintFor(item);
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; has been transferred to another &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The hit object which has been assigned to a new drawable.&lt;/param&gt;
+        /// &lt;param name=&quot;drawableObject&quot;&gt;The new drawable that is representing the hit object.&lt;/param&gt;
+        protected virtual void TransferBlueprintFor(HitObject hitObject, DrawableHitObject drawableObject)
+        {
+        }
+
+        protected override void DragOperationCompleted()
+        {
+            base.DragOperationCompleted();
+
+            // handle positional change etc.
+            foreach (var blueprint in SelectionBlueprints)
+                Beatmap.Update(blueprint.Item);
+        }
+
+        protected override bool OnDoubleClick(DoubleClickEvent e)
+        {
+            if (!base.OnDoubleClick(e))
+                return false;
+
+            EditorClock?.SeekSmoothlyTo(ClickedBlueprint.Item.StartTime);
+            return true;
+        }
+
+        protected override SelectionBlueprintContainer CreateSelectionBlueprintContainer() =&gt; new HitObjectOrderedSelectionContainer { RelativeSizeAxes = Axes.Both };
+
+        protected override SelectionHandler&lt;HitObject&gt; CreateSelectionHandler() =&gt; new EditorSelectionHandler();
+
+        protected override void SelectAll()
+        {
+            Composer.Playfield.KeepAllAlive();
+            SelectedItems.AddRange(Beatmap.HitObjects.Except(SelectedItems).ToArray());
+        }
+
+        /// &lt;summary&gt;
+        /// Ensures that newly-selected hitobjects are kept alive
+        /// and drops that keep-alive from newly-deselected objects.
+        /// &lt;/summary&gt;
+        private void updateSelectionLifetime(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.NewItems != null)
+            {
+                foreach (HitObject newSelection in e.NewItems)
+                    Composer.Playfield.SetKeepAlive(newSelection, true);
+            }
+
+            if (e.OldItems != null)
+            {
+                foreach (HitObject oldSelection in e.OldItems)
+                    Composer.Playfield.SetKeepAlive(oldSelection, false);
+            }
+        }
+
+        protected override void OnBlueprintSelected(SelectionBlueprint&lt;HitObject&gt; blueprint)
+        {
+            base.OnBlueprintSelected(blueprint);
+
+            Composer.Playfield.SetKeepAlive(blueprint.Item, true);
+        }
+
+        protected override void OnBlueprintDeselected(SelectionBlueprint&lt;HitObject&gt; blueprint)
+        {
+            base.OnBlueprintDeselected(blueprint);
+
+            Composer.Playfield.SetKeepAlive(blueprint.Item, false);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (Beatmap != null)
+            {
+                Beatmap.HitObjectAdded -= AddBlueprintFor;
+                Beatmap.HitObjectRemoved -= RemoveBlueprintFor;
+                Beatmap.SelectedHitObjects.CollectionChanged -= updateSelectionLifetime;
+            }
+
+            usageEventBuffer?.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,45,22,49,0],[22,50,22,62,0],[25,43,25,47,0],[25,48,25,60,0],[31,47,31,51,0],[31,52,31,64,0],[33,9,33,71,0],[34,9,34,10,0],[35,13,35,33,0],[36,9,36,10,0],[40,9,40,10,0],[41,13,41,62,0],[42,9,42,10,0],[45,9,45,10,0],[46,13,46,33,0],[48,13,48,56,0],[50,13,50,55,0],[51,13,51,60,0],[52,13,52,85,0],[54,13,54,34,0],[55,13,55,14,0],[56,17,56,24,0],[56,26,56,33,0],[56,34,56,36,0],[56,37,56,56,0],[57,21,57,52,0],[59,17,59,86,0],[60,17,60,73,0],[61,17,61,79,0],[62,17,62,84,0],[63,13,63,14,0],[64,9,64,10,0],[67,9,67,10,0],[68,13,68,27,0],[69,13,69,40,0],[70,9,70,10,0],[73,16,73,40,0],[73,40,73,56,0],[73,56,73,57,0],[76,9,76,10,0],[77,13,77,39,0],[78,17,78,24,0],[81,13,81,63,0],[83,13,83,29,0],[84,17,84,51,0],[84,51,84,74,0],[84,74,84,76,0],[85,9,85,10,0],[88,9,88,10,0],[89,13,89,34,0],[90,17,90,24,0],[92,13,92,40,0],[93,9,93,10,0],[101,9,101,10,0],[102,9,102,10,0],[105,9,105,10,0],[106,13,106,43,0],[109,13,109,20,0],[109,22,109,35,0],[109,36,109,38,0],[109,39,109,58,0],[110,17,110,48,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,40,0],[116,17,116,30,0],[118,13,118,74,0],[119,13,119,25,0],[120,9,120,10,0],[122,95,122,166,0],[124,84,124,112,0],[127,9,127,10,0],[128,13,128,47,0],[129,13,129,88,0],[130,9,130,10,0],[137,9,137,10,0],[138,13,138,36,0],[139,13,139,14,0],[140,17,140,24,0],[140,26,140,48,0],[140,49,140,51,0],[140,52,140,62,0],[141,21,141,73,0],[142,13,142,14,0],[144,13,144,36,0],[145,13,145,14,0],[146,17,146,24,0],[146,26,146,48,0],[146,49,146,51,0],[146,52,146,62,0],[147,21,147,74,0],[148,13,148,14,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,153,49,0],[155,13,155,67,0],[156,9,156,10,0],[159,9,159,10,0],[160,13,160,51,0],[162,13,162,68,0],[163,9,163,10,0],[166,9,166,10,0],[167,13,167,39,0],[169,13,169,33,0],[170,13,170,14,0],[171,17,171,59,0],[172,17,172,64,0],[173,17,173,89,0],[174,13,174,14,0],[176,13,176,41,0],[177,9,177,10,0]]);
+    </script>
+  </body>
+</html>

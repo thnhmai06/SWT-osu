@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Taiko/Difficulty/TaikoPerformanceCalculator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Game.Rulesets.Difficulty;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.Taiko.Objects;
+using osu.Game.Rulesets.Taiko.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Utils;
+
+namespace osu.Game.Rulesets.Taiko.Difficulty
+{
+    public class TaikoPerformanceCalculator : PerformanceCalculator
+    {
+        private int countGreat;
+        private int countOk;
+        private int countMeh;
+        private int countMiss;
+        private double? estimatedUnstableRate;
+
+        private double clockRate;
+        private double greatHitWindow;
+
+        private double totalDifficultHits;
+
+        public TaikoPerformanceCalculator()
+            : base(new TaikoRuleset())
+        {
+        }
+
+        protected override PerformanceAttributes CreatePerformanceAttributes(ScoreInfo score, DifficultyAttributes attributes)
+        {
+            var taikoAttributes = (TaikoDifficultyAttributes)attributes;
+
+            countGreat = score.Statistics.GetValueOrDefault(HitResult.Great);
+            countOk = score.Statistics.GetValueOrDefault(HitResult.Ok);
+            countMeh = score.Statistics.GetValueOrDefault(HitResult.Meh);
+            countMiss = Math.Max(0, score.Statistics.GetValueOrDefault(HitResult.Miss));
+
+            clockRate = ModUtils.CalculateRateWithMods(score.Mods);
+
+            var difficulty = score.BeatmapInfo!.Difficulty.Clone();
+
+            score.Mods.OfType&lt;IApplicableToDifficulty&gt;().ForEach(m =&gt; m.ApplyToDifficulty(difficulty));
+
+            HitWindows hitWindows = new TaikoHitWindows();
+            hitWindows.SetDifficulty(difficulty.OverallDifficulty);
+
+            greatHitWindow = hitWindows.WindowFor(HitResult.Great) / clockRate;
+
+            estimatedUnstableRate = (countGreat == 0 || greatHitWindow &lt;= 0)
+                ? null
+                : computeDeviationUpperBound(countGreat / (double)totalHits) * 10;
+
+            // Total difficult hits measures the total difficulty of a map based on its consistency factor.
+            totalDifficultHits = totalHits * taikoAttributes.ConsistencyFactor;
+
+            // Converts and the classic mod are detected and omitted from mod-specific bonuses due to the scope of current difficulty calculation.
+            bool isConvert = score.BeatmapInfo!.Ruleset.OnlineID != 1;
+            bool isClassic = score.Mods.Any(m =&gt; m is ModClassic);
+
+            double difficultyValue = computeDifficultyValue(score, taikoAttributes, isConvert, isClassic) * 1.08;
+            double accuracyValue = computeAccuracyValue(score, taikoAttributes, isConvert) * 1.1;
+
+            return new TaikoPerformanceAttributes
+            {
+                Difficulty = difficultyValue,
+                Accuracy = accuracyValue,
+                EstimatedUnstableRate = estimatedUnstableRate,
+                Total = difficultyValue + accuracyValue
+            };
+        }
+
+        private double computeDifficultyValue(ScoreInfo score, TaikoDifficultyAttributes attributes, bool isConvert, bool isClassic)
+        {
+            if (estimatedUnstableRate == null || totalDifficultHits == 0)
+                return 0;
+
+            // The estimated unstable rate for 100% accuracy, at which all rhythm difficulty has been played successfully.
+            double rhythmExpectedUnstableRate = computeDeviationUpperBound(1.0) * 10;
+
+            // The unstable rate at which it can be assumed all rhythm difficulty has been ignored.
+            // 0.8 represents 80% of total hits being greats, or 90% accuracy in-game
+            double rhythmMaximumUnstableRate = computeDeviationUpperBound(0.8) * 10;
+
+            // The fraction of star rating made up by rhythm difficulty, normalised to represent rhythm&#39;s perceived contribution to star rating.
+            double rhythmFactor = DiffUtils.ReverseLerp(attributes.RhythmDifficulty / attributes.StarRating, 0.15, 0.4);
+
+            // A penalty removing improperly played rhythm difficulty from star rating based on estimated unstable rate.
+            double rhythmPenalty = 1 - DiffUtils.Logistic(
+                estimatedUnstableRate.Value,
+                midpointOffset: (rhythmExpectedUnstableRate + rhythmMaximumUnstableRate) / 2,
+                multiplier: 10 / (rhythmMaximumUnstableRate - rhythmExpectedUnstableRate),
+                maxValue: 0.25 * DiffUtils.Pow(rhythmFactor, 3)
+            );
+
+            double baseDifficulty = 5 * Math.Max(1.0, attributes.StarRating * rhythmPenalty / 0.110) - 4.0;
+            double difficultyValue = Math.Min(DiffUtils.Pow(baseDifficulty, 3) / 69052.51, DiffUtils.Pow(baseDifficulty, 2.25) / 1250.0);
+
+            difficultyValue *= 1 + 0.10 * Math.Max(0, attributes.StarRating - 10);
+
+            // Applies a bonus to maps with more total difficulty.
+            double lengthBonus = 1 + 0.25 * totalDifficultHits / (totalDifficultHits + 4000);
+            difficultyValue *= lengthBonus;
+
+            // Scales miss penalty by the total difficult hits of a map, making misses more punishing on maps with less total difficulty.
+            double missPenalty = 0.97 + 0.03 * totalDifficultHits / (totalDifficultHits + 1500);
+            difficultyValue *= DiffUtils.Pow(missPenalty, countMiss);
+
+            if (score.Mods.Any(m =&gt; m is ModHidden))
+            {
+                double hiddenBonus = isConvert ? 0.025 : 0.1;
+
+                // Hidden+flashlight plays are excluded from reading-based penalties to hidden.
+                if (!score.Mods.Any(m =&gt; m is ModFlashlight))
+                {
+                    // A penalty is applied to the bonus for hidden on non-classic scores, as the playfield can be made wider to make fast reading easier.
+                    if (!isClassic)
+                        hiddenBonus *= 0.2;
+
+                    // A penalty is applied to classic easy+hidden scores, as notes disappear later making fast reading easier.
+                    if (score.Mods.Any(m =&gt; m is ModEasy) &amp;&amp; isClassic)
+                        hiddenBonus *= 0.5;
+                }
+
+                difficultyValue *= 1 + hiddenBonus;
+            }
+
+            if (score.Mods.Any(m =&gt; m is ModFlashlight&lt;TaikoHitObject&gt;))
+                difficultyValue *= Math.Max(1, 1.050 - Math.Min(attributes.MonoStaminaFactor / 50, 1) * lengthBonus);
+
+            // Scale accuracy more harshly on nearly-completely mono (single coloured) speed maps.
+            double monoAccScalingExponent = 2 + attributes.MonoStaminaFactor;
+            double monoAccScalingShift = 500 - 100 * (attributes.MonoStaminaFactor * 3);
+
+            return difficultyValue * DiffUtils.Pow(DiffUtils.Erf(monoAccScalingShift / (DiffUtils.SQRT2 * estimatedUnstableRate.Value)), monoAccScalingExponent);
+        }
+
+        private double computeAccuracyValue(ScoreInfo score, TaikoDifficultyAttributes attributes, bool isConvert)
+        {
+            if (greatHitWindow &lt;= 0 || estimatedUnstableRate == null)
+                return 0;
+
+            double accuracyValue = 470 * DiffUtils.Pow(0.9885, estimatedUnstableRate.Value);
+
+            // Scales up the bonus for lower unstable rate as star rating increases.
+            accuracyValue *= 1 + DiffUtils.Pow(50 / estimatedUnstableRate.Value, 2) * DiffUtils.Pow(attributes.StarRating, 2.8) / 600;
+
+            if (score.Mods.Any(m =&gt; m is ModHidden) &amp;&amp; !isConvert)
+                accuracyValue *= 1.075;
+
+            // Applies a bonus to maps with more total difficulty, calculating this with a map&#39;s total hits and consistency factor.
+            accuracyValue *= 1 + 0.3 * totalDifficultHits / (totalDifficultHits + 4000);
+
+            // Applies a bonus to maps with more total memory required with HDFL.
+            double memoryLengthBonus = Math.Min(1.15, DiffUtils.Pow(totalHits / 1500.0, 0.3));
+
+            if (score.Mods.Any(m =&gt; m is ModFlashlight&lt;TaikoHitObject&gt;) &amp;&amp; score.Mods.Any(m =&gt; m is ModHidden) &amp;&amp; !isConvert)
+                accuracyValue *= Math.Max(1.0, 1.05 * memoryLengthBonus);
+
+            return accuracyValue;
+        }
+
+        /// &lt;summary&gt;
+        /// Computes an upper bound on the player&#39;s tap deviation based on the OD, number of circles and sliders,
+        /// and the hit judgements, assuming the player&#39;s mean hit error is 0. The estimation is consistent in that
+        /// two SS scores on the same map with the same settings will always return the same deviation.
+        /// &lt;/summary&gt;
+        private double computeDeviationUpperBound(double accuracy)
+        {
+            const double z = 2.32634787404; // 99% critical value for the normal distribution (one-tailed).
+
+            double n = totalHits;
+
+            // Proportion of greats hit.
+            double p = accuracy;
+
+            // We can be 99% confident that p is at least this value.
+            double pLowerBound = (n * p + z * z / 2) / (n + z * z) - z / (n + z * z) * Math.Sqrt(n * p * (1 - p) + z * z / 4);
+
+            // We can be 99% confident that the deviation is not higher than:
+            return greatHitWindow / (DiffUtils.SQRT2 * DiffUtils.ErfInv(pLowerBound));
+        }
+
+        private int totalHits =&gt; countGreat + countOk + countMeh + countMiss;
+
+        private int totalSuccessfulHits =&gt; countGreat + countOk + countMeh;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,15,33,39,1],[34,9,34,10,1],[35,9,35,10,1],[38,9,38,10,1],[39,13,39,73,1],[41,13,41,78,1],[42,13,42,72,1],[43,13,43,74,1],[44,13,44,89,1],[46,13,46,68,1],[48,13,48,68,1],[50,13,50,71,1],[50,71,50,102,1],[50,102,50,104,1],[52,13,52,59,1],[53,13,53,68,1],[55,13,55,80,1],[57,13,59,83,1],[62,13,62,80,1],[65,13,65,71,1],[66,13,66,50,1],[66,50,66,65,1],[66,65,66,67,1],[68,13,68,114,1],[69,13,69,98,1],[71,13,77,15,1],[78,9,78,10,1],[81,9,81,10,1],[82,13,82,74,1],[83,17,83,26,1],[86,13,86,86,1],[90,13,90,85,1],[93,13,93,121,1],[96,13,101,15,1],[103,13,103,108,1],[104,13,104,138,1],[106,13,106,83,1],[109,13,109,94,1],[110,13,110,44,1],[113,13,113,97,1],[114,13,114,70,1],[116,13,116,37,1],[116,37,116,51,1],[116,51,116,53,1],[117,13,117,14,1],[118,17,118,62,1],[121,17,121,42,1],[121,42,121,60,1],[121,60,121,62,1],[122,17,122,18,1],[124,21,124,36,1],[125,25,125,44,1],[128,21,128,45,1],[128,45,128,57,1],[128,57,128,72,1],[129,25,129,44,1],[130,17,130,18,1],[132,17,132,52,1],[133,13,133,14,1],[135,13,135,37,1],[135,37,135,71,1],[135,71,135,73,1],[136,17,136,118,1],[139,13,139,78,1],[140,13,140,89,1],[142,13,142,162,1],[143,9,143,10,1],[146,9,146,10,1],[147,13,147,70,1],[148,17,148,26,1],[150,13,150,93,1],[153,13,153,135,1],[155,13,155,37,1],[155,37,155,51,1],[155,51,155,67,1],[156,17,156,40,1],[159,13,159,89,1],[162,13,162,95,1],[164,13,164,37,1],[164,37,164,71,1],[164,71,164,96,1],[164,96,164,110,1],[164,110,164,126,1],[165,17,165,74,1],[167,13,167,34,1],[168,9,168,10,1],[176,9,176,10,1],[179,13,179,34,1],[182,13,182,33,1],[185,13,185,127,1],[188,13,188,87,1],[189,9,189,10,1],[191,34,191,77,1],[193,44,193,75,0]]);
+    </script>
+  </body>
+</html>

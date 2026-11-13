@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/ExternalEditScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Testing;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Localisation;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Overlays;
+using osu.Game.Screens.OnlinePlay.Match.Components;
+using osuTK;
+
+namespace osu.Game.Screens.Edit
+{
+    internal partial class ExternalEditScreen : OsuScreen
+    {
+        [Resolved]
+        private GameHost gameHost { get; set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        [Resolved]
+        private Editor editor { get; set; } = null!;
+
+        [Resolved]
+        private EditorBeatmap editorBeatmap { get; set; } = null!;
+
+        private Task? fileMountOperation;
+
+        public ExternalEditOperation&lt;BeatmapSetInfo&gt;? EditOperation { get; private set; }
+
+        private bool operationFinishStarted;
+        private bool operationFinished;
+
+        private FillFlowContainer flow = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChild = new Container
+            {
+                Masking = true,
+                CornerRadius = 20,
+                AutoSizeAxes = Axes.Both,
+                AutoSizeDuration = 500,
+                AutoSizeEasing = Easing.OutQuint,
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Children = new Drawable[]
+                {
+                    new Box
+                    {
+                        Colour = colourProvider.Background5,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    flow = new FillFlowContainer
+                    {
+                        Margin = new MarginPadding(20),
+                        AutoSizeAxes = Axes.Both,
+                        Direction = FillDirection.Vertical,
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                        Spacing = new Vector2(15),
+                    }
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            fileMountOperation = begin();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            // Don&#39;t allow exiting until the file mount operation has completed.
+            // This is mainly to simplify the flow (once the screen is pushed we are guaranteed an attempted mount).
+            if (fileMountOperation?.IsCompleted == false)
+                return true;
+
+            // Similarly do not allow interrupting an ongoing finish.
+            if (operationFinishStarted &amp;&amp; !operationFinished)
+                return true;
+
+            // If the operation completed successfully, ensure that we finish the operation before exiting.
+            // The finish() call will subsequently call Exit() when done.
+            if (EditOperation != null &amp;&amp; !operationFinishStarted)
+            {
+                finish().FireAndForget();
+                return true;
+            }
+
+            return base.OnExiting(e);
+        }
+
+        private async Task begin()
+        {
+            showSpinner(EditorStrings.ExternalEditExporting);
+
+            await Task.Delay(500).ConfigureAwait(true);
+
+            try
+            {
+                EditOperation = await beatmapManager.BeginExternalEditing(editorBeatmap.BeatmapInfo.BeatmapSet!).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($@&quot;Failed to initiate external edit operation: {ex}&quot;, LoggingTarget.Database);
+                fileMountOperation = null;
+                showSpinner(EditorStrings.ExportFailed);
+                await Task.Delay(1000).ConfigureAwait(true);
+                this.Exit();
+            }
+
+            flow.Children = new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Text = EditorStrings.BeatmapMountedExternally,
+                    Font = OsuFont.Default.With(size: 30),
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                },
+                new OsuTextFlowContainer
+                {
+                    Padding = new MarginPadding(5),
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Width = 350,
+                    AutoSizeAxes = Axes.Y,
+                    Text = EditorStrings.ExternalEditMountedExplanation,
+                },
+                new PurpleRoundedButton
+                {
+                    Text = EditorStrings.OpenFolder,
+                    Width = 350,
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Action = openDirectory,
+                    Enabled = { Value = false }
+                },
+                new DangerousRoundedButton
+                {
+                    Text = EditorStrings.FinishEditingExternally,
+                    Width = 350,
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Action = () =&gt; finish().FireAndForget(),
+                    Enabled = { Value = false }
+                }
+            };
+
+            Scheduler.AddDelayed(() =&gt;
+            {
+                foreach (var b in flow.ChildrenOfType&lt;RoundedButton&gt;())
+                    b.Enabled.Value = true;
+                openDirectory();
+            }, 1000);
+        }
+
+        private void openDirectory()
+        {
+            if (EditOperation == null)
+                return;
+
+            // Ensure the trailing separator is present in order to show the folder contents.
+            gameHost.OpenFileExternally(EditOperation.MountedPath.TrimDirectorySeparator() + Path.DirectorySeparatorChar);
+        }
+
+        private async Task finish()
+        {
+            if (operationFinishStarted)
+                return;
+
+            operationFinishStarted = true;
+
+            BackButtonVisibility.Value = false;
+            string originalDifficulty = editor.Beatmap.Value.Beatmap.BeatmapInfo.DifficultyName;
+
+            showSpinner(EditorStrings.ExternalEditCleaningUp);
+
+            Live&lt;BeatmapSetInfo&gt;? beatmap = null;
+
+            try
+            {
+                beatmap = await EditOperation!.Finish().ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($@&quot;Failed to finish external edit operation: {ex}&quot;, LoggingTarget.Database);
+                showSpinner(EditorStrings.ImportFailed);
+                await Task.Delay(1000).ConfigureAwait(true);
+            }
+
+            // Setting to null will allow exit to succeed.
+            EditOperation = null;
+
+            if (beatmap == null)
+            {
+                // has to be set before `Exit()` call to ensure the exit isn&#39;t blocked in `OnExiting()`
+                operationFinished = true;
+                this.Exit();
+            }
+            else
+            {
+                // the `ImportAsUpdate()` flow will yield beatmap(sets) with online status of `None` if online lookup fails.
+                // coerce such models to `LocallyModified` state instead to unify behaviour with normal editing flow.
+                beatmap.PerformWrite(s =&gt;
+                {
+                    if (s.Status == BeatmapOnlineStatus.None)
+                        s.Status = BeatmapOnlineStatus.LocallyModified;
+                    foreach (var difficulty in s.Beatmaps.Where(b =&gt; b.Status == BeatmapOnlineStatus.None))
+                        difficulty.Status = BeatmapOnlineStatus.LocallyModified;
+                });
+
+                var closestMatchingBeatmap =
+                    beatmap.Value.Beatmaps.FirstOrDefault(b =&gt; b.DifficultyName == originalDifficulty)
+                    ?? beatmap.Value.Beatmaps.First();
+
+                // has to be set before `SwitchToDifficulty()` call to ensure the exit isn&#39;t blocked in `OnExiting()`
+                operationFinished = true;
+                editor.SwitchToDifficulty(closestMatchingBeatmap);
+            }
+        }
+
+        private void showSpinner(LocalisableString text)
+        {
+            foreach (var b in flow.ChildrenOfType&lt;RoundedButton&gt;())
+                b.Enabled.Value = false;
+
+            flow.Children = new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Text = text,
+                    Font = OsuFont.Default.With(size: 30),
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                },
+                new LoadingSpinner
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    State = { Value = Visibility.Visible }
+                },
+            };
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,37,36,41,0],[36,42,36,46,0],[36,51,36,56,0],[39,56,39,60,0],[39,61,39,65,0],[39,70,39,75,0],[42,49,42,53,0],[42,54,42,58,0],[42,63,42,68,0],[45,33,45,37,0],[45,38,45,42,0],[45,47,45,52,0],[48,47,48,51,0],[48,52,48,56,0],[48,61,48,66,0],[52,71,52,75,0],[52,76,52,88,0],[57,9,57,48,0],[61,9,61,10,0],[62,13,88,15,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,33,0],[95,13,95,42,0],[96,9,96,10,0],[99,9,99,10,0],[102,13,102,58,0],[103,17,103,29,0],[106,13,106,62,0],[107,17,107,29,0],[111,13,111,66,0],[112,13,112,14,0],[113,17,113,42,0],[114,17,114,29,0],[117,13,117,38,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,62,0],[124,13,124,56,0],[127,13,127,14,0],[128,17,128,135,0],[129,13,129,14,0],[130,13,130,33,0],[131,13,131,14,0],[132,17,132,106,0],[133,17,133,43,0],[134,17,134,57,0],[135,17,135,61,0],[136,17,136,29,0],[137,13,137,14,0],[139,13,172,36,0],[172,36,172,60,0],[172,60,175,15,0],[177,13,178,13,0],[178,13,178,14,0],[178,14,179,17,0],[179,17,179,24,0],[179,24,179,26,0],[179,26,179,31,0],[179,31,179,32,0],[179,32,179,34,0],[179,34,179,35,0],[179,35,179,71,0],[179,71,180,21,0],[180,21,180,44,0],[180,44,181,17,0],[181,17,181,33,0],[181,33,182,13,0],[182,13,182,14,0],[182,14,182,22,0],[183,9,183,10,0],[186,9,186,10,0],[187,13,187,39,0],[188,17,188,24,0],[191,13,191,123,0],[192,9,192,10,0],[195,9,195,10,0],[196,13,196,40,0],[197,17,197,24,0],[199,13,199,43,0],[201,13,201,48,0],[202,13,202,97,0],[204,13,204,63,0],[206,13,206,50,0],[209,13,209,14,0],[210,17,210,78,0],[211,13,211,14,0],[212,13,212,33,0],[213,13,213,14,0],[214,17,214,104,0],[215,17,215,57,0],[216,17,216,61,0],[217,13,217,14,0],[220,13,220,34,0],[222,13,222,33,0],[223,13,223,14,0],[225,17,225,42,0],[226,17,226,29,0],[227,13,227,14,0],[229,13,229,14,0],[232,17,233,17,0],[233,17,233,18,0],[233,18,234,21,0],[234,21,234,62,0],[234,62,235,25,0],[235,25,235,72,0],[235,72,236,21,0],[236,21,236,28,0],[236,28,236,30,0],[236,30,236,44,0],[236,44,236,45,0],[236,45,236,47,0],[236,47,236,48,0],[236,48,236,70,0],[236,70,236,106,0],[236,106,236,107,0],[236,107,237,25,0],[237,25,237,81,0],[237,81,238,17,0],[238,17,238,18,0],[238,18,238,20,0],[240,17,241,64,0],[241,64,241,102,0],[241,102,242,55,0],[245,17,245,42,0],[246,17,246,67,0],[247,13,247,14,0],[248,9,248,10,0],[251,9,251,10,0],[252,13,252,20,0],[252,22,252,27,0],[252,28,252,30,0],[252,31,252,67,0],[253,17,253,41,0],[255,13,270,15,0],[271,9,271,10,0]]);
+    </script>
+  </body>
+</html>

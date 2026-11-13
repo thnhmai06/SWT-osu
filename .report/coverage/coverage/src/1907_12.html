@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/Components/RankedPlayChatDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Chat;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Users.Drawables;
+using osuTK;
+using osuTK.Graphics;
+using ClientChatStrings = osu.Game.Localisation.ChatStrings;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components
+{
+    public partial class RankedPlayChatDisplay : VisibilityContainer, IKeyBindingHandler&lt;GlobalAction&gt;, IFocusManager
+    {
+        [Resolved]
+        private ChannelManager? channelManager { get; set; }
+
+        [Resolved]
+        private RealmKeyBindingStore keyBindingStore { get; set; } = null!;
+
+        private IFocusManager parentFocusManager = null!;
+
+        private readonly MultiplayerRoom room;
+
+        private ChatTextBox textbox = null!;
+        private BubbleChatHistory chatHistory = null!;
+
+        private Channel? channel;
+
+        private const float chatbox_width = 320;
+
+        public RankedPlayChatDisplay(MultiplayerRoom room)
+        {
+            RelativeSizeAxes = Axes.Y;
+            Width = chatbox_width * 1.5f;
+            this.room = room;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChildren = new Drawable[]
+            {
+                textbox = new ChatTextBox
+                {
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    Width = chatbox_width,
+                    Height = 30,
+                    CornerRadius = 10,
+                    ReleaseFocusOnCommit = true,
+                    HoldFocus = false,
+                    Focus = onFocusGained,
+                    FocusLost = onFocusLost
+                },
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            parentFocusManager = GetContainingFocusManager()!;
+
+            resetPlaceholderText();
+            textbox.OnCommit += onCommit;
+
+            channel = channelManager?.JoinChannel(new Channel { Id = room.ChannelID, Type = ChannelType.Multiplayer, Name = $&quot;#lazermp_{room.RoomID}&quot; });
+
+            if (channel == null) return;
+
+            textbox.Current.BindTo(channel.TextBoxMessage);
+
+            AddInternal(new ChatContextMenuContainer
+            {
+                Anchor = Anchor.BottomCentre,
+                Origin = Anchor.BottomCentre,
+                RelativeSizeAxes = Axes.Both,
+                Padding = new MarginPadding { Bottom = 35 },
+                Child = chatHistory = new BubbleChatHistory(channel)
+                {
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    RelativeSizeAxes = Axes.X
+                },
+            });
+        }
+
+        private void onCommit(TextBox sender, bool newText)
+        {
+            string text = textbox.Text.Trim();
+
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            if (text[0] == &#39;/&#39;)
+                channelManager?.PostCommand(text[1..], channel);
+            else
+                channelManager?.PostMessage(text, target: channel);
+
+            textbox.Text = string.Empty;
+        }
+
+        private void onFocusGained()
+        {
+            textbox.PlaceholderText = ChatStrings.InputPlaceholder;
+            chatHistory.Expand();
+        }
+
+        private void onFocusLost()
+        {
+            resetPlaceholderText();
+            chatHistory.Collapse();
+        }
+
+        private void resetPlaceholderText()
+        {
+            textbox.PlaceholderText = Localisation.ChatStrings.InGameInputPlaceholder(keyBindingStore.GetBindingsStringFor(GlobalAction.ToggleChatFocus));
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.Back:
+                    if (textbox.HasFocus)
+                    {
+                        Schedule(() =&gt; textbox.KillFocus());
+                        return true;
+                    }
+
+                    break;
+
+                case GlobalAction.ToggleChatFocus:
+                    if (!textbox.HasFocus)
+                    {
+                        Schedule(() =&gt; parentFocusManager.ChangeFocus(textbox));
+                        return true;
+                    }
+
+                    break;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        public void TriggerFocusContention(Drawable? triggerSource)
+        {
+            if (triggerSource == null || triggerSource.IsRootedAt(chatHistory))
+                parentFocusManager.TriggerFocusContention(triggerSource);
+        }
+
+        public bool ChangeFocus(Drawable? potentialFocusTarget)
+        {
+            if (potentialFocusTarget == null || potentialFocusTarget.IsRootedAt(chatHistory))
+                return parentFocusManager.ChangeFocus(potentialFocusTarget);
+
+            return false;
+        }
+
+        protected override void PopIn()
+        {
+            FinishTransforms();
+
+            this.MoveToY(150f)
+                .FadeOut()
+                .MoveToY(0f, 240, Easing.OutCubic)
+                .FadeIn(240, Easing.OutCubic);
+        }
+
+        protected override void PopOut()
+        {
+            FinishTransforms();
+
+            this.FadeOut(240, Easing.InOutCubic)
+                .MoveToY(150f, 240, Easing.InOutCubic);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (channel != null)
+                textbox.Current.UnbindFrom(channel.TextBoxMessage);
+        }
+
+        private partial class ChatTextBox : StandAloneChatDisplay.ChatTextBox
+        {
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                BackgroundFocused = Colour4.FromHex(&quot;222228&quot;);
+                BackgroundUnfocused = BackgroundFocused.Opacity(0.7f);
+                Placeholder.Colour = Color4.White;
+            }
+        }
+
+        private partial class ChatContextMenuContainer : OsuContextMenuContainer
+        {
+            public ChatContextMenuContainer()
+            {
+                Content.Anchor = Anchor.BottomRight;
+                Content.Origin = Anchor.BottomRight;
+            }
+        }
+
+        public partial class BubbleChatHistory : CompositeDrawable
+        {
+            /// &lt;summary&gt;
+            /// Maximum number of recent messages to keep.
+            /// &lt;/summary&gt;
+            private const int max_length = 10;
+
+            /// &lt;summary&gt;
+            /// The vertical spacing between messages.
+            /// &lt;/summary&gt;
+            private const float message_spacing = 2;
+
+            /// &lt;summary&gt;
+            /// When in a collapsed state, the time before a newly-posted message disappears from view.
+            /// &lt;/summary&gt;
+            private const float time_before_disappear = 5000;
+
+            [Cached]
+            private readonly Channel channel;
+
+            private readonly Container&lt;MessageBubble&gt; messageContainer;
+
+            private bool expanded;
+
+            private Sample messageReceivedSample = null!;
+            private double? lastSamplePlayback;
+
+            public BubbleChatHistory(Channel channel)
+            {
+                AutoSizeAxes = Axes.Y;
+
+                this.channel = channel;
+
+                InternalChild = messageContainer = new Container&lt;MessageBubble&gt;
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                };
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(AudioManager audio)
+            {
+                messageReceivedSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/message&quot;);
+
+                channel.NewMessagesArrived += onNewMessagesArrived;
+            }
+
+            /// &lt;summary&gt;
+            /// Collapses the display such that only new messages are temporarily shown.
+            /// &lt;/summary&gt;
+            public void Collapse()
+            {
+                expanded = false;
+
+                foreach (var child in messageContainer.Reverse().Take(max_length).Reverse())
+                {
+                    // Normally we wait an amount of time to preview messages before they disappear.
+                    // When quickly toggling expanded and collapsed states, we want to still consider this preview window.
+                    double previewTimeRemaining = Math.Max(0, time_before_disappear - (Time.Current - child.PostTime));
+
+                    using (BeginDelayedSequence(previewTimeRemaining))
+                        child.Hide();
+                }
+            }
+
+            /// &lt;summary&gt;
+            /// Expands the display such that all historical messages are shown.
+            /// &lt;/summary&gt;
+            public void Expand()
+            {
+                expanded = true;
+
+                foreach (var child in messageContainer.Reverse().Take(max_length))
+                    child.Show();
+            }
+
+            private void onNewMessagesArrived(IEnumerable&lt;Message&gt; bundle)
+            {
+                foreach (var message in bundle)
+                {
+                    var newMessage = new MessageBubble(message)
+                    {
+                        Anchor = Anchor.BottomRight,
+                        Origin = Anchor.BottomRight,
+                        PostTime = Time.Current
+                    };
+
+                    messageContainer.Add(newMessage);
+
+                    float offset = 0;
+
+                    ScheduleAfterChildren(() =&gt;
+                    {
+                        // Layout bubbles, pushing all others upwards to make room for the new one.
+                        foreach (var child in messageContainer.Reverse())
+                        {
+                            child.MoveToY(-offset, 400, Easing.OutPow10);
+                            offset += child.DrawHeight + message_spacing;
+                        }
+                    });
+
+                    // Hide any overflowing message.
+                    // Only need to handle the most-recently-overflowing one, because others would be handled in prior calls to this method.
+                    if (messageContainer.Count &gt; max_length)
+                    {
+                        var lastBubble = messageContainer[messageContainer.Count - max_length - 1];
+
+                        lastBubble.Hide();
+                        lastBubble.Expire();
+                    }
+
+                    newMessage.Show();
+
+                    playSample();
+
+                    // If not in the expanded state, hide the new message after a short while.
+                    if (!expanded)
+                    {
+                        using (BeginDelayedSequence(time_before_disappear))
+                            newMessage.Hide();
+                    }
+                }
+            }
+
+            private void playSample()
+            {
+                if (lastSamplePlayback != null &amp;&amp; Time.Current - lastSamplePlayback &lt; 100)
+                    return;
+
+                messageReceivedSample.Play();
+                lastSamplePlayback = Time.Current;
+            }
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                channel.NewMessagesArrived -= onNewMessagesArrived;
+            }
+
+            private partial class MessageBubble : CompositeDrawable, IHasContextMenu
+            {
+                private readonly Message message;
+
+                /// &lt;summary&gt;
+                /// The time at which this message was posted.
+                /// &lt;/summary&gt;
+                public required double PostTime { get; init; }
+
+                public MessageBubble(Message message)
+                {
+                    this.message = message;
+                    AutoSizeAxes = Axes.Both;
+
+                    Scale = Vector2.Zero;
+                    Alpha = 0;
+                }
+
+                [Resolved]
+                private IAPIProvider api { get; set; } = null!;
+
+                [Resolved]
+                private Channel channel { get; set; } = null!;
+
+                [Resolved]
+                private IDialogOverlay? dialogOverlay { get; set; }
+
+                private const int padding = 8;
+                private const int avatar_offset = 20;
+
+                [BackgroundDependencyLoader]
+                private void load()
+                {
+                    InternalChildren = new Drawable[]
+                    {
+                        new Container
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            CornerRadius = 8,
+                            Masking = true,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = getColour(),
+                                },
+                                new Container
+                                {
+                                    AutoSizeAxes = Axes.Both,
+                                    Padding = new MarginPadding(padding),
+                                    Children = new Drawable[]
+                                    {
+                                        new CircularContainer
+                                        {
+                                            Anchor = Anchor.CentreLeft,
+                                            Origin = Anchor.CentreLeft,
+                                            Size = new Vector2(16),
+                                            Masking = true,
+                                            Child = new UpdateableAvatar(message.Sender)
+                                            {
+                                                DelayedLoad = false,
+                                                RelativeSizeAxes = Axes.Both
+                                            }
+                                        },
+                                        new OsuTextFlowContainer
+                                        {
+                                            X = avatar_offset,
+                                            MaximumSize = new Vector2(chatbox_width * 1.5f - avatar_offset - padding * 2, 0),
+                                            Anchor = Anchor.CentreLeft,
+                                            Origin = Anchor.CentreLeft,
+                                            AutoSizeAxes = Axes.Both,
+                                            Text = message.Content,
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                }
+
+                public override void Show()
+                {
+                    this.ScaleTo(1, 400, Easing.OutElasticQuarter)
+                        .FadeIn(200, Easing.OutQuint);
+                }
+
+                public override void Hide()
+                {
+                    this.FadeOut(200, Easing.OutQuint);
+                }
+
+                private Colour4 getColour()
+                {
+                    if (message is InfoMessage)
+                        return Color4Extensions.FromHex(&quot;#240d36&quot;);
+
+                    if (message.Sender.Id == api.LocalUser.Value.Id)
+                        return RankedPlayColourScheme.BLUE.PrimaryDarkest;
+
+                    return RankedPlayColourScheme.RED.PrimaryDarkest;
+                }
+
+                public MenuItem[]? ContextMenuItems
+                {
+                    get
+                    {
+                        if (message.Sender.Equals(APIUser.SYSTEM_USER))
+                            return null;
+
+                        if (message.Sender.Equals(api.LocalUser.Value))
+                            return null;
+
+                        return
+                        [
+                            new OsuMenuItem(UsersStrings.ReportButtonText, MenuItemType.Destructive, () =&gt; dialogOverlay?.Push(new ReportChatDialog(message)
+                            {
+                                Success = () =&gt; channel.AddNewMessages(new InfoMessage(ClientChatStrings.ReportConfirmation)),
+                            }))
+                        ];
+                    }
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[41,50,41,54,0],[41,55,41,59,0],[44,56,44,60,0],[44,61,44,65,0],[44,70,44,75,0],[46,9,46,58,0],[50,9,50,45,0],[51,9,51,55,0],[57,9,57,59,0],[58,9,58,10,0],[59,13,59,39,0],[60,13,60,42,0],[61,13,61,30,0],[62,9,62,10,0],[66,9,66,10,0],[67,13,81,15,0],[82,9,82,10,0],[85,9,85,10,0],[86,13,86,33,0],[88,13,88,63,0],[90,13,90,36,0],[91,13,91,42,0],[93,13,93,154,0],[95,13,95,33,0],[95,34,95,41,0],[97,13,97,60,0],[99,13,111,16,0],[112,9,112,10,0],[115,9,115,10,0],[116,13,116,47,0],[118,13,118,49,0],[119,17,119,24,0],[121,13,121,32,0],[122,17,122,65,0],[124,17,124,68,0],[126,13,126,41,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,68,0],[132,13,132,34,0],[133,9,133,10,0],[136,9,136,10,0],[137,13,137,36,0],[138,13,138,36,0],[139,9,139,10,0],[142,9,142,10,0],[143,13,143,155,0],[144,9,144,10,0],[147,9,147,10,0],[148,13,148,30,0],[151,21,151,42,0],[152,21,152,22,0],[153,25,153,40,0],[153,40,153,59,0],[153,59,153,61,0],[154,25,154,37,0],[157,21,157,27,0],[160,21,160,43,0],[161,21,161,22,0],[162,25,162,40,0],[162,40,162,79,0],[162,79,162,81,0],[163,25,163,37,0],[166,21,166,27,0],[169,13,169,26,0],[170,9,170,10,0],[173,9,173,10,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,80,0],[179,17,179,74,0],[180,9,180,10,0],[183,9,183,10,0],[184,13,184,94,0],[185,17,185,77,0],[187,13,187,26,0],[188,9,188,10,0],[191,9,191,10,0],[192,13,192,32,0],[194,13,197,47,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,32,0],[204,13,205,56,0],[206,9,206,10,0],[209,9,209,10,0],[210,13,210,39,0],[212,13,212,33,0],[213,17,213,68,0],[214,9,214,10,0],[219,13,219,14,0],[220,17,220,37,0],[222,17,222,63,0],[223,17,223,71,0],[224,17,224,51,0],[225,13,225,14,0],[230,13,230,46,0],[231,13,231,14,0],[232,17,232,53,0],[233,17,233,53,0],[234,13,234,14,0],[261,13,261,58,0],[264,13,264,54,0],[265,13,265,14,0],[266,17,266,39,0],[268,17,268,40,0],[270,17,274,19,0],[275,13,275,14,0],[279,13,279,14,0],[280,17,280,102,0],[282,17,282,68,0],[283,13,283,14,0],[289,13,289,14,0],[290,17,290,34,0],[292,17,292,24,0],[292,26,292,35,0],[292,36,292,38,0],[292,39,292,92,0],[293,17,293,18,0],[296,21,296,120,0],[298,21,298,71,0],[299,25,299,38,0],[300,17,300,18,0],[301,13,301,14,0],[307,13,307,14,0],[308,17,308,33,0],[310,17,310,24,0],[310,26,310,35,0],[310,36,310,38,0],[310,39,310,82,0],[311,21,311,34,0],[312,13,312,14,0],[315,13,315,14,0],[316,17,316,24,0],[316,26,316,37,0],[316,38,316,40,0],[316,41,316,47,0],[317,17,317,18,0],[318,21,323,23,0],[325,21,325,54,0],[327,21,327,38,0],[329,21,330,21,0],[330,21,330,22,0],[330,22,332,25,0],[332,25,332,32,0],[332,32,332,34,0],[332,34,332,43,0],[332,43,332,44,0],[332,44,332,46,0],[332,46,332,47,0],[332,47,332,73,0],[332,73,333,25,0],[333,25,333,26,0],[333,26,334,29,0],[334,29,334,74,0],[334,74,335,29,0],[335,29,335,74,0],[335,74,336,25,0],[336,25,336,26,0],[336,26,337,21,0],[337,21,337,22,0],[337,22,337,24,0],[341,21,341,61,0],[342,21,342,22,0],[343,25,343,100,0],[345,25,345,43,0],[346,25,346,45,0],[347,21,347,22,0],[349,21,349,39,0],[351,21,351,34,0],[354,21,354,35,0],[355,21,355,22,0],[356,25,356,76,0],[357,29,357,47,0],[358,21,358,22,0],[359,17,359,18,0],[360,13,360,14,0],[363,13,363,14,0],[364,17,364,91,0],[365,21,365,28,0],[367,17,367,46,0],[368,17,368,51,0],[369,13,369,14,0],[372,13,372,14,0],[373,17,373,43,0],[375,17,375,68,0],[376,13,376,14,0],[385,51,385,55,0],[385,56,385,61,0],[387,17,387,54,0],[388,17,388,18,0],[389,21,389,44,0],[390,21,390,46,0],[392,21,392,42,0],[393,21,393,31,0],[394,17,394,18,0],[397,44,397,48,0],[397,49,397,53,0],[397,58,397,63,0],[400,43,400,47,0],[400,48,400,52,0],[400,57,400,62,0],[403,57,403,61,0],[403,62,403,66,0],[410,17,410,18,0],[411,21,456,23,0],[457,17,457,18,0],[460,17,460,18,0],[461,21,462,55,0],[463,17,463,18,0],[466,17,466,18,0],[467,21,467,56,0],[468,17,468,18,0],[471,17,471,18,0],[472,21,472,48,0],[473,25,473,68,0],[475,21,475,69,0],[476,25,476,75,0],[478,21,478,70,0],[479,17,479,18,0],[484,21,484,22,0],[485,25,485,72,0],[486,29,486,41,0],[488,25,488,72,0],[489,29,489,41,0],[491,25,493,108,0],[493,108,495,49,0],[495,49,495,126,0],[495,126,496,31,0],[496,31,497,27,0],[498,21,498,22,0]]);
+    </script>
+  </body>
+</html>

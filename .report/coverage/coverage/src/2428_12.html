@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Difficulty/Skills/VariableLengthStrainSkill.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Extensions;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Mods;
+
+namespace osu.Game.Rulesets.Difficulty.Skills
+{
+    /// &lt;summary&gt;
+    /// Similar to &lt;see cref=&quot;StrainSkill&quot;/&gt;, but instead of strains having a fixed length, strains can be any length.
+    /// A new &lt;see cref=&quot;StrainPeak&quot;/&gt; is created for each &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// This class intends to replace &lt;see cref=&quot;StrainSkill&quot;/&gt; eventually as it fixes bugs with that implementation.
+    /// Has not yet been applied globally as it changes resultant PP values in ways which may require discretion.
+    /// &lt;/remarks&gt;
+    public abstract class VariableLengthStrainSkill : Skill
+    {
+        /// &lt;summary&gt;
+        /// The weight by which each strain value decays.
+        /// &lt;/summary&gt;
+        protected readonly double DecayWeight;
+
+        /// &lt;summary&gt;
+        /// The maximum length of each strain section.
+        /// &lt;/summary&gt;
+        protected readonly int MaxSectionLength;
+
+        private double currentSectionPeak; // We also keep track of the peak strain in the current section.
+        private double currentSectionBegin;
+        private double currentSectionEnd;
+
+        /// &lt;summary&gt;
+        /// The number of `MaxSectionLength` sections calculated such that enough of the difficulty value is preserved.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This variable operates under the assumption that final difficulty calculation uses a standard geometric sum,
+        /// and that &lt;see cref=&quot;strainPeaks&quot;/&gt; is not required for any other purpose
+        /// &lt;/remarks&gt;
+        private readonly double maxStoredLength;
+
+        private readonly List&lt;StrainPeak&gt; strainPeaks = new List&lt;StrainPeak&gt;();
+
+        private double totalLength;
+
+        /// &lt;summary&gt;
+        /// Stores previous strains so that, if a high difficulty hit object is followed by a lower
+        /// difficulty hit object, the high difficulty hit object gets a full strain instead of being cut short.
+        /// &lt;/summary&gt;
+        private readonly List&lt;(double StrainValue, double StartTime)&gt; queuedStrains = new List&lt;(double, double)&gt;();
+
+        /// &lt;summary&gt;
+        /// Create a new &lt;see cref=&quot;VariableLengthStrainSkill&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods.&lt;/param&gt;
+        /// &lt;param name=&quot;decayWeight&quot;&gt;The weight by which each strain value decays.&lt;/param&gt;
+        /// &lt;param name=&quot;maxSectionLength&quot;&gt;The maximum length of each strain section.&lt;/param&gt;
+        protected VariableLengthStrainSkill(Mod[] mods, double decayWeight = 0.9, int maxSectionLength = 400)
+            : base(mods)
+        {
+            DecayWeight = decayWeight;
+            MaxSectionLength = maxSectionLength;
+
+            maxStoredLength = 11 / (1 - DecayWeight);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the strain value at &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;. This value is calculated with or without respect to previous objects.
+        /// &lt;/summary&gt;
+        protected abstract double StrainValueAt(DifficultyHitObject current);
+
+        /// &lt;summary&gt;
+        /// Process a &lt;see cref=&quot;DifficultyHitObject&quot;/&gt; and update current strain values accordingly.
+        /// &lt;/summary&gt;
+        protected sealed override double ProcessInternal(DifficultyHitObject current)
+        {
+            // If we&#39;re on the first object, set up the first section to end `MaxSectionLength` after it.
+            if (current.Index == 0)
+            {
+                currentSectionBegin = current.StartTime;
+                currentSectionEnd = currentSectionBegin + MaxSectionLength;
+
+                // No work is required for first object after calculating difficulty
+                currentSectionPeak = StrainValueAt(current);
+                return currentSectionPeak;
+            }
+
+            backfillPeaks(current);
+
+            double currentStrain = StrainValueAt(current);
+
+            // If the current strain is larger than the current peak, begin a new peak
+            // Otherwise, add the current strain to the queue
+            if (currentStrain &gt; currentSectionPeak)
+            {
+                // Clear the queue since none of the strains inside of it will be contributing to the difficulty.
+                queuedStrains.Clear();
+
+                // End the current section with the new peak
+                saveCurrentPeak(current.StartTime - currentSectionBegin);
+
+                // Set up the new section to start at the current object with the current strain
+                currentSectionBegin = current.StartTime;
+                currentSectionEnd = currentSectionBegin + MaxSectionLength;
+                currentSectionPeak = currentStrain;
+            }
+            else
+            {
+                // Empty the queue of smaller elements as they won&#39;t be relevant to difficulty
+                while (queuedStrains.Count &gt; 0 &amp;&amp; queuedStrains[^1].StrainValue &lt; currentStrain)
+                    queuedStrains.RemoveAt(queuedStrains.Count - 1);
+
+                queuedStrains.Add((currentStrain, current.StartTime));
+            }
+
+            return currentStrain;
+        }
+
+        /// &lt;summary&gt;
+        /// Fills the space between the end of the current section and the current object, if there is any.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;current&quot;&gt;The object who&#39;s &lt;see cref=&quot;DifficultyHitObject.StartTime&quot;/&gt; is backfilled to.&lt;/param&gt;
+        private void backfillPeaks(DifficultyHitObject current)
+        {
+            // If the current object starts after the current section ends
+            // then we want to start a new section without any harsh drop-off.
+            // If we have previous strains that influence the current difficulty we will prioritise those first.
+            // Otherwise, start with the current object&#39;s initial strain.
+            while (current.StartTime &gt; currentSectionEnd)
+            {
+                // Save the current peak, marking the end of the section.
+                saveCurrentPeak(currentSectionEnd - currentSectionBegin);
+                currentSectionBegin = currentSectionEnd;
+
+                // If we have any strains queued, then we will use those until the object falls into the new section.
+                if (queuedStrains.Count &gt; 0)
+                {
+                    (double strain, double startTime) = queuedStrains[0];
+                    queuedStrains.RemoveAt(0);
+
+                    // We want the section to end `MaxSectionLength` after the strain we&#39;re using as an influence.
+                    // This effectively means the queued strain will exist in its own section if the gap between the queued strain and current object is large enough.
+                    // This is required to make sure there&#39;s no harsh difficulty difference between 2 sections if there was a large gap.
+                    currentSectionEnd = startTime + MaxSectionLength;
+                    startNewSectionFrom(currentSectionBegin, current);
+
+                    // If the current object&#39;s peak was higher, we don&#39;t want to override it with a lower strain.
+                    // Only use the queued strain if it contributes more difficulty.
+                    currentSectionPeak = Math.Max(currentSectionPeak, strain);
+                }
+                // If the queue is empty then we should start the section from the current object instead.
+                // The queue can be empty if we&#39;re starting off of the back of a new peak, or if we drained through all the queue
+                // and the current object is still later than the section end.
+                else
+                {
+                    // We don&#39;t have any prior strains to take as a reference, so end the new section `MaxSectionLength` after it starts.
+                    currentSectionEnd = currentSectionBegin + MaxSectionLength;
+                    startNewSectionFrom(currentSectionBegin, current);
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Saves the current peak strain level to the list of strain peaks, which will be used to calculate an overall difficulty.
+        /// &lt;/summary&gt;
+        private void saveCurrentPeak(double sectionLength)
+        {
+            if (finalPeak != null)
+            {
+                strainPeaks.Remove(finalPeak.Value);
+                finalPeak = null;
+            }
+
+            StrainPeak peak = new StrainPeak(currentSectionPeak, sectionLength);
+
+            strainPeaks.AddInPlace(peak);
+            totalLength += sectionLength;
+
+            // Remove from the back of our strain peaks if there&#39;s any which are too deep to contribute to difficulty.
+            // `maxStoredLength` dictates for us how many sections will preserve at least 99.999% of the difficulty value.
+            while (totalLength &gt; maxStoredLength * MaxSectionLength)
+            {
+                totalLength -= strainPeaks[^1].SectionLength;
+                strainPeaks.RemoveAt(strainPeaks.Count - 1);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Sets the initial strain level for a new section.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The beginning of the new section in milliseconds.&lt;/param&gt;
+        /// &lt;param name=&quot;current&quot;&gt;The current hit object.&lt;/param&gt;
+        private void startNewSectionFrom(double time, DifficultyHitObject current)
+        {
+            // The maximum strain of the new section is not zero by default
+            // This means we need to capture the strain level at the beginning of the new section, and use that as the initial peak level.
+            currentSectionPeak = CalculateInitialStrain(time, current);
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the peak strain at a point in time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to retrieve the peak strain at.&lt;/param&gt;
+        /// &lt;param name=&quot;current&quot;&gt;The current hit object.&lt;/param&gt;
+        /// &lt;returns&gt;The peak strain.&lt;/returns&gt;
+        protected abstract double CalculateInitialStrain(double time, DifficultyHitObject current);
+
+        private StrainPeak? finalPeak;
+
+        /// &lt;summary&gt;
+        /// Returns a live enumerable of the peak strains for each &lt;see cref=&quot;MaxSectionLength&quot;/&gt; section of the beatmap,
+        /// including the peak of the current section.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;StrainPeak&gt; GetCurrentStrainPeaks()
+        {
+            if (finalPeak == null)
+            {
+                finalPeak = new StrainPeak(currentSectionPeak, currentSectionEnd - currentSectionBegin);
+                strainPeaks.AddInPlace(finalPeak.Value);
+            }
+
+            return strainPeaks;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the number of strains weighted against the top strain.
+        /// The result is scaled by clock rate as it affects the total number of strains.
+        /// &lt;/summary&gt;
+        public virtual double CountTopWeightedStrains(double difficultyValue)
+        {
+            if (ObjectDifficulties.Count == 0)
+                return 0.0;
+
+            double consistentTopStrain = difficultyValue * (1 - DecayWeight); // What would the top strain be if all strain values were identical
+
+            if (consistentTopStrain == 0)
+                return ObjectDifficulties.Count;
+
+            // Use a weighted sum of all strains. Constants are arbitrary and give nice values
+            return ObjectDifficulties.Sum(s =&gt; DiffUtils.Logistic(s / consistentTopStrain, 0.88, 10, 1.1));
+        }
+
+        /// &lt;summary&gt;
+        /// Used to store the difficulty of a section of a map.
+        /// &lt;/summary&gt;
+        public readonly record struct StrainPeak : IComparable&lt;StrainPeak&gt;
+        {
+            public StrainPeak(double value, double sectionLength)
+            {
+                Value = value;
+                SectionLength = Math.Round(sectionLength);
+            }
+
+            public double Value { get; }
+            public double SectionLength { get; }
+
+            // Reverse sort, highest is first.
+            public int CompareTo(StrainPeak other) =&gt; other.Value.CompareTo(Value);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[47,9,47,80,1],[55,9,55,116,1],[64,15,64,25,1],[65,9,65,10,1],[66,13,66,39,1],[67,13,67,49,1],[69,13,69,54,1],[70,9,70,10,1],[81,9,81,10,1],[83,13,83,36,1],[84,13,84,14,1],[85,17,85,57,1],[86,17,86,76,1],[89,17,89,61,1],[90,17,90,43,1],[93,13,93,36,1],[95,13,95,59,1],[99,13,99,52,1],[100,13,100,14,1],[102,17,102,39,1],[105,17,105,74,1],[108,17,108,57,1],[109,17,109,76,1],[110,17,110,52,1],[111,13,111,14,1],[113,13,113,14,1],[115,17,115,97,1],[116,21,116,69,1],[118,17,118,71,1],[119,13,119,14,1],[121,13,121,34,1],[122,9,122,10,1],[129,9,129,10,1],[134,13,134,58,1],[135,13,135,14,1],[137,17,137,74,1],[138,17,138,57,1],[141,17,141,45,1],[142,17,142,18,1],[143,21,143,74,1],[144,21,144,47,1],[149,21,149,70,1],[150,21,150,71,1],[154,21,154,79,1],[155,17,155,18,1],[160,17,160,18,1],[162,21,162,80,1],[163,21,163,71,1],[164,17,164,18,1],[165,13,165,14,1],[166,9,166,10,1],[172,9,172,10,1],[173,13,173,35,1],[174,13,174,14,0],[175,17,175,53,0],[176,17,176,34,0],[177,13,177,14,0],[179,13,179,81,1],[181,13,181,42,1],[182,13,182,42,1],[186,13,186,69,1],[187,13,187,14,0],[188,17,188,62,0],[189,17,189,61,0],[190,13,190,14,0],[191,9,191,10,1],[199,9,199,10,1],[202,13,202,72,1],[203,9,203,10,1],[220,9,220,10,1],[221,13,221,35,1],[222,13,222,14,1],[223,17,223,105,1],[224,17,224,57,1],[225,13,225,14,1],[227,13,227,32,1],[228,9,228,10,1],[235,9,235,10,1],[236,13,236,47,1],[237,17,237,28,1],[239,13,239,78,1],[241,13,241,42,1],[242,17,242,49,0],[245,13,245,48,1],[245,48,245,106,1],[245,106,245,108,1],[246,9,246,10,1],[254,13,254,14,1],[255,17,255,31,1],[256,17,256,59,1],[257,13,257,14,1],[259,35,259,39,1],[260,43,260,47,1],[263,55,263,83,1]]);
+    </script>
+  </body>
+</html>

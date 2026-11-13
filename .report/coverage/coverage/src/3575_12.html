@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/LegacyExporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Platform;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.Localisation;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Utils;
+using Realms;
+
+namespace osu.Game.Database
+{
+    /// &lt;summary&gt;
+    /// Handles exporting models to files for sharing / consumption outside the game.
+    /// &lt;/summary&gt;
+    public abstract class LegacyExporter&lt;TModel&gt;
+        where TModel : RealmObject, IHasNamedFiles, IHasGuidPrimaryKey
+    {
+        /// &lt;summary&gt;
+        /// Max length of filename (including extension).
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;para&gt;
+        /// The filename limit for most OSs is 255. This actual usable length is smaller because &lt;see cref=&quot;Storage.CreateFileSafely(string)&quot;/&gt; adds an additional &quot;_&lt;see cref=&quot;Guid&quot;/&gt;&quot; to the end of the path.
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// For more information see &lt;see href=&quot;https://www.ibm.com/docs/en/spectrum-protect/8.1.9?topic=parameters-file-specification-syntax&quot;&gt;file specification syntax&lt;/see&gt;, &lt;seealso href=&quot;https://en.wikipedia.org/wiki/Comparison_of_file_systems#Limits&quot;&gt;file systems limitations&lt;/seealso&gt;
+        /// &lt;/para&gt;
+        /// &lt;/remarks&gt;
+        public const int MAX_FILENAME_LENGTH = 255 - (32 + 4 + 2 + 5); //max path - (Guid + Guid &quot;D&quot; format chars + Storage.CreateFileSafely chars + account for &#39; (99)&#39; suffix)
+
+        /// &lt;summary&gt;
+        /// The file extension for exports (including the leading &#39;.&#39;).
+        /// &lt;/summary&gt;
+        protected abstract string FileExtension { get; }
+
+        protected readonly Storage UserFileStorage;
+        protected readonly Storage ExportStorage;
+
+        public Action&lt;Notification&gt;? PostNotification { get; set; }
+
+        protected LegacyExporter(Storage storage)
+        {
+            ExportStorage = (storage as OsuStorage)?.GetExportStorage() ?? storage.GetStorageForDirectory(@&quot;exports&quot;);
+            UserFileStorage = storage.GetStorageForDirectory(@&quot;files&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the baseline name of the file to which the &lt;paramref name=&quot;item&quot;/&gt; will be exported.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The name of the file will be run through &lt;see cref=&quot;ModelExtensions.GetValidFilename&quot;/&gt; to eliminate characters
+        /// which are not permitted by various filesystems.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The item being exported.&lt;/param&gt;
+        protected virtual string GetFilename(TModel item) =&gt; item.GetDisplayString();
+
+        /// &lt;summary&gt;
+        /// Exports a model to the default export location.
+        /// This will create a notification tracking the progress of the export, visible to the user.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model to export.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;A cancellation token.&lt;/param&gt;
+        public async Task ExportAsync(Live&lt;TModel&gt; model, CancellationToken cancellationToken = default)
+        {
+            string itemFilename = model.PerformRead(s =&gt; GetFilename(s).GetValidFilename());
+
+            if (itemFilename.Length &gt; MAX_FILENAME_LENGTH - FileExtension.Length)
+                itemFilename = itemFilename.Remove(MAX_FILENAME_LENGTH - FileExtension.Length);
+
+            IEnumerable&lt;string&gt; existingExports = ExportStorage
+                                                  .GetFiles(string.Empty, $&quot;{itemFilename}*{FileExtension}&quot;)
+                                                  .Concat(ExportStorage.GetDirectories(string.Empty));
+
+            string filename = NamingUtils.GetNextBestFilename(existingExports, $&quot;{itemFilename}{FileExtension}&quot;);
+
+            ProgressNotification notification = new ProgressNotification
+            {
+                State = ProgressNotificationState.Active,
+                Text = NotificationsStrings.FileExportOngoing(itemFilename),
+            };
+
+            PostNotification?.Invoke(notification);
+
+            using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, notification.CancellationToken);
+
+            try
+            {
+                using (var stream = ExportStorage.CreateFileSafely(filename))
+                {
+                    await ExportToStreamAsync(model, stream, notification, linkedSource.Token).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                notification.State = ProgressNotificationState.Cancelled;
+
+                // cleanup if export is failed or canceled.
+                ExportStorage.Delete(filename);
+                throw;
+            }
+
+            notification.CompletionText = NotificationsStrings.FileExportFinished(itemFilename);
+            notification.CompletionClickAction = () =&gt; ExportStorage.PresentFileExternally(filename);
+            notification.State = ProgressNotificationState.Completed;
+        }
+
+        /// &lt;summary&gt;
+        /// Exports a model to a provided stream.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model to export.&lt;/param&gt;
+        /// &lt;param name=&quot;outputStream&quot;&gt;The output stream to export to.&lt;/param&gt;
+        /// &lt;param name=&quot;notification&quot;&gt;An optional notification to be updated with export progress.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;A cancellation token.&lt;/param&gt;
+        public Task ExportToStreamAsync(Live&lt;TModel&gt; model, Stream outputStream, ProgressNotification? notification = null, CancellationToken cancellationToken = default) =&gt;
+            Task.Run(() =&gt; { model.PerformRead(s =&gt; ExportToStream(s, outputStream, notification, cancellationToken)); }, cancellationToken);
+
+        /// &lt;summary&gt;
+        /// Exports a model to a provided stream.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model to export.&lt;/param&gt;
+        /// &lt;param name=&quot;outputStream&quot;&gt;The output stream to export to.&lt;/param&gt;
+        /// &lt;param name=&quot;notification&quot;&gt;An optional notification to be updated with export progress.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;A cancellation token.&lt;/param&gt;
+        public abstract void ExportToStream(TModel model, Stream outputStream, ProgressNotification? notification, CancellationToken cancellationToken = default);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[47,57,47,61,0],[47,62,47,66,0],[49,9,49,50,0],[50,9,50,10,0],[51,13,51,119,0],[52,13,52,72,0],[53,9,53,10,0],[63,62,63,85,0],[72,9,72,10,0],[73,13,73,58,0],[73,58,73,91,0],[73,91,73,93,0],[75,13,75,82,0],[76,17,76,96,0],[78,13,80,103,0],[82,13,82,114,0],[84,13,88,15,0],[90,13,90,52,0],[92,13,92,137,0],[95,13,95,14,0],[96,24,96,77,0],[97,17,97,18,0],[98,21,98,118,0],[99,17,99,18,0],[100,13,100,14,0],[101,13,101,18,0],[102,13,102,14,0],[103,17,103,74,0],[106,17,106,48,0],[107,17,107,23,0],[110,13,110,97,0],[111,13,111,56,0],[111,56,111,101,0],[111,101,111,102,0],[112,13,112,70,0],[113,9,113,10,0],[123,13,123,28,0],[123,28,123,29,0],[123,29,123,30,0],[123,30,123,53,0],[123,53,123,117,0],[123,117,123,119,0],[123,119,123,120,0],[123,120,123,121,0],[123,121,123,141,0]]);
+    </script>
+  </body>
+</html>

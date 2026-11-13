@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapLeaderboardWedge.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.PolygonExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Leaderboards;
+using osu.Game.Online.Placeholders;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play.Leaderboards;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Select
+{
+    public partial class BeatmapLeaderboardWedge : VisibilityContainer
+    {
+        public const float SPACING_BETWEEN_SCORES = 4;
+
+        public IBindable&lt;BeatmapLeaderboardScope&gt; Scope { get; } = new Bindable&lt;BeatmapLeaderboardScope&gt;();
+
+        public IBindable&lt;LeaderboardSortMode&gt; Sorting { get; } = new Bindable&lt;LeaderboardSortMode&gt;();
+
+        public IBindable&lt;bool&gt; FilterBySelectedMods { get; } = new BindableBool();
+
+        [Resolved]
+        private LeaderboardManager leaderboardManager { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; mods { get; set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private ISongSelect? songSelect { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private Container&lt;Placeholder&gt; placeholderContainer = null!;
+        private Placeholder? placeholder;
+
+        private Container scoresContainer = null!;
+
+        private OsuScrollContainer scoresScroll = null!;
+        private Container personalBestDisplay = null!;
+
+        private Container&lt;BeatmapLeaderboardScore&gt; personalBestScoreContainer = null!;
+        private OsuSpriteText personalBestText = null!;
+        private LoadingLayer loading = null!;
+
+        private CancellationTokenSource? cancellationTokenSource;
+
+        private readonly IBindable&lt;LeaderboardScores?&gt; fetchedScores = new Bindable&lt;LeaderboardScores?&gt;();
+
+        private const float personal_best_height = 112;
+
+        // Blocking mouse down is required to avoid song select&#39;s background reveal logic happening while hovering scores.
+        // Our horizontal alignment doesn&#39;t really align with the rest of the sheared components (protrudes a touch to the right) which makes
+        // it complicated to handle this at a higher level.
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; scoresScroll.ReceivePositionalInputAt(screenSpacePos);
+
+        protected override bool OnMouseDown(MouseDownEvent e) =&gt; true;
+
+        private Sample? swishSample;
+
+        private readonly List&lt;ScheduledDelegate&gt; scoreSfxDelegates = new List&lt;ScheduledDelegate&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            Child = new OsuContextMenuContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    scoresScroll = new OsuScrollContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        ScrollbarVisible = false,
+                        Shear = OsuGame.SHEAR,
+                        Child = scoresContainer = new Container
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Padding = new MarginPadding
+                            {
+                                Top = 5,
+                                // Left padding offsets the shear to create a visually appealing list display.
+                                Left = 80f,
+                                // Bottom padding ensures the last entry&#39;s full width is displayed
+                                // (ie it is fully on screen after shear is considered).
+                                Bottom = BeatmapLeaderboardScore.HEIGHT * 3
+                            },
+                        },
+                    },
+                    personalBestDisplay = new Container
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        RelativeSizeAxes = Axes.X,
+                        Height = personal_best_height,
+                        Shear = OsuGame.SHEAR,
+                        Margin = new MarginPadding
+                        {
+                            Left = -40f,
+                        },
+                        CornerRadius = 10f,
+                        Masking = true,
+                        // push the personal best 1px down to hide masking issues
+                        Y = 1f,
+                        X = -100f,
+                        Alpha = 0f,
+                        Children = new Drawable[]
+                        {
+                            new WedgeBackground(),
+                            // Required because wedge background blocks input from passing through
+                            // to the main context menu container above.
+                            new OsuContextMenuContainer
+                            {
+                                Shear = -OsuGame.SHEAR,
+                                RelativeSizeAxes = Axes.Both,
+                                Child = new Container
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Padding = new MarginPadding { Top = 5f, Bottom = 5f, Left = 70f, Right = 10f },
+                                    Children = new Drawable[]
+                                    {
+                                        personalBestText = new OsuSpriteText
+                                        {
+                                            Colour = colourProvider.Content2,
+                                            Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold),
+                                        },
+                                        personalBestScoreContainer = new Container&lt;BeatmapLeaderboardScore&gt;
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            AutoSizeAxes = Axes.Y,
+                                            Margin = new MarginPadding { Top = 20f },
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                    },
+                    placeholderContainer = new Container&lt;Placeholder&gt;
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    loading = new LoadingLayer(),
+                }
+            };
+
+            swishSample = audio.Samples.Get(@&quot;SongSelect/leaderboard-score&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Scope.BindValueChanged(_ =&gt; RefetchScores());
+            Sorting.BindValueChanged(_ =&gt; RefetchScores());
+            FilterBySelectedMods.BindValueChanged(_ =&gt; RefetchScores());
+            beatmap.BindValueChanged(_ =&gt; RefetchScores());
+            ruleset.BindValueChanged(_ =&gt; RefetchScores());
+            mods.BindValueChanged(_ =&gt; refetchScoresFromMods());
+
+            RefetchScores();
+        }
+
+        protected override void PopIn()
+        {
+            this.FadeIn(300, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            this.FadeOut(300, Easing.OutQuint);
+        }
+
+        private void refetchScoresFromMods()
+        {
+            if (FilterBySelectedMods.Value)
+                RefetchScores();
+        }
+
+        private bool initialFetchComplete;
+
+        private ScheduledDelegate? refetchOperation;
+
+        public void RefetchScores()
+        {
+            SetScores(Array.Empty&lt;ScoreInfo&gt;());
+
+            if (beatmap.IsDefault)
+            {
+                SetState(LeaderboardState.NoneSelected);
+                return;
+            }
+
+            SetState(LeaderboardState.Retrieving);
+
+            var fetchScope = Scope.Value;
+
+            refetchOperation?.Cancel();
+            refetchOperation = Scheduler.AddDelayed(() =&gt;
+            {
+                var fetchBeatmapInfo = beatmap.Value.BeatmapInfo;
+                var fetchRuleset = ruleset.Value ?? fetchBeatmapInfo.Ruleset;
+                var fetchSorting = fetchScope == BeatmapLeaderboardScope.Local ? Sorting.Value : LeaderboardSortMode.Score;
+
+                // For now, we forcefully refresh to keep things simple.
+                // In the future, removing this requirement may be deemed useful, but will need ample testing of edge case scenarios
+                // (like returning from gameplay after setting a new score, returning to song select after main menu).
+                leaderboardManager.FetchWithCriteria(new LeaderboardCriteria(fetchBeatmapInfo, fetchRuleset, fetchScope, FilterBySelectedMods.Value ? mods.Value.ToArray() : null, fetchSorting),
+                    forceRefresh: true);
+
+                if (!initialFetchComplete)
+                {
+                    // only bind this after the first fetch to avoid reading stale scores.
+                    fetchedScores.BindTo(leaderboardManager.Scores);
+
+                    // Schedule is important here to avoid handling changes after this drawable is disposed.
+                    fetchedScores.BindValueChanged(_ =&gt; Schedule(updateScores), true);
+                    initialFetchComplete = true;
+                }
+            }, initialFetchComplete &amp;&amp; fetchScope != BeatmapLeaderboardScope.Local ? 300 : 0);
+        }
+
+        private void updateScores()
+        {
+            var scores = fetchedScores.Value;
+
+            if (scores == null) return;
+
+            // because leaderboard refetches are debounced, it is technically possible for the global leaderboard manager
+            // to contain scores for a different beatmap than the ones the wedge is currently on.
+            // in this case, ignore the incoming scores to avoid briefly flashing the wrong leaderboard.
+            if (leaderboardManager.CurrentCriteria?.Beatmap?.Equals(beatmap.Value.BeatmapInfo) != true)
+                return;
+
+            if (scores.FailState != null)
+                SetState((LeaderboardState)scores.FailState);
+            else
+                SetScores(scores.TopScores, scores.UserScore, scores.TotalScores);
+        }
+
+        protected void SetScores(IEnumerable&lt;ScoreInfo&gt; scores, ScoreInfo? userScore = null, int? totalCount = null)
+        {
+            cancellationTokenSource?.Cancel();
+            cancellationTokenSource = new CancellationTokenSource();
+
+            clearScores();
+            SetState(LeaderboardState.Success);
+
+            if (!scores.Any())
+            {
+                SetState(LeaderboardState.NoScores);
+                return;
+            }
+
+            LoadComponentsAsync(scores.Select((s, i) =&gt;
+            {
+                BeatmapLeaderboardScore.HighlightType? highlightType = null;
+
+                if (s.OnlineID == userScore?.OnlineID)
+                    highlightType = BeatmapLeaderboardScore.HighlightType.Own;
+                else if (api.LocalUserState.Friends.Any(r =&gt; r.TargetID == s.UserID) &amp;&amp; Scope.Value != BeatmapLeaderboardScope.Friend)
+                    highlightType = BeatmapLeaderboardScore.HighlightType.Friend;
+
+                return new BeatmapLeaderboardScore(s)
+                {
+                    Rank = i + 1,
+                    Highlight = highlightType,
+                    SelectedMods = { BindTarget = mods },
+                    Action = songSelect?.CanPresentScore == true
+                        ? () =&gt; songSelect.PresentScore(s)
+                        : null,
+                    ShowReplay = songSelect?.CanPresentScore == true
+                        ? info =&gt; songSelect.PresentScore(info, ScorePresentType.Gameplay)
+                        : null
+                };
+            }), loadedScores =&gt;
+            {
+                int delay = 200;
+                int i = 0;
+
+                foreach (var d in loadedScores)
+                {
+                    d.Y = (BeatmapLeaderboardScore.HEIGHT + SPACING_BETWEEN_SCORES) * i;
+
+                    // This is a bit of a weird one. We&#39;re already in a sheared state and don&#39;t want top-level
+                    // shear applied, but still need the `BeatmapLeaderboardScore` to be in &quot;sheared&quot; mode (see ctor).
+                    d.Shear = Vector2.Zero;
+
+                    scoresContainer.Add(d);
+
+                    d.FadeOut()
+                     .MoveToX(-20f)
+                     .Delay(delay)
+                     .FadeIn(300, Easing.OutQuint)
+                     .MoveToX(0f, 300, Easing.OutQuint);
+
+                    bool visible = d.ScreenSpaceDrawQuad.TopLeft.Y &lt; d.Parent!.ChildMaskingBounds.BottomLeft.Y;
+
+                    if (visible)
+                    {
+                        var del = Scheduler.AddDelayed(() =&gt;
+                        {
+                            var chan = swishSample?.GetChannel();
+                            if (chan == null) return;
+
+                            chan.Balance.Value = -OsuGameBase.SFX_STEREO_STRENGTH / 2;
+                            chan.Frequency.Value = 0.98f + RNG.NextDouble(0.04f);
+                            chan.Play();
+                        }, delay);
+
+                        scoreSfxDelegates.Add(del);
+                    }
+
+                    delay += 30;
+                    i++;
+                }
+            }, cancellation: cancellationTokenSource.Token);
+
+            if (userScore != null)
+            {
+                personalBestDisplay.MoveToX(0, 600, Easing.OutQuint);
+                personalBestDisplay.FadeIn(600, Easing.OutQuint);
+                personalBestScoreContainer.Child = new BeatmapLeaderboardScore(userScore)
+                {
+                    Highlight = BeatmapLeaderboardScore.HighlightType.Own,
+                    Rank = userScore.Position,
+                    SelectedMods = { BindTarget = mods },
+                    Action = () =&gt; onLeaderboardScoreClicked(userScore),
+                };
+
+                scoresScroll.TransformTo(nameof(scoresScroll.Padding), new MarginPadding { Bottom = personal_best_height }, 300, Easing.OutQuint);
+
+                if (totalCount != null &amp;&amp; userScore.Position != null)
+                    personalBestText.Text = BeatmapLeaderboardWedgeStrings.PersonalBestWithPosition(userScore.Position.Value, totalCount.Value);
+                else
+                    personalBestText.Text = BeatmapLeaderboardWedgeStrings.PersonalBest;
+            }
+        }
+
+        private void clearScores()
+        {
+            float delay = 0;
+
+            foreach (var d in scoresContainer)
+            {
+                // Avoid applying animations a second time to drawables which are already fading out.
+                if (d.LifetimeEnd != double.MaxValue)
+                    continue;
+
+                d.Delay(delay)
+                 .MoveToX(-10f, 120, Easing.Out)
+                 .FadeOut(120, Easing.Out)
+                 .Expire();
+
+                // If the user is scrolled down in the list, start delaying only from the current visible range to
+                // avoid the perceived transition from taking longer than expected.
+                if (d.ScreenSpaceDrawQuad.Intersects(scoresScroll.ScreenSpaceDrawQuad))
+                    delay += 20;
+            }
+
+            personalBestDisplay.MoveToX(-100, 300, Easing.OutQuint);
+            personalBestDisplay.FadeOut(300, Easing.OutQuint);
+            scoresScroll.TransformTo(nameof(scoresScroll.Padding), new MarginPadding(), 300, Easing.OutQuint);
+
+            scoreSfxDelegates.ForEach(d =&gt; d.Cancel());
+            scoreSfxDelegates.Clear();
+        }
+
+        private void onLeaderboardScoreClicked(ScoreInfo score) =&gt; songSelect?.PresentScore(score);
+
+        private LeaderboardState displayedState;
+
+        private ScheduledDelegate? loadingShowDelegate;
+
+        protected void SetState(LeaderboardState state)
+        {
+            if (state == displayedState)
+                return;
+
+            loading.Hide();
+
+            if (state == LeaderboardState.Retrieving)
+            {
+                // Slight delay so this doesn&#39;t display for a few silly frames for local score retrievals.
+                loadingShowDelegate ??= Scheduler.AddDelayed(() =&gt; loading.Show(), 250);
+            }
+            else
+            {
+                loadingShowDelegate?.Cancel();
+                loadingShowDelegate = null;
+            }
+
+            displayedState = state;
+
+            placeholder?.FadeOut(150, Easing.OutQuint).Expire();
+            placeholder = getPlaceholderFor(state);
+
+            if (placeholder == null)
+                return;
+
+            clearScores();
+
+            placeholderContainer.Child = placeholder;
+
+            placeholder.ScaleTo(0.8f).Then().ScaleTo(1, 900, Easing.OutQuint);
+            placeholder.FadeInFromZero(300, Easing.OutQuint);
+        }
+
+        #region Fade handling
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            const int height = BeatmapLeaderboardScore.HEIGHT;
+
+            float fadeBottom = (float)(scoresScroll.Current + scoresScroll.DrawHeight);
+            float fadeTop = (float)(scoresScroll.Current);
+
+            fadeTop += (float)Math.Min(height, Math.Log10(Math.Max(fadeTop, 0) + 1) * height);
+
+            foreach (var c in scoresContainer)
+            {
+                float topY = c.ToSpaceOfOtherDrawable(Vector2.Zero, scoresContainer).Y;
+                float bottomY = topY + height;
+
+                bool requireBottomFade = bottomY &gt;= fadeBottom;
+                bool requireTopFade = topY &lt; fadeTop;
+
+                if (!requireBottomFade &amp;&amp; !requireTopFade)
+                {
+                    c.Colour = Color4.White;
+                    continue;
+                }
+
+                if (topY &gt; fadeBottom + height || bottomY &lt; fadeTop - height)
+                {
+                    c.Colour = Color4.Transparent;
+                    continue;
+                }
+
+                if (requireBottomFade)
+                {
+                    c.Colour = ColourInfo.GradientVertical(
+                        Color4.White.Opacity(Math.Min(1 - (topY - fadeBottom) / height, 1)),
+                        Color4.White.Opacity(Math.Min(1 - (bottomY - fadeBottom) / height, 1)));
+                }
+                else
+                {
+                    Debug.Assert(requireTopFade);
+
+                    c.Colour = ColourInfo.GradientVertical(
+                        Color4.White.Opacity(Math.Min(1 - (fadeTop - topY) / height, 1)),
+                        Color4.White.Opacity(Math.Min(1 - (fadeTop - bottomY) / height, 1)));
+                }
+            }
+        }
+
+        #endregion
+
+        private Placeholder? getPlaceholderFor(LeaderboardState state)
+        {
+            switch (state)
+            {
+                case LeaderboardState.NetworkFailure:
+                    return new ClickablePlaceholder(LeaderboardStrings.CouldntFetchScores, FontAwesome.Solid.Sync)
+                    {
+                        Action = RefetchScores
+                    };
+
+                case LeaderboardState.NoneSelected:
+                    return new MessagePlaceholder(LeaderboardStrings.PleaseSelectABeatmap);
+
+                case LeaderboardState.RulesetUnavailable:
+                    return new MessagePlaceholder(LeaderboardStrings.LeaderboardsAreNotAvailableForThisRuleset);
+
+                case LeaderboardState.BeatmapUnavailable:
+                    return new MessagePlaceholder(LeaderboardStrings.LeaderboardsAreNotAvailableForThisBeatmap);
+
+                case LeaderboardState.NoScores:
+                    return new MessagePlaceholder(LeaderboardStrings.NoRecordsYet);
+
+                case LeaderboardState.NotLoggedIn:
+                    return new LoginPlaceholder(LeaderboardStrings.PleaseSignInToViewOnlineLeaderboards);
+
+                case LeaderboardState.NotSupporter:
+                    return new MessagePlaceholder(LeaderboardStrings.PleaseInvestInAnOsuSupporterTagToViewThisLeaderboard);
+
+                case LeaderboardState.NoTeam:
+                    return new MessagePlaceholder(LeaderboardStrings.NoTeam);
+
+                case LeaderboardState.Retrieving:
+                    return null;
+
+                case LeaderboardState.Success:
+                    return null;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(state));
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[46,59,46,63,0],[46,68,46,107,0],[48,57,48,61,0],[48,66,48,101,0],[50,55,50,59,0],[50,64,50,82,0],[53,57,53,61,0],[53,62,53,66,0],[53,71,53,76,0],[56,53,56,57,0],[56,58,56,62,0],[56,67,56,72,0],[59,50,59,54,0],[59,55,59,59,0],[59,64,59,69,0],[62,54,62,58,0],[62,59,62,63,0],[62,68,62,73,0],[65,56,65,60,0],[65,61,65,65,0],[65,70,65,75,0],[68,43,68,47,0],[68,48,68,52,0],[71,36,71,40,0],[71,41,71,45,0],[71,50,71,55,0],[73,9,73,69,0],[76,9,76,51,0],[78,9,78,57,0],[79,9,79,55,0],[81,9,81,87,0],[82,9,82,56,0],[83,9,83,46,0],[87,9,87,107,0],[94,82,94,135,0],[96,66,96,70,0],[100,9,100,100,0],[104,9,104,10,0],[105,13,105,42,0],[107,13,189,15,0],[191,13,191,78,0],[192,9,192,10,0],[195,9,195,10,0],[196,13,196,33,0],[198,13,198,41,0],[198,41,198,56,0],[198,56,198,58,0],[199,13,199,43,0],[199,43,199,58,0],[199,58,199,60,0],[200,13,200,56,0],[200,56,200,71,0],[200,71,200,73,0],[201,13,201,43,0],[201,43,201,58,0],[201,58,201,60,0],[202,13,202,43,0],[202,43,202,58,0],[202,58,202,60,0],[203,13,203,40,0],[203,40,203,63,0],[203,63,203,65,0],[205,13,205,29,0],[206,9,206,10,0],[209,9,209,10,0],[210,13,210,47,0],[211,9,211,10,0],[214,9,214,10,0],[215,13,215,48,0],[216,9,216,10,0],[219,9,219,10,0],[220,13,220,44,0],[221,17,221,33,0],[222,9,222,10,0],[229,9,229,10,0],[230,13,230,49,0],[232,13,232,35,0],[233,13,233,14,0],[234,17,234,57,0],[235,17,235,24,0],[238,13,238,51,0],[240,13,240,42,0],[242,13,242,40,0],[243,13,244,13,0],[244,13,244,14,0],[244,14,245,17,0],[245,17,245,66,0],[245,66,246,17,0],[246,17,246,78,0],[246,78,247,17,0],[247,17,247,124,0],[247,124,252,17,0],[252,17,253,41,0],[253,41,255,17,0],[255,17,255,43,0],[255,43,256,17,0],[256,17,256,18,0],[256,18,258,21,0],[258,21,258,69,0],[258,69,261,21,0],[261,21,261,57,0],[261,57,261,79,0],[261,79,261,87,0],[261,87,262,21,0],[262,21,262,49,0],[262,49,263,17,0],[263,17,263,18,0],[263,18,264,13,0],[264,13,264,14,0],[264,14,264,95,0],[265,9,265,10,0],[268,9,268,10,0],[269,13,269,46,0],[271,13,271,32,0],[271,33,271,40,0],[276,13,276,104,0],[277,17,277,24,0],[279,13,279,42,0],[280,17,280,62,0],[282,17,282,83,0],[283,9,283,10,0],[286,9,286,10,0],[287,13,287,47,0],[288,13,288,69,0],[290,13,290,27,0],[291,13,291,48,0],[293,13,293,31,0],[294,13,294,14,0],[295,17,295,53,0],[296,17,296,24,0],[299,13,300,13,0],[300,13,300,14,0],[300,14,301,17,0],[301,17,301,77,0],[301,77,303,17,0],[303,17,303,55,0],[303,55,304,21,0],[304,21,304,79,0],[304,79,305,22,0],[305,22,305,62,0],[305,62,305,84,0],[305,84,305,135,0],[305,135,306,21,0],[306,21,306,82,0],[306,82,308,17,0],[308,17,314,33,0],[314,33,314,59,0],[314,59,317,35,0],[317,35,317,91,0],[317,91,319,19,0],[319,19,320,13,0],[320,13,320,14,0],[320,14,321,13,0],[321,13,321,14,0],[321,14,322,17,0],[322,17,322,33,0],[322,33,323,17,0],[323,17,323,27,0],[323,27,325,17,0],[325,17,325,24,0],[325,24,325,26,0],[325,26,325,31,0],[325,31,325,32,0],[325,32,325,34,0],[325,34,325,35,0],[325,35,325,47,0],[325,47,326,17,0],[326,17,326,18,0],[326,18,327,21,0],[327,21,327,89,0],[327,89,331,21,0],[331,21,331,44,0],[331,44,333,21,0],[333,21,333,44,0],[333,44,335,21,0],[335,21,339,57,0],[339,57,341,21,0],[341,21,341,112,0],[341,112,343,21,0],[343,21,343,33,0],[343,33,344,21,0],[344,21,344,22,0],[344,22,345,25,0],[345,25,346,25,0],[346,25,346,26,0],[346,26,347,29,0],[347,29,347,66,0],[347,66,348,29,0],[348,29,348,46,0],[348,46,348,47,0],[348,47,348,54,0],[348,54,350,29,0],[350,29,350,87,0],[350,87,351,29,0],[351,29,351,82,0],[351,82,352,29,0],[352,29,352,41,0],[352,41,353,25,0],[353,25,353,26,0],[353,26,353,35,0],[353,35,355,25,0],[355,25,355,52,0],[355,52,356,21,0],[356,21,356,22,0],[356,22,358,21,0],[358,21,358,33,0],[358,33,359,21,0],[359,21,359,25,0],[359,25,360,17,0],[360,17,360,18,0],[360,18,361,13,0],[361,13,361,14,0],[361,14,361,61,0],[363,13,363,35,0],[364,13,364,14,0],[365,17,365,70,0],[366,17,366,66,0],[367,17,372,36,0],[372,36,372,72,0],[372,72,373,19,0],[375,17,375,147,0],[377,17,377,70,0],[378,21,378,145,0],[380,21,380,89,0],[381,13,381,14,0],[382,9,382,10,0],[385,9,385,10,0],[386,13,386,29,0],[388,13,388,20,0],[388,22,388,27,0],[388,28,388,30,0],[388,31,388,46,0],[389,13,389,14,0],[391,17,391,54,0],[392,21,392,30,0],[394,17,397,28,0],[401,17,401,88,0],[402,21,402,33,0],[403,13,403,14,0],[405,13,405,69,0],[406,13,406,63,0],[407,13,407,111,0],[409,13,409,44,0],[409,44,409,54,0],[409,54,409,56,0],[410,13,410,39,0],[411,9,411,10,0],[413,68,413,99,0],[420,9,420,10,0],[421,13,421,41,0],[422,17,422,24,0],[424,13,424,28,0],[426,13,426,54,0],[427,13,427,14,0],[429,17,429,68,0],[429,68,429,82,0],[429,82,429,89,0],[430,13,430,14,0],[432,13,432,14,0],[433,17,433,47,0],[434,17,434,44,0],[435,13,435,14,0],[437,13,437,36,0],[439,13,439,65,0],[440,13,440,52,0],[442,13,442,37,0],[443,17,443,24,0],[445,13,445,27,0],[447,13,447,54,0],[449,13,449,79,0],[450,13,450,62,0],[451,9,451,10,0],[456,9,456,10,0],[457,13,457,40,0],[461,13,461,88,0],[462,13,462,59,0],[464,13,464,95,0],[466,13,466,20,0],[466,22,466,27,0],[466,28,466,30,0],[466,31,466,46,0],[467,13,467,14,0],[468,17,468,88,0],[469,17,469,47,0],[471,17,471,64,0],[472,17,472,54,0],[474,17,474,59,0],[475,17,475,18,0],[476,21,476,45,0],[477,21,477,30,0],[480,17,480,78,0],[481,17,481,18,0],[482,21,482,51,0],[483,21,483,30,0],[486,17,486,39,0],[487,17,487,18,0],[488,21,490,97,0],[491,17,491,18,0],[493,17,493,18,0],[494,21,494,50,0],[496,21,498,94,0],[499,17,499,18,0],[500,13,500,14,0],[501,9,501,10,0],[506,9,506,10,0],[507,13,507,27,0],[510,21,513,23,0],[516,21,516,92,0],[519,21,519,113,0],[522,21,522,113,0],[525,21,525,84,0],[528,21,528,106,0],[531,21,531,124,0],[534,21,534,78,0],[537,21,537,33,0],[540,21,540,33,0],[543,21,543,74,0],[545,9,545,10,0]]);
+    </script>
+  </body>
+</html>

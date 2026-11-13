@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/LocalCachedBeatmapMetadataSource.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
+using osu.Framework.Development;
+using osu.Framework.IO.Network;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Database;
+using SharpCompress.Compressors;
+using SharpCompress.Compressors.BZip2;
+using SQLitePCL;
+
+namespace osu.Game.Beatmaps
+{
+    /// &lt;summary&gt;
+    /// Performs online metadata lookups using a copy of a database containing metadata for a large subset of beatmaps (stored to &lt;see cref=&quot;cache_database_name&quot;/&gt;).
+    /// The database will be asynchronously downloaded - if not already present locally - when this component is constructed.
+    /// &lt;/summary&gt;
+    public class LocalCachedBeatmapMetadataSource : IOnlineBeatmapMetadataSource
+    {
+        private readonly Storage storage;
+
+        private FileWebRequest? cacheDownloadRequest;
+
+        private const string cache_database_name = @&quot;online.db&quot;;
+
+        public LocalCachedBeatmapMetadataSource(Storage storage)
+        {
+            try
+            {
+                // required to initialise native SQLite libraries on some platforms.
+                Batteries_V2.Init();
+                raw.sqlite3_config(2 /*SQLITE_CONFIG_MULTITHREAD*/);
+            }
+            catch
+            {
+                // may fail if platform not supported.
+            }
+
+            this.storage = storage;
+
+            if (shouldFetchCache())
+                FetchCache();
+        }
+
+        private bool shouldFetchCache()
+        {
+            // avoid downloading / using cache for unit tests.
+            if (DebugUtils.IsNUnitRunning)
+                return false;
+
+            if (!storage.Exists(cache_database_name))
+            {
+                log(@&quot;Fetching local cache because it does not exist.&quot;);
+                return true;
+            }
+
+            // periodically update the cache to include newer beatmaps.
+            var fileInfo = new FileInfo(storage.GetFullPath(cache_database_name));
+
+            if (fileInfo.LastWriteTime &lt; DateTime.Now.AddMonths(-1))
+            {
+                log($@&quot;Refetching local cache because it was last written to on {fileInfo.LastWriteTime}.&quot;);
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool Available =&gt;
+            // no download in progress.
+            cacheDownloadRequest == null
+            // cached database exists on disk.
+            &amp;&amp; storage.Exists(cache_database_name);
+
+        public bool TryLookup(BeatmapInfo beatmapInfo, [NotNullWhen(true)] out OnlineBeatmapMetadata? onlineMetadata)
+        {
+            Debug.Assert(beatmapInfo.BeatmapSet != null);
+
+            if (!Available)
+            {
+                onlineMetadata = null;
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(beatmapInfo.MD5Hash)
+                &amp;&amp; string.IsNullOrEmpty(beatmapInfo.Path))
+            {
+                onlineMetadata = null;
+                return false;
+            }
+
+            try
+            {
+                using (var db = getConnection())
+                {
+                    db.Open();
+
+                    switch (getCacheVersion(db))
+                    {
+                        case 2:
+                            // can be removed 20260123
+                            return queryCacheVersion2(db, beatmapInfo, out onlineMetadata);
+
+                        case 3:
+                            return queryCacheVersion3(db, beatmapInfo, out onlineMetadata);
+                    }
+                }
+
+                onlineMetadata = null;
+                return false;
+            }
+            catch (SqliteException sqliteException)
+            {
+                onlineMetadata = null;
+
+                // There have been cases where the user&#39;s local database is corrupt.
+                // Let&#39;s attempt to identify these cases and re-initialise the local cache.
+                switch (sqliteException.SqliteErrorCode)
+                {
+                    case 26: // SQLITE_NOTADB
+                    case 11: // SQLITE_CORRUPT
+                        // only attempt purge &amp; re-download if there is no other refetch in progress
+                        if (cacheDownloadRequest != null)
+                            return false;
+
+                        tryPurgeCache();
+                        FetchCache();
+                        return false;
+                }
+
+                logForModel(beatmapInfo.BeatmapSet, $@&quot;Cached local retrieval for {beatmapInfo} failed with unhandled sqlite error {sqliteException}.&quot;);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                logForModel(beatmapInfo.BeatmapSet, $@&quot;Cached local retrieval for {beatmapInfo} failed with {ex}.&quot;);
+                onlineMetadata = null;
+                return false;
+            }
+        }
+
+        private void tryPurgeCache()
+        {
+            log(@&quot;Local metadata cache is corrupted; attempting purge.&quot;);
+
+            try
+            {
+                File.Delete(storage.GetFullPath(cache_database_name));
+            }
+            catch (Exception ex)
+            {
+                log($@&quot;Failed to purge local metadata cache: {ex}&quot;);
+            }
+
+            log(@&quot;Local metadata cache purged due to corruption.&quot;);
+        }
+
+        private SqliteConnection getConnection() =&gt;
+            new SqliteConnection(string.Concat(@&quot;Data Source=&quot;, storage.GetFullPath(@&quot;online.db&quot;, true)));
+
+        /// &lt;summary&gt;
+        /// Force an immediate fetch of the latest cache database.
+        /// &lt;/summary&gt;
+        public Task FetchCache()
+        {
+            // This is guarded in the local call, but also included as a safety
+            // for any incorrect public usage.
+            if (DebugUtils.IsNUnitRunning)
+                return Task.CompletedTask;
+
+            bool isRefetch = storage.Exists(cache_database_name);
+
+            string cacheFilePath = storage.GetFullPath(cache_database_name);
+            string compressedCacheFilePath = $@&quot;{cacheFilePath}.bz2&quot;;
+
+            cacheDownloadRequest = new FileWebRequest(compressedCacheFilePath, $@&quot;https://assets.ppy.sh/client-resources/{cache_database_name}.bz2?{DateTimeOffset.UtcNow:yyyyMMdd}&quot;);
+
+            cacheDownloadRequest.Failed += ex =&gt;
+            {
+                File.Delete(compressedCacheFilePath);
+
+                // don&#39;t clobber the cache when refetching if the download didn&#39;t succeed. seems excessive.
+                // consequently, also null the download request to allow the existing cache to be used (see `Available`).
+                if (isRefetch)
+                    cacheDownloadRequest = null;
+                else
+                    File.Delete(cacheFilePath);
+
+                log($@&quot;Online cache download failed: {ex}&quot;);
+            };
+
+            cacheDownloadRequest.Finished += () =&gt;
+            {
+                try
+                {
+                    // `SqliteConnection` by default uses pooling.
+                    // disposing an `SqliteConnection` is not enough to get `Microsoft.Data.Sqlite` to close the database file.
+                    // this means that overwriting the file may fail if the pools are not cleared before trying.
+                    // this fails especially loudly on Windows because of Windows file delete semantics being exclusive-write
+                    // rather than Unix&#39;s &quot;file is marked for deletion after last reader closes the fd&quot;.
+                    SqliteConnection.ClearAllPools();
+
+                    using (var stream = File.OpenRead(cacheDownloadRequest.Filename))
+                    using (var outStream = File.OpenWrite(cacheFilePath))
+                    {
+                        // ensure to clobber any and all existing data to avoid accidental corruption.
+                        outStream.SetLength(0);
+
+                        using (var bz2 = BZip2Stream.Create(stream, CompressionMode.Decompress, false))
+                            bz2.CopyTo(outStream);
+                    }
+
+                    // set to null on completion to allow lookups to begin using the new source
+                    cacheDownloadRequest = null;
+                    log(@&quot;Local cache fetch completed successfully.&quot;);
+                }
+                catch (Exception ex)
+                {
+                    log($@&quot;Online cache extraction failed: {ex}&quot;);
+                    // at this point clobber the cache regardless of whether we&#39;re refetching, because by this point who knows what state the cache file is in.
+                    File.Delete(cacheFilePath);
+                }
+                finally
+                {
+                    File.Delete(compressedCacheFilePath);
+                }
+            };
+
+            return Task.Run(async () =&gt;
+            {
+                try
+                {
+                    await cacheDownloadRequest.PerformAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Prevent throwing unobserved exceptions, as they will be logged from the network request to the log file anyway.
+                }
+            });
+        }
+
+        public bool IsAtLeastVersion(int version)
+        {
+            try
+            {
+                using (var connection = getConnection())
+                {
+                    connection.Open();
+                    return getCacheVersion(connection) &gt;= version;
+                }
+            }
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 26 || ex.SqliteErrorCode == 11) // SQLITE_NOTADB, SQLITE_CORRUPT
+            {
+                // if the database is corrupted then return `false` as the consumer may want to just refetch the db themselves
+                return false;
+            }
+        }
+
+        private int getCacheVersion(SqliteConnection connection)
+        {
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = @&quot;SELECT COUNT(1) FROM `sqlite_master` WHERE `type` = &#39;table&#39; AND `name` = &#39;schema_version&#39;&quot;;
+
+                using var reader = cmd.ExecuteReader();
+
+                if (!reader.Read())
+                    throw new InvalidOperationException(&quot;Error when attempting to check for existence of `schema_version` table.&quot;);
+
+                // No versioning table means that this is the very first version of the schema.
+                if (reader.GetInt32(0) == 0)
+                    return 1;
+            }
+
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = @&quot;SELECT `number` FROM `schema_version`&quot;;
+
+                using var reader = cmd.ExecuteReader();
+
+                if (!reader.Read())
+                    throw new InvalidOperationException(&quot;Error when attempting to query schema version.&quot;);
+
+                return reader.GetInt32(0);
+            }
+        }
+
+        public DateTime? GetCacheFetchDate()
+        {
+            string path = storage.GetFullPath(cache_database_name);
+            var file = new FileInfo(path);
+            if (!file.Exists)
+                return null;
+
+            return file.LastWriteTime;
+        }
+
+        private bool queryCacheVersion2(SqliteConnection db, BeatmapInfo beatmapInfo, out OnlineBeatmapMetadata? onlineMetadata)
+        {
+            Debug.Assert(beatmapInfo.BeatmapSet != null);
+
+            using var cmd = db.CreateCommand();
+
+            cmd.CommandText =
+                &quot;&quot;&quot;
+                SELECT `b`.`beatmapset_id`, `b`.`beatmap_id`, `b`.`approved`, `b`.`user_id`, `b`.`checksum`, `b`.`last_update`, `s`.`submit_date`, `s`.`approved_date`
+                FROM `osu_beatmaps` AS `b`
+                JOIN `osu_beatmapsets` AS `s` ON `s`.`beatmapset_id` = `b`.`beatmapset_id`
+                WHERE (`b`.`checksum` = @MD5Hash OR `b`.`filename` = @Path)
+                AND `b`.`approved` in (1, 2, 4)
+                &quot;&quot;&quot;;
+            // approved conditional can theoretically be removed as it was fixed in
+            // https://github.com/ppy/osu-onlinedb-generator/commit/489ac000775c3ff63bc914efb83cad0f6fbde261
+            // but it&#39;s also safe to leave it (should not affect performance).
+
+            cmd.Parameters.Add(new SqliteParameter(@&quot;@MD5Hash&quot;, beatmapInfo.MD5Hash));
+            cmd.Parameters.Add(new SqliteParameter(@&quot;@Path&quot;, beatmapInfo.Path));
+
+            using var reader = cmd.ExecuteReader();
+
+            if (reader.Read())
+            {
+                logForModel(beatmapInfo.BeatmapSet, $@&quot;Cached local retrieval for {beatmapInfo} (cache version 2).&quot;);
+
+                onlineMetadata = new OnlineBeatmapMetadata
+                {
+                    BeatmapSetID = reader.GetInt32(0),
+                    BeatmapID = reader.GetInt32(1),
+                    BeatmapStatus = (BeatmapOnlineStatus)reader.GetByte(2),
+                    BeatmapSetStatus = (BeatmapOnlineStatus)reader.GetByte(2),
+                    AuthorID = reader.GetInt32(3),
+                    MD5Hash = reader.GetString(4),
+                    LastUpdated = reader.GetDateTimeOffset(5),
+                    DateSubmitted = reader.GetDateTimeOffset(6),
+                    DateRanked = reader.GetDateTimeOffset(7),
+                };
+                return true;
+            }
+
+            onlineMetadata = null;
+            return false;
+        }
+
+        private bool queryCacheVersion3(SqliteConnection db, BeatmapInfo beatmapInfo, out OnlineBeatmapMetadata? onlineMetadata)
+        {
+            Debug.Assert(beatmapInfo.BeatmapSet != null);
+
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText =
+                    &quot;&quot;&quot;
+                    SELECT `b`.`beatmapset_id`, `b`.`beatmap_id`, `b`.`approved`, `b`.`user_id`, `b`.`checksum`, `b`.`last_update`, `s`.`submit_date`, `s`.`approved_date`
+                    FROM `osu_beatmaps` AS `b`
+                    JOIN `osu_beatmapsets` AS `s` ON `s`.`beatmapset_id` = `b`.`beatmapset_id`
+                    WHERE (`b`.`checksum` = @MD5Hash OR `b`.`filename` = @Path)
+                    &quot;&quot;&quot;;
+
+                cmd.Parameters.Add(new SqliteParameter(@&quot;@MD5Hash&quot;, beatmapInfo.MD5Hash));
+                cmd.Parameters.Add(new SqliteParameter(@&quot;@Path&quot;, beatmapInfo.Path));
+
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (!reader.Read())
+                    {
+                        onlineMetadata = null;
+                        return false;
+                    }
+
+                    logForModel(beatmapInfo.BeatmapSet, $@&quot;Cached local retrieval for {beatmapInfo} (cache version 3).&quot;);
+
+                    onlineMetadata = new OnlineBeatmapMetadata
+                    {
+                        BeatmapSetID = reader.GetInt32(0),
+                        BeatmapID = reader.GetInt32(1),
+                        BeatmapStatus = (BeatmapOnlineStatus)reader.GetByte(2),
+                        BeatmapSetStatus = (BeatmapOnlineStatus)reader.GetByte(2),
+                        AuthorID = reader.GetInt32(3),
+                        MD5Hash = reader.GetString(4),
+                        LastUpdated = reader.GetDateTimeOffset(5),
+                        DateSubmitted = reader.GetDateTimeOffset(6),
+                        DateRanked = reader.GetDateTimeOffset(7),
+                    };
+                }
+            }
+
+            using (var tagsCommand = db.CreateCommand())
+            {
+                tagsCommand.CommandText = &quot;SELECT `name` FROM `tags` WHERE `id` IN (SELECT `tag_id` FROM `beatmap_tags` WHERE `beatmap_id` = @BeatmapID)&quot;;
+                tagsCommand.Parameters.Add(new SqliteParameter(@&quot;@BeatmapID&quot;, onlineMetadata.BeatmapID));
+
+                using (var tagsReader = tagsCommand.ExecuteReader())
+                {
+                    while (tagsReader.Read())
+                        onlineMetadata.UserTags.Add(tagsReader.GetString(0));
+                }
+            }
+
+            return true;
+        }
+
+        private static void log(string message)
+            =&gt; Logger.Log($@&quot;[{nameof(LocalCachedBeatmapMetadataSource)}] {message}&quot;, LoggingTarget.Database);
+
+        private void logForModel(BeatmapSetInfo set, string message) =&gt;
+            RealmArchiveModelImporter&lt;BeatmapSetInfo&gt;.LogForModel(set, $@&quot;[{nameof(LocalCachedBeatmapMetadataSource)}] {message}&quot;);
+
+        public void Dispose()
+        {
+            cacheDownloadRequest?.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,65,0],[34,9,34,10,0],[36,13,36,14,0],[38,17,38,37,0],[39,17,39,69,0],[40,13,40,14,0],[41,13,41,18,0],[42,13,42,14,0],[44,13,44,14,0],[46,13,46,36,0],[48,13,48,36,0],[49,17,49,30,0],[50,9,50,10,0],[53,9,53,10,0],[55,13,55,43,0],[56,17,56,30,0],[58,13,58,54,0],[59,13,59,14,0],[60,17,60,73,0],[61,17,61,29,0],[65,13,65,83,0],[67,13,67,69,0],[68,13,68,14,0],[69,17,69,109,0],[70,17,70,29,0],[73,13,73,26,0],[74,9,74,10,0],[78,13,80,51,0],[83,9,83,10,0],[84,13,84,58,0],[86,13,86,28,0],[87,13,87,14,0],[88,17,88,39,0],[89,17,89,30,0],[92,13,93,59,0],[94,13,94,14,0],[95,17,95,39,0],[96,17,96,30,0],[100,13,100,14,0],[101,24,101,48,0],[102,17,102,18,0],[103,21,103,31,0],[105,21,105,49,0],[109,29,109,92,0],[112,29,112,92,0],[114,17,114,18,0],[116,17,116,39,0],[117,17,117,30,0],[119,13,119,52,0],[120,13,120,14,0],[121,17,121,39,0],[125,17,125,57,0],[130,25,130,58,0],[131,29,131,42,0],[133,25,133,41,0],[134,25,134,38,0],[135,25,135,38,0],[138,17,138,153,0],[139,17,139,30,0],[141,13,141,33,0],[142,13,142,14,0],[143,17,143,117,0],[144,17,144,39,0],[145,17,145,30,0],[147,9,147,10,0],[150,9,150,10,0],[151,13,151,74,0],[154,13,154,14,0],[155,17,155,71,0],[156,13,156,14,0],[157,13,157,33,0],[158,13,158,14,0],[159,17,159,69,0],[160,13,160,14,0],[162,13,162,68,0],[163,9,163,10,0],[166,13,166,106,0],[172,9,172,10,0],[175,13,175,43,0],[176,17,176,43,0],[178,13,178,66,0],[180,13,180,77,0],[181,13,181,70,0],[183,13,183,183,0],[185,13,186,13,0],[186,13,186,14,0],[186,14,187,17,0],[187,17,187,54,0],[187,54,191,17,0],[191,17,191,31,0],[191,31,192,21,0],[192,21,192,49,0],[192,49,194,21,0],[194,21,194,48,0],[194,48,196,17,0],[196,17,196,61,0],[196,61,197,13,0],[197,13,197,14,0],[197,14,197,15,0],[199,13,200,13,0],[200,13,200,14,0],[200,14,202,17,0],[202,17,202,18,0],[202,18,208,21,0],[208,21,208,54,0],[208,54,210,28,0],[210,28,210,85,0],[210,85,211,28,0],[211,28,211,73,0],[211,73,212,21,0],[212,21,212,22,0],[212,22,214,25,0],[214,25,214,48,0],[214,48,216,32,0],[216,32,216,103,0],[216,103,217,29,0],[217,29,217,51,0],[217,51,218,21,0],[218,21,218,22,0],[218,22,221,21,0],[221,21,221,49,0],[221,49,222,21,0],[222,21,222,71,0],[222,71,223,17,0],[223,17,223,18,0],[223,18,224,17,0],[224,17,224,37,0],[224,37,225,17,0],[225,17,225,18,0],[225,18,226,21,0],[226,21,226,67,0],[226,67,228,21,0],[228,21,228,48,0],[228,48,229,17,0],[229,17,229,18,0],[229,18,231,17,0],[231,17,231,18,0],[231,18,232,21,0],[232,21,232,58,0],[232,58,233,17,0],[233,17,233,18,0],[233,18,234,13,0],[234,13,234,14,0],[234,14,234,15,0],[236,13,237,13,0],[237,13,237,14,0],[237,14,239,17,0],[239,17,239,18,0],[239,18,240,21,0],[240,21,240,85,0],[240,85,241,17,0],[241,17,241,18,0],[241,18,242,17,0],[242,17,242,22,0],[242,22,243,17,0],[243,17,243,18,0],[243,18,245,17,0],[245,17,245,18,0],[245,18,246,13,0],[246,13,246,14,0],[246,14,246,16,0],[247,9,247,10,0],[250,9,250,10,0],[252,13,252,14,0],[253,24,253,56,0],[254,17,254,18,0],[255,21,255,39,0],[256,21,256,67,0],[259,40,259,99,0],[260,13,260,14,0],[262,17,262,30,0],[264,9,264,10,0],[267,9,267,10,0],[268,20,268,56,0],[269,13,269,14,0],[270,17,270,128,0],[272,17,272,56,0],[274,17,274,36,0],[275,21,275,132,0],[278,17,278,45,0],[279,21,279,30,0],[280,13,280,14,0],[282,20,282,56,0],[283,13,283,14,0],[284,17,284,76,0],[286,17,286,56,0],[288,17,288,36,0],[289,21,289,107,0],[291,17,291,43,0],[293,9,293,10,0],[296,9,296,10,0],[297,13,297,68,0],[298,13,298,43,0],[299,13,299,30,0],[300,17,300,29,0],[302,13,302,39,0],[303,9,303,10,0],[306,9,306,10,0],[307,13,307,58,0],[309,13,309,48,0],[311,13,318,21,0],[323,13,323,87,0],[324,13,324,81,0],[326,13,326,52,0],[328,13,328,31,0],[329,13,329,14,0],[330,17,330,118,0],[332,17,343,19,0],[344,17,344,29,0],[347,13,347,35,0],[348,13,348,26,0],[349,9,349,10,0],[352,9,352,10,0],[353,13,353,58,0],[355,20,355,48,0],[356,13,356,14,0],[357,17,363,25,0],[365,17,365,91,0],[366,17,366,85,0],[368,24,368,56,0],[369,17,369,18,0],[370,21,370,40,0],[371,21,371,22,0],[372,25,372,47,0],[373,25,373,38,0],[376,21,376,122,0],[378,21,389,23,0],[390,17,390,18,0],[391,13,391,14,0],[393,20,393,56,0],[394,13,394,14,0],[395,17,395,155,0],[396,17,396,106,0],[398,24,398,68,0],[399,17,399,18,0],[400,21,400,46,0],[401,25,401,78,0],[402,17,402,18,0],[403,13,403,14,0],[405,13,405,25,0],[406,9,406,10,0],[409,16,409,110,0],[412,13,412,131,0],[415,9,415,10,0],[416,13,416,45,0],[417,9,417,10,0]]);
+    </script>
+  </body>
+</html>

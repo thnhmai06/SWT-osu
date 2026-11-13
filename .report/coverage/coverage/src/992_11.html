@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/OsuSliderVelocityToolboxGroup.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Localisation;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Timing;
+using osuTK;
+
+namespace osu.Game.Rulesets.Osu.Edit
+{
+    public partial class OsuSliderVelocityToolboxGroup : EditorToolboxGroup
+    {
+        /// &lt;summary&gt;
+        /// The slider velocity to be used for new object placements.
+        /// &lt;/summary&gt;
+        public IBindable&lt;double&gt; SliderVelocity =&gt; sliderControl.Current;
+
+        private ExpandableSliderVelocityAdjustmentControl sliderControl = null!;
+        private ExpandableButton useLastSliderButton = null!;
+
+        private readonly BindableList&lt;HitObject&gt; selectedHitObjects = new BindableList&lt;HitObject&gt;();
+
+        [Resolved]
+        private EditorBeatmap editorBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private EditorClock editorClock { get; set; } = null!;
+
+        private double lastClockPosition = double.NegativeInfinity;
+
+        /// &lt;summary&gt;
+        /// This &lt;see cref=&quot;Cached&quot;/&gt; is used to track whether the &quot;source&quot; of slider velocity is valid.
+        /// That means:
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;
+        /// When there are no objects with velocity selected, the presumed &quot;source&quot; of slider velocity is
+        /// the last slider preceding the editor&#39;s current playback position (if one exists).
+        /// &lt;/item&gt;
+        /// &lt;item&gt;When there are objects with velocity selected, they are the presumed &quot;source&quot; of slider velocity.&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// Any event that may affect the readout of slider velocity from the &quot;source&quot; of slider velocity as defined above
+        /// should invalidate this &lt;see cref=&quot;Cached&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private readonly Cached sliderVelocitySource = new Cached();
+
+        /// &lt;summary&gt;
+        /// This flag is used to track whether the &lt;see cref=&quot;sliderControl&quot;/&gt;
+        /// is currently decoupled from and overriding the &lt;see cref=&quot;sliderVelocitySource&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is only supported when there are no objects with velocity selected.
+        /// In that scenario, this flag supports the behaviour of being able to select a slider velocity manually via &lt;see cref=&quot;sliderControl&quot;/&gt;
+        /// independent of the last slider preceding the editor&#39;s current playback position.
+        /// &lt;see cref=&quot;useLastSliderButton&quot;/&gt; is used to clear this flag.
+        /// &lt;/remarks&gt;
+        private bool overridingSliderVelocitySource;
+
+        public OsuSliderVelocityToolboxGroup()
+            : base(&quot;velocity&quot;)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Spacing = new Vector2(5);
+            Children = new Drawable[]
+            {
+                sliderControl = new ExpandableSliderVelocityAdjustmentControl(),
+                useLastSliderButton = new ExpandableButton
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Action = () =&gt;
+                    {
+                        overridingSliderVelocitySource = false;
+                        sliderVelocitySource.Invalidate();
+                    },
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            sliderControl.Current.BindValueChanged(_ =&gt;
+            {
+                updateContractedText();
+
+                // if the slider velocity source is valid,
+                // then this change to `sliderControl.Current` did not originate from the giant revalidation block in `Update()`,
+                // meaning it was user-inflicted, meaning that the user is now overriding the velocity source.
+                if (sliderVelocitySource.IsValid)
+                {
+                    overridingSliderVelocitySource = true;
+                    sliderVelocitySource.Invalidate();
+                }
+            }, true);
+            useLastSliderButton.Expanded.BindValueChanged(_ =&gt; sliderVelocitySource.Invalidate());
+
+            editorBeatmap.HitObjectAdded += invalidateSliderVelocitySourceObject;
+            editorBeatmap.HitObjectUpdated += invalidateSliderVelocitySourceObject;
+            editorBeatmap.HitObjectRemoved += invalidateSliderVelocitySourceObject;
+            selectedHitObjects.BindTo(editorBeatmap.SelectedHitObjects);
+            selectedHitObjects.BindCollectionChanged((_, _) =&gt; sliderVelocitySource.Invalidate());
+        }
+
+        private void updateContractedText()
+        {
+            sliderControl.ContractedLabelText = LocalisableString.Interpolate($@&quot;SV: {sliderControl.Current.Value.ToLocalisableString(&quot;N2&quot;)}x&quot;);
+        }
+
+        private void invalidateSliderVelocitySourceObject(HitObject _) =&gt; sliderVelocitySource.Invalidate();
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (editorClock.CurrentTime != lastClockPosition)
+            {
+                sliderVelocitySource.Invalidate();
+                lastClockPosition = editorClock.CurrentTime;
+            }
+
+            // Four possible causes of invalidation:
+            // - The user has selected some objects from the beatmap, in which case the velocity from the selected objects (if any)
+            //   should take absolute precedence.
+            // - The user seeked the clock, which means that the last slider to read the velocity from in &quot;use last slider velocity&quot; mode might have changed.
+            // - Some change to the beatmap was made, which means the displayed velocity may no longer match the source objects in underlying beatmap
+            //   (this applies when some objects are selected *and* when none are selected).
+            // - The user is interacting with the toolbox in a way that requires a visual state update
+            //   (hovered to expand it, clicked the button to use last slider&#39;s velocity, or dragged the manual velocity slider).
+            //   This is a procedural one, because `sliderVelocitySource` will have been re-validated correctly already in that case,
+            //   but to decrease unnecessary work being done every frame, the invalidation is explicitly re-triggered to update the toolbox state.
+            if (!sliderVelocitySource.IsValid)
+            {
+                var selectedSliderVelocities = selectedHitObjects.OfType&lt;Slider&gt;().Select(s =&gt; s.SliderVelocityMultiplier).Distinct().ToList();
+
+                if (selectedSliderVelocities.Count &gt; 0)
+                {
+                    overridingSliderVelocitySource = false;
+
+                    useLastSliderButton.Enabled.Value = false;
+                    useLastSliderButton.ExpandedLabelText = &quot;Adjusting velocity of selection&quot;;
+                    useLastSliderButton.ContractedLabelText = default;
+
+                    sliderControl.ObjectsToAdjust.Clear();
+                    sliderControl.ObjectsToAdjust.AddRange(selectedHitObjects.OfType&lt;Slider&gt;());
+                }
+                else
+                {
+                    sliderControl.ObjectsToAdjust.Clear();
+
+                    var lastSlider = editorBeatmap
+                                     .HitObjects
+                                     .OfType&lt;Slider&gt;()
+                                     .LastOrDefault(h =&gt; h.StartTime &lt;= editorClock.CurrentTime);
+
+                    if (lastSlider == null)
+                    {
+                        useLastSliderButton.Enabled.Value = false;
+                        useLastSliderButton.ExpandedLabelText = &quot;No sliders to get velocity from&quot;;
+                        useLastSliderButton.ContractedLabelText = default;
+                    }
+                    else
+                    {
+                        useLastSliderButton.Enabled.Value = useLastSliderButton.Expanded.Value &amp;&amp; overridingSliderVelocitySource;
+                        useLastSliderButton.ExpandedLabelText = overridingSliderVelocitySource
+                            ? LocalisableString.Interpolate($@&quot;Use last slider&#39;s velocity ({lastSlider.SliderVelocityMultiplier.ToLocalisableString(&quot;N2&quot;)}x)&quot;)
+                            : &quot;Using last slider&#39;s velocity&quot;;
+                        useLastSliderButton.ContractedLabelText = $@&quot;current {lastSlider.SliderVelocityMultiplier.ToLocalisableString(&quot;N2&quot;)}x&quot;;
+
+                        if (!overridingSliderVelocitySource)
+                            sliderControl.Current.Value = lastSlider.SliderVelocityMultiplier;
+                    }
+                }
+
+                sliderVelocitySource.Validate();
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            if (editorBeatmap.IsNotNull())
+            {
+                editorBeatmap.HitObjectAdded -= invalidateSliderVelocitySourceObject;
+                editorBeatmap.HitObjectUpdated -= invalidateSliderVelocitySourceObject;
+                editorBeatmap.HitObjectRemoved -= invalidateSliderVelocitySourceObject;
+            }
+
+            base.Dispose(isDisposing);
+        }
+
+        internal partial class ExpandableSliderVelocityAdjustmentControl : CompositeDrawable, IExpandable
+        {
+            private readonly OsuSpriteText contractedLabel;
+            private readonly SliderVelocityAdjustmentControl adjustmentControl;
+
+            /// &lt;summary&gt;
+            /// The label text to display when this slider is in a contracted state.
+            /// &lt;/summary&gt;
+            public LocalisableString ContractedLabelText
+            {
+                get =&gt; contractedLabel.Text;
+                set =&gt; contractedLabel.Text = value;
+            }
+
+            public Bindable&lt;double&gt; Current =&gt; adjustmentControl.Current;
+            public bool IsMultipleValues =&gt; adjustmentControl.IsMultipleValues;
+            public BindableList&lt;HitObject&gt; ObjectsToAdjust =&gt; adjustmentControl.ObjectsToAdjust;
+
+            public BindableBool Expanded { get; } = new BindableBool();
+
+            public override bool HandlePositionalInput =&gt; true;
+
+            public ExpandableSliderVelocityAdjustmentControl()
+            {
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+
+                InternalChild = new FillFlowContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Spacing = new Vector2(0f, 10f),
+                    Children = new Drawable[]
+                    {
+                        contractedLabel = new OsuSpriteText(),
+                        adjustmentControl = new SliderVelocityAdjustmentControl(),
+                    }
+                };
+            }
+
+            [Resolved]
+            private IExpandingContainer? expandingContainer { get; set; }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                expandingContainer?.Expanded.BindValueChanged(containerExpanded =&gt;
+                {
+                    Expanded.Value = containerExpanded.NewValue;
+                }, true);
+
+                Expanded.BindValueChanged(v =&gt;
+                {
+                    contractedLabel.FadeTo(v.NewValue ? 0 : 1);
+
+                    adjustmentControl.FadeTo(v.NewValue ? Current.Disabled ? 0.3f : 1f : 0f, 500, Easing.OutQuint);
+                    adjustmentControl.BypassAutoSizeAxes = !v.NewValue ? Axes.Y : Axes.None;
+                }, true);
+
+                Current.BindDisabledChanged(disabled =&gt;
+                {
+                    adjustmentControl.Alpha = Expanded.Value ? disabled ? 0.3f : 1 : 0f;
+                });
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,52,29,73,0],[31,9,31,81,0],[32,9,32,62,0],[34,9,34,101,0],[37,47,37,51,0],[37,52,37,56,0],[37,61,37,66,0],[40,43,40,47,0],[40,48,40,52,0],[40,57,40,62,0],[42,9,42,68,0],[57,9,57,69,0],[72,15,72,31,0],[73,9,73,10,0],[74,9,74,10,0],[78,9,78,10,0],[79,13,79,38,0],[80,13,87,21,0],[87,21,87,22,0],[87,22,88,25,0],[88,25,88,64,0],[88,64,89,25,0],[89,25,89,59,0],[89,59,90,21,0],[90,21,90,22,0],[90,22,92,15,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,33,0],[99,13,100,13,0],[100,13,100,14,0],[100,14,101,17,0],[101,17,101,40,0],[101,40,106,17,0],[106,17,106,50,0],[106,50,107,17,0],[107,17,107,18,0],[107,18,108,21,0],[108,21,108,59,0],[108,59,109,21,0],[109,21,109,55,0],[109,55,110,17,0],[110,17,110,18,0],[110,18,111,13,0],[111,13,111,14,0],[111,14,111,22,0],[112,13,112,64,0],[112,64,112,97,0],[112,97,112,99,0],[114,13,114,82,0],[115,13,115,84,0],[116,13,116,84,0],[117,13,117,73,0],[118,13,118,64,0],[118,64,118,97,0],[118,97,118,99,0],[119,9,119,10,0],[122,9,122,10,0],[123,13,123,145,0],[124,9,124,10,0],[126,75,126,108,0],[129,9,129,10,0],[130,13,130,27,0],[132,13,132,62,0],[133,13,133,14,0],[134,17,134,51,0],[135,17,135,61,0],[136,13,136,14,0],[148,13,148,47,0],[149,13,149,14,0],[150,17,150,96,0],[150,96,150,122,0],[150,122,150,144,0],[152,17,152,56,0],[153,17,153,18,0],[154,21,154,60,0],[156,21,156,63,0],[157,21,157,95,0],[158,21,158,71,0],[160,21,160,59,0],[161,21,161,97,0],[162,17,162,18,0],[164,17,164,18,0],[165,21,165,59,0],[167,21,170,58,0],[170,58,170,96,0],[170,96,170,98,0],[172,21,172,44,0],[173,21,173,22,0],[174,25,174,67,0],[175,25,175,99,0],[176,25,176,75,0],[177,21,177,22,0],[179,21,179,22,0],[180,25,180,130,0],[181,25,183,62,0],[184,25,184,144,0],[186,25,186,61,0],[187,29,187,95,0],[188,21,188,22,0],[189,17,189,18,0],[191,17,191,49,0],[192,13,192,14,0],[193,9,193,10,0],[196,9,196,10,0],[197,13,197,43,0],[198,13,198,14,0],[199,17,199,86,0],[200,17,200,88,0],[201,17,201,88,0],[202,13,202,14,0],[204,13,204,39,0],[205,9,205,10,0],[217,24,217,44,0],[218,24,218,52,0],[221,48,221,73,0],[222,45,222,79,0],[223,63,223,96,0],[225,44,225,48,0],[225,53,225,71,0],[227,59,227,63,0],[229,13,229,63,0],[230,13,230,14,0],[231,17,231,43,0],[232,17,232,39,0],[234,17,244,19,0],[245,13,245,14,0],[248,63,248,67,0],[248,68,248,72,0],[251,13,251,14,0],[252,17,252,37,0],[254,17,255,17,0],[255,17,255,18,0],[255,18,256,21,0],[256,21,256,65,0],[256,65,257,17,0],[257,17,257,18,0],[257,18,257,26,0],[259,17,260,17,0],[260,17,260,18,0],[260,18,261,21,0],[261,21,261,64,0],[261,64,263,21,0],[263,21,263,116,0],[263,116,264,21,0],[264,21,264,93,0],[264,93,265,17,0],[265,17,265,18,0],[265,18,265,26,0],[267,17,268,17,0],[268,17,268,18,0],[268,18,269,21,0],[269,21,269,89,0],[269,89,270,17,0],[270,17,270,18,0],[270,18,270,20,0],[271,13,271,14,0]]);
+    </script>
+  </body>
+</html>

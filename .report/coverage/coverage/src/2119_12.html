@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Submission/SubmissionStageProgress.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Overlays;
+using osuTK;
+
+namespace osu.Game.Screens.Edit.Submission
+{
+    public partial class SubmissionStageProgress : CompositeDrawable
+    {
+        public LocalisableString StageDescription { get; init; }
+
+        public int StageIndex { get; init; }
+
+        private Bindable&lt;StageStatusType&gt; status { get; } = new Bindable&lt;StageStatusType&gt;();
+
+        private Bindable&lt;float?&gt; progress { get; } = new Bindable&lt;float?&gt;();
+
+        private Container progressBarContainer = null!;
+        private Box progressBar = null!;
+        private Container iconContainer = null!;
+        private OsuTextFlowContainer errorMessage = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        private Sample? progressSample;
+
+        private const int stage_done_sample_count = 4;
+        private Sample? stageDoneSample;
+
+        private Sample? errorSample;
+        private Sample? cancelSample;
+
+        private SampleChannel? progressSampleChannel;
+
+        private const int fadeout_duration = 100;
+        private ScheduledDelegate? progressSampleFadeDelegate;
+        private ScheduledDelegate? progressSampleStopDelegate;
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider, AudioManager audio)
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChildren = new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Text = StageDescription,
+                },
+                new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Anchor = Anchor.CentreRight,
+                    Origin = Anchor.CentreRight,
+                    Direction = FillDirection.Horizontal,
+                    Spacing = new Vector2(5),
+                    Children = new Drawable[]
+                    {
+                        iconContainer = new Container
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            Anchor = Anchor.CentreRight,
+                            Origin = Anchor.CentreRight,
+                        },
+                        new Container
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            Anchor = Anchor.CentreRight,
+                            Origin = Anchor.CentreRight,
+                            Children =
+                            [
+                                progressBarContainer = new Container
+                                {
+                                    Anchor = Anchor.CentreRight,
+                                    Origin = Anchor.CentreRight,
+                                    Width = 150,
+                                    Height = 10,
+                                    CornerRadius = 5,
+                                    Masking = true,
+                                    Children = new[]
+                                    {
+                                        new Box
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Colour = colourProvider.Background6,
+                                        },
+                                        progressBar = new Box
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Anchor = Anchor.CentreLeft,
+                                            Origin = Anchor.CentreLeft,
+                                            Width = 0,
+                                            Colour = colourProvider.Highlight1,
+                                        }
+                                    }
+                                },
+                                errorMessage = new OsuTextFlowContainer
+                                {
+                                    Anchor = Anchor.CentreRight,
+                                    Origin = Anchor.CentreRight,
+                                    // should really be `CentreRight` too, but that&#39;s broken due to a framework bug
+                                    // (https://github.com/ppy/osu-framework/issues/5084)
+                                    TextAnchor = Anchor.BottomRight,
+                                    Width = 450,
+                                    AutoSizeAxes = Axes.Y,
+                                    Alpha = 0,
+                                    Colour = colours.Red1,
+                                }
+                            ]
+                        }
+                    }
+                }
+            };
+
+            errorSample = audio.Samples.Get(@&quot;UI/generic-error&quot;);
+            cancelSample = audio.Samples.Get(@&quot;UI/notification-cancel&quot;);
+            progressSample = audio.Samples.Get(@&quot;UI/bss-progress&quot;);
+
+            int stageSample = Math.Min(stage_done_sample_count - 1, StageIndex);
+            stageDoneSample = audio.Samples.Get(@$&quot;UI/bss-stage-{stageSample}&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            status.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateStatus), true);
+            progress.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateProgress), true);
+
+            progressSampleChannel = progressSample?.GetChannel();
+            progressSampleChannel?.ManualFree = true;
+        }
+
+        public void SetNotStarted() =&gt; status.Value = StageStatusType.NotStarted;
+
+        public void SetInProgress(float? progress = null)
+        {
+            this.progress.Value = progress;
+            status.Value = StageStatusType.InProgress;
+
+            if (progressSampleChannel == null)
+                return;
+
+            progressSampleChannel.Frequency.Value = 0.5f;
+            progressSampleChannel.Volume.Value = 0.25f;
+            progressSampleChannel.Looping = true;
+        }
+
+        public void SetCompleted() =&gt; status.Value = StageStatusType.Completed;
+
+        public void SetFailed(string reason)
+        {
+            status.Value = StageStatusType.Failed;
+            errorMessage.Text = reason;
+        }
+
+        public void SetCanceled() =&gt; status.Value = StageStatusType.Canceled;
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            progressSampleChannel?.Stop();
+            progressSampleChannel?.Dispose();
+        }
+
+        private const float transition_duration = 200;
+        private const Easing transition_easing = Easing.OutQuint;
+
+        private void updateProgress()
+        {
+            progressSampleFadeDelegate?.Cancel();
+            progressSampleStopDelegate?.Cancel();
+
+            progressBarContainer.FadeTo(status.Value == StageStatusType.InProgress &amp;&amp; progress.Value != null ? 1 : 0, transition_duration, transition_easing);
+
+            if (progress.Value is float progressValue)
+            {
+                progressBar.ResizeWidthTo(progressValue, transition_duration, transition_easing);
+
+                if (progressSampleChannel == null || Precision.AlmostEquals(progressValue, 0f))
+                    return;
+
+                // Don&#39;t restart the looping sample if already playing
+                if (!progressSampleChannel.Playing)
+                    progressSampleChannel.Play();
+
+                this.TransformBindableTo(progressSampleChannel.Frequency, 0.5f + (progressValue * 1.5f), transition_duration, transition_easing);
+                this.TransformBindableTo(progressSampleChannel.Volume, 0.25f + (progressValue * .75f), transition_duration, transition_easing);
+
+                progressSampleFadeDelegate = Scheduler.AddDelayed(() =&gt;
+                {
+                    // Perform a fade-out before stopping the sample to prevent clicking.
+                    this.TransformBindableTo(progressSampleChannel.Volume, 0, fadeout_duration);
+                    progressSampleStopDelegate = Scheduler.AddDelayed(() =&gt; { progressSampleChannel.Stop(); }, fadeout_duration);
+                }, transition_duration - fadeout_duration);
+            }
+        }
+
+        private void updateStatus()
+        {
+            progressBarContainer.FadeTo(status.Value == StageStatusType.InProgress &amp;&amp; progress.Value != null ? 1 : 0, transition_duration, Easing.OutQuint);
+            errorMessage.FadeTo(status.Value == StageStatusType.Failed ? 1 : 0, transition_duration, Easing.OutQuint);
+
+            iconContainer.Clear();
+            iconContainer.ClearTransforms();
+
+            switch (status.Value)
+            {
+                case StageStatusType.InProgress:
+                    iconContainer.Child = new LoadingSpinner
+                    {
+                        Size = new Vector2(16),
+                        State = { Value = Visibility.Visible, },
+                    };
+                    iconContainer.Colour = colours.Orange1;
+                    break;
+
+                case StageStatusType.Completed:
+                    iconContainer.Child = new SpriteIcon
+                    {
+                        Icon = FontAwesome.Solid.CheckCircle,
+                        Size = new Vector2(16),
+                    };
+                    iconContainer.Colour = colours.Green1;
+                    iconContainer.FlashColour(Colour4.White, 1000, Easing.OutQuint);
+
+                    // manually set progress value, as to trigger sample playback for the final section
+                    progress.Value = 1;
+
+                    stageDoneSample?.Play();
+
+                    break;
+
+                case StageStatusType.Failed:
+                    iconContainer.Child = new SpriteIcon
+                    {
+                        Icon = FontAwesome.Solid.ExclamationCircle,
+                        Size = new Vector2(16),
+                    };
+                    iconContainer.Colour = colours.Red1;
+                    iconContainer.FlashColour(Colour4.White, 1000, Easing.OutQuint);
+                    errorSample?.Play();
+                    progressSampleChannel?.Stop();
+                    break;
+
+                case StageStatusType.Canceled:
+                    iconContainer.Child = new SpriteIcon
+                    {
+                        Icon = FontAwesome.Solid.Ban,
+                        Size = new Vector2(16),
+                    };
+                    iconContainer.Colour = colours.Gray8;
+                    iconContainer.FlashColour(Colour4.White, 1000, Easing.OutQuint);
+                    cancelSample?.Play();
+                    progressSampleChannel?.Stop();
+                    break;
+            }
+        }
+
+        public enum StageStatusType
+        {
+            NotStarted,
+            InProgress,
+            Completed,
+            Failed,
+            Canceled,
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,53,27,57,0],[27,58,27,63,0],[29,33,29,37,0],[29,38,29,43,0],[31,52,31,56,0],[31,61,31,92,0],[33,45,33,49,0],[33,54,33,76,0],[35,9,35,56,0],[36,9,36,41,0],[37,9,37,49,0],[38,9,38,59,0],[41,37,41,41,0],[41,42,41,46,0],[41,51,41,56,0],[59,9,59,10,0],[60,13,60,39,0],[61,13,61,35,0],[63,13,134,15,0],[136,13,136,66,0],[137,13,137,73,0],[138,13,138,68,0],[140,13,140,81,0],[141,13,141,81,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,33,0],[148,13,148,42,0],[148,42,148,73,0],[148,73,148,81,0],[149,13,149,44,0],[149,44,149,77,0],[149,77,149,85,0],[151,13,151,66,0],[152,13,152,54,0],[153,9,153,10,0],[155,40,155,81,0],[158,9,158,10,0],[159,13,159,44,0],[160,13,160,55,0],[162,13,162,47,0],[163,17,163,24,0],[165,13,165,58,0],[166,13,166,56,0],[167,13,167,50,0],[168,9,168,10,0],[170,39,170,79,0],[173,9,173,10,0],[174,13,174,51,0],[175,13,175,40,0],[176,9,176,10,0],[178,38,178,77,0],[181,9,181,10,0],[182,13,182,39,0],[184,13,184,43,0],[185,13,185,46,0],[186,9,186,10,0],[192,9,192,10,0],[193,13,193,50,0],[194,13,194,50,0],[196,13,196,159,0],[198,13,198,55,0],[199,13,199,14,0],[200,17,200,98,0],[202,17,202,96,0],[203,21,203,28,0],[206,17,206,52,0],[207,21,207,50,0],[209,17,209,146,0],[210,17,210,144,0],[212,17,213,17,0],[213,17,213,18,0],[213,18,215,21,0],[215,21,215,97,0],[215,97,216,21,0],[216,21,216,77,0],[216,77,216,78,0],[216,78,216,79,0],[216,79,216,108,0],[216,108,216,109,0],[216,109,216,110,0],[216,110,216,130,0],[216,130,217,17,0],[217,17,217,18,0],[217,18,217,60,0],[218,13,218,14,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,157,0],[224,13,224,119,0],[226,13,226,35,0],[227,13,227,45,0],[229,13,229,34,0],[232,21,236,23,0],[237,21,237,60,0],[238,21,238,27,0],[241,21,245,23,0],[246,21,246,59,0],[247,21,247,85,0],[250,21,250,40,0],[252,21,252,45,0],[254,21,254,27,0],[257,21,261,23,0],[262,21,262,57,0],[263,21,263,85,0],[264,21,264,41,0],[265,21,265,51,0],[266,21,266,27,0],[269,21,273,23,0],[274,21,274,58,0],[275,21,275,85,0],[276,21,276,42,0],[277,21,277,51,0],[278,21,278,27,0],[280,9,280,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/Statistics/StatisticsPanel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Online.Placeholders;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Ranking.Statistics.User;
+using osuTK;
+using Realms;
+
+namespace osu.Game.Screens.Ranking.Statistics
+{
+    public partial class StatisticsPanel : VisibilityContainer
+    {
+        public const float SIDE_PADDING = 20;
+
+        public readonly Bindable&lt;ScoreInfo?&gt; Score = new Bindable&lt;ScoreInfo?&gt;();
+
+        /// &lt;summary&gt;
+        /// The score which was achieved by the local user.
+        /// If this is set to a non-null score, an &lt;see cref=&quot;OverallRanking&quot;/&gt; component will be displayed showing changes to the local user&#39;s ranking and statistics
+        /// when a statistics update related to this score is received from spectator server.
+        /// &lt;/summary&gt;
+        public ScoreInfo? AchievedScore { get; init; }
+
+        protected override bool StartHidden =&gt; true;
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private readonly Container content;
+        private readonly LoadingSpinner spinner;
+
+        private bool wasOpened;
+        private Sample? popInSample;
+        private Sample? popOutSample;
+        private CancellationTokenSource? loadCancellation;
+
+        public StatisticsPanel()
+        {
+            InternalChild = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Padding = new MarginPadding
+                {
+                    Left = ScorePanel.EXPANDED_WIDTH + SIDE_PADDING * 2,
+                    Right = SIDE_PADDING,
+                },
+                Children = new Drawable[]
+                {
+                    content = new Container { RelativeSizeAxes = Axes.Both },
+                    spinner = new LoadingSpinner()
+                }
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            Score.BindValueChanged(populateStatistics, true);
+
+            popInSample = audio.Samples.Get(@&quot;Results/statistics-panel-pop-in&quot;);
+            popOutSample = audio.Samples.Get(@&quot;Results/statistics-panel-pop-out&quot;);
+        }
+
+        private void populateStatistics(ValueChangedEvent&lt;ScoreInfo?&gt; score)
+        {
+            loadCancellation?.Cancel();
+            loadCancellation = null;
+
+            foreach (var child in content)
+                child.FadeOut(150).Expire();
+
+            spinner.Hide();
+
+            var newScore = score.NewValue;
+
+            if (newScore == null)
+                return;
+
+            spinner.Show();
+
+            var localCancellationSource = loadCancellation = new CancellationTokenSource();
+
+            var workingBeatmap = beatmapManager.GetWorkingBeatmap(newScore.BeatmapInfo);
+
+            // Todo: The placement of this is temporary. Eventually we&#39;ll both generate the playable beatmap _and_ run through it in a background task to generate the hit events.
+            Task.Run(() =&gt; workingBeatmap.GetPlayableBeatmap(newScore.Ruleset, newScore.Mods), loadCancellation.Token).ContinueWith(task =&gt; Schedule(() =&gt;
+            {
+                bool hitEventsAvailable = newScore.HitEvents.Count != 0;
+                Container&lt;Drawable&gt; container;
+
+                var statisticItems = CreateStatisticItems(newScore, task.GetResultSafely()).ToArray();
+
+                if (!hitEventsAvailable &amp;&amp; statisticItems.All(c =&gt; c.RequiresHitEvents))
+                {
+                    container = new FillFlowContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Direction = FillDirection.Vertical,
+                        Children = new Drawable[]
+                        {
+                            new MessagePlaceholder(&quot;Extended statistics are only available after watching a replay!&quot;),
+                            new ReplayDownloadButton(newScore)
+                            {
+                                Scale = new Vector2(1.5f),
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                            },
+                        }
+                    };
+                }
+                else
+                {
+                    FillFlowContainer flow;
+                    container = flow = new FillFlowContainer
+                    {
+                        Alpha = 0,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Direction = FillDirection.Full,
+                    };
+
+                    bool anyRequiredHitEvents = false;
+
+                    foreach (var item in statisticItems)
+                    {
+                        if (!hitEventsAvailable &amp;&amp; item.RequiresHitEvents)
+                        {
+                            anyRequiredHitEvents = true;
+                            continue;
+                        }
+
+                        flow.Add(new StatisticItemContainer(item)
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                        });
+                    }
+
+                    if (anyRequiredHitEvents)
+                    {
+                        flow.Add(new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            Children = new Drawable[]
+                            {
+                                new MessagePlaceholder(&quot;More statistics available after watching a replay!&quot;),
+                                new ReplayDownloadButton(newScore)
+                                {
+                                    Scale = new Vector2(1.5f),
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                },
+                            }
+                        });
+                    }
+                }
+
+                LoadComponentAsync(container, d =&gt;
+                {
+                    if (Score.Value?.Equals(newScore) != true)
+                        return;
+
+                    spinner.Hide();
+                    content.Add(d);
+                    d.FadeIn(250, Easing.OutQuint);
+                }, localCancellationSource.Token);
+            }), localCancellationSource.Token);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;StatisticItem&quot;/&gt;s to be displayed in this panel for a given &lt;paramref name=&quot;newScore&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;newScore&quot;&gt;The score to create the rows for.&lt;/param&gt;
+        /// &lt;param name=&quot;playableBeatmap&quot;&gt;The beatmap on which the score was set.&lt;/param&gt;
+        protected virtual IEnumerable&lt;StatisticItem&gt; CreateStatisticItems(ScoreInfo newScore, IBeatmap playableBeatmap)
+        {
+            foreach (var statistic in newScore.Ruleset.CreateInstance().CreateStatisticsForScore(newScore, playableBeatmap))
+                yield return statistic;
+
+            if (AchievedScore != null
+                &amp;&amp; newScore.UserID &gt; 1
+                &amp;&amp; newScore.UserID == AchievedScore.UserID
+                &amp;&amp; newScore.OnlineID &gt; 0
+                &amp;&amp; newScore.OnlineID == AchievedScore.OnlineID)
+            {
+                yield return new StatisticItem(&quot;Overall Ranking&quot;, () =&gt; new OverallRanking(newScore)
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                });
+            }
+
+            if (newScore.BeatmapInfo!.OnlineID &gt; 0
+                &amp;&amp; api.IsLoggedIn)
+            {
+                string? preventTaggingReason = null;
+
+                // We may want to iterate on the following conditions further in the future
+
+                var localUserScore = AchievedScore ?? realm.Run(r =&gt;
+                    r.GetAllLocalScoresForUser(api.LocalUser.Value.Id)
+                     .Filter($@&quot;{nameof(ScoreInfo.BeatmapInfo)}.{nameof(BeatmapInfo.ID)} == $0&quot;, newScore.BeatmapInfo.ID)
+                     .AsEnumerable()
+                     .OrderByDescending(score =&gt; score.Ruleset.MatchesOnlineID(newScore.BeatmapInfo.Ruleset))
+                     .ThenByDescending(score =&gt; score.Rank)
+                     .FirstOrDefault());
+
+                if (localUserScore == null)
+                    preventTaggingReason = &quot;Play the beatmap to contribute to beatmap tags!&quot;;
+                else if (localUserScore.Ruleset.OnlineID != newScore.BeatmapInfo!.Ruleset.OnlineID)
+                    preventTaggingReason = &quot;Play the beatmap in its original ruleset to contribute to beatmap tags!&quot;;
+                else if (localUserScore.Rank &lt; ScoreRank.C)
+                    preventTaggingReason = &quot;Set a better score to contribute to beatmap tags!&quot;;
+                else if (localUserScore.Mods.Any(m =&gt; (m.Type == ModType.Conversion) &amp;&amp; !(m is ModClassic)))
+                    preventTaggingReason = &quot;Play this beatmap without conversion mods to contribute to beatmap tags!&quot;;
+
+                if (preventTaggingReason == null)
+                {
+                    yield return new StatisticItem(&quot;Beatmap tags&quot;, () =&gt; new UserTagControl(newScore.BeatmapInfo)
+                    {
+                        Writable = true,
+                        RelativeSizeAxes = Axes.X,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    });
+                }
+                else
+                {
+                    yield return new StatisticItem(&quot;Beatmap tags&quot;, () =&gt; new Container
+                    {
+                        Children = new Drawable[]
+                        {
+                            new UserTagControl(newScore.BeatmapInfo)
+                            {
+                                Writable = false,
+                                RelativeSizeAxes = Axes.X,
+                                Anchor = Anchor.TopCentre,
+                                Origin = Anchor.TopCentre,
+                            },
+                            new Container
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                AutoSizeAxes = Axes.Both,
+                                Masking = true,
+                                EdgeEffect = new EdgeEffectParameters
+                                {
+                                    Radius = 60,
+                                    Roundness = 8,
+                                    Colour = OsuColour.Gray(0.18f),
+                                    Type = EdgeEffectType.Shadow,
+                                },
+                                Children = new Drawable[]
+                                {
+                                    new OsuTextFlowContainer(cp =&gt; cp.Font = OsuFont.GetFont(size: StatisticItem.FONT_SIZE, weight: FontWeight.SemiBold))
+                                    {
+                                        AutoSizeAxes = Axes.Both,
+                                        Text = preventTaggingReason,
+                                    },
+                                }
+                            },
+                        },
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                    });
+                }
+            }
+        }
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            ToggleVisibility();
+            return true;
+        }
+
+        protected override void PopIn()
+        {
+            this.FadeIn(350, Easing.OutQuint);
+
+            popInSample?.Play();
+            wasOpened = true;
+        }
+
+        protected override void PopOut()
+        {
+            this.FadeOut(250, Easing.OutQuint);
+
+            if (wasOpened)
+            {
+                popOutSample?.Play();
+                this.HidePopover(); // targeted at the user tag control
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            loadCancellation?.Cancel();
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,9,37,81,0],[44,43,44,47,0],[44,48,44,53,0],[46,48,46,52,0],[49,49,49,53,0],[49,54,49,58,0],[49,63,49,68,0],[52,37,52,41,0],[52,42,52,46,0],[52,51,52,56,0],[55,36,55,40,0],[55,41,55,45,0],[55,50,55,55,0],[65,9,65,33,0],[66,9,66,10,0],[67,13,80,15,0],[81,9,81,10,0],[85,9,85,10,0],[86,13,86,62,0],[88,13,88,81,0],[89,13,89,83,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,40,0],[95,13,95,37,0],[97,13,97,20,0],[97,22,97,31,0],[97,32,97,34,0],[97,35,97,42,0],[98,17,98,45,0],[100,13,100,28,0],[102,13,102,43,0],[104,13,104,34,0],[105,17,105,24,0],[107,13,107,28,0],[109,13,109,92,0],[111,13,111,89,0],[114,13,114,28,0],[114,28,114,94,0],[114,94,114,141,0],[114,141,115,13,0],[115,13,115,14,0],[115,14,116,17,0],[116,17,116,73,0],[116,73,119,17,0],[119,17,119,103,0],[119,103,121,17,0],[121,17,121,68,0],[121,68,121,87,0],[121,87,121,89,0],[121,89,122,17,0],[122,17,122,18,0],[122,18,123,21,0],[123,21,139,23,0],[139,23,140,17,0],[140,17,140,18,0],[140,18,142,17,0],[142,17,142,18,0],[142,18,144,21,0],[144,21,152,23,0],[152,23,154,21,0],[154,21,154,55,0],[154,55,156,21,0],[156,21,156,28,0],[156,28,156,30,0],[156,30,156,38,0],[156,38,156,39,0],[156,39,156,41,0],[156,41,156,42,0],[156,42,156,56,0],[156,56,157,21,0],[157,21,157,22,0],[157,22,158,25,0],[158,25,158,75,0],[158,75,159,25,0],[159,25,159,26,0],[159,26,160,29,0],[160,29,160,57,0],[160,57,161,29,0],[161,29,161,38,0],[161,38,164,25,0],[164,25,168,28,0],[168,28,169,21,0],[169,21,169,22,0],[169,22,171,21,0],[171,21,171,46,0],[171,46,172,21,0],[172,21,172,22,0],[172,22,173,25,0],[173,25,190,28,0],[190,28,191,21,0],[191,21,191,22,0],[191,22,192,17,0],[192,17,192,18,0],[192,18,194,17,0],[194,17,195,17,0],[195,17,195,18,0],[195,18,196,21,0],[196,21,196,63,0],[196,63,197,25,0],[197,25,197,32,0],[197,32,199,21,0],[199,21,199,36,0],[199,36,200,21,0],[200,21,200,36,0],[200,36,201,21,0],[201,21,201,52,0],[201,52,202,17,0],[202,17,202,18,0],[202,18,202,51,0],[202,51,203,13,0],[203,13,203,14,0],[203,14,203,15,0],[203,15,203,48,0],[204,9,204,10,0],[212,9,212,10,0],[213,13,213,20,0],[213,22,213,35,0],[213,36,213,38,0],[213,39,213,124,0],[214,17,214,40,0],[216,13,220,64,0],[221,13,221,14,0],[222,17,222,73,0],[222,73,227,18,0],[227,18,227,20,0],[228,13,228,14,0],[230,13,231,35,0],[232,13,232,14,0],[233,17,233,53,0],[237,17,238,21,0],[238,21,241,50,0],[241,50,241,109,0],[241,109,242,49,0],[242,49,242,59,0],[242,59,243,39,0],[243,39,243,41,0],[245,17,245,44,0],[246,21,246,94,0],[247,22,247,100,0],[248,21,248,118,0],[249,22,249,60,0],[250,21,250,96,0],[251,22,251,55,0],[251,55,251,107,0],[251,107,251,109,0],[252,21,252,119,0],[254,17,254,50,0],[255,17,255,18,0],[256,21,256,74,0],[256,74,262,22,0],[262,22,262,24,0],[263,17,263,18,0],[265,17,265,18,0],[266,21,266,74,0],[266,74,292,68,0],[292,68,292,153,0],[292,153,302,22,0],[302,22,302,24,0],[303,17,303,18,0],[304,13,304,14,0],[305,9,305,10,0],[308,9,308,10,0],[309,13,309,32,0],[310,13,310,25,0],[311,9,311,10,0],[314,9,314,10,0],[315,13,315,47,0],[317,13,317,33,0],[318,13,318,30,0],[319,9,319,10,0],[322,9,322,10,0],[323,13,323,48,0],[325,13,325,27,0],[326,13,326,14,0],[327,17,327,38,0],[328,17,328,36,0],[329,13,329,14,0],[330,9,330,10,0],[333,9,333,10,0],[334,13,334,40,0],[336,13,336,39,0],[337,9,337,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/DailyChallenge/DailyChallengeScoreBreakdown.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.Metadata;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Screens.OnlinePlay.DailyChallenge.Events;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.DailyChallenge
+{
+    public partial class DailyChallengeScoreBreakdown : CompositeDrawable
+    {
+        public Bindable&lt;MultiplayerScore?&gt; UserBestScore { get; } = new Bindable&lt;MultiplayerScore?&gt;();
+
+        private FillFlowContainer&lt;Bar&gt; barsContainer = null!;
+
+        private const int bin_count = MultiplayerPlaylistItemStats.TOTAL_SCORE_DISTRIBUTION_BINS;
+        private long[] bins = new long[bin_count];
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChildren = new Drawable[]
+            {
+                new SectionHeader(DailyChallengeStrings.SectionScoreBreakdown),
+                barsContainer = new FillFlowContainer&lt;Bar&gt;
+                {
+                    Direction = FillDirection.Horizontal,
+                    RelativeSizeAxes = Axes.Both,
+                    Height = 0.9f,
+                    Padding = new MarginPadding { Top = 35 },
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                }
+            };
+
+            for (int i = 0; i &lt; bin_count; ++i)
+            {
+                barsContainer.Add(new Bar(100_000 * i, 100_000 * (i + 1) - 1)
+                {
+                    Width = 1f / bin_count,
+                });
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            UserBestScore.BindValueChanged(_ =&gt;
+            {
+                foreach (var bar in barsContainer)
+                    bar.ContainsLocalUser.Value = UserBestScore.Value is not null &amp;&amp; bar.BinStart &lt;= UserBestScore.Value.TotalScore &amp;&amp; UserBestScore.Value.TotalScore &lt;= bar.BinEnd;
+            });
+        }
+
+        private readonly Queue&lt;NewScoreEvent&gt; newScores = new Queue&lt;NewScoreEvent&gt;();
+
+        public void AddNewScore(NewScoreEvent newScoreEvent)
+        {
+            newScores.Enqueue(newScoreEvent);
+
+            // ensure things don&#39;t get too out-of-hand.
+            if (newScores.Count &gt; 25)
+            {
+                bins[getTargetBin(newScores.Dequeue())] += 1;
+                Scheduler.AddOnce(updateCounts);
+            }
+        }
+
+        private double lastScoreDisplay;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (Time.Current - lastScoreDisplay &gt; 150 &amp;&amp; newScores.TryDequeue(out var newScore))
+            {
+                if (lastScoreDisplay &lt; Time.Current)
+                    lastScoreDisplay = Time.Current;
+
+                int targetBin = getTargetBin(newScore);
+                bins[targetBin] += 1;
+
+                updateCounts();
+
+                var text = new OsuSpriteText
+                {
+                    Text = newScore.TotalScore.ToString(@&quot;N0&quot;),
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.BottomCentre,
+                    Font = OsuFont.Default.With(size: 30),
+                    RelativePositionAxes = Axes.X,
+                    X = (targetBin + 0.5f) / bin_count - 0.5f,
+                    Alpha = 0,
+                };
+                AddInternal(text);
+
+                Scheduler.AddDelayed(() =&gt;
+                {
+                    float startY = ToLocalSpace(barsContainer[targetBin].CircularBar.ScreenSpaceDrawQuad.TopLeft).Y;
+                    text.FadeInFromZero()
+                        .ScaleTo(new Vector2(0.8f), 500, Easing.OutElasticHalf)
+                        .MoveToY(startY)
+                        .MoveToOffset(new Vector2(0, -50), 2500, Easing.OutQuint)
+                        .FadeOut(2500, Easing.OutQuint)
+                        .Expire();
+                }, 150);
+
+                lastScoreDisplay = Time.Current;
+            }
+        }
+
+        public void SetInitialCounts(long[] counts)
+        {
+            if (counts.Length != bin_count)
+                throw new ArgumentException(@&quot;Incorrect number of bins.&quot;, nameof(counts));
+
+            bins = counts;
+            updateCounts();
+        }
+
+        private static int getTargetBin(NewScoreEvent score) =&gt;
+            (int)Math.Clamp(Math.Floor((float)score.TotalScore / 100000), 0, bin_count - 1);
+
+        private void updateCounts()
+        {
+            long max = Math.Max(bins.Max(), 1);
+            for (int i = 0; i &lt; bin_count; ++i)
+                barsContainer[i].UpdateCounts(bins[i], max);
+        }
+
+        private partial class Bar : CompositeDrawable, IHasTooltip
+        {
+            public BindableBool ContainsLocalUser { get; } = new BindableBool();
+
+            public readonly int BinStart;
+            public readonly int BinEnd;
+
+            private long count;
+            private long max;
+
+            public Container CircularBar { get; private set; } = null!;
+
+            private Box fill = null!;
+            private Box flashLayer = null!;
+            private OsuSpriteText userIndicator = null!;
+
+            public Bar(int binStart, int binEnd)
+            {
+                BinStart = binStart;
+                BinEnd = binEnd;
+            }
+
+            [Resolved]
+            private OverlayColourProvider colourProvider { get; set; } = null!;
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            [BackgroundDependencyLoader]
+            private void load(OverlayColourProvider colourProvider)
+            {
+                RelativeSizeAxes = Axes.Both;
+
+                AddInternal(new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding
+                    {
+                        Bottom = 20,
+                        Horizontal = 3,
+                    },
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    Children = new Drawable[]
+                    {
+                        CircularBar = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Anchor = Anchor.BottomCentre,
+                            Origin = Anchor.BottomCentre,
+                            Height = 0.01f,
+                            Masking = true,
+                            CornerRadius = 10,
+                            Children = new Drawable[]
+                            {
+                                fill = new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                },
+                                flashLayer = new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Alpha = 0,
+                                },
+                            }
+                        },
+                        userIndicator = new OsuSpriteText
+                        {
+                            Anchor = Anchor.BottomCentre,
+                            Origin = Anchor.BottomCentre,
+                            Colour = colours.Orange1,
+                            Text = DailyChallengeStrings.You,
+                            Font = OsuFont.Default.With(weight: FontWeight.Bold),
+                            Alpha = 0,
+                            RelativePositionAxes = Axes.Y,
+                            Margin = new MarginPadding { Bottom = 5, },
+                        }
+                    },
+                });
+
+                string? label = null;
+
+                switch (BinStart)
+                {
+                    case 200_000:
+                    case 400_000:
+                    case 600_000:
+                    case 800_000:
+                        label = @$&quot;{BinStart / 1000}k&quot;;
+                        break;
+
+                    case 1_000_000:
+                        label = @&quot;1M&quot;;
+                        break;
+                }
+
+                if (label != null)
+                {
+                    AddInternal(new OsuSpriteText
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomCentre,
+                        Text = label,
+                        Colour = colourProvider.Content2,
+                    });
+                }
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                ContainsLocalUser.BindValueChanged(_ =&gt;
+                {
+                    fill.FadeColour(ContainsLocalUser.Value ? colours.Orange1 : colourProvider.Highlight1, 300, Easing.OutQuint);
+                    userIndicator.FadeTo(ContainsLocalUser.Value ? 1 : 0, 300, Easing.OutQuint);
+                }, true);
+                FinishTransforms(true);
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                CircularBar.CornerRadius = Math.Min(CircularBar.DrawHeight / 2, CircularBar.DrawWidth / 4);
+            }
+
+            public void UpdateCounts(long newCount, long newMax)
+            {
+                bool isIncrement = newCount &gt; count;
+
+                count = newCount;
+                max = newMax;
+
+                float height = 0.01f + 0.99f * count / max;
+                CircularBar.ResizeHeightTo(height, 300, Easing.OutQuint);
+                userIndicator.MoveToY(-height, 300, Easing.OutQuint);
+                if (isIncrement)
+                    flashLayer.FadeOutFromOne(600, Easing.OutQuint);
+            }
+
+            public LocalisableString TooltipText =&gt; DailyChallengeStrings.ScoreBreakdownBarTooltip(count, BinStart, BinEnd);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,60,28,64,0],[28,69,28,102,0],[30,9,30,62,0],[33,9,33,51,0],[37,9,37,10,0],[38,13,50,15,0],[52,18,52,27,0],[52,29,52,42,0],[52,44,52,47,0],[53,13,53,14,0],[54,17,57,20,0],[58,13,58,14,0],[59,9,59,10,0],[62,9,62,10,0],[63,13,63,33,0],[65,13,66,13,0],[66,13,66,14,0],[66,14,67,17,0],[67,17,67,24,0],[67,24,67,26,0],[67,26,67,33,0],[67,33,67,34,0],[67,34,67,36,0],[67,36,67,37,0],[67,37,67,50,0],[67,50,68,21,0],[68,21,68,181,0],[68,181,69,13,0],[69,13,69,14,0],[69,14,69,16,0],[70,9,70,10,0],[72,9,72,86,0],[75,9,75,10,0],[76,13,76,46,0],[79,13,79,38,0],[80,13,80,14,0],[81,17,81,62,0],[82,17,82,49,0],[83,13,83,14,0],[84,9,84,10,0],[89,9,89,10,0],[90,13,90,27,0],[92,13,92,97,0],[93,13,93,14,0],[94,17,94,53,0],[95,21,95,53,0],[97,17,97,56,0],[98,17,98,38,0],[100,17,100,32,0],[102,17,111,19,0],[112,17,112,35,0],[114,17,115,17,0],[115,17,115,18,0],[115,18,116,21,0],[116,21,116,117,0],[116,117,117,21,0],[117,21,122,35,0],[122,35,123,17,0],[123,17,123,18,0],[123,18,123,25,0],[125,17,125,49,0],[126,13,126,14,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,44,0],[132,17,132,91,0],[134,13,134,27,0],[135,13,135,28,0],[136,9,136,10,0],[139,13,139,92,0],[142,9,142,10,0],[143,13,143,48,0],[144,18,144,27,0],[144,29,144,42,0],[144,44,144,47,0],[145,17,145,61,0],[146,9,146,10,0],[150,53,150,57,0],[150,62,150,80,0],[158,44,158,48,0],[158,49,158,61,0],[158,66,158,71,0],[160,13,160,38,0],[161,13,161,44,0],[162,13,162,57,0],[164,13,164,49,0],[165,13,165,14,0],[166,17,166,37,0],[167,17,167,33,0],[168,13,168,14,0],[171,60,171,64,0],[171,65,171,69,0],[171,74,171,79,0],[174,41,174,45,0],[174,46,174,50,0],[174,55,174,60,0],[178,13,178,14,0],[179,17,179,46,0],[181,17,226,20,0],[228,17,228,38,0],[230,17,230,34,0],[236,25,236,56,0],[237,25,237,31,0],[240,25,240,39,0],[241,25,241,31,0],[244,17,244,35,0],[245,17,245,18,0],[246,21,252,24,0],[253,17,253,18,0],[254,13,254,14,0],[257,13,257,14,0],[258,17,258,37,0],[260,17,261,17,0],[261,17,261,18,0],[261,18,262,21,0],[262,21,262,130,0],[262,130,263,21,0],[263,21,263,97,0],[263,97,264,17,0],[264,17,264,18,0],[264,18,264,26,0],[265,17,265,40,0],[266,13,266,14,0],[269,13,269,14,0],[270,17,270,31,0],[272,17,272,108,0],[273,13,273,14,0],[276,13,276,14,0],[277,17,277,53,0],[279,17,279,34,0],[280,17,280,30,0],[282,17,282,60,0],[283,17,283,74,0],[284,17,284,70,0],[285,17,285,33,0],[286,21,286,69,0],[287,13,287,14,0],[289,53,289,124,0]]);
+    </script>
+  </body>
+</html>

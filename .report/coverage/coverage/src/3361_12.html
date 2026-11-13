@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/ParticleSpewer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Utils;
+using osuTK;
+
+namespace osu.Game.Graphics
+{
+    public abstract partial class ParticleSpewer : Sprite
+    {
+        private readonly FallingParticle[] particles;
+        private int currentIndex;
+        private double? lastParticleAdded;
+
+        private readonly double timeBetweenSpawns;
+        private readonly double maxDuration;
+
+        /// &lt;summary&gt;
+        /// Determines whether particles are being spawned.
+        /// &lt;/summary&gt;
+        public readonly BindableBool Active = new BindableBool();
+
+        public override bool IsPresent =&gt; base.IsPresent &amp;&amp; hasActiveParticles;
+
+        protected virtual bool CanSpawnParticles =&gt; true;
+        protected virtual float ParticleGravity =&gt; 0;
+
+        private bool hasActiveParticles =&gt; Active.Value || (lastParticleAdded + maxDuration) &gt; Time.Current;
+
+        protected ParticleSpewer(Texture texture, int perSecond, double maxDuration)
+        {
+            Texture = texture;
+            Blending = BlendingParameters.Additive;
+
+            particles = new FallingParticle[perSecond * (int)Math.Ceiling(maxDuration / 1000)];
+
+            timeBetweenSpawns = 1000f / perSecond;
+            this.maxDuration = maxDuration;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Active.BindValueChanged(active =&gt;
+            {
+                // ensure that particles can be spawned immediately after the spewer becomes active.
+                if (active.NewValue)
+                    lastParticleAdded = null;
+            });
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            Invalidate(Invalidation.DrawNode);
+
+            if (!Active.Value || !CanSpawnParticles)
+                return;
+
+            if (lastParticleAdded == null)
+            {
+                lastParticleAdded = Time.Current;
+                spawnParticle();
+                return;
+            }
+
+            double timeElapsed = Time.Current - lastParticleAdded.Value;
+
+            // Avoid spawning too many particles if a long amount of time has passed.
+            if (Math.Abs(timeElapsed) &gt; maxDuration)
+            {
+                lastParticleAdded = Time.Current;
+                spawnParticle();
+                return;
+            }
+
+            Debug.Assert(lastParticleAdded != null);
+
+            for (int i = 0; i &lt; timeElapsed / timeBetweenSpawns; i++)
+            {
+                lastParticleAdded += timeBetweenSpawns;
+                spawnParticle();
+            }
+        }
+
+        private void spawnParticle()
+        {
+            Debug.Assert(lastParticleAdded != null);
+
+            var newParticle = CreateParticle();
+
+            newParticle.StartTime = (float)lastParticleAdded.Value;
+
+            particles[currentIndex] = newParticle;
+
+            currentIndex = (currentIndex + 1) % particles.Length;
+        }
+
+        /// &lt;summary&gt;
+        /// Called each time a new particle should be spawned.
+        /// &lt;/summary&gt;
+        protected virtual FallingParticle CreateParticle() =&gt; new FallingParticle();
+
+        protected override DrawNode CreateDrawNode() =&gt; new ParticleSpewerDrawNode(this);
+
+        #region DrawNode
+
+        private class ParticleSpewerDrawNode : SpriteDrawNode
+        {
+            private readonly FallingParticle[] particles;
+
+            protected new ParticleSpewer Source =&gt; (ParticleSpewer)base.Source;
+
+            private readonly float maxDuration;
+
+            private float currentTime;
+            private float gravity;
+            private Axes relativePositionAxes;
+            private Vector2 sourceSize;
+
+            public ParticleSpewerDrawNode(ParticleSpewer source)
+                : base(source)
+            {
+                particles = new FallingParticle[Source.particles.Length];
+                maxDuration = (float)Source.maxDuration;
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                Source.particles.CopyTo(particles, 0);
+
+                currentTime = (float)Source.Time.Current;
+                gravity = Source.ParticleGravity;
+                relativePositionAxes = Source.RelativePositionAxes;
+                sourceSize = Source.DrawSize;
+            }
+
+            protected override void Blit(IRenderer renderer)
+            {
+                foreach (var p in particles)
+                {
+                    if (p.Duration == 0)
+                        continue;
+
+                    float timeSinceStart = currentTime - p.StartTime;
+
+                    // ignore particles from the future.
+                    // these can appear when seeking in replays.
+                    if (timeSinceStart &lt; 0) continue;
+
+                    float alpha = p.AlphaAtTime(timeSinceStart);
+                    if (alpha &lt;= 0) continue;
+
+                    var pos = p.PositionAtTime(timeSinceStart, gravity, maxDuration);
+                    float scale = p.ScaleAtTime(timeSinceStart);
+                    float angle = p.AngleAtTime(timeSinceStart);
+
+                    var rect = createDrawRect(pos, scale);
+
+                    var quad = new Quad(
+                        transformPosition(rect.TopLeft, rect.Centre, angle),
+                        transformPosition(rect.TopRight, rect.Centre, angle),
+                        transformPosition(rect.BottomLeft, rect.Centre, angle),
+                        transformPosition(rect.BottomRight, rect.Centre, angle)
+                    );
+
+                    renderer.DrawQuad(Texture, quad, DrawColourInfo.Colour.MultiplyAlpha(alpha),
+                        inflationPercentage: new Vector2(InflationAmount.X / DrawRectangle.Width, InflationAmount.Y / DrawRectangle.Height),
+                        textureCoords: TextureCoords);
+                }
+            }
+
+            private RectangleF createDrawRect(Vector2 position, float scale)
+            {
+                float width = Texture.DisplayWidth * scale;
+                float height = Texture.DisplayHeight * scale;
+
+                if (relativePositionAxes.HasFlag(Axes.X))
+                    position.X *= sourceSize.X;
+                if (relativePositionAxes.HasFlag(Axes.Y))
+                    position.Y *= sourceSize.Y;
+
+                return new RectangleF(
+                    position.X - width / 2,
+                    position.Y - height / 2,
+                    width,
+                    height);
+            }
+
+            private Vector2 transformPosition(Vector2 pos, Vector2 centre, float angle)
+            {
+                float cos = MathF.Cos(angle);
+                float sin = MathF.Sin(angle);
+
+                float x = centre.X + (pos.X - centre.X) * cos + (pos.Y - centre.Y) * sin;
+                float y = centre.Y + (pos.Y - centre.Y) * cos - (pos.X - centre.X) * sin;
+
+                return Vector2Extensions.Transform(new Vector2(x, y), DrawInfo.Matrix);
+            }
+
+            protected override bool CanDrawOpaqueInterior =&gt; false;
+        }
+
+        #endregion
+
+        protected struct FallingParticle
+        {
+            public float StartTime;
+            public Vector2 StartPosition;
+            public Vector2 Velocity;
+            public float Duration;
+            public float StartAngle;
+            public float EndAngle;
+            public float EndScale;
+
+            public float AlphaAtTime(float timeSinceStart) =&gt; 1 - progressAtTime(timeSinceStart);
+
+            public float ScaleAtTime(float timeSinceStart) =&gt; (float)Interpolation.Lerp(1, EndScale, progressAtTime(timeSinceStart));
+
+            public float AngleAtTime(float timeSinceStart) =&gt; (float)Interpolation.Lerp(StartAngle, EndAngle, progressAtTime(timeSinceStart));
+
+            public Vector2 PositionAtTime(float timeSinceStart, float gravity, float maxDuration)
+            {
+                float progress = progressAtTime(timeSinceStart);
+                var currentGravity = new Vector2(0, gravity * Duration / maxDuration * progress);
+
+                return StartPosition + (Velocity + currentGravity) * timeSinceStart / maxDuration;
+            }
+
+            private float progressAtTime(float timeSinceStart) =&gt; Math.Clamp(timeSinceStart / Duration, 0, 1);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,9,31,66,0],[33,43,33,79,0],[35,53,35,57,0],[36,52,36,53,0],[38,44,38,108,0],[40,9,40,85,0],[41,9,41,10,0],[42,13,42,31,0],[43,13,43,52,0],[45,13,45,96,0],[47,13,47,51,0],[48,13,48,44,0],[49,9,49,10,0],[52,9,52,10,0],[53,13,53,33,0],[55,13,56,13,0],[56,13,56,14,0],[56,14,58,17,0],[58,17,58,37,0],[58,37,59,21,0],[59,21,59,46,0],[59,46,60,13,0],[60,13,60,14,0],[60,14,60,16,0],[61,9,61,10,0],[64,9,64,10,0],[65,13,65,27,0],[67,13,67,47,0],[69,13,69,53,0],[70,17,70,24,0],[72,13,72,43,0],[73,13,73,14,0],[74,17,74,50,0],[75,17,75,33,0],[76,17,76,24,0],[79,13,79,73,0],[82,13,82,53,0],[83,13,83,14,0],[84,17,84,50,0],[85,17,85,33,0],[86,17,86,24,0],[89,13,89,53,0],[91,18,91,27,0],[91,29,91,64,0],[91,66,91,69,0],[92,13,92,14,0],[93,17,93,56,0],[94,17,94,33,0],[95,13,95,14,0],[96,9,96,10,0],[99,9,99,10,0],[100,13,100,53,0],[102,13,102,48,0],[104,13,104,68,0],[106,13,106,51,0],[108,13,108,66,0],[109,9,109,10,0],[114,63,114,84,0],[116,57,116,89,0],[124,52,124,79,0],[134,19,134,31,0],[135,13,135,14,0],[136,17,136,74,0],[137,17,137,57,0],[138,13,138,14,0],[141,13,141,14,0],[142,17,142,35,0],[144,17,144,55,0],[146,17,146,58,0],[147,17,147,50,0],[148,17,148,68,0],[149,17,149,46,0],[150,13,150,14,0],[153,13,153,14,0],[154,17,154,24,0],[154,26,154,31,0],[154,32,154,34,0],[154,35,154,44,0],[155,17,155,18,0],[156,21,156,41,0],[157,25,157,34,0],[159,21,159,70,0],[163,21,163,44,0],[163,45,163,54,0],[165,21,165,65,0],[166,21,166,36,0],[166,37,166,46,0],[168,21,168,86,0],[169,21,169,65,0],[170,21,170,65,0],[172,21,172,59,0],[174,21,179,23,0],[181,21,183,55,0],[184,17,184,18,0],[185,13,185,14,0],[188,13,188,14,0],[189,17,189,60,0],[190,17,190,62,0],[192,17,192,58,0],[193,21,193,48,0],[194,17,194,58,0],[195,21,195,48,0],[197,17,201,29,0],[202,13,202,14,0],[205,13,205,14,0],[206,17,206,46,0],[207,17,207,46,0],[209,17,209,90,0],[210,17,210,90,0],[212,17,212,88,0],[213,13,213,14,0],[215,62,215,67,0],[230,63,230,97,0],[232,63,232,133,0],[234,63,234,142,0],[237,13,237,14,0],[238,17,238,65,0],[239,17,239,98,0],[241,17,241,99,0],[242,13,242,14,0],[244,67,244,110,0]]);
+    </script>
+  </body>
+</html>

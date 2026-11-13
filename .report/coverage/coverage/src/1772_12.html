@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/HitErrorMeters/BarHitErrorMeter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Localisation.HUD;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Scoring;
+using osuTK;
+
+namespace osu.Game.Screens.Play.HUD.HitErrorMeters
+{
+    [Cached]
+    public partial class BarHitErrorMeter : HitErrorMeter
+    {
+        [SettingSource(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.JudgementLineThickness), nameof(BarHitErrorMeterStrings.JudgementLineThicknessDescription))]
+        public BindableNumber&lt;float&gt; JudgementLineThickness { get; } = new BindableNumber&lt;float&gt;(4)
+        {
+            MinValue = 1,
+            MaxValue = 8,
+            Precision = 0.1f,
+        };
+
+        [SettingSource(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.ColourBarVisibility))]
+        public Bindable&lt;bool&gt; ColourBarVisibility { get; } = new Bindable&lt;bool&gt;(true);
+
+        [SettingSource(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.ShowMovingAverage), nameof(BarHitErrorMeterStrings.ShowMovingAverageDescription))]
+        public Bindable&lt;bool&gt; ShowMovingAverage { get; } = new BindableBool(true);
+
+        [SettingSource(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.CentreMarkerStyle), nameof(BarHitErrorMeterStrings.CentreMarkerStyleDescription))]
+        public Bindable&lt;CentreMarkerStyles&gt; CentreMarkerStyle { get; } = new Bindable&lt;CentreMarkerStyles&gt;(CentreMarkerStyles.Circle);
+
+        [SettingSource(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.LabelStyle), nameof(BarHitErrorMeterStrings.LabelStyleDescription))]
+        public Bindable&lt;LabelStyles&gt; LabelStyle { get; } = new Bindable&lt;LabelStyles&gt;(LabelStyles.Icons);
+
+        private const int judgement_line_width = 14;
+
+        private const int max_concurrent_judgements = 50;
+
+        private const int centre_marker_size = 8;
+
+        private double maxHitWindow;
+
+        private double floatingAverage;
+
+        private readonly DrawablePool&lt;JudgementLine&gt; judgementLinePool = new DrawablePool&lt;JudgementLine&gt;(50);
+
+        private SpriteIcon arrow = null!;
+        private UprightAspectMaintainingContainer labelEarly = null!;
+        private UprightAspectMaintainingContainer labelLate = null!;
+
+        private Container colourBarsEarly = null!;
+        private Container colourBarsLate = null!;
+
+        private Container judgementsContainer = null!;
+
+        private Container colourBars = null!;
+        private Container arrowContainer = null!;
+
+        private (HitResult result, double length)[] hitWindows = null!;
+
+        private Drawable[]? centreMarkerDrawables;
+
+        public BarHitErrorMeter()
+        {
+            AutoSizeAxes = Axes.Both;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            const int bar_height = 200;
+            const int bar_width = 2;
+            const float chevron_size = 8;
+
+            hitWindows = HitWindows.GetAllAvailableWindows().Where(w =&gt; w.result.IsHit()).ToArray();
+
+            InternalChild = new Container
+            {
+                AutoSizeAxes = Axes.X,
+                Height = bar_height,
+                Margin = new MarginPadding(2),
+                Children = new Drawable[]
+                {
+                    judgementLinePool,
+                    colourBars = new Container
+                    {
+                        Name = &quot;colour axis&quot;,
+                        X = chevron_size,
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        Width = judgement_line_width,
+                        RelativeSizeAxes = Axes.Y,
+                        Children = new Drawable[]
+                        {
+                            colourBarsEarly = new Container
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.TopCentre,
+                                Width = bar_width,
+                                RelativeSizeAxes = Axes.Y,
+                                Alpha = 0,
+                                Height = 0.5f,
+                                Scale = new Vector2(1, -1),
+                            },
+                            colourBarsLate = new Container
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.TopCentre,
+                                Alpha = 0,
+                                Width = bar_width,
+                                RelativeSizeAxes = Axes.Y,
+                                Height = 0.5f,
+                            },
+                            judgementsContainer = new Container
+                            {
+                                Name = &quot;judgements&quot;,
+                                Anchor = Anchor.TopCentre,
+                                Origin = Anchor.TopCentre,
+                                RelativeSizeAxes = Axes.Y,
+                                Width = judgement_line_width,
+                            },
+                            labelEarly = new UprightAspectMaintainingContainer
+                            {
+                                AutoSizeAxes = Axes.Both,
+                                Anchor = Anchor.TopCentre,
+                                Origin = Anchor.Centre,
+                                Y = -10,
+                            },
+                            labelLate = new UprightAspectMaintainingContainer
+                            {
+                                AutoSizeAxes = Axes.Both,
+                                Anchor = Anchor.BottomCentre,
+                                Origin = Anchor.Centre,
+                                Y = 10,
+                            },
+                        }
+                    },
+                    arrowContainer = new Container
+                    {
+                        Name = &quot;average chevron&quot;,
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreRight,
+                        Width = chevron_size,
+                        X = chevron_size,
+                        RelativeSizeAxes = Axes.Y,
+                        Alpha = 0,
+                        Scale = new Vector2(0, 1),
+                        Child = arrow = new SpriteIcon
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.Centre,
+                            RelativePositionAxes = Axes.Y,
+                            Y = 0.5f,
+                            Icon = FontAwesome.Solid.ChevronRight,
+                            Size = new Vector2(chevron_size),
+                        }
+                    },
+                }
+            };
+
+            createColourBars(hitWindows);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            colourBars.Height = 0;
+            colourBars.ResizeHeightTo(1, 800, Easing.OutQuint);
+
+            CentreMarkerStyle.BindValueChanged(style =&gt; recreateCentreMarker(style.NewValue), true);
+            LabelStyle.BindValueChanged(style =&gt; recreateLabels(style.NewValue), true);
+            ColourBarVisibility.BindValueChanged(visible =&gt;
+            {
+                colourBarsEarly.FadeTo(visible.NewValue ? 1 : 0, 500, Easing.OutQuint);
+                colourBarsLate.FadeTo(visible.NewValue ? 1 : 0, 500, Easing.OutQuint);
+            }, true);
+
+            // delay the appearance animations for only the initial appearance.
+            using (arrowContainer.BeginDelayedSequence(450))
+            {
+                ShowMovingAverage.BindValueChanged(visible =&gt;
+                {
+                    arrowContainer.FadeTo(visible.NewValue ? 1 : 0, 250, Easing.OutQuint);
+                    arrowContainer.ScaleTo(visible.NewValue ? new Vector2(1) : new Vector2(0, 1), 250, Easing.OutQuint);
+                }, true);
+            }
+        }
+
+        private void recreateCentreMarker(CentreMarkerStyles style)
+        {
+            if (centreMarkerDrawables != null)
+            {
+                foreach (var d in centreMarkerDrawables)
+                {
+                    d.ScaleTo(0, 500, Easing.OutQuint)
+                     .FadeOut(500, Easing.OutQuint);
+
+                    d.Expire();
+                }
+
+                centreMarkerDrawables = null;
+            }
+
+            switch (style)
+            {
+                case CentreMarkerStyles.None:
+                    break;
+
+                case CentreMarkerStyles.Circle:
+                    centreMarkerDrawables = new Drawable[]
+                    {
+                        new Circle
+                        {
+                            Name = &quot;middle marker behind&quot;,
+                            Colour = GetColourForHitResult(hitWindows.Last().result),
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Depth = float.MaxValue,
+                            Size = new Vector2(centre_marker_size),
+                        },
+                        new Circle
+                        {
+                            Name = &quot;middle marker in front&quot;,
+                            Colour = GetColourForHitResult(hitWindows.Last().result).Darken(0.3f),
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Depth = float.MinValue,
+                            Size = new Vector2(centre_marker_size / 2f),
+                        },
+                    };
+                    break;
+
+                case CentreMarkerStyles.Line:
+                    const float border_size = 1.5f;
+
+                    centreMarkerDrawables = new Drawable[]
+                    {
+                        new Box
+                        {
+                            Name = &quot;middle marker behind&quot;,
+                            Colour = GetColourForHitResult(hitWindows.Last().result),
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Depth = float.MaxValue,
+                            Size = new Vector2(judgement_line_width, centre_marker_size / 3f),
+                        },
+                        new Box
+                        {
+                            Name = &quot;middle marker in front&quot;,
+                            Colour = GetColourForHitResult(hitWindows.Last().result).Darken(0.3f),
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Depth = float.MinValue,
+                            Size = new Vector2(judgement_line_width - border_size, centre_marker_size / 3f - border_size),
+                        },
+                    };
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(style), style, null);
+            }
+
+            if (centreMarkerDrawables != null)
+            {
+                foreach (var d in centreMarkerDrawables)
+                {
+                    colourBars.Add(d);
+
+                    d.FadeInFromZero(500, Easing.OutQuint)
+                     .ScaleTo(0).ScaleTo(1, 1000, Easing.OutElasticHalf);
+                }
+            }
+        }
+
+        private void recreateLabels(LabelStyles style)
+        {
+            const float icon_size = 14;
+
+            switch (style)
+            {
+                case LabelStyles.None:
+                    labelEarly.Clear();
+                    labelLate.Clear();
+                    break;
+
+                case LabelStyles.Icons:
+                    labelEarly.Child = new SpriteIcon
+                    {
+                        Size = new Vector2(icon_size),
+                        Icon = OsuIcon.Hare
+                    };
+
+                    labelLate.Child = new SpriteIcon
+                    {
+                        Size = new Vector2(icon_size),
+                        Icon = OsuIcon.Tortoise
+                    };
+
+                    break;
+
+                case LabelStyles.Text:
+                    labelEarly.Child = new OsuSpriteText
+                    {
+                        Text = &quot;Early&quot;,
+                        Font = OsuFont.Default.With(size: 10),
+                        Height = 12,
+                    };
+
+                    labelLate.Child = new OsuSpriteText
+                    {
+                        Text = &quot;Late&quot;,
+                        Font = OsuFont.Default.With(size: 10),
+                        Height = 12,
+                    };
+
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(style), style, null);
+            }
+
+            labelEarly.FadeInFromZero(500);
+            labelLate.FadeInFromZero(500);
+        }
+
+        private void createColourBars((HitResult result, double length)[] windows)
+        {
+            // max to avoid div-by-zero.
+            maxHitWindow = Math.Max(1, windows.First().length);
+
+            for (int i = 0; i &lt; windows.Length; i++)
+            {
+                (var result, double length) = windows[i];
+
+                float hitWindow = (float)(length / maxHitWindow);
+
+                colourBarsEarly.Add(createColourBar(result, hitWindow, i == 0));
+                colourBarsLate.Add(createColourBar(result, hitWindow, i == 0));
+            }
+
+            Drawable createColourBar(HitResult result, float height, bool requireGradient = false)
+            {
+                var colour = GetColourForHitResult(result);
+
+                if (requireGradient)
+                {
+                    // the first bar needs gradient rendering.
+                    const float gradient_start = 0.8f;
+
+                    return new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Children = new Drawable[]
+                        {
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = colour,
+                                Height = height * gradient_start
+                            },
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                RelativePositionAxes = Axes.Both,
+                                Colour = ColourInfo.GradientVertical(colour, colour.Opacity(0)),
+                                Y = gradient_start,
+                                Height = height * (1 - gradient_start)
+                            },
+                        }
+                    };
+                }
+
+                return new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colour,
+                    Height = height
+                };
+            }
+        }
+
+        protected override void OnNewJudgement(JudgementResult judgement)
+        {
+            const int arrow_move_duration = 800;
+
+            if (!judgement.IsHit || judgement.HitObject.HitWindows?.WindowFor(HitResult.Miss) == 0)
+                return;
+
+            if (!judgement.Type.IsScorable() || judgement.Type.IsBonus())
+                return;
+
+            if (judgementsContainer.Count &gt; max_concurrent_judgements)
+            {
+                const double quick_fade_time = 100;
+
+                // check with a bit of lenience to avoid precision error in comparison.
+                var old = judgementsContainer.FirstOrDefault(j =&gt; j.LifetimeEnd &gt; Clock.CurrentTime + quick_fade_time * 1.1);
+
+                if (old != null)
+                {
+                    old.ClearTransforms();
+                    old.FadeOut(quick_fade_time).Expire();
+                }
+            }
+
+            judgementLinePool.Get(drawableJudgement =&gt;
+            {
+                drawableJudgement.Y = getRelativeJudgementPosition(judgement.TimeOffset);
+                drawableJudgement.Colour = GetColourForHitResult(judgement.Type);
+
+                judgementsContainer.Add(drawableJudgement);
+            });
+
+            arrow.MoveToY(
+                getRelativeJudgementPosition(floatingAverage = floatingAverage * 0.9 + judgement.TimeOffset * 0.1)
+                , arrow_move_duration, Easing.OutQuint);
+        }
+
+        private float getRelativeJudgementPosition(double value) =&gt; Math.Clamp((float)((value / maxHitWindow) + 1) / 2, 0, 1);
+
+        internal partial class JudgementLine : PoolableDrawable
+        {
+            public readonly BindableNumber&lt;float&gt; JudgementLineThickness = new BindableFloat();
+
+            [Resolved]
+            private BarHitErrorMeter barHitErrorMeter { get; set; } = null!;
+
+            public JudgementLine()
+            {
+                RelativeSizeAxes = Axes.X;
+                RelativePositionAxes = Axes.Y;
+
+                Blending = BlendingParameters.Additive;
+
+                Origin = Anchor.Centre;
+                Anchor = Anchor.TopCentre;
+
+                InternalChild = new Circle
+                {
+                    RelativeSizeAxes = Axes.Both,
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                JudgementLineThickness.BindTo(barHitErrorMeter.JudgementLineThickness);
+                JudgementLineThickness.BindValueChanged(thickness =&gt; Height = thickness.NewValue, true);
+            }
+
+            protected override void PrepareForUse()
+            {
+                base.PrepareForUse();
+
+                const int judgement_fade_in_duration = 100;
+                const int judgement_fade_out_duration = 5000;
+
+                Alpha = 0;
+                Width = 0;
+
+                this
+                    .FadeTo(0.6f, judgement_fade_in_duration, Easing.OutQuint)
+                    .ResizeWidthTo(1, judgement_fade_in_duration, Easing.OutQuint)
+                    .Then()
+                    .FadeOut(judgement_fade_out_duration)
+                    .ResizeWidthTo(0, judgement_fade_out_duration, Easing.InQuint)
+                    .Expire();
+            }
+        }
+
+        public override void Clear()
+        {
+            foreach (var j in judgementsContainer)
+            {
+                j.ClearTransforms();
+                j.Expire();
+            }
+        }
+
+        public enum CentreMarkerStyles
+        {
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.CentreMarkerStylesNone))]
+            None,
+
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.CentreMarkerStylesCircle))]
+            Circle,
+
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.CentreMarkerStylesLine))]
+            Line
+        }
+
+        public enum LabelStyles
+        {
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.LabelStylesNone))]
+            None,
+
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.LabelStylesIcons))]
+            Icons,
+
+            [LocalisableDescription(typeof(BarHitErrorMeterStrings), nameof(BarHitErrorMeterStrings.LabelStylesText))]
+            Text
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,63,31,67,0],[31,72,36,10,0],[39,53,39,57,0],[39,62,39,86,0],[42,51,42,55,0],[42,60,42,82,0],[45,65,45,69,0],[45,74,45,133,0],[48,51,48,55,0],[48,60,48,104,0],[60,9,60,110,0],[62,9,62,42,0],[63,9,63,70,0],[64,9,64,69,0],[66,9,66,51,0],[67,9,67,50,0],[69,9,69,55,0],[71,9,71,46,0],[72,9,72,50,0],[74,9,74,72,0],[78,9,78,34,0],[79,9,79,10,0],[80,13,80,38,0],[81,9,81,10,0],[85,9,85,10,0],[90,13,90,73,0],[90,73,90,89,0],[90,89,90,101,0],[92,13,174,15,0],[176,13,176,42,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,33,0],[183,13,183,35,0],[184,13,184,64,0],[186,13,186,57,0],[186,57,186,93,0],[186,93,186,101,0],[187,13,187,50,0],[187,50,187,80,0],[187,80,187,88,0],[188,13,189,13,0],[189,13,189,14,0],[189,14,190,17,0],[190,17,190,88,0],[190,88,191,17,0],[191,17,191,87,0],[191,87,192,13,0],[192,13,192,14,0],[192,14,192,22,0],[195,13,195,61,0],[196,13,196,14,0],[197,17,198,17,0],[198,17,198,18,0],[198,18,199,21,0],[199,21,199,91,0],[199,91,200,21,0],[200,21,200,121,0],[200,121,201,17,0],[201,17,201,18,0],[201,18,201,26,0],[202,13,202,14,0],[203,9,203,10,0],[206,9,206,10,0],[207,13,207,47,0],[208,13,208,14,0],[209,17,209,24,0],[209,26,209,31,0],[209,32,209,34,0],[209,35,209,56,0],[210,17,210,18,0],[211,21,212,53,0],[214,21,214,32,0],[215,17,215,18,0],[217,17,217,46,0],[218,13,218,14,0],[220,13,220,27,0],[223,21,223,27,0],[226,21,246,23,0],[247,21,247,27,0],[252,21,272,23,0],[273,21,273,27,0],[276,21,276,87,0],[279,13,279,47,0],[280,13,280,14,0],[281,17,281,24,0],[281,26,281,31,0],[281,32,281,34,0],[281,35,281,56,0],[282,17,282,18,0],[283,21,283,39,0],[285,21,286,74,0],[287,17,287,18,0],[288,13,288,14,0],[289,9,289,10,0],[292,9,292,10,0],[295,13,295,27,0],[298,21,298,40,0],[299,21,299,39,0],[300,21,300,27,0],[303,21,307,23,0],[309,21,313,23,0],[315,21,315,27,0],[318,21,323,23,0],[325,21,330,23,0],[332,21,332,27,0],[335,21,335,87,0],[338,13,338,44,0],[339,13,339,43,0],[340,9,340,10,0],[343,9,343,10,0],[345,13,345,64,0],[347,18,347,27,0],[347,29,347,47,0],[347,49,347,52,0],[348,13,348,14,0],[349,17,349,58,0],[351,17,351,66,0],[353,17,353,81,0],[354,17,354,80,0],[355,13,355,14,0],[358,13,358,14,0],[359,17,359,60,0],[361,17,361,37,0],[362,17,362,18,0],[366,21,386,23,0],[389,17,394,19,0],[395,13,395,14,0],[396,9,396,10,0],[399,9,399,10,0],[402,13,402,100,0],[403,17,403,24,0],[405,13,405,74,0],[406,17,406,24,0],[408,13,408,71,0],[409,13,409,14,0],[413,17,413,67,0],[413,67,413,124,0],[413,124,413,126,0],[415,17,415,33,0],[416,17,416,18,0],[417,21,417,43,0],[418,21,418,59,0],[419,17,419,18,0],[420,13,420,14,0],[422,13,423,13,0],[423,13,423,14,0],[423,14,424,17,0],[424,17,424,90,0],[424,90,425,17,0],[425,17,425,82,0],[425,82,427,17,0],[427,17,427,60,0],[427,60,428,13,0],[428,13,428,14,0],[428,14,428,16,0],[430,13,432,57,0],[433,9,433,10,0],[435,69,435,126,0],[439,13,439,96,0],[442,57,442,61,0],[442,62,442,66,0],[442,71,442,76,0],[444,13,444,35,0],[445,13,445,14,0],[446,17,446,43,0],[447,17,447,47,0],[449,17,449,56,0],[451,17,451,40,0],[452,17,452,43,0],[454,17,457,19,0],[458,13,458,14,0],[461,13,461,14,0],[462,17,462,37,0],[464,17,464,88,0],[465,17,465,70,0],[465,70,465,97,0],[465,97,465,105,0],[466,13,466,14,0],[469,13,469,14,0],[470,17,470,38,0],[475,17,475,27,0],[476,17,476,27,0],[478,17,484,31,0],[485,13,485,14,0],[489,9,489,10,0],[490,13,490,20,0],[490,22,490,27,0],[490,28,490,30,0],[490,31,490,50,0],[491,13,491,14,0],[492,17,492,37,0],[493,17,493,28,0],[494,13,494,14,0],[495,9,495,10,0]]);
+    </script>
+  </body>
+</html>

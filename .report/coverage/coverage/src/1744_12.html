@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/HoldForMenuButton.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public partial class HoldForMenuButton : FillFlowContainer
+    {
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+        public override bool PropagatePositionalInputSubTree =&gt; alwaysShow.Value || touchActive.Value;
+
+        public readonly Bindable&lt;bool&gt; IsPaused = new Bindable&lt;bool&gt;();
+
+        public readonly Bindable&lt;bool&gt; ReplayLoaded = new Bindable&lt;bool&gt;();
+
+        private HoldButton button;
+
+        public Action Action { get; set; }
+
+        private OsuSpriteText text;
+
+        private Bindable&lt;bool&gt; alwaysShow;
+
+        private readonly bool isDangerousAction;
+
+        public HoldForMenuButton(bool isDangerousAction = false)
+        {
+            this.isDangerousAction = isDangerousAction;
+
+            Direction = FillDirection.Horizontal;
+            Spacing = new Vector2(20, 0);
+            Margin = new MarginPadding(10);
+
+            AlwaysPresent = true;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            Children = new Drawable[]
+            {
+                text = new OsuSpriteText
+                {
+                    Font = OsuFont.GetFont(weight: FontWeight.Bold),
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft
+                },
+                button = new HoldButton(isDangerousAction)
+                {
+                    HoverGained = () =&gt; text.FadeIn(500, Easing.OutQuint),
+                    HoverLost = () =&gt; text.FadeOut(500, Easing.OutQuint),
+                    IsPaused = { BindTarget = IsPaused },
+                    ReplayLoaded = { BindTarget = ReplayLoaded },
+                    Action = () =&gt; Action(),
+                }
+            };
+
+            AutoSizeAxes = Axes.Both;
+
+            alwaysShow = config.GetBindable&lt;bool&gt;(OsuSetting.AlwaysShowHoldForMenuButton);
+        }
+
+        [Resolved]
+        private SessionStatics sessionStatics { get; set; }
+
+        private Bindable&lt;bool&gt; touchActive;
+
+        protected override void LoadComplete()
+        {
+            button.HoldActivationDelay.BindValueChanged(v =&gt;
+            {
+                text.Text = v.NewValue &gt; 0
+                    ? UserInterfaceStrings.HoldForMenu
+                    : UserInterfaceStrings.PressForMenu;
+            }, true);
+
+            touchActive = sessionStatics.GetBindable&lt;bool&gt;(Static.TouchInputActive);
+
+            if (touchActive.Value)
+            {
+                Alpha = 1f;
+                text.FadeInFromZero(500, Easing.OutQuint)
+                    .Delay(1500)
+                    .FadeOut(500, Easing.OutQuint);
+            }
+            else
+            {
+                Alpha = 0;
+                text.Alpha = 0f;
+            }
+
+            base.LoadComplete();
+        }
+
+        private float positionalAdjust = 1; // Start at 1 to handle the case where a user never send positional input.
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            positionalAdjust = Vector2.Distance(e.MousePosition, button.ToSpaceOfOtherDrawable(button.DrawRectangle.Centre, Parent!)) / 100;
+            return base.OnMouseMove(e);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // While the button is hovered or still animating, keep fully visible.
+            if (text.Alpha &gt; 0 || button.Progress.Value &gt; 0 || button.IsHovered)
+                Alpha = 1;
+            // When touch input is detected, keep visible at a constant opacity.
+            else if (touchActive.Value)
+                Alpha = 0.5f;
+            // Otherwise, if the user chooses, show it when the mouse is nearby.
+            else if (alwaysShow.Value)
+            {
+                float minAlpha = touchActive.Value ? .08f : 0;
+
+                Alpha = Interpolation.ValueAt(
+                    Math.Clamp(Clock.ElapsedFrameTime, 0, 200),
+                    Alpha, Math.Clamp(1 - positionalAdjust, minAlpha, 1), 0, 200, Easing.OutQuint);
+            }
+            else
+                Alpha = 0;
+        }
+
+        private partial class HoldButton : HoldToConfirmContainer, IKeyBindingHandler&lt;GlobalAction&gt;
+        {
+            private SpriteIcon icon;
+            private CircularProgress circularProgress;
+            private Circle overlayCircle;
+
+            public readonly Bindable&lt;bool&gt; IsPaused = new Bindable&lt;bool&gt;();
+
+            public readonly Bindable&lt;bool&gt; ReplayLoaded = new Bindable&lt;bool&gt;();
+
+            protected override bool AllowMultipleFires =&gt; true;
+
+            public Action HoverGained;
+            public Action HoverLost;
+
+            private const double shake_duration = 20;
+
+            private bool pendingAnimation;
+            private ScheduledDelegate shakeOperation;
+
+            private Bindable&lt;bool&gt; alwaysRequireHold;
+
+            public HoldButton(bool isDangerousAction)
+                : base(isDangerousAction)
+            {
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, OsuConfigManager config)
+            {
+                alwaysRequireHold = config.GetBindable&lt;bool&gt;(OsuSetting.AlwaysRequireHoldingForPause);
+
+                Size = new Vector2(60);
+
+                Child = new CircularContainer
+                {
+                    Masking = true,
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colours.Gray1,
+                            Alpha = 0.5f,
+                        },
+                        circularProgress = new CircularProgress
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            InnerRadius = 1
+                        },
+                        overlayCircle = new Circle
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colours.Gray1,
+                            Size = new Vector2(0.9f),
+                        },
+                        icon = new SpriteIcon
+                        {
+                            Shadow = false,
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Size = new Vector2(15),
+                            Icon = FontAwesome.Solid.Times
+                        },
+                    }
+                };
+
+                bind();
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                circularProgress.Progress = Progress.Value;
+            }
+
+            private void bind()
+            {
+                Progress.ValueChanged += progress =&gt;
+                {
+                    icon.Scale = new Vector2(1 + (float)progress.NewValue * 0.2f);
+
+                    if (IsDangerousAction)
+                    {
+                        Colour = Interpolation.ValueAt(progress.NewValue, Color4.White, Color4.Red, 0, 1, Easing.OutQuint);
+
+                        if (progress.NewValue &gt; 0 &amp;&amp; progress.NewValue &lt; 1)
+                        {
+                            shakeOperation ??= Scheduler.AddDelayed(shake, shake_duration, true);
+                        }
+                        else
+                        {
+                            Child.MoveTo(Vector2.Zero, shake_duration * 2, Easing.OutQuint);
+                            shakeOperation?.Cancel();
+                            shakeOperation = null;
+                        }
+                    }
+                };
+            }
+
+            private void shake()
+            {
+                const float shake_magnitude = 8;
+
+                Child.MoveTo(new Vector2(
+                    RNG.NextSingle(-1, 1) * (float)Progress.Value * shake_magnitude,
+                    RNG.NextSingle(-1, 1) * (float)Progress.Value * shake_magnitude
+                ), shake_duration);
+            }
+
+            protected override void Confirm()
+            {
+                base.Confirm();
+
+                // temporarily unbind as to not look weird if releasing during confirm animation (can see the unwind of progress).
+                Progress.UnbindAll();
+
+                // avoid starting a new confirm call until we finish animating.
+                pendingAnimation = true;
+
+                AbortConfirm();
+
+                overlayCircle.ScaleTo(0, 100)
+                             .Then().FadeOut().ScaleTo(1).FadeIn(500)
+                             .OnComplete(_ =&gt;
+                             {
+                                 icon.ScaleTo(1, 100);
+                                 circularProgress.FadeOut(100).OnComplete(_ =&gt;
+                                 {
+                                     bind();
+
+                                     circularProgress.FadeIn();
+                                     pendingAnimation = false;
+                                 });
+                             });
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                HoverGained?.Invoke();
+                return true;
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                HoverLost?.Invoke();
+                base.OnHoverLost(e);
+            }
+
+            public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+            {
+                if (e.Repeat)
+                    return false;
+
+                switch (e.Action)
+                {
+                    case GlobalAction.Back:
+                        if (!pendingAnimation)
+                        {
+                            if (IsDangerousAction || alwaysRequireHold.Value)
+                                BeginConfirm();
+                            else
+                                Confirm();
+                        }
+
+                        return true;
+
+                    case GlobalAction.PauseGameplay:
+                        // handled by replay player
+                        if (ReplayLoaded.Value) return false;
+
+                        if (!pendingAnimation)
+                        {
+                            if (IsDangerousAction || alwaysRequireHold.Value)
+                                BeginConfirm();
+                            else
+                                Confirm();
+                        }
+
+                        return true;
+                }
+
+                return false;
+            }
+
+            public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+            {
+                switch (e.Action)
+                {
+                    case GlobalAction.Back:
+                        AbortConfirm();
+                        break;
+
+                    case GlobalAction.PauseGameplay:
+                        if (ReplayLoaded.Value) return;
+
+                        AbortConfirm();
+                        break;
+                }
+            }
+
+            protected override bool OnMouseDown(MouseDownEvent e)
+            {
+                if (!pendingAnimation &amp;&amp; e.CurrentState.Mouse.Buttons.Count() == 1)
+                    BeginConfirm();
+                return true;
+            }
+
+            protected override void OnMouseUp(MouseUpEvent e)
+            {
+                if (!e.HasAnyButtonPressed)
+                    AbortConfirm();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,82,32,86,0],[34,65,34,102,0],[36,9,36,72,0],[38,9,38,76,0],[42,32,42,36,0],[42,37,42,41,0],[50,9,50,65,0],[51,9,51,10,0],[52,13,52,56,0],[54,13,54,50,0],[55,13,55,42,0],[56,13,56,44,0],[58,13,58,34,0],[59,9,59,10,0],[63,9,63,10,0],[64,13,74,41,0],[74,41,74,74,0],[74,74,75,39,0],[75,39,75,73,0],[75,73,78,36,0],[78,36,78,44,0],[78,44,80,15,0],[82,13,82,38,0],[84,13,84,91,0],[85,9,85,10,0],[88,49,88,53,0],[88,54,88,58,0],[93,9,93,10,0],[94,13,95,13,0],[95,13,95,14,0],[95,14,96,17,0],[96,17,98,57,0],[98,57,99,13,0],[99,13,99,14,0],[99,14,99,22,0],[101,13,101,85,0],[103,13,103,35,0],[104,13,104,14,0],[105,17,105,28,0],[106,17,108,52,0],[109,13,109,14,0],[111,13,111,14,0],[112,17,112,27,0],[113,17,113,33,0],[114,13,114,14,0],[116,13,116,33,0],[117,9,117,10,0],[119,9,119,44,0],[122,9,122,10,0],[123,13,123,141,0],[124,13,124,40,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,27,0],[132,13,132,81,0],[133,17,133,27,0],[135,18,135,40,0],[136,17,136,30,0],[138,18,138,39,0],[139,13,139,14,0],[140,17,140,63,0],[142,17,144,100,0],[145,13,145,14,0],[147,17,147,27,0],[148,9,148,10,0],[156,13,156,76,0],[158,13,158,80,0],[160,59,160,63,0],[173,19,173,42,0],[174,13,174,14,0],[175,13,175,14,0],[179,13,179,14,0],[180,17,180,103,0],[182,17,182,40,0],[184,17,218,19,0],[220,17,220,24,0],[221,13,221,14,0],[224,13,224,14,0],[225,17,225,31,0],[226,17,226,60,0],[227,13,227,14,0],[230,13,230,14,0],[231,17,232,17,0],[232,17,232,18,0],[232,18,233,21,0],[233,21,233,83,0],[233,83,235,21,0],[235,21,235,43,0],[235,43,236,21,0],[236,21,236,22,0],[236,22,237,25,0],[237,25,237,124,0],[237,124,239,25,0],[239,25,239,76,0],[239,76,240,25,0],[240,25,240,26,0],[240,26,241,29,0],[241,29,241,98,0],[241,98,242,25,0],[242,25,242,26,0],[242,26,244,25,0],[244,25,244,26,0],[244,26,245,29,0],[245,29,245,93,0],[245,93,246,29,0],[246,29,246,54,0],[246,54,247,29,0],[247,29,247,51,0],[247,51,248,25,0],[248,25,248,26,0],[248,26,249,21,0],[249,21,249,22,0],[249,22,250,17,0],[250,17,250,18,0],[250,18,250,19,0],[251,13,251,14,0],[254,13,254,14,0],[257,17,260,36,0],[261,13,261,14,0],[264,13,264,14,0],[265,17,265,32,0],[268,17,268,38,0],[271,17,271,41,0],[273,17,273,32,0],[275,17,278,30,0],[278,30,278,31,0],[278,31,279,34,0],[279,34,279,55,0],[279,55,280,34,0],[280,34,281,34,0],[281,34,281,35,0],[281,35,282,38,0],[282,38,282,45,0],[282,45,284,38,0],[284,38,284,64,0],[284,64,285,38,0],[285,38,285,63,0],[285,63,286,34,0],[286,34,286,35,0],[286,35,286,37,0],[286,37,287,30,0],[287,30,287,31,0],[287,31,287,33,0],[288,13,288,14,0],[291,13,291,14,0],[292,17,292,39,0],[293,17,293,29,0],[294,13,294,14,0],[297,13,297,14,0],[298,17,298,37,0],[299,17,299,37,0],[300,13,300,14,0],[303,13,303,14,0],[304,17,304,30,0],[305,21,305,34,0],[307,17,307,34,0],[310,25,310,47,0],[311,25,311,26,0],[312,29,312,78,0],[313,33,313,48,0],[315,33,315,43,0],[316,25,316,26,0],[318,25,318,37,0],[322,25,322,48,0],[322,49,322,62,0],[324,25,324,47,0],[325,25,325,26,0],[326,29,326,78,0],[327,33,327,48,0],[329,33,329,43,0],[330,25,330,26,0],[332,25,332,37,0],[335,17,335,30,0],[336,13,336,14,0],[339,13,339,14,0],[340,17,340,34,0],[343,25,343,40,0],[344,25,344,31,0],[347,25,347,48,0],[347,49,347,56,0],[349,25,349,40,0],[350,25,350,31,0],[352,13,352,14,0],[355,13,355,14,0],[356,17,356,84,0],[357,21,357,36,0],[358,17,358,29,0],[359,13,359,14,0],[362,13,362,14,0],[363,17,363,44,0],[364,21,364,36,0],[365,13,365,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/RealmArchiveModelImporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Humanizer;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Game.Extensions;
+using osu.Game.IO.Archives;
+using osu.Game.Models;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Utils;
+using Realms;
+
+namespace osu.Game.Database
+{
+    /// &lt;summary&gt;
+    /// Encapsulates a model store class to give it import functionality.
+    /// Adds cross-functionality with &lt;see cref=&quot;RealmFileStore&quot;/&gt; to give access to the central file store for the provided model.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;TModel&quot;&gt;The model type.&lt;/typeparam&gt;
+    public abstract class RealmArchiveModelImporter&lt;TModel&gt; : IModelImporter&lt;TModel&gt;
+        where TModel : RealmObject, IHasRealmFiles, IHasGuidPrimaryKey, ISoftDelete
+    {
+        /// &lt;summary&gt;
+        /// The maximum number of concurrent imports to run per import scheduler.
+        /// &lt;/summary&gt;
+        private const int import_queue_request_concurrency = 1;
+
+        /// &lt;summary&gt;
+        /// The minimum number of items in a single import call in order for the import to be processed as a batch.
+        /// Batch imports will apply optimisations preferring speed over consistency when detecting changes in already-imported items.
+        /// &lt;/summary&gt;
+        private const int minimum_items_considered_batch_import = 10;
+
+        /// &lt;summary&gt;
+        /// A singleton scheduler shared by all &lt;see cref=&quot;RealmArchiveModelImporter{TModel}&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This scheduler generally performs IO and CPU intensive work so concurrency is limited harshly.
+        /// It is mainly being used as a queue mechanism for large imports.
+        /// &lt;/remarks&gt;
+        // ReSharper disable once StaticMemberInGenericType
+        private static readonly ThreadedTaskScheduler import_scheduler = new ThreadedTaskScheduler(import_queue_request_concurrency, nameof(RealmArchiveModelImporter&lt;&gt;));
+
+        /// &lt;summary&gt;
+        /// A second scheduler for batch imports.
+        /// For simplicity, these will just run in parallel with normal priority imports, but a future refactor would see this implemented via a custom scheduler/queue.
+        /// See https://gist.github.com/peppy/f0e118a14751fc832ca30dd48ba3876b for an incomplete version of this.
+        /// &lt;/summary&gt;
+        // ReSharper disable once StaticMemberInGenericType
+        private static readonly ThreadedTaskScheduler import_scheduler_batch = new ThreadedTaskScheduler(import_queue_request_concurrency, nameof(RealmArchiveModelImporter&lt;&gt;));
+
+        /// &lt;summary&gt;
+        /// Temporarily pause imports to avoid performance overheads affecting gameplay scenarios.
+        /// &lt;/summary&gt;
+        public bool PauseImports { get; set; }
+
+        public abstract IEnumerable&lt;string&gt; HandledExtensions { get; }
+
+        protected readonly RealmFileStore Files;
+
+        protected readonly RealmAccess Realm;
+
+        /// &lt;summary&gt;
+        /// Fired when the user requests to view the resulting import.
+        /// &lt;/summary&gt;
+        public Action&lt;IEnumerable&lt;Live&lt;TModel&gt;&gt;&gt;? PresentImport { get; set; }
+
+        /// &lt;summary&gt;
+        /// Set an endpoint for notifications to be posted to.
+        /// &lt;/summary&gt;
+        public Action&lt;Notification&gt;? PostNotification { get; set; }
+
+        protected RealmArchiveModelImporter(Storage storage, RealmAccess realm)
+        {
+            Realm = realm;
+
+            Files = new RealmFileStore(realm, storage);
+        }
+
+        public Task Import(params string[] paths) =&gt; Import(paths.Select(p =&gt; new ImportTask(p)).ToArray());
+
+        public Task Import(ImportTask[] tasks, ImportParameters parameters = default)
+        {
+            var notification = new ProgressNotification { State = ProgressNotificationState.Active };
+
+            PostNotification?.Invoke(notification);
+
+            return Import(notification, tasks, parameters);
+        }
+
+        public async Task&lt;IEnumerable&lt;Live&lt;TModel&gt;&gt;&gt; Import(ProgressNotification notification, ImportTask[] tasks, ImportParameters parameters = default)
+        {
+            if (tasks.Length == 0)
+            {
+                notification.CompletionText = $&quot;No {HumanisedModelName}s were found to import!&quot;;
+                notification.State = ProgressNotificationState.Completed;
+                return Enumerable.Empty&lt;RealmLive&lt;TModel&gt;&gt;();
+            }
+
+            notification.Progress = 0;
+
+            int current = 0;
+
+            var imported = new List&lt;Live&lt;TModel&gt;&gt;();
+
+            parameters.Batch |= tasks.Length &gt;= minimum_items_considered_batch_import;
+
+            notification.Text = $&quot;{HumanisedModelName.Humanize(LetterCasing.Title)} import is initialising...&quot;;
+            notification.State = ProgressNotificationState.Active;
+
+            await pauseIfNecessaryAsync(parameters, notification, notification.CancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await Parallel.ForEachAsync(tasks, notification.CancellationToken, async (task, cancellation) =&gt;
+                {
+                    cancellation.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        await pauseIfNecessaryAsync(parameters, notification, cancellation).ConfigureAwait(false);
+
+                        var model = await Import(task, parameters, cancellation).ConfigureAwait(false);
+
+                        lock (imported)
+                        {
+                            if (model != null)
+                                imported.Add(model);
+                            current++;
+
+                            notification.Text = $&quot;Imported {current} of {tasks.Length} {HumanisedModelName}s&quot;;
+                            notification.Progress = (float)current / tasks.Length;
+                        }
+                    }
+                    catch (OperationCanceledException cancelled)
+                    {
+                        // We don&#39;t want to abort the full import process based off difficulty calculator&#39;s internal cancellation
+                        // see https://github.com/ppy/osu/blob/91f3be5feaab0c73c17e1a8c270516aa9bee1e14/osu.Game/Rulesets/Difficulty/DifficultyCalculator.cs#L65.
+                        if (cancelled.CancellationToken == notification.CancellationToken)
+                            throw;
+
+                        Logger.Error(cancelled, $@&quot;Timed out importing ({task})&quot;, LoggingTarget.Database);
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Error(e, $@&quot;Could not import ({task})&quot;, LoggingTarget.Database);
+                    }
+                }).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (imported.Count == 0)
+                {
+                    if (notification.CancellationToken.IsCancellationRequested)
+                    {
+                        notification.State = ProgressNotificationState.Cancelled;
+                    }
+                    else
+                    {
+                        notification.Text = $&quot;{HumanisedModelName.Humanize(LetterCasing.Title)} import failed! Check logs for more information.&quot;;
+                        notification.State = ProgressNotificationState.Cancelled;
+                    }
+                }
+                else
+                {
+                    if (tasks.Length &gt; imported.Count)
+                        notification.CompletionText = $&quot;Imported {imported.Count} of {tasks.Length} {HumanisedModelName}s.&quot;;
+                    else if (imported.Count &gt; 1)
+                        notification.CompletionText = $&quot;Imported {imported.Count} {HumanisedModelName}s!&quot;;
+                    else
+                        notification.CompletionText = $&quot;Imported {imported.First().GetDisplayString()}!&quot;;
+
+                    if (imported.Count &gt; 0 &amp;&amp; PresentImport != null)
+                    {
+                        notification.CompletionText += &quot; Click to view.&quot;;
+                        notification.CompletionClickAction = () =&gt;
+                        {
+                            PresentImport?.Invoke(imported);
+                            return true;
+                        };
+                    }
+
+                    notification.State = ProgressNotificationState.Completed;
+                }
+            }
+
+            return imported;
+        }
+
+        public virtual Task&lt;Live&lt;TModel&gt;?&gt; ImportAsUpdate(ProgressNotification notification, ImportTask task, TModel original) =&gt; throw new NotImplementedException();
+
+        public async Task&lt;ExternalEditOperation&lt;TModel&gt;&gt; BeginExternalEditing(TModel model)
+        {
+            string mountedPath = Path.Join(Path.GetTempPath(), model.Hash);
+
+            if (Directory.Exists(mountedPath))
+                Directory.Delete(mountedPath, true);
+
+            Directory.CreateDirectory(mountedPath);
+
+            foreach (var realmFile in model.Files)
+            {
+                string sourcePath = Files.Storage.GetFullPath(realmFile.File.GetStoragePath());
+                // there are edge cases where externalising an imported model to the filesystem could fail due to invalid filenames.
+                // one scenario where this happens goes something like this:
+                // - stable user exports an archive, which contains filenames that get mangled by stable&#39;s default zip encoding codepage (Shift-JIS)
+                // - said archive is imported to lazer, but the invalid filename is not actually an issue due to lazer file store structure
+                //   (the file is stored under a filename correspondent to its SHA instead, and its real filename is only stored in realm)
+                // - however attempts to externally edit the model fail as the external edit attempts and fails to produce the file&#39;s &quot;real&quot; filename in the mounted path
+                // to prevent this bricking external edit, strip invalid characters on external edit.
+                // the presumption here is that whatever produced the mangled archive is primarily at fault here, and we&#39;re just trying to trudge on locally as best as possible.
+                // if there are further troubles related to similar issues, reevaluate moving this sort of check to the import side instead (sanitising filenames on import from archive).
+                string destinationPath = mountedPath;
+                foreach (string piece in realmFile.Filename.Split(&#39;/&#39;).Select(f =&gt; f.GetValidFilename()))
+                    destinationPath = Path.Combine(destinationPath, piece);
+
+                string destinationDirectory = Path.GetDirectoryName(destinationPath)!;
+
+                if (!FilesystemSanityCheckHelpers.IsSubDirectory(parent: mountedPath, child: destinationDirectory))
+                {
+                    Logger.Log($@&quot;Skipping attempt to mount {realmFile.Filename} due to detected escape out of mounted path.&quot;, LoggingTarget.Database);
+                    continue;
+                }
+
+                Directory.CreateDirectory(destinationDirectory);
+
+                // Consider using hard links here to make this instant.
+                using (var inStream = Files.Storage.GetStream(sourcePath))
+                using (var outStream = File.Create(destinationPath))
+                    await inStream.CopyToAsync(outStream).ConfigureAwait(false);
+            }
+
+            return new ExternalEditOperation&lt;TModel&gt;(this, model, mountedPath);
+        }
+
+        /// &lt;summary&gt;
+        /// Import one &lt;typeparamref name=&quot;TModel&quot;/&gt; from the filesystem and delete the file on success.
+        /// Note that this bypasses the UI flow and should only be used for special cases or testing.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;task&quot;&gt;The &lt;see cref=&quot;ImportTask&quot;/&gt; containing data about the &lt;typeparamref name=&quot;TModel&quot;/&gt; to import.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters to further configure the import process.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The imported model, if successful.&lt;/returns&gt;
+        public async Task&lt;Live&lt;TModel&gt;?&gt; Import(ImportTask task, ImportParameters parameters = default, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Live&lt;TModel&gt;? import;
+            using (ArchiveReader reader = task.GetReader())
+                import = await importFromArchive(reader, parameters, cancellationToken).ConfigureAwait(false);
+
+            // We may or may not want to delete the file depending on where it is stored.
+            //  e.g. reconstructing/repairing database with items from default storage.
+            // Also, not always a single file, i.e. for LegacyFilesystemReader
+            // TODO: Add a check to prevent files from storage to be deleted.
+            try
+            {
+                if (import != null &amp;&amp; ShouldDeleteArchive(task.Path))
+                    task.DeleteFile();
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $@&quot;Could not delete original file after import ({task})&quot;);
+            }
+
+            return import;
+        }
+
+        /// &lt;summary&gt;
+        /// Create and import a model based off the provided &lt;see cref=&quot;ArchiveReader&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This method also handled queueing the import task on a relevant import thread pool.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;archive&quot;&gt;The archive to be imported.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters to further configure the import process.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional cancellation token.&lt;/param&gt;
+        private async Task&lt;Live&lt;TModel&gt;?&gt; importFromArchive(ArchiveReader archive, ImportParameters parameters = default, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            TModel? model = null;
+
+            try
+            {
+                model = CreateModel(archive, parameters);
+
+                if (model == null)
+                    return null;
+            }
+            catch (TaskCanceledException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                LogForModel(model, @$&quot;Model creation of {archive.Name} failed.&quot;, e);
+                return null;
+            }
+
+            var scheduledImport = Task.Factory.StartNew(() =&gt; ImportModel(model, archive, parameters, cancellationToken),
+                cancellationToken,
+                TaskCreationOptions.HideScheduler,
+                parameters.Batch ? import_scheduler_batch : import_scheduler);
+
+            return await scheduledImport.ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Silently import an item from a &lt;typeparamref name=&quot;TModel&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The model to be imported.&lt;/param&gt;
+        /// &lt;param name=&quot;archive&quot;&gt;An optional archive to use for model population.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters to further configure the import process.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional cancellation token.&lt;/param&gt;
+        public virtual Live&lt;TModel&gt;? ImportModel(TModel item, ArchiveReader? archive = null, ImportParameters parameters = default, CancellationToken cancellationToken = default) =&gt; Realm.Run(realm =&gt;
+        {
+            TModel? existing;
+
+            if (parameters.Batch &amp;&amp; archive != null)
+            {
+                // this is a fast bail condition to improve large import performance.
+                item.Hash = computeHashFast(archive);
+
+                existing = CheckForExisting(item, realm);
+
+                if (existing != null)
+                {
+                    // bare minimum comparisons
+                    //
+                    // note that this should really be checking filesizes on disk (of existing files) for some degree of sanity.
+                    // or alternatively doing a faster hash check. either of these require database changes and reprocessing of existing files.
+                    if (CanSkipImport(existing, item) &amp;&amp;
+                        getFilenames(existing.Files).SequenceEqual(getShortenedFilenames(archive).Select(p =&gt; p.shortened).Order()) &amp;&amp;
+                        checkAllFilesExist(existing))
+                    {
+                        LogForModel(item, @$&quot;Found existing (optimised) {HumanisedModelName} for {item} (ID {existing.ID}) – skipping import.&quot;);
+
+                        using (var transaction = realm.BeginWrite())
+                        {
+                            UndeleteForReuse(existing);
+                            transaction.Commit();
+                        }
+
+                        return existing.ToLive(Realm);
+                    }
+
+                    LogForModel(item, @&quot;Found existing (optimised) but failed pre-check.&quot;);
+                }
+            }
+
+            try
+            {
+                // Log output here will be missing a valid hash in non-batch imports.
+                LogForModel(item, $@&quot;Beginning import from {archive?.Name ?? &quot;unknown&quot;}...&quot;);
+
+                List&lt;RealmNamedFileUsage&gt; files = new List&lt;RealmNamedFileUsage&gt;();
+
+                if (archive != null)
+                {
+                    // Import files to the disk store.
+                    // We intentionally delay adding to realm to avoid blocking on a write during disk operations.
+                    foreach (var filenames in getShortenedFilenames(archive))
+                    {
+                        if (FilesystemSanityCheckHelpers.IncursPathTraversalRisk(filenames.shortened))
+                            throw new InvalidOperationException($@&quot;Filename &quot;&quot;{filenames.original}&quot;&quot; is not allowed.&quot;);
+
+                        using (Stream s = archive.GetStream(filenames.original))
+                            files.Add(new RealmNamedFileUsage(Files.Add(s, realm, false, parameters.PreferHardLinks), filenames.shortened));
+                    }
+                }
+
+                using (var transaction = realm.BeginWrite())
+                {
+                    // Add all files to realm in one go.
+                    // This is done ahead of the main transaction to ensure we can correctly cleanup the files, even if the import fails.
+                    foreach (var file in files)
+                    {
+                        if (!file.File.IsManaged)
+                            realm.Add(file.File, true);
+                    }
+
+                    transaction.Commit();
+                }
+
+                item.Files.AddRange(files);
+                item.Hash = ComputeHash(item);
+
+                // TODO: do we want to make the transaction this local? not 100% sure, will need further investigation.
+                using (var transaction = realm.BeginWrite())
+                {
+                    // TODO: we may want to run this outside of the transaction.
+                    Populate(item, archive, realm, cancellationToken);
+
+                    // Populate() may have adjusted file content (see SkinImporter.updateSkinIniMetadata), so regardless of whether a fast check was done earlier, let&#39;s
+                    // check for existing items a second time.
+                    //
+                    // If this is ever a performance issue, the fast-check hash can be compared and trigger a skip of this second check if it still matches.
+                    // I don&#39;t think it is a huge deal doing a second indexed check, though.
+                    existing = CheckForExisting(item, realm);
+
+                    if (existing != null)
+                    {
+                        if (CanReuseExisting(existing, item))
+                        {
+                            LogForModel(item, @$&quot;Found existing {HumanisedModelName} for {item} (ID {existing.ID}) – skipping import.&quot;);
+
+                            UndeleteForReuse(existing);
+                            transaction.Commit();
+
+                            return existing.ToLive(Realm);
+                        }
+
+                        LogForModel(item, @&quot;Found existing but failed re-use check.&quot;);
+
+                        existing.DeletePending = true;
+                    }
+
+                    PreImport(item, realm);
+
+                    // import to store
+                    realm.Add(item);
+
+                    PostImport(item, realm, parameters);
+
+                    transaction.Commit();
+                }
+
+                LogForModel(item, @&quot;Import successfully completed!&quot;);
+            }
+            catch (Exception e)
+            {
+                if (!(e is TaskCanceledException))
+                    LogForModel(item, @&quot;Database import or population failed and has been rolled back.&quot;, e);
+
+                throw;
+            }
+
+            return (Live&lt;TModel&gt;?)item.ToLive(Realm);
+        });
+
+        /// &lt;summary&gt;
+        /// Any file extensions which should be included in hash creation.
+        /// Generally should include all file types which determine the file&#39;s uniqueness.
+        /// Large files should be avoided if possible.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is only used by the default hash implementation. If &lt;see cref=&quot;ComputeHash&quot;/&gt; is overridden, it will not be used.
+        /// &lt;/remarks&gt;
+        protected abstract string[] HashableFileTypes { get; }
+
+        internal static void LogForModel(TModel? model, string message, Exception? e = null)
+        {
+            string trimmedHash;
+            if (model == null || !model.IsValid || string.IsNullOrEmpty(model.Hash))
+                trimmedHash = &quot;?????&quot;;
+            else
+                trimmedHash = model.Hash.Substring(0, 5);
+
+            string prefix = $&quot;[{trimmedHash}]&quot;;
+
+            if (e != null)
+                Logger.Error(e, $&quot;{prefix} {message}&quot;, LoggingTarget.Database);
+            else
+                Logger.Log($&quot;{prefix} {message}&quot;, LoggingTarget.Database);
+        }
+
+        /// &lt;summary&gt;
+        /// Create a SHA-2 hash from the provided archive based on file content of all files matching &lt;see cref=&quot;HashableFileTypes&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        ///  In the case of no matching files, a hash will be generated from the passed archive&#39;s &lt;see cref=&quot;ArchiveReader.Name&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        public string ComputeHash(TModel item)
+        {
+            // for now, concatenate all hashable files in the set to create a unique hash.
+            MemoryStream hashable = new MemoryStream();
+
+            foreach (RealmNamedFileUsage file in item.Files.Where(f =&gt; HashableFileTypes.Any(ext =&gt; f.Filename.EndsWith(ext, StringComparison.OrdinalIgnoreCase))).OrderBy(f =&gt; f.Filename))
+            {
+                using (Stream? s = Files.Store.GetStream(file.File.GetStoragePath()))
+                {
+                    s?.CopyTo(hashable);
+                }
+            }
+
+            if (hashable.Length &gt; 0)
+                return hashable.ComputeSHA2Hash();
+
+            return item.Hash;
+        }
+
+        private string computeHashFast(ArchiveReader reader)
+        {
+            MemoryStream hashable = new MemoryStream();
+
+            foreach (string? file in reader.Filenames.Where(f =&gt; HashableFileTypes.Any(ext =&gt; f.EndsWith(ext, StringComparison.OrdinalIgnoreCase))).Order())
+            {
+                using (Stream s = reader.GetStream(file))
+                    s.CopyTo(hashable);
+            }
+
+            if (hashable.Length &gt; 0)
+                return hashable.ComputeSHA2Hash();
+
+            return reader.Name.ComputeSHA2Hash();
+        }
+
+        private IEnumerable&lt;(string original, string shortened)&gt; getShortenedFilenames(ArchiveReader reader)
+        {
+            string prefix = reader.Filenames.GetCommonPrefix();
+            if (!(prefix.EndsWith(&#39;/&#39;) || prefix.EndsWith(&#39;\\&#39;)))
+                prefix = string.Empty;
+
+            // filename lookups on models are case insensitive (see `BeatmapSetInfoExtensions.GetFile()`), but an
+            // archive can contain both &quot;audio.mp3&quot; and &quot;Audio.MP3&quot;. importing such a pair would result in a model which
+            // throws on any file lookup or be unclear which file should be chosen should that be guarded
+            var seenFilenames = new HashSet&lt;string&gt;(StringComparer.OrdinalIgnoreCase);
+
+            foreach (string file in reader.Filenames)
+            {
+                string shortened = file.Substring(prefix.Length).ToStandardisedPath();
+
+                if (!seenFilenames.Add(shortened))
+                    throw new InvalidOperationException($@&quot;Multiple files with the name &quot;&quot;{shortened}&quot;&quot; (ignoring case) are present. Only one of them can be kept.&quot;);
+
+                yield return (file, shortened);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Create a barebones model from the provided archive.
+        /// Actual expensive population should be done in &lt;see cref=&quot;Populate&quot;/&gt;; this should just prepare for duplicate checking.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;archive&quot;&gt;The archive to create the model for.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters to further configure the import process.&lt;/param&gt;
+        /// &lt;returns&gt;A model populated with minimal information. Returning a null will abort importing silently.&lt;/returns&gt;
+        protected abstract TModel? CreateModel(ArchiveReader archive, ImportParameters parameters);
+
+        /// &lt;summary&gt;
+        /// Populate the provided model completely from the given archive.
+        /// After this method, the model should be in a state ready to commit to a store.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model to populate.&lt;/param&gt;
+        /// &lt;param name=&quot;archive&quot;&gt;The archive to use as a reference for population. May be null.&lt;/param&gt;
+        /// &lt;param name=&quot;realm&quot;&gt;The current realm context.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;An optional cancellation token.&lt;/param&gt;
+        protected abstract void Populate(TModel model, ArchiveReader? archive, Realm realm, CancellationToken cancellationToken = default);
+
+        /// &lt;summary&gt;
+        /// Perform any final actions before the import to database executes.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model prepared for import.&lt;/param&gt;
+        /// &lt;param name=&quot;realm&quot;&gt;The current realm context.&lt;/param&gt;
+        protected virtual void PreImport(TModel model, Realm realm)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Perform any final actions before the import has been committed to the database.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The model prepared for import.&lt;/param&gt;
+        /// &lt;param name=&quot;realm&quot;&gt;The current realm context.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters to further configure the import process.&lt;/param&gt;
+        protected virtual void PostImport(TModel model, Realm realm, ImportParameters parameters)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Check whether an existing model already exists for a new import item.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The new model proposed for import.&lt;/param&gt;
+        /// &lt;param name=&quot;realm&quot;&gt;The current realm context.&lt;/param&gt;
+        /// &lt;returns&gt;An existing model which matches the criteria to skip importing, else null.&lt;/returns&gt;
+        protected TModel? CheckForExisting(TModel model, Realm realm) =&gt;
+            string.IsNullOrEmpty(model.Hash) ? null : realm.All&lt;TModel&gt;().OrderBy(b =&gt; b.DeletePending).FirstOrDefault(b =&gt; b.Hash == model.Hash);
+
+        /// &lt;summary&gt;
+        /// Whether import can be skipped after finding an existing import early in the process.
+        /// Only valid when &lt;see cref=&quot;ComputeHash&quot;/&gt; is not overridden.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;existing&quot;&gt;The existing model.&lt;/param&gt;
+        /// &lt;param name=&quot;import&quot;&gt;The newly imported model.&lt;/param&gt;
+        /// &lt;returns&gt;Whether to skip this import completely.&lt;/returns&gt;
+        protected virtual bool CanSkipImport(TModel existing, TModel import) =&gt; true;
+
+        /// &lt;summary&gt;
+        /// After an existing &lt;typeparamref name=&quot;TModel&quot;/&gt; is found during an import process, the default behaviour is to use/restore the existing
+        /// item and skip the import. This method allows changing that behaviour.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;existing&quot;&gt;The existing model.&lt;/param&gt;
+        /// &lt;param name=&quot;import&quot;&gt;The newly imported model.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the existing model should be restored and used. Returning false will delete the existing and force a re-import.&lt;/returns&gt;
+        protected virtual bool CanReuseExisting(TModel existing, TModel import) =&gt;
+            // for the best or worst, we copy and import files of a new import before checking whether
+            // it is a duplicate. so to check if anything has changed, we can just compare all File IDs.
+            getIDs(existing.Files).SequenceEqual(getIDs(import.Files)) &amp;&amp;
+            getFilenames(existing.Files).SequenceEqual(getFilenames(import.Files));
+
+        private bool checkAllFilesExist(TModel model) =&gt;
+            model.Files.All(f =&gt; Files.Storage.Exists(f.File.GetStoragePath()));
+
+        /// &lt;summary&gt;
+        /// Called when an existing model is in a soft deleted state but being recovered.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;existing&quot;&gt;The existing model.&lt;/param&gt;
+        protected virtual void UndeleteForReuse(TModel existing)
+        {
+            if (!existing.DeletePending)
+                return;
+
+            LogForModel(existing, $@&quot;Existing {HumanisedModelName}&#39;s deletion flag has been removed to allow for reuse.&quot;);
+            existing.DeletePending = false;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether this specified path should be removed after successful import.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;path&quot;&gt;The path for consideration. May be a file or a directory.&lt;/param&gt;
+        /// &lt;returns&gt;Whether to perform deletion.&lt;/returns&gt;
+        protected virtual bool ShouldDeleteArchive(string path) =&gt; false;
+
+        private async Task pauseIfNecessaryAsync(ImportParameters importParameters, ProgressNotification notification, CancellationToken cancellationToken)
+        {
+            if (!PauseImports || importParameters.ImportImmediately)
+                return;
+
+            Logger.Log($@&quot;{GetType().Name} is being paused.&quot;);
+
+            // A paused state could obviously be entered mid-import (during the `Task.WhenAll` below),
+            // but in order to keep things simple let&#39;s focus on the most common scenario.
+            notification.Text = $&quot;{HumanisedModelName.Humanize(LetterCasing.Title)} import is paused due to gameplay...&quot;;
+            notification.State = ProgressNotificationState.Queued;
+
+            while (PauseImports)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Logger.Log($@&quot;{GetType().Name} is being resumed.&quot;);
+
+            notification.Text = $&quot;{HumanisedModelName.Humanize(LetterCasing.Title)} import is resuming...&quot;;
+            notification.State = ProgressNotificationState.Active;
+        }
+
+        private IEnumerable&lt;string&gt; getIDs(IEnumerable&lt;INamedFile&gt; files)
+        {
+            foreach (var f in files.OrderBy(f =&gt; f.Filename))
+                yield return f.File.Hash;
+        }
+
+        private IEnumerable&lt;string&gt; getFilenames(IEnumerable&lt;INamedFile&gt; files)
+        {
+            foreach (var f in files.OrderBy(f =&gt; f.Filename))
+                yield return f.Filename;
+        }
+
+        public virtual string HumanisedModelName =&gt; $&quot;{typeof(TModel).Name.Replace(@&quot;Info&quot;, &quot;&quot;).ToLowerInvariant()}&quot;;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[52,9,52,171,0],[60,9,60,177,0],[65,36,65,40,0],[65,41,65,45,0],[76,67,76,71,0],[76,72,76,76,0],[81,57,81,61,0],[81,62,81,66,0],[83,9,83,80,0],[84,9,84,10,0],[85,13,85,27,0],[87,13,87,56,0],[88,9,88,10,0],[90,54,90,79,0],[90,79,90,96,0],[90,96,90,108,0],[93,9,93,10,0],[94,13,94,102,0],[96,13,96,52,0],[98,13,98,60,0],[99,9,99,10,0],[102,9,102,10,0],[103,13,103,35,0],[104,13,104,14,0],[105,17,105,97,0],[106,17,106,74,0],[107,17,107,62,0],[110,13,110,39,0],[112,13,112,29,0],[114,13,114,53,0],[116,13,116,87,0],[118,13,118,112,0],[119,13,119,67,0],[121,13,121,121,0],[124,13,124,14,0],[125,17,126,17,0],[126,17,126,18,0],[126,18,127,21,0],[127,21,127,65,0],[127,65,130,21,0],[130,21,130,22,0],[130,22,131,25,0],[131,25,131,115,0],[131,115,133,25,0],[133,25,133,104,0],[133,104,135,25,0],[135,25,135,40,0],[135,40,136,25,0],[136,25,136,26,0],[136,26,137,29,0],[137,29,137,47,0],[137,47,138,33,0],[138,33,138,53,0],[138,53,139,29,0],[139,29,139,39,0],[139,39,141,29,0],[141,29,141,111,0],[141,111,142,29,0],[142,29,142,83,0],[142,83,143,25,0],[143,25,143,26,0],[143,26,144,21,0],[144,21,144,22,0],[144,22,145,21,0],[145,21,145,65,0],[145,65,146,21,0],[146,21,146,22,0],[146,22,149,25,0],[149,25,149,91,0],[149,91,150,29,0],[150,29,150,35,0],[150,35,152,25,0],[152,25,152,107,0],[152,107,153,21,0],[153,21,153,22,0],[153,22,154,21,0],[154,21,154,40,0],[154,40,155,21,0],[155,21,155,22,0],[155,22,156,25,0],[156,25,156,96,0],[156,96,157,21,0],[157,21,157,22,0],[157,22,158,17,0],[158,17,158,18,0],[158,18,158,42,0],[159,13,159,14,0],[161,13,161,14,0],[162,17,162,41,0],[163,17,163,18,0],[164,21,164,80,0],[165,21,165,22,0],[166,25,166,82,0],[167,21,167,22,0],[169,21,169,22,0],[170,25,170,146,0],[171,25,171,82,0],[172,21,172,22,0],[173,17,173,18,0],[175,17,175,18,0],[176,21,176,55,0],[177,25,177,125,0],[178,26,178,49,0],[179,25,179,107,0],[181,25,181,106,0],[183,21,183,69,0],[184,21,184,22,0],[185,25,185,74,0],[186,25,187,25,0],[187,25,187,26,0],[187,26,188,29,0],[188,29,188,61,0],[188,61,189,29,0],[189,29,189,41,0],[189,41,190,25,0],[190,25,190,26,0],[190,26,190,27,0],[191,21,191,22,0],[193,21,193,78,0],[194,17,194,18,0],[195,13,195,14,0],[197,13,197,29,0],[198,9,198,10,0],[200,131,200,166,0],[203,9,203,10,0],[204,13,204,76,0],[206,13,206,47,0],[207,17,207,53,0],[209,13,209,52,0],[211,13,211,20,0],[211,22,211,35,0],[211,36,211,38,0],[211,39,211,50,0],[212,13,212,14,0],[213,17,213,96,0],[223,17,223,54,0],[224,17,224,24,0],[224,26,224,38,0],[224,39,224,41,0],[224,42,224,84,0],[224,84,224,104,0],[224,104,224,105,0],[225,21,225,76,0],[227,17,227,87,0],[229,17,229,116,0],[230,17,230,18,0],[231,21,231,152,0],[232,21,232,30,0],[235,17,235,65,0],[238,24,238,74,0],[239,24,239,68,0],[240,21,240,81,0],[241,13,241,14,0],[243,13,243,80,0],[244,9,244,10,0],[255,9,255,10,0],[256,13,256,62,0],[259,20,259,59,0],[260,17,260,111,0],[267,13,267,14,0],[268,17,268,70,0],[269,21,269,39,0],[270,13,270,14,0],[271,13,271,32,0],[272,13,272,14,0],[273,17,273,91,0],[274,13,274,14,0],[276,13,276,27,0],[277,9,277,10,0],[289,9,289,10,0],[290,13,290,62,0],[292,13,292,34,0],[295,13,295,14,0],[296,17,296,58,0],[298,17,298,35,0],[299,21,299,33,0],[300,13,300,14,0],[301,13,301,42,0],[302,13,302,14,0],[303,17,303,23,0],[305,13,305,32,0],[306,13,306,14,0],[307,17,307,85,0],[308,17,308,29,0],[311,13,311,63,0],[311,63,311,121,0],[311,121,314,79,0],[316,13,316,64,0],[317,9,317,10,0],[326,183,327,9,0],[327,9,327,10,0],[327,10,330,13,0],[330,13,330,53,0],[330,53,331,13,0],[331,13,331,14,0],[331,14,333,17,0],[333,17,333,54,0],[333,54,335,17,0],[335,17,335,58,0],[335,58,337,17,0],[337,17,337,38,0],[337,38,338,17,0],[338,17,338,18,0],[338,18,343,21,0],[343,21,344,111,0],[344,111,344,122,0],[344,122,345,54,0],[345,54,346,21,0],[346,21,346,22,0],[346,22,347,25,0],[347,25,347,145,0],[347,145,349,32,0],[349,32,349,68,0],[349,68,350,25,0],[350,25,350,26,0],[350,26,351,29,0],[351,29,351,56,0],[351,56,352,29,0],[352,29,352,50,0],[352,50,353,25,0],[353,25,353,26,0],[353,26,355,25,0],[355,25,355,55,0],[355,55,358,21,0],[358,21,358,92,0],[358,92,359,17,0],[359,17,359,18,0],[359,18,360,13,0],[360,13,360,14,0],[360,14,363,13,0],[363,13,363,14,0],[363,14,365,17,0],[365,17,365,94,0],[365,94,367,17,0],[367,17,367,83,0],[367,83,369,17,0],[369,17,369,37,0],[369,37,370,17,0],[370,17,370,18,0],[370,18,373,21,0],[373,21,373,28,0],[373,28,373,30,0],[373,30,373,43,0],[373,43,373,44,0],[373,44,373,46,0],[373,46,373,47,0],[373,47,373,77,0],[373,77,374,21,0],[374,21,374,22,0],[374,22,375,25,0],[375,25,375,103,0],[375,103,376,29,0],[376,29,376,120,0],[376,120,378,32,0],[378,32,378,80,0],[378,80,379,29,0],[379,29,379,141,0],[379,141,380,21,0],[380,21,380,22,0],[380,22,381,17,0],[381,17,381,18,0],[381,18,383,24,0],[383,24,383,60,0],[383,60,384,17,0],[384,17,384,18,0],[384,18,387,21,0],[387,21,387,28,0],[387,28,387,30,0],[387,30,387,38,0],[387,38,387,39,0],[387,39,387,41,0],[387,41,387,42,0],[387,42,387,47,0],[387,47,388,21,0],[388,21,388,22,0],[388,22,389,25,0],[389,25,389,50,0],[389,50,390,29,0],[390,29,390,56,0],[390,56,391,21,0],[391,21,391,22,0],[391,22,393,21,0],[393,21,393,42,0],[393,42,394,17,0],[394,17,394,18,0],[394,18,396,17,0],[396,17,396,44,0],[396,44,397,17,0],[397,17,397,47,0],[397,47,400,24,0],[400,24,400,60,0],[400,60,401,17,0],[401,17,401,18,0],[401,18,403,21,0],[403,21,403,71,0],[403,71,410,21,0],[410,21,410,62,0],[410,62,412,21,0],[412,21,412,42,0],[412,42,413,21,0],[413,21,413,22,0],[413,22,414,25,0],[414,25,414,62,0],[414,62,415,25,0],[415,25,415,26,0],[415,26,416,29,0],[416,29,416,137,0],[416,137,418,29,0],[418,29,418,56,0],[418,56,419,29,0],[419,29,419,50,0],[419,50,421,29,0],[421,29,421,59,0],[421,59,424,25,0],[424,25,424,87,0],[424,87,426,25,0],[426,25,426,55,0],[426,55,427,21,0],[427,21,427,22,0],[427,22,429,21,0],[429,21,429,44,0],[429,44,432,21,0],[432,21,432,37,0],[432,37,434,21,0],[434,21,434,57,0],[434,57,436,21,0],[436,21,436,42,0],[436,42,437,17,0],[437,17,437,18,0],[437,18,439,17,0],[439,17,439,70,0],[439,70,440,13,0],[440,13,440,14,0],[440,14,441,13,0],[441,13,441,32,0],[441,32,442,13,0],[442,13,442,14,0],[442,14,443,17,0],[443,17,443,51,0],[443,51,444,21,0],[444,21,444,109,0],[444,109,446,17,0],[446,17,446,23,0],[446,23,449,13,0],[449,13,449,54,0],[449,54,450,9,0],[450,9,450,10,0],[450,10,450,11,0],[463,9,463,10,0],[465,13,465,85,0],[466,17,466,39,0],[468,17,468,58,0],[470,13,470,48,0],[472,13,472,27,0],[473,17,473,80,0],[475,17,475,75,0],[476,9,476,10,0],[485,9,485,10,0],[487,13,487,56,0],[489,13,489,20,0],[489,22,489,46,0],[489,47,489,49,0],[489,50,489,72,0],[489,72,489,101,0],[489,101,489,161,0],[489,161,489,162,0],[489,162,489,177,0],[489,177,489,187,0],[489,187,489,188,0],[490,13,490,14,0],[491,24,491,85,0],[492,17,492,18,0],[493,21,493,41,0],[494,17,494,18,0],[495,13,495,14,0],[497,13,497,37,0],[498,17,498,51,0],[500,13,500,30,0],[501,9,501,10,0],[504,9,504,10,0],[505,13,505,56,0],[507,13,507,20,0],[507,22,507,34,0],[507,35,507,37,0],[507,38,507,66,0],[507,66,507,95,0],[507,95,507,146,0],[507,146,507,147,0],[507,147,507,156,0],[508,13,508,14,0],[509,24,509,57,0],[510,21,510,40,0],[511,13,511,14,0],[513,13,513,37,0],[514,17,514,51,0],[516,13,516,50,0],[517,9,517,10,0],[520,9,520,10,0],[521,13,521,64,0],[522,13,522,66,0],[523,17,523,39,0],[528,13,528,87,0],[530,13,530,20,0],[530,22,530,33,0],[530,34,530,36,0],[530,37,530,53,0],[531,13,531,14,0],[532,17,532,87,0],[534,17,534,51,0],[535,21,535,166,0],[537,17,537,48,0],[538,13,538,14,0],[539,9,539,10,0],[566,9,566,10,0],[567,9,567,10,0],[576,9,576,10,0],[577,9,577,10,0],[586,13,586,146,0],[595,81,595,85,0],[607,13,608,83,0],[611,13,611,34,0],[611,34,611,79,0],[611,79,611,80,0],[618,9,618,10,0],[619,13,619,41,0],[620,17,620,24,0],[622,13,622,123,0],[623,13,623,44,0],[624,9,624,10,0],[631,68,631,73,0],[634,9,634,10,0],[635,13,635,69,0],[636,17,636,24,0],[638,13,638,63,0],[642,13,642,122,0],[643,13,643,67,0],[645,13,645,33,0],[646,13,646,14,0],[647,17,647,66,0],[648,17,648,80,0],[649,13,649,14,0],[651,13,651,62,0],[652,13,652,64,0],[654,13,654,108,0],[655,13,655,67,0],[656,9,656,10,0],[659,9,659,10,0],[660,13,660,20,0],[660,22,660,27,0],[660,28,660,30,0],[660,31,660,50,0],[660,50,660,60,0],[660,60,660,61,0],[661,17,661,42,0],[662,9,662,10,0],[665,9,665,10,0],[666,13,666,20,0],[666,22,666,27,0],[666,28,666,30,0],[666,31,666,50,0],[666,50,666,60,0],[666,60,666,61,0],[667,17,667,41,0],[668,9,668,10,0],[670,53,670,117,0]]);
+    </script>
+  </body>
+</html>

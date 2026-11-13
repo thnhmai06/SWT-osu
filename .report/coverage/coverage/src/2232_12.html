@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Scoring/Legacy/LegacyScoreDecoder.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using Newtonsoft.Json;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO.Legacy;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Replays;
+using osu.Game.Replays.Legacy;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Replays;
+using osu.Game.Rulesets.Scoring;
+using osuTK;
+using SharpCompress.Compressors.LZMA;
+
+namespace osu.Game.Scoring.Legacy
+{
+    public abstract class LegacyScoreDecoder
+    {
+        private IBeatmap currentBeatmap;
+        private Ruleset currentRuleset;
+
+        private long beatmapOffset;
+
+        public Score Parse(Stream stream)
+        {
+            var score = new Score
+            {
+                Replay = new Replay()
+            };
+
+            WorkingBeatmap workingBeatmap;
+            ScoreRank? decodedRank = null;
+
+            using (SerializationReader sr = new SerializationReader(stream))
+            {
+                currentRuleset = GetRuleset(sr.ReadByte());
+                var scoreInfo = new ScoreInfo { Ruleset = currentRuleset.RulesetInfo };
+
+                score.ScoreInfo = scoreInfo;
+
+                int version = sr.ReadInt32();
+
+                scoreInfo.IsLegacyScore = version &lt; LegacyScoreEncoder.FIRST_LAZER_VERSION;
+
+                // TotalScoreVersion gets initialised to LATEST_VERSION.
+                // In the case where the incoming score has either an osu!stable or old lazer version, we need
+                // to mark it with the correct version increment to trigger reprocessing to new standardised scoring.
+                scoreInfo.TotalScoreVersion = version &lt; 30000002 ? 30000001 : version;
+
+                string beatmapHash = sr.ReadString();
+
+                workingBeatmap = GetBeatmap(beatmapHash);
+
+                if (workingBeatmap is DummyWorkingBeatmap)
+                    throw new BeatmapNotFoundException(beatmapHash);
+
+                scoreInfo.User = new APIUser { Username = sr.ReadString() };
+
+                // MD5Hash
+                sr.ReadString();
+
+                scoreInfo.SetCount300(sr.ReadUInt16());
+                scoreInfo.SetCount100(sr.ReadUInt16());
+                scoreInfo.SetCount50(sr.ReadUInt16());
+                scoreInfo.SetCountGeki(sr.ReadUInt16());
+                scoreInfo.SetCountKatu(sr.ReadUInt16());
+                scoreInfo.SetCountMiss(sr.ReadUInt16());
+
+                scoreInfo.TotalScore = sr.ReadInt32();
+                scoreInfo.MaxCombo = sr.ReadUInt16();
+
+                /* score.Perfect = */
+                sr.ReadBoolean();
+
+                scoreInfo.Mods = currentRuleset.ConvertFromLegacyMods((LegacyMods)sr.ReadInt32()).ToArray();
+
+                // lazer replays get a really high version number.
+                if (version &lt; LegacyScoreEncoder.FIRST_LAZER_VERSION)
+                    scoreInfo.Mods = scoreInfo.Mods.Append(currentRuleset.CreateMod&lt;ModClassic&gt;()).ToArray();
+
+                currentBeatmap = workingBeatmap.GetPlayableBeatmap(currentRuleset.RulesetInfo, scoreInfo.Mods);
+                scoreInfo.BeatmapInfo = currentBeatmap.BeatmapInfo;
+
+                // As this is baked into hitobject timing (see `LegacyBeatmapDecoder`) we also need to apply this to replay frame timing.
+                beatmapOffset = currentBeatmap.BeatmapVersion &lt; 5 ? LegacyBeatmapDecoder.EARLY_VERSION_TIMING_OFFSET : 0;
+
+                /* score.HpGraphString = */
+                sr.ReadString();
+
+                scoreInfo.Date = sr.ReadDateTime();
+
+                byte[] compressedReplay = sr.ReadByteArray();
+
+                if (version &gt;= 20140721)
+                    scoreInfo.LegacyOnlineID = sr.ReadInt64();
+                else if (version &gt;= 20121008)
+                    scoreInfo.LegacyOnlineID = sr.ReadInt32();
+
+                if (scoreInfo.LegacyOnlineID == 0)
+                    scoreInfo.LegacyOnlineID = -1;
+
+                byte[] compressedScoreInfo = null;
+
+                if (version &gt;= 30000001)
+                    compressedScoreInfo = sr.ReadByteArray();
+
+                if (compressedReplay?.Length &gt; 0)
+                    readCompressedData(compressedReplay, reader =&gt; readLegacyReplay(score.Replay, reader));
+
+                if (compressedScoreInfo?.Length &gt; 0)
+                {
+                    readCompressedData(compressedScoreInfo, reader =&gt;
+                    {
+                        LegacyReplaySoloScoreInfo readScore = JsonConvert.DeserializeObject&lt;LegacyReplaySoloScoreInfo&gt;(reader.ReadToEnd());
+
+                        Debug.Assert(readScore != null);
+
+                        score.ScoreInfo.OnlineID = readScore.OnlineID;
+                        score.ScoreInfo.Statistics = readScore.Statistics;
+                        score.ScoreInfo.MaximumStatistics = readScore.MaximumStatistics;
+                        score.ScoreInfo.Mods = readScore.Mods.Select(m =&gt; m.ToMod(currentRuleset)).ToArray();
+                        score.ScoreInfo.ClientVersion = readScore.ClientVersion;
+                        decodedRank = readScore.Rank;
+                        if (readScore.UserID &gt; 1)
+                            score.ScoreInfo.RealmUser.OnlineID = readScore.UserID;
+
+                        if (readScore.TotalScoreWithoutMods is long totalScoreWithoutMods)
+                            score.ScoreInfo.TotalScoreWithoutMods = totalScoreWithoutMods;
+                        else
+                            PopulateTotalScoreWithoutMods(score.ScoreInfo);
+
+                        score.ScoreInfo.Pauses.AddRange(readScore.Pauses);
+                    });
+                }
+            }
+
+            PopulateMaximumStatistics(score.ScoreInfo, workingBeatmap);
+
+            if (score.ScoreInfo.IsLegacyScore)
+                score.ScoreInfo.LegacyTotalScore = score.ScoreInfo.TotalScore;
+
+            StandardisedScoreMigrationTools.UpdateToLatestScoring(score.ScoreInfo, workingBeatmap);
+
+            if (decodedRank != null)
+                score.ScoreInfo.Rank = decodedRank.Value;
+
+            // before returning for database import, we must restore the database-sourced BeatmapInfo.
+            // if not, the clone operation in GetPlayableBeatmap will cause a dereference and subsequent database exception.
+            score.ScoreInfo.BeatmapInfo = workingBeatmap.BeatmapInfo;
+            score.ScoreInfo.BeatmapHash = workingBeatmap.BeatmapInfo.Hash;
+
+            return score;
+        }
+
+        private void readCompressedData(byte[] data, Action&lt;StreamReader&gt; readFunc)
+        {
+            using (var replayInStream = new MemoryStream(data))
+            {
+                byte[] properties = new byte[5];
+                if (replayInStream.Read(properties, 0, 5) != 5)
+                    throw new IOException(&quot;input .lzma is too short&quot;);
+
+                long outSize = 0;
+
+                for (int i = 0; i &lt; 8; i++)
+                {
+                    int v = replayInStream.ReadByte();
+                    if (v &lt; 0)
+                        throw new IOException(&quot;Can&#39;t Read 1&quot;);
+
+                    outSize |= (long)(byte)v &lt;&lt; (8 * i);
+                }
+
+                long compressedSize = replayInStream.Length - replayInStream.Position;
+
+                using (var lzma = LzmaStream.Create(properties, replayInStream, compressedSize, outSize))
+                using (var reader = new StreamReader(lzma))
+                    readFunc(reader);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Populates the &lt;see cref=&quot;ScoreInfo.MaximumStatistics&quot;/&gt; for a given &lt;see cref=&quot;ScoreInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The score to populate the statistics of.&lt;/param&gt;
+        /// &lt;param name=&quot;workingBeatmap&quot;&gt;The corresponding &lt;see cref=&quot;WorkingBeatmap&quot;/&gt;.&lt;/param&gt;
+        public static void PopulateMaximumStatistics(ScoreInfo score, WorkingBeatmap workingBeatmap)
+        {
+            Debug.Assert(score.BeatmapInfo != null);
+
+            if (score.MaximumStatistics.Select(kvp =&gt; kvp.Value).Sum() &gt; 0)
+                return;
+
+            var ruleset = score.Ruleset.Detach();
+            var rulesetInstance = ruleset.CreateInstance();
+            var scoreProcessor = rulesetInstance.CreateScoreProcessor();
+
+            // Populate the maximum statistics.
+            HitResult maxBasicResult = rulesetInstance.GetHitResultsForDisplay()
+                                                      .Select(h =&gt; h.result)
+                                                      .Where(h =&gt; h.IsBasic()).MaxBy(scoreProcessor.GetBaseScoreForResult);
+
+            foreach ((HitResult result, int count) in score.Statistics)
+            {
+                switch (result)
+                {
+                    case HitResult.LargeTickHit:
+                    case HitResult.LargeTickMiss:
+                        score.MaximumStatistics[HitResult.LargeTickHit] = score.MaximumStatistics.GetValueOrDefault(HitResult.LargeTickHit) + count;
+                        break;
+
+                    case HitResult.SmallTickHit:
+                    case HitResult.SmallTickMiss:
+                        score.MaximumStatistics[HitResult.SmallTickHit] = score.MaximumStatistics.GetValueOrDefault(HitResult.SmallTickHit) + count;
+                        break;
+
+                    case HitResult.IgnoreHit:
+                    case HitResult.IgnoreMiss:
+                    case HitResult.SmallBonus:
+                    case HitResult.LargeBonus:
+                        break;
+
+                    default:
+                        score.MaximumStatistics[maxBasicResult] = score.MaximumStatistics.GetValueOrDefault(maxBasicResult) + count;
+                        break;
+                }
+            }
+
+            if (!score.IsLegacyScore)
+                return;
+
+#pragma warning disable CS0618
+            // In osu! and osu!mania, some judgements affect combo but aren&#39;t stored to scores.
+            // A special hit result is used to pad out the combo value to match, based on the max combo from the difficulty attributes.
+            var calculator = rulesetInstance.CreateDifficultyCalculator(workingBeatmap);
+            var attributes = calculator.Calculate(score.Mods);
+
+            int maxComboFromStatistics = score.MaximumStatistics.Where(kvp =&gt; kvp.Key.AffectsCombo()).Select(kvp =&gt; kvp.Value).DefaultIfEmpty(0).Sum();
+            if (attributes.MaxCombo &gt; maxComboFromStatistics)
+                score.MaximumStatistics[HitResult.LegacyComboIncrease] = attributes.MaxCombo - maxComboFromStatistics;
+#pragma warning restore CS0618
+        }
+
+        public static void PopulateTotalScoreWithoutMods(ScoreInfo score)
+        {
+            Debug.Assert(score.BeatmapInfo != null);
+
+            var ruleset = score.Ruleset.CreateInstance();
+            var scoreMultiplierCalculator = ruleset.CreateScoreMultiplierCalculator(new ScoreMultiplierContext(score.BeatmapInfo.Difficulty, score));
+            double modMultiplier = scoreMultiplierCalculator.CalculateFor(score.Mods);
+
+            score.TotalScoreWithoutMods = (long)Math.Round(score.TotalScore / modMultiplier);
+        }
+
+        private void readLegacyReplay(Replay replay, StreamReader reader)
+        {
+            long lastTime = beatmapOffset;
+            var legacyFrames = new List&lt;LegacyReplayFrame&gt;();
+
+            string[] frames = reader.ReadToEnd().Split(&#39;,&#39;);
+
+            for (int i = 0; i &lt; frames.Length; i++)
+            {
+                string[] split = frames[i].Split(&#39;|&#39;);
+
+                if (split.Length &lt; 4)
+                    continue;
+
+                if (split[0] == &quot;-12345&quot;)
+                {
+                    // Todo: The seed is provided in split[3], which we&#39;ll need to use at some point
+                    continue;
+                }
+
+                // In mania, mouseX encodes the pressed keys in the lower 20 bits
+                int mouseXParseLimit = currentRuleset.RulesetInfo.OnlineID == 3 ? (1 &lt;&lt; 20) - 1 : Parsing.MAX_COORDINATE_VALUE;
+
+                // the legacy replay format as defined by stable expects frame delta times
+                // (&#39;delta time&#39; here meaning the amount of time between consecutive frames)
+                // to be integral and does not allow fractional values.
+                // one particular reason why this matters is that integral deltas
+                // avoid nasty floating point traps like accumulation error from summation or round-off error.
+                // however, there was a period in lazer&#39;s lifetime wherein lazer emitted replays
+                // with fractional (float) frame deltas, up until https://github.com/ppy/osu/pull/12583.
+                // despite the fact that gameplay mechanics changed multiple times since
+                // and the replay isn&#39;t going to play back anywhere near accurately anyway,
+                // no mistakes are ever forgiven, thus this attempts to parse the delta as an integer once,
+                // and if that fails, tries again as float.
+                // notably this cannot just be `(int)Parsing.ParseFloat(split[0])`, because that can lose information
+                // (`float` numbers have 24 bits of significand precision, which is not enough to accurately represent every possible value of `int`).
+                int diff;
+                if (!int.TryParse(split[0], out diff))
+                    diff = (int)Math.Round(Parsing.ParseFloat(split[0]));
+
+                float mouseX = Parsing.ParseFloat(split[1], mouseXParseLimit);
+                float mouseY = Parsing.ParseFloat(split[2], Parsing.MAX_COORDINATE_VALUE);
+
+                lastTime += diff;
+
+                legacyFrames.Add(new LegacyReplayFrame(lastTime,
+                    mouseX,
+                    mouseY,
+                    (ReplayButtonState)Parsing.ParseInt(split[3])));
+            }
+
+            // https://github.com/peppy/osu-stable-reference/blob/e53980dd76857ee899f66ce519ba1597e7874f28/osu!/GameModes/Play/ReplayWatcher.cs#L62-L67
+            if (legacyFrames.Count &gt;= 2 &amp;&amp; legacyFrames[1].Time &lt; legacyFrames[0].Time)
+            {
+                legacyFrames[1].Time = legacyFrames[0].Time;
+                legacyFrames[0].Time = 0;
+            }
+
+            // https://github.com/peppy/osu-stable-reference/blob/e53980dd76857ee899f66ce519ba1597e7874f28/osu!/GameModes/Play/ReplayWatcher.cs#L69-L71
+            if (legacyFrames.Count &gt;= 3 &amp;&amp; legacyFrames[0].Time &gt; legacyFrames[2].Time)
+                legacyFrames[0].Time = legacyFrames[1].Time = legacyFrames[2].Time;
+
+            // at the start of the replay, stable places two replay frames, at time 0 and SkipBoundary - 1, respectively.
+            // both frames use a position of (256, -500).
+            // ignore these frames as they serve no real purpose (and can even mislead ruleset-specific handlers - see mania)
+            if (legacyFrames.Count &gt;= 2 &amp;&amp; legacyFrames[1].Position == new Vector2(256, -500))
+                legacyFrames.RemoveAt(1);
+
+            if (legacyFrames.Count &gt;= 1 &amp;&amp; legacyFrames[0].Position == new Vector2(256, -500))
+                legacyFrames.RemoveAt(0);
+
+            ReplayFrame currentFrame = null;
+
+            foreach (var legacyFrame in legacyFrames)
+            {
+                // never allow backwards time traversal in relation to the current frame.
+                // this handles frames with negative delta.
+                // this doesn&#39;t match stable 100% as stable will do something similar to adding an interpolated &quot;intermediate frame&quot;
+                // at the point wherein time flow changes from backwards to forwards, but it&#39;ll do for now.
+                if (currentFrame != null &amp;&amp; legacyFrame.Time &lt; currentFrame.Time)
+                    continue;
+
+                replay.Frames.Add(currentFrame = convertFrame(legacyFrame, currentFrame));
+            }
+        }
+
+        private ReplayFrame convertFrame(LegacyReplayFrame currentFrame, ReplayFrame lastFrame)
+        {
+            var convertible = currentRuleset.CreateConvertibleReplayFrame();
+            if (convertible == null)
+                throw new InvalidOperationException($&quot;Legacy replay cannot be converted for the ruleset: {currentRuleset.Description}&quot;);
+
+            convertible.FromLegacy(currentFrame, currentBeatmap, lastFrame);
+
+            var frame = (ReplayFrame)convertible;
+            frame.Time = currentFrame.Time;
+
+            return frame;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the &lt;see cref=&quot;Ruleset&quot;/&gt; for a specific id.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;rulesetId&quot;&gt;The id.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Ruleset&quot;/&gt;.&lt;/returns&gt;
+        protected abstract Ruleset GetRuleset(int rulesetId);
+
+        /// &lt;summary&gt;
+        /// Retrieves the &lt;see cref=&quot;WorkingBeatmap&quot;/&gt; corresponding to an MD5 hash.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;md5Hash&quot;&gt;The MD5 hash.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;WorkingBeatmap&quot;/&gt;.&lt;/returns&gt;
+        protected abstract WorkingBeatmap GetBeatmap(string md5Hash);
+
+        public class BeatmapNotFoundException : Exception
+        {
+            public string Hash { get; }
+
+            public BeatmapNotFoundException(string hash)
+            {
+                Hash = hash;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[38,9,38,10,1],[39,13,42,15,1],[45,13,45,43,1],[47,20,47,76,1],[48,13,48,14,1],[49,17,49,60,1],[50,17,50,88,1],[52,17,52,45,1],[54,17,54,46,1],[56,17,56,92,1],[61,17,61,87,1],[63,17,63,54,1],[65,17,65,58,1],[67,17,67,59,1],[68,21,68,69,0],[70,17,70,77,1],[73,17,73,33,1],[75,17,75,56,1],[76,17,76,56,1],[77,17,77,55,1],[78,17,78,57,1],[79,17,79,57,1],[80,17,80,57,1],[82,17,82,55,1],[83,17,83,54,1],[86,17,86,34,1],[88,17,88,109,1],[91,17,91,70,1],[92,21,92,110,1],[94,17,94,112,1],[95,17,95,68,1],[98,17,98,122,1],[101,17,101,33,1],[103,17,103,52,1],[105,17,105,62,1],[107,17,107,41,1],[108,21,108,63,1],[109,22,109,46,1],[110,21,110,63,1],[112,17,112,51,1],[113,21,113,51,1],[115,17,115,51,1],[117,17,117,41,1],[118,21,118,62,1],[120,17,120,50,1],[121,21,121,68,1],[121,68,121,106,1],[121,106,121,108,1],[123,17,123,53,1],[124,17,124,18,1],[125,21,126,21,1],[126,21,126,22,1],[126,22,127,25,1],[127,25,127,140,1],[127,140,129,25,1],[129,25,129,57,1],[129,57,131,25,1],[131,25,131,71,1],[131,71,132,25,1],[132,25,132,75,1],[132,75,133,25,1],[133,25,133,89,1],[133,89,134,25,1],[134,25,134,75,1],[134,75,134,98,0],[134,98,134,110,1],[134,110,135,25,1],[135,25,135,81,1],[135,81,136,25,1],[136,25,136,54,1],[136,54,137,25,1],[137,25,137,50,1],[137,50,138,29,1],[138,29,138,83,0],[138,83,140,25,1],[140,25,140,91,1],[140,91,141,29,1],[141,29,141,91,1],[141,91,143,29,1],[143,29,143,76,0],[143,76,145,25,1],[145,25,145,75,1],[145,75,146,21,1],[146,21,146,22,1],[146,22,146,24,1],[147,17,147,18,1],[148,13,148,14,1],[150,13,150,72,1],[152,13,152,47,1],[153,17,153,79,1],[155,13,155,100,1],[157,13,157,37,1],[158,17,158,58,1],[162,13,162,70,1],[163,13,163,75,1],[165,13,165,26,1],[166,9,166,10,1],[169,9,169,10,1],[170,20,170,63,1],[171,13,171,14,1],[172,17,172,49,1],[173,17,173,64,1],[174,21,174,71,0],[176,17,176,34,1],[178,22,178,31,1],[178,33,178,38,1],[178,40,178,43,1],[179,17,179,18,1],[180,21,180,55,1],[181,21,181,31,1],[182,25,182,63,0],[184,21,184,57,1],[185,17,185,18,1],[187,17,187,87,1],[189,24,189,105,1],[190,24,190,59,1],[191,21,191,38,1],[192,13,192,14,1],[193,9,193,10,1],[201,9,201,10,1],[202,13,202,53,1],[204,13,204,55,1],[204,55,204,64,1],[204,64,204,76,1],[205,17,205,24,1],[207,13,207,50,1],[208,13,208,60,1],[209,13,209,73,1],[212,13,213,68,1],[213,68,213,76,1],[213,76,214,67,1],[214,67,214,78,1],[214,78,214,124,1],[216,13,216,20,1],[216,22,216,51,1],[216,52,216,54,1],[216,55,216,71,1],[217,13,217,14,1],[218,17,218,32,1],[222,25,222,149,1],[223,25,223,31,1],[227,25,227,149,1],[228,25,228,31,1],[234,25,234,31,1],[237,25,237,133,1],[238,25,238,31,1],[240,13,240,14,1],[242,13,242,38,1],[243,17,243,24,1],[248,13,248,89,1],[249,13,249,63,1],[251,13,251,79,1],[251,79,251,101,1],[251,101,251,117,1],[251,117,251,126,1],[251,126,251,152,1],[252,13,252,62,1],[253,17,253,119,1],[255,9,255,10,1],[258,9,258,10,1],[259,13,259,53,1],[261,13,261,58,1],[262,13,262,150,1],[263,13,263,87,1],[265,13,265,94,1],[266,9,266,10,1],[269,9,269,10,1],[270,13,270,43,1],[271,13,271,62,1],[273,13,273,61,1],[275,18,275,27,1],[275,29,275,46,1],[275,48,275,51,1],[276,13,276,14,1],[277,17,277,55,1],[279,17,279,38,1],[280,21,280,30,0],[282,17,282,42,1],[283,17,283,18,1],[285,21,285,30,1],[289,17,289,128,1],[305,17,305,55,1],[306,21,306,74,0],[308,17,308,79,1],[309,17,309,91,1],[311,17,311,34,1],[313,17,316,69,1],[317,13,317,14,1],[320,13,320,88,1],[321,13,321,14,1],[322,17,322,61,1],[323,17,323,42,1],[324,13,324,14,1],[327,13,327,88,1],[328,17,328,84,1],[333,13,333,95,1],[334,17,334,42,1],[336,13,336,95,1],[337,17,337,42,1],[339,13,339,45,1],[341,13,341,20,1],[341,22,341,37,1],[341,38,341,40,1],[341,41,341,53,1],[342,13,342,14,1],[347,17,347,82,1],[348,21,348,30,1],[350,17,350,91,1],[351,13,351,14,1],[352,9,352,10,1],[355,9,355,10,1],[356,13,356,77,1],[357,13,357,37,1],[358,17,358,137,0],[360,13,360,77,1],[362,13,362,50,1],[363,13,363,44,1],[365,13,365,26,1],[366,9,366,10,1],[384,34,384,38,0],[386,13,386,57,0],[387,13,387,14,0],[388,17,388,29,0],[389,13,389,14,0]]);
+    </script>
+  </body>
+</html>

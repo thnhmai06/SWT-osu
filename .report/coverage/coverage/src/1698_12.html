@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/SquareGraph.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using JetBrains.Annotations;
+using osu.Framework;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osuTK;
+using osuTK.Graphics;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Allocation;
+using osu.Framework.Layout;
+using osu.Framework.Threading;
+
+namespace osu.Game.Screens.Play
+{
+    public partial class SquareGraph : Container
+    {
+        private BufferedContainer&lt;Column&gt; columns;
+
+        public int ColumnCount =&gt; columns?.Children.Count ?? 0;
+
+        private int progress;
+
+        public int Progress
+        {
+            get =&gt; progress;
+            set
+            {
+                if (value == progress) return;
+
+                progress = value;
+                redrawProgress();
+            }
+        }
+
+        private float[] calculatedValues = Array.Empty&lt;float&gt;(); // values but adjusted to fit the amount of columns
+
+        private int[] values;
+
+        public int[] Values
+        {
+            get =&gt; values;
+            set
+            {
+                if (value == values) return;
+
+                values = value;
+                layout.Invalidate();
+            }
+        }
+
+        private Color4 fillColour;
+
+        public Color4 FillColour
+        {
+            get =&gt; fillColour;
+            set
+            {
+                if (value == fillColour) return;
+
+                fillColour = value;
+                redrawFilled();
+            }
+        }
+
+        private ScheduledDelegate scheduledCreate;
+
+        private readonly LayoutValue layout = new LayoutValue(Invalidation.DrawSize | Invalidation.DrawInfo);
+
+        public SquareGraph()
+        {
+            AddLayout(layout);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!layout.IsValid)
+            {
+                columns?.FadeOut(500, Easing.OutQuint).Expire();
+
+                scheduledCreate?.Cancel();
+                scheduledCreate = Scheduler.AddDelayed(RecreateGraph, 500);
+
+                layout.Validate();
+            }
+        }
+
+        private CancellationTokenSource cts;
+
+        /// &lt;summary&gt;
+        /// Recreates the entire graph.
+        /// &lt;/summary&gt;
+        protected virtual void RecreateGraph()
+        {
+            var newColumns = new BufferedContainer&lt;Column&gt;(cachedFrameBuffer: true)
+            {
+                RedrawOnScale = false,
+                RelativeSizeAxes = Axes.Both,
+            };
+
+            for (float x = 0; x &lt; DrawWidth; x += Column.WIDTH)
+            {
+                newColumns.Add(new Column(DrawHeight)
+                {
+                    LitColour = fillColour,
+                    Anchor = Anchor.BottomLeft,
+                    Origin = Anchor.BottomLeft,
+                    Position = new Vector2(x, 0),
+                    State = ColumnState.Dimmed,
+                });
+            }
+
+            cts?.Cancel();
+
+            LoadComponentAsync(newColumns, c =&gt;
+            {
+                Child = columns = c;
+                columns.FadeInFromZero(500, Easing.OutQuint);
+
+                recalculateValues();
+                redrawFilled();
+                redrawProgress();
+            }, (cts = new CancellationTokenSource()).Token);
+        }
+
+        /// &lt;summary&gt;
+        /// Redraws all the columns to match their lit/dimmed state.
+        /// &lt;/summary&gt;
+        private void redrawProgress()
+        {
+            for (int i = 0; i &lt; ColumnCount; i++)
+                columns[i].State = i &lt;= progress ? ColumnState.Lit : ColumnState.Dimmed;
+            columns?.ForceRedraw();
+        }
+
+        /// &lt;summary&gt;
+        /// Redraws the filled amount of all the columns.
+        /// &lt;/summary&gt;
+        private void redrawFilled()
+        {
+            for (int i = 0; i &lt; ColumnCount; i++)
+                columns[i].Filled = calculatedValues.ElementAtOrDefault(i);
+            columns?.ForceRedraw();
+        }
+
+        /// &lt;summary&gt;
+        /// Takes &lt;see cref=&quot;Values&quot;/&gt; and adjusts it to fit the amount of columns.
+        /// &lt;/summary&gt;
+        private void recalculateValues()
+        {
+            var newValues = new List&lt;float&gt;();
+
+            if (values == null)
+            {
+                for (float i = 0; i &lt; ColumnCount; i++)
+                    newValues.Add(0);
+
+                return;
+            }
+
+            int max = values.Max();
+
+            float step = values.Length / (float)ColumnCount;
+
+            for (float i = 0; i &lt; values.Length; i += step)
+            {
+                newValues.Add((float)values[(int)i] / max);
+            }
+
+            calculatedValues = newValues.ToArray();
+        }
+
+        public partial class Column : Container, IStateful&lt;ColumnState&gt;
+        {
+            protected readonly Color4 EmptyColour = Color4.White.Opacity(20);
+            public Color4 LitColour = Color4.LightBlue;
+            protected readonly Color4 DimmedColour = Color4.White.Opacity(140);
+
+            private float cubeCount =&gt; DrawHeight / WIDTH;
+            private const float cube_size = 4;
+            private const float padding = 2;
+            public const float WIDTH = cube_size + padding;
+
+            [CanBeNull]
+            public event Action&lt;ColumnState&gt; StateChanged;
+
+            private readonly List&lt;Box&gt; drawableRows = new List&lt;Box&gt;();
+
+            private float filled;
+
+            public float Filled
+            {
+                get =&gt; filled;
+                set
+                {
+                    if (value == filled) return;
+
+                    filled = value;
+                    fillActive();
+                }
+            }
+
+            private ColumnState state;
+
+            public ColumnState State
+            {
+                get =&gt; state;
+                set
+                {
+                    if (value == state) return;
+
+                    state = value;
+                    if (IsLoaded)
+                        fillActive();
+
+                    StateChanged?.Invoke(State);
+                }
+            }
+
+            public Column(float height)
+            {
+                Width = WIDTH;
+                Height = height;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                drawableRows.AddRange(Enumerable.Range(0, (int)cubeCount).Select(r =&gt; new Box
+                {
+                    Size = new Vector2(cube_size),
+                    Position = new Vector2(0, r * WIDTH + padding),
+                }));
+
+                Children = drawableRows;
+
+                // Reverse drawableRows so when iterating through them they start at the bottom
+                drawableRows.Reverse();
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+                fillActive();
+            }
+
+            private void fillActive()
+            {
+                Color4 colour = State == ColumnState.Lit ? LitColour : DimmedColour;
+
+                int countFilled = (int)Math.Clamp(filled * drawableRows.Count, 0, drawableRows.Count);
+
+                for (int i = 0; i &lt; drawableRows.Count; i++)
+                    drawableRows[i].Colour = i &lt; countFilled ? colour : EmptyColour;
+            }
+        }
+
+        public enum ColumnState
+        {
+            Lit,
+            Dimmed
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,35,28,63,0],[34,20,34,28,0],[36,13,36,14,0],[37,17,37,39,0],[37,40,37,47,0],[39,17,39,34,0],[40,17,40,34,0],[41,13,41,14,0],[44,9,44,65,0],[50,20,50,26,0],[52,13,52,14,0],[53,17,53,37,0],[53,38,53,45,0],[55,17,55,32,0],[56,17,56,37,0],[57,13,57,14,0],[64,20,64,30,0],[66,13,66,14,0],[67,17,67,41,0],[67,42,67,49,0],[69,17,69,36,0],[70,17,70,32,0],[71,13,71,14,0],[76,9,76,110,0],[78,9,78,29,0],[79,9,79,10,0],[80,13,80,31,0],[81,9,81,10,0],[84,9,84,10,0],[85,13,85,27,0],[87,13,87,33,0],[88,13,88,14,0],[89,17,89,65,0],[91,17,91,43,0],[92,17,92,76,0],[94,17,94,35,0],[95,13,95,14,0],[96,9,96,10,0],[104,9,104,10,0],[105,13,109,15,0],[111,18,111,29,0],[111,31,111,44,0],[111,46,111,63,0],[112,13,112,14,0],[113,17,120,20,0],[121,13,121,14,0],[123,13,123,27,0],[125,13,126,13,0],[126,13,126,14,0],[126,14,127,17,0],[127,17,127,37,0],[127,37,128,17,0],[128,17,128,62,0],[128,62,130,17,0],[130,17,130,37,0],[130,37,131,17,0],[131,17,131,32,0],[131,32,132,17,0],[132,17,132,34,0],[132,34,133,13,0],[133,13,133,14,0],[133,14,133,61,0],[134,9,134,10,0],[140,9,140,10,0],[141,18,141,27,0],[141,29,141,44,0],[141,46,141,49,0],[142,17,142,89,0],[143,13,143,36,0],[144,9,144,10,0],[150,9,150,10,0],[151,18,151,27,0],[151,29,151,44,0],[151,46,151,49,0],[152,17,152,76,0],[153,13,153,36,0],[154,9,154,10,0],[160,9,160,10,0],[161,13,161,47,0],[163,13,163,32,0],[164,13,164,14,0],[165,22,165,33,0],[165,35,165,50,0],[165,52,165,55,0],[166,21,166,38,0],[168,17,168,24,0],[171,13,171,36,0],[173,13,173,61,0],[175,18,175,29,0],[175,31,175,48,0],[175,50,175,59,0],[176,13,176,14,0],[177,17,177,60,0],[178,13,178,14,0],[180,13,180,52,0],[181,9,181,10,0],[185,13,185,78,0],[186,13,186,56,0],[187,13,187,80,0],[189,40,189,58,0],[197,13,197,71,0],[203,24,203,30,0],[205,17,205,18,0],[206,21,206,41,0],[206,42,206,49,0],[208,21,208,36,0],[209,21,209,34,0],[210,17,210,18,0],[217,24,217,29,0],[219,17,219,18,0],[220,21,220,40,0],[220,41,220,48,0],[222,21,222,35,0],[223,21,223,34,0],[224,25,224,38,0],[226,21,226,49,0],[227,17,227,18,0],[230,13,230,40,0],[231,13,231,14,0],[232,17,232,31,0],[233,17,233,33,0],[234,13,234,14,0],[238,13,238,14,0],[239,17,239,87,0],[239,87,243,18,0],[243,18,243,21,0],[245,17,245,41,0],[248,17,248,40,0],[249,13,249,14,0],[252,13,252,14,0],[253,17,253,37,0],[254,17,254,30,0],[255,13,255,14,0],[258,13,258,14,0],[259,17,259,85,0],[261,17,261,103,0],[263,22,263,31,0],[263,33,263,55,0],[263,57,263,60,0],[264,21,264,85,0],[265,13,265,14,0]]);
+    </script>
+  </body>
+</html>

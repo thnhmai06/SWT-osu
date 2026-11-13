@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Chat/MessageFormatter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Web;
+using osu.Framework.Development;
+using osu.Framework.Logging;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets.Edit;
+
+namespace osu.Game.Online.Chat
+{
+    public static class MessageFormatter
+    {
+        // IMPORTANT: this has to be defined and initialised to a non-zero value BEFORE all usages below.
+        // failing to do so will cause the `Regex` constructor invocations in initialisers below to throw.
+        private static readonly TimeSpan regex_timeout = DebugUtils.IsNUnitRunning
+            ? TimeSpan.FromSeconds(1)
+            : TimeSpan.FromMilliseconds(5);
+
+        // [[Performance Points]] -&gt; wiki:Performance Points (https://osu.ppy.sh/wiki/Performance_Points)
+        private static readonly Regex wiki_regex = new Regex(@&quot;\[\[(?&lt;text&gt;[^\]]+)\]\]&quot;, RegexOptions.None, regex_timeout);
+
+        // (test)[https://osu.ppy.sh/b/1234] -&gt; test (https://osu.ppy.sh/b/1234)
+        private static readonly Regex old_link_regex =
+            new Regex(@&quot;\((?&lt;text&gt;(((?&lt;=\\)[\(\)])|[^\(\)])*(((?&lt;open&gt;\()(((?&lt;=\\)[\(\)])|[^\(\)])*)+((?&lt;close-open&gt;\))(((?&lt;=\\)[\(\)])|[^\(\)])*)+)*(?(open)(?!)))\)\[(?&lt;url&gt;[a-z]+://[^ ]+)\]&quot;,
+                RegexOptions.None, regex_timeout);
+
+        // [https://osu.ppy.sh/b/1234 Beatmap [Hard] (poop)] -&gt; Beatmap [hard] (poop) (https://osu.ppy.sh/b/1234)
+        private static readonly Regex new_link_regex =
+            new Regex(@&quot;\[(?&lt;url&gt;[a-z]+://[^ ]+) (?&lt;text&gt;(((?&lt;=\\)[\[\]])|[^\[\]])*(((?&lt;open&gt;\[)(((?&lt;=\\)[\[\]])|[^\[\]])*)+((?&lt;close-open&gt;\])(((?&lt;=\\)[\[\]])|[^\[\]])*)+)*(?(open)(?!)))\]&quot;,
+                RegexOptions.None, regex_timeout);
+
+        // [test](https://osu.ppy.sh/b/1234) -&gt; test (https://osu.ppy.sh/b/1234) aka correct markdown format
+        private static readonly Regex markdown_link_regex =
+            new Regex(
+                @&quot;\[(?&lt;text&gt;(((?&lt;=\\)[\[\]])|[^\[\]])*(((?&lt;open&gt;\[)(((?&lt;=\\)[\[\]])|[^\[\]])*)+((?&lt;close-open&gt;\])(((?&lt;=\\)[\[\]])|[^\[\]])*)+)*(?(open)(?!)))\]\((?&lt;url&gt;[a-z]+://[^ ]+)(\s+(?&lt;title&gt;&quot;&quot;([^&quot;&quot;]|(?&lt;=\\)&quot;&quot;)*&quot;&quot;))?\)&quot;,
+                RegexOptions.None, regex_timeout);
+
+        // advanced, RFC-compatible regular expression that matches any possible URL, *but* allows certain invalid characters that are widely used
+        // This is in the format (&lt;required&gt;, [optional]):
+        //      http[s]://&lt;domain&gt;.&lt;tld&gt;[:port][/path][?query][#fragment]
+        private static readonly Regex advanced_link_regex = new Regex(
+            // protocol
+            @&quot;(?&lt;link&gt;(https?|osu(mp)?):\/\/&quot; +
+            // domain + tld
+            @&quot;(?&lt;domain&gt;(?:[a-z0-9]\.|[a-z0-9][a-z0-9-]*[a-z0-9]\.)*[a-z0-9-]*[a-z0-9]&quot; +
+            // port (optional)
+            @&quot;(?::\d+)?)&quot; +
+            // path (optional)
+            @&quot;(?&lt;path&gt;(?:(?:\/+(?:[a-z0-9$_\.\+!\*\&#39;,;:\(\)@&amp;~=-]|%[0-9a-f]{2})*)*&quot; +
+            // query (optional)
+            @&quot;(?:\?(?:[a-z0-9$_\+!\*\&#39;,;:\(\)@&amp;=\/~-]|%[0-9a-f]{2})*)?)?&quot; +
+            // fragment (optional)
+            @&quot;(?:#(?:[a-z0-9$_\+!\*\&#39;,;:\(\)@&amp;=\/~-]|%[0-9a-f]{2})*)?)?)&quot;,
+            RegexOptions.IgnoreCase, regex_timeout);
+
+        // #osu
+        private static readonly Regex channel_regex = new Regex(@&quot;(#[a-zA-Z]+[a-zA-Z0-9]+)&quot;, RegexOptions.None, regex_timeout);
+
+        // Unicode emojis
+        private static readonly Regex emoji_regex = new Regex(@&quot;(\uD83D[\uDC00-\uDE4F])&quot;, RegexOptions.None, regex_timeout);
+
+        /// &lt;summary&gt;
+        /// The root URL for the website, used for chat link matching.
+        /// &lt;/summary&gt;
+        public static string WebsiteRootUrl
+        {
+            get =&gt; websiteRootUrl;
+            set =&gt; websiteRootUrl = value
+                                    .Trim(&#39;/&#39;) // trim potential trailing slash/
+                                    .Split(&#39;/&#39;).Last(); // only keep domain name, ignoring protocol.
+        }
+
+        private static string websiteRootUrl = &quot;osu.ppy.sh&quot;;
+
+        private static void handleMatches(Regex regex, string display, string link, MessageFormatterResult result, int startIndex = 0, LinkAction? linkActionOverride = null,
+                                          char[]? escapeChars = null)
+        {
+            int captureOffset = 0;
+
+            try
+            {
+                MatchCollection matches = regex.Matches(result.Text, startIndex);
+
+                foreach (Match m in matches)
+                {
+                    int index = m.Index - captureOffset;
+
+                    string displayText = string.Format(display,
+                        m.Groups[0],
+                        m.Groups[&quot;text&quot;].Value,
+                        m.Groups[&quot;url&quot;].Value).Trim();
+
+                    string linkText = string.Format(link,
+                        m.Groups[0],
+                        m.Groups[&quot;text&quot;].Value,
+                        m.Groups[&quot;url&quot;].Value).Trim();
+
+                    if (displayText.Length == 0 || linkText.Length == 0) continue;
+
+                    // Remove backslash escapes in front of the characters provided in escapeChars
+                    if (escapeChars != null)
+                        displayText = escapeChars.Aggregate(displayText, (current, c) =&gt; current.Replace($&quot;\\{c}&quot;, c.ToString()));
+
+                    // Check for overlapping links
+                    if (!result.Links.Exists(l =&gt; l.Overlaps(index, m.Length)))
+                    {
+                        result.Text = result.Text.Remove(index, m.Length).Insert(index, displayText);
+
+                        // since we just changed the line display text, offset any already processed links.
+                        result.Links.ForEach(l =&gt; l.Index -= l.Index &gt; index ? m.Length - displayText.Length : 0);
+
+                        var details = GetLinkDetails(linkText);
+                        result.Links.Add(new Link(linkText, index, displayText.Length, linkActionOverride ?? details.Action, details.Argument));
+
+                        // adjust the offset for processing the current matches group.
+                        captureOffset += m.Length - displayText.Length;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Log($&quot;Failed to parse chat message ({e.Message}). Message content follows:&quot;);
+                Logger.Log($&quot;\&quot;{result.Text}\&quot;&quot;);
+            }
+        }
+
+        private static void handleAdvanced(Regex regex, MessageFormatterResult result, int startIndex = 0)
+        {
+            foreach (Match m in regex.Matches(result.Text, startIndex))
+            {
+                int index = m.Index;
+                string linkText = m.Groups[&quot;link&quot;].Value;
+                int indexLength = linkText.Length;
+
+                var details = GetLinkDetails(linkText);
+                var link = new Link(linkText, index, indexLength, details.Action, details.Argument);
+
+                // sometimes an already-processed formatted link can reduce to a simple URL, too
+                // (example: [mean example - https://osu.ppy.sh](https://osu.ppy.sh))
+                // therefore we need to check if any of the pre-existing links contains the raw one we found
+                if (result.Links.All(existingLink =&gt; !existingLink.Overlaps(link)))
+                    result.Links.Add(link);
+            }
+        }
+
+        public static LinkDetails GetLinkDetails(string url)
+        {
+            string[] args = url.Split(&#39;/&#39;, StringSplitOptions.RemoveEmptyEntries);
+            args[0] = args[0].TrimEnd(&#39;:&#39;);
+
+            switch (args[0])
+            {
+                case @&quot;http&quot;:
+                case @&quot;https&quot;:
+                    // length &gt; 3 since all these links need another argument to work
+                    if (args.Length &gt; 3 &amp;&amp; args[1].EndsWith(WebsiteRootUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string mainArg = args[3];
+
+                        switch (args[2])
+                        {
+                            // old site only
+                            case @&quot;b&quot;:
+                            case @&quot;beatmaps&quot;:
+                            {
+                                string trimmed = mainArg.Split(&#39;?&#39;).First();
+                                if (int.TryParse(trimmed, out int id))
+                                    return new LinkDetails(LinkAction.OpenBeatmap, id.ToString());
+
+                                break;
+                            }
+
+                            case @&quot;s&quot;:
+                            case @&quot;beatmapsets&quot;:
+                            case @&quot;d&quot;:
+                            {
+                                if (mainArg == @&quot;discussions&quot;)
+                                    // handle discussion links externally for now
+                                    return new LinkDetails(LinkAction.External, url);
+
+                                if (args.Length &gt; 4 &amp;&amp; int.TryParse(args[4], out int id))
+                                    // https://osu.ppy.sh/beatmapsets/1154158#osu/2768184
+                                    return new LinkDetails(LinkAction.OpenBeatmap, id.ToString());
+
+                                // https://osu.ppy.sh/beatmapsets/1154158#whatever
+                                string trimmed = mainArg.Split(&#39;#&#39;).First();
+                                if (int.TryParse(trimmed, out id))
+                                    return new LinkDetails(LinkAction.OpenBeatmapSet, id.ToString());
+
+                                break;
+                            }
+
+                            case @&quot;u&quot;:
+                            case @&quot;users&quot;:
+                                return getUserLink(mainArg);
+
+                            case @&quot;wiki&quot;:
+                                return new LinkDetails(LinkAction.OpenWiki, string.Join(&#39;/&#39;, args.Skip(3)));
+
+                            case @&quot;home&quot;:
+                                if (mainArg != @&quot;changelog&quot;)
+                                    // handle link other than changelog as external for now
+                                    return new LinkDetails(LinkAction.External, url);
+
+                                switch (args.Length)
+                                {
+                                    case 4:
+                                        // https://osu.ppy.sh/home/changelog
+                                        return new LinkDetails(LinkAction.OpenChangelog, string.Empty);
+
+                                    case 6:
+                                        // https://osu.ppy.sh/home/changelog/lazer/2021.1006
+                                        return new LinkDetails(LinkAction.OpenChangelog, $&quot;{args[4]}/{args[5]}&quot;);
+                                }
+
+                                break;
+
+                            case @&quot;multiplayer&quot;:
+                                if (mainArg != @&quot;rooms&quot;)
+                                    return new LinkDetails(LinkAction.External, url);
+
+                                if (args.Length == 5)
+                                {
+                                    // https://osu.ppy.sh/multiplayer/rooms/{id}
+                                    // route used for both multiplayer and playlists
+                                    return new LinkDetails(LinkAction.JoinRoom, args[4]);
+                                }
+
+                                break;
+                        }
+                    }
+
+                    break;
+
+                case @&quot;osu&quot;:
+                    // every internal link also needs some kind of argument
+                    if (args.Length &lt; 3)
+                        break;
+
+                    LinkAction linkType;
+
+                    switch (args[1])
+                    {
+                        case @&quot;chan&quot;:
+                            linkType = LinkAction.OpenChannel;
+                            break;
+
+                        case @&quot;edit&quot;:
+                            linkType = LinkAction.OpenEditorTimestamp;
+                            break;
+
+                        case @&quot;b&quot;:
+                            linkType = LinkAction.OpenBeatmap;
+                            break;
+
+                        case @&quot;s&quot;:
+                        case @&quot;dl&quot;:
+                            linkType = LinkAction.OpenBeatmapSet;
+                            break;
+
+                        case @&quot;spectate&quot;:
+                            linkType = LinkAction.Spectate;
+                            break;
+
+                        case @&quot;u&quot;:
+                            return getUserLink(args[2]);
+
+                        case @&quot;room&quot;:
+                            linkType = LinkAction.JoinRoom;
+                            break;
+
+                        default:
+                            return new LinkDetails(LinkAction.External, url);
+                    }
+
+                    return new LinkDetails(linkType, HttpUtility.UrlDecode(args[2]));
+            }
+
+            return new LinkDetails(LinkAction.External, url);
+        }
+
+        private static LinkDetails getUserLink(string argument)
+        {
+            if (int.TryParse(argument, out int userId))
+                return new LinkDetails(LinkAction.OpenUserProfile, new APIUser { Id = userId });
+
+            return new LinkDetails(LinkAction.OpenUserProfile, new APIUser { Username = argument });
+        }
+
+        private static MessageFormatterResult format(string toFormat, int startIndex = 0, int space = 3)
+        {
+            var result = new MessageFormatterResult(toFormat);
+
+            // handle the [link display] format
+            handleMatches(new_link_regex, &quot;{1}&quot;, &quot;{2}&quot;, result, startIndex, escapeChars: new[] { &#39;[&#39;, &#39;]&#39; });
+
+            // handle the standard markdown []() format
+            handleMatches(markdown_link_regex, &quot;{1}&quot;, &quot;{2}&quot;, result, startIndex, escapeChars: new[] { &#39;[&#39;, &#39;]&#39; });
+
+            // handle the ()[] link format
+            handleMatches(old_link_regex, &quot;{1}&quot;, &quot;{2}&quot;, result, startIndex, escapeChars: new[] { &#39;(&#39;, &#39;)&#39; });
+
+            // handle wiki links
+            handleMatches(wiki_regex, &quot;{1}&quot;, $&quot;https://{WebsiteRootUrl}/wiki/{{1}}&quot;, result, startIndex);
+
+            // handle bare links
+            handleAdvanced(advanced_link_regex, result, startIndex);
+
+            // handle editor times
+            handleMatches(EditorTimestampParser.TIME_REGEX_STRICT, &quot;{0}&quot;, $@&quot;{OsuGameBase.OSU_PROTOCOL}edit/{{0}}&quot;, result, startIndex, LinkAction.OpenEditorTimestamp);
+
+            // handle channels
+            handleMatches(channel_regex, &quot;{0}&quot;, $@&quot;{OsuGameBase.OSU_PROTOCOL}chan/{{0}}&quot;, result, startIndex, LinkAction.OpenChannel);
+
+            // see: https://github.com/ppy/osu/pull/24190
+            result.Text = Regex.Replace(result.Text, emoji_regex.ToString(), &quot;[emoji]&quot;);
+
+            return result;
+        }
+
+        public static Message FormatMessage(Message inputMessage)
+        {
+            var result = format(inputMessage.Content);
+
+            inputMessage.DisplayContent = result.Text;
+
+            // Sometimes, regex matches are not in order
+            result.Links.Sort();
+            inputMessage.Links = result.Links;
+            return inputMessage;
+        }
+
+        public static MessageFormatterResult FormatText(string text)
+        {
+            var result = format(text);
+
+            result.Links.Sort();
+
+            return result;
+        }
+
+        public class MessageFormatterResult
+        {
+            public List&lt;Link&gt; Links = new List&lt;Link&gt;();
+            public string Text;
+            public string OriginalText;
+
+            public MessageFormatterResult(string text)
+            {
+                OriginalText = Text = text;
+            }
+        }
+    }
+
+    public class LinkDetails
+    {
+        public readonly LinkAction Action;
+
+        public readonly object Argument;
+
+        public LinkDetails(LinkAction action, object argument)
+        {
+            Action = action;
+            Argument = argument;
+        }
+    }
+
+    public enum LinkAction
+    {
+        External,
+        OpenBeatmap,
+        OpenBeatmapSet,
+        OpenChannel,
+        OpenEditorTimestamp,
+        JoinRoom,
+        Spectate,
+        OpenUserProfile,
+        SearchBeatmapSet,
+        OpenWiki,
+        Custom,
+        OpenChangelog,
+        FilterBeatmapSetGenre,
+        FilterBeatmapSetLanguage,
+    }
+
+    public class Link : IComparable&lt;Link&gt;
+    {
+        public string Url;
+        public int Index;
+        public int Length;
+        public LinkAction Action;
+        public object Argument;
+
+        public Link(string url, int startIndex, int length, LinkAction action, object argument)
+        {
+            Url = url;
+            Index = startIndex;
+            Length = length;
+            Action = action;
+            Argument = argument;
+        }
+
+        public bool Overlaps(Link otherLink) =&gt; Overlaps(otherLink.Index, otherLink.Length);
+
+        public bool Overlaps(int otherIndex, int otherLength) =&gt; Index &lt; otherIndex + otherLength &amp;&amp; otherIndex &lt; Index + Length;
+
+        public int CompareTo(Link? otherLink) =&gt; Index &gt; otherLink?.Index ? 1 : -1;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,22,44,0],[25,9,25,124,0],[28,9,30,51,0],[33,9,35,51,0],[38,9,41,51,0],[46,9,59,53,0],[62,9,62,128,0],[65,9,65,125,0],[72,20,72,34,0],[73,20,75,55,0],[78,9,78,61,0],[82,9,82,10,0],[83,13,83,35,0],[86,13,86,14,0],[87,17,87,82,0],[89,17,89,24,0],[89,26,89,33,0],[89,34,89,36,0],[89,37,89,44,0],[90,17,90,18,0],[91,21,91,57,0],[93,21,96,55,0],[98,21,101,55,0],[103,21,103,73,0],[103,74,103,83,0],[106,21,106,45,0],[107,25,107,90,0],[107,90,107,129,0],[107,129,107,131,0],[110,21,110,51,0],[110,51,110,78,0],[110,78,110,80,0],[111,21,111,22,0],[112,25,112,102,0],[115,25,115,51,0],[115,51,115,113,0],[115,113,115,115,0],[117,25,117,64,0],[118,25,118,145,0],[121,25,121,72,0],[122,21,122,22,0],[123,17,123,18,0],[124,13,124,14,0],[125,13,125,32,0],[126,13,126,14,0],[127,17,127,101,0],[128,17,128,50,0],[129,13,129,14,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,20,0],[134,22,134,29,0],[134,30,134,32,0],[134,33,134,71,0],[135,13,135,14,0],[136,17,136,37,0],[137,17,137,58,0],[138,17,138,51,0],[140,17,140,56,0],[141,17,141,101,0],[146,17,146,54,0],[146,54,146,82,0],[146,82,146,84,0],[147,21,147,44,0],[148,13,148,14,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,153,83,0],[154,13,154,44,0],[156,13,156,29,0],[161,21,161,113,0],[162,21,162,22,0],[163,25,163,50,0],[165,25,165,41,0],[170,29,170,30,0],[171,33,171,77,0],[172,33,172,71,0],[173,37,173,99,0],[175,33,175,39,0],[181,29,181,30,0],[182,33,182,63,0],[184,37,184,86,0],[186,33,186,90,0],[188,37,188,99,0],[191,33,191,77,0],[192,33,192,67,0],[193,37,193,102,0],[195,33,195,39,0],[200,33,200,61,0],[203,33,203,109,0],[206,33,206,61,0],[208,37,208,86,0],[210,33,210,53,0],[214,41,214,104,0],[218,41,218,114,0],[221,33,221,39,0],[224,33,224,57,0],[225,37,225,86,0],[227,33,227,54,0],[228,33,228,34,0],[231,37,231,90,0],[234,33,234,39,0],[236,21,236,22,0],[238,21,238,27,0],[242,21,242,41,0],[243,25,243,31,0],[247,21,247,37,0],[250,29,250,63,0],[251,29,251,35,0],[254,29,254,71,0],[255,29,255,35,0],[258,29,258,63,0],[259,29,259,35,0],[263,29,263,66,0],[264,29,264,35,0],[267,29,267,60,0],[268,29,268,35,0],[271,29,271,57,0],[274,29,274,60,0],[275,29,275,35,0],[278,29,278,78,0],[281,21,281,86,0],[284,13,284,62,0],[285,9,285,10,0],[288,9,288,10,0],[289,13,289,56,0],[290,17,290,97,0],[292,13,292,101,0],[293,9,293,10,0],[296,9,296,10,0],[297,13,297,63,0],[300,13,300,110,0],[303,13,303,115,0],[306,13,306,110,0],[309,13,309,106,0],[312,13,312,69,0],[315,13,315,169,0],[318,13,318,135,0],[321,13,321,89,0],[323,13,323,27,0],[324,9,324,10,0],[327,9,327,10,0],[328,13,328,55,0],[330,13,330,55,0],[333,13,333,33,0],[334,13,334,47,0],[335,13,335,33,0],[336,9,336,10,0],[339,9,339,10,0],[340,13,340,39,0],[342,13,342,33,0],[344,13,344,27,0],[345,9,345,10,0],[349,13,349,56,0],[353,13,353,55,0],[354,13,354,14,0],[355,17,355,44,0],[356,13,356,14,0],[366,9,366,63,0],[367,9,367,10,0],[368,13,368,29,0],[369,13,369,33,0],[370,9,370,10,0],[399,9,399,96,0],[400,9,400,10,0],[401,13,401,23,0],[402,13,402,32,0],[403,13,403,29,0],[404,13,404,29,0],[405,13,405,33,0],[406,9,406,10,0],[408,49,408,92,0],[410,66,410,129,0],[412,50,412,83,0]]);
+    </script>
+  </body>
+</html>

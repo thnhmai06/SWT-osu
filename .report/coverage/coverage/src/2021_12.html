@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Menu/IntroScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Screens;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Overlays.Volume;
+using osu.Game.Rulesets;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+using Realms;
+
+namespace osu.Game.Screens.Menu
+{
+    public abstract partial class IntroScreen : StartupScreen
+    {
+        /// &lt;summary&gt;
+        /// Whether we have loaded the menu previously.
+        /// &lt;/summary&gt;
+        public bool DidLoadMenu { get; private set; }
+
+        /// &lt;summary&gt;
+        /// A hash used to find the associated beatmap if already imported.
+        /// &lt;/summary&gt;
+        protected abstract string BeatmapHash { get; }
+
+        /// &lt;summary&gt;
+        /// A source file to use as an import source if the intro beatmap is not yet present.
+        /// Should be within the &quot;Tracks&quot; namespace of game resources.
+        /// &lt;/summary&gt;
+        protected abstract string BeatmapFile { get; }
+
+        protected IBindable&lt;bool&gt; MenuVoice { get; private set; }
+
+        protected IBindable&lt;bool&gt; MenuMusic { get; private set; }
+
+        private WorkingBeatmap initialBeatmap;
+
+        protected ITrack Track { get; private set; }
+
+        private const int exit_delay = 3000;
+
+        private SkinnableSound skinnableSeeya;
+        private ISample seeya;
+
+        protected virtual string SeeyaSampleName =&gt; &quot;Intro/seeya&quot;;
+
+        protected override bool PlayExitSound =&gt; false;
+
+        private LeasedBindable&lt;WorkingBeatmap&gt; beatmap;
+
+        private OsuScreen nextScreen;
+
+        [Resolved]
+        private AudioManager audio { get; set; }
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        [CanBeNull]
+        private readonly Func&lt;OsuScreen&gt; createNextScreen;
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;Track&quot;/&gt; is provided by osu! resources, rather than a user beatmap.
+        /// Only valid during or after &lt;see cref=&quot;LogoArriving&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected bool UsingThemedIntro { get; private set; }
+
+        protected override BackgroundScreen CreateBackground() =&gt; new BackgroundScreenDefault
+        {
+            Colour = Color4.Black
+        };
+
+        public override bool? AllowGlobalTrackControl =&gt; false;
+
+        protected IntroScreen([CanBeNull] Func&lt;MainMenu&gt; createNextScreen = null)
+        {
+            this.createNextScreen = createNextScreen;
+        }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config, Framework.Game game, RealmAccess realm, IAPIProvider api)
+        {
+            // prevent user from changing beatmap while the intro is still running.
+            beatmap = Beatmap.BeginLease(false);
+
+            MenuVoice = config.GetBindable&lt;bool&gt;(OsuSetting.MenuVoice);
+            MenuMusic = config.GetBindable&lt;bool&gt;(OsuSetting.MenuMusic);
+
+            if (api.LocalUser.Value.IsSupporter)
+                AddInternal(skinnableSeeya = new SkinnableSound(new SampleInfo(SeeyaSampleName)));
+            else
+                seeya = audio.Samples.Get(SeeyaSampleName);
+
+            // if the user has requested not to play theme music, we should attempt to find a random beatmap from their collection.
+            if (!MenuMusic.Value)
+            {
+                realm.Run(r =&gt;
+                {
+                    var usableBeatmapSets = r.All&lt;BeatmapSetInfo&gt;().Where(s =&gt; !s.DeletePending &amp;&amp; !s.Protected).AsRealmCollection();
+
+                    int setCount = usableBeatmapSets.Count;
+
+                    if (setCount &gt; 0)
+                    {
+                        var found = usableBeatmapSets[RNG.Next(0, setCount - 1)].Beatmaps.FirstOrDefault();
+
+                        if (found != null)
+                            initialBeatmap = beatmaps.GetWorkingBeatmap(found);
+                    }
+                });
+            }
+
+            // we generally want a song to be playing on startup, so use the intro music even if a user has specified not to if no other track is available.
+            if (initialBeatmap == null)
+            {
+                // Intro beatmaps are generally made using the osu! ruleset.
+                // It might not be present in test projects for other rulesets.
+                bool osuRulesetPresent = rulesets.GetRuleset(0) != null;
+
+                if (!loadThemedIntro() &amp;&amp; osuRulesetPresent)
+                {
+                    // if we detect that the theme track or beatmap is unavailable this is either first startup or things are in a bad state.
+                    // this could happen if a user has nuked their files store. for now, reimport to repair this.
+                    var import = beatmaps.Import(new ImportTask(game.Resources.GetStream($&quot;Tracks/{BeatmapFile}&quot;), BeatmapFile)).GetResultSafely();
+
+                    import?.PerformWrite(b =&gt; b.Protected = true);
+
+                    loadThemedIntro();
+                }
+            }
+
+            bool loadThemedIntro()
+            {
+                var setInfo = beatmaps.QueryBeatmapSet(b =&gt; b.Protected &amp;&amp; b.Hash == BeatmapHash);
+
+                if (setInfo == null)
+                    return false;
+
+                setInfo.PerformRead(s =&gt;
+                {
+                    if (s.Beatmaps.Count == 0)
+                        return;
+
+                    var working = beatmaps.GetWorkingBeatmap(s.Beatmaps.First());
+
+                    // Ensure files area actually present on disk.
+                    // This is to handle edge cases like users deleting files outside the game and breaking the world.
+                    if (!hasAllFiles(working))
+                        return;
+
+                    initialBeatmap = working;
+                });
+
+                return UsingThemedIntro = initialBeatmap != null;
+            }
+
+            AddInternal(new GlobalScrollAdjustsVolume());
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+            ensureEventuallyArrivingAtMenu();
+        }
+
+        [Resolved]
+        private INotificationOverlay notifications { get; set; }
+
+        private bool hasAllFiles(WorkingBeatmap working)
+        {
+            foreach (var f in working.BeatmapSetInfo.Files)
+            {
+                using (var str = working.GetStream(f.File.GetStoragePath()))
+                {
+                    if (str == null)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void ensureEventuallyArrivingAtMenu()
+        {
+            // This intends to handle the case where an intro may get stuck.
+            // Historically, this could happen if the host system&#39;s audio device is in a state it can&#39;t
+            // play audio, causing a clock to never elapse time and the intro to never end.
+            //
+            // This safety measure gives the user a chance to fix the problem from the settings menu.
+            Scheduler.AddDelayed(() =&gt;
+            {
+                if (DidLoadMenu)
+                    return;
+
+                PrepareMenuLoad();
+                LoadMenu();
+
+                if (!Debugger.IsAttached)
+                {
+                    notifications.Post(new SimpleErrorNotification
+                    {
+                        Text = NotificationsStrings.AudioPlaybackIssue
+                    });
+                }
+            }, 8000);
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            this.FadeIn(300);
+
+            ApplyToBackground(b =&gt; b.FadeColour(Color4.Black, 100));
+
+            double fadeOutTime = exit_delay;
+
+            var track = musicController.CurrentTrack;
+
+            // ensure the track doesn&#39;t change or loop as we are exiting.
+            track.Looping = false;
+            Beatmap.Disabled = true;
+
+            // we also handle the exit transition.
+            if (MenuVoice.Value)
+            {
+                if (skinnableSeeya != null)
+                {
+                    // resuming a screen (i.e. calling OnResume) happens before the screen itself becomes alive,
+                    // therefore skinnable samples may not be updated yet with the recently selected skin.
+                    // schedule after children to ensure skinnable samples have processed skin changes before playing.
+                    ScheduleAfterChildren(() =&gt; skinnableSeeya.Play());
+                }
+                else
+                    seeya.Play();
+
+                // if playing the outro voice, we have more time to have fun with the background track.
+                // initially fade to almost silent then ramp out over the remaining time.
+                const double initial_fade = 200;
+                track
+                    .VolumeTo(0.03f, initial_fade).Then()
+                    .VolumeTo(0, fadeOutTime - initial_fade, Easing.In);
+            }
+            else
+            {
+                fadeOutTime = 500;
+
+                // if outro voice is turned off, just do a simple fade out.
+                track.VolumeTo(0, fadeOutTime, Easing.Out);
+            }
+
+            //don&#39;t want to fade out completely else we will stop running updates.
+            Game.FadeTo(0.01f, fadeOutTime).OnComplete(_ =&gt; this.Exit());
+
+            base.OnResuming(e);
+        }
+
+        private bool backgroundFaded;
+
+        protected void FadeInBackground(float duration = 0)
+        {
+            ApplyToBackground(b =&gt; b.FadeColour(Color4.White, duration));
+            backgroundFaded = true;
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+            initialBeatmap = null;
+
+            if (!backgroundFaded)
+                FadeInBackground(200);
+        }
+
+        protected void StartTrack()
+        {
+            var drawableTrack = musicController.CurrentTrack;
+
+            if (!UsingThemedIntro)
+            {
+                initialBeatmap?.PrepareTrackForPreview(false, -2600);
+
+                drawableTrack.VolumeTo(0);
+                drawableTrack.Restart();
+                drawableTrack.VolumeTo(1, 2600, Easing.InCubic);
+            }
+            else
+            {
+                drawableTrack.Restart();
+            }
+        }
+
+        protected override void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            base.LogoArriving(logo, resuming);
+
+            logo.Colour = Color4.White;
+            logo.Triangles = false;
+            logo.Ripple = false;
+
+            if (!resuming)
+            {
+                // generally this can never be null
+                // an exception is running ruleset tests, where the osu! ruleset may not be present (causing importing the intro to fail).
+                if (initialBeatmap != null)
+                    beatmap.Value = initialBeatmap;
+                Track = beatmap.Value.Track;
+
+                // ensure the track starts at maximum volume
+                musicController.CurrentTrack.FinishTransforms();
+
+                logo.MoveTo(new Vector2(0.5f));
+                logo.ScaleTo(Vector2.One);
+                logo.Hide();
+            }
+            else
+            {
+                const int quick_appear = 350;
+                int initialMovementTime = logo.Alpha &gt; 0.2f ? quick_appear : 0;
+
+                logo.MoveTo(new Vector2(0.5f), initialMovementTime, Easing.OutQuint);
+
+                logo
+                    .ScaleTo(1, initialMovementTime, Easing.OutQuint)
+                    .FadeIn(quick_appear, Easing.OutQuint)
+                    .Then()
+                    .RotateTo(20, exit_delay * 1.5f)
+                    .FadeOut(exit_delay);
+            }
+        }
+
+        protected void PrepareMenuLoad()
+        {
+            if (nextScreen != null)
+                return;
+
+            nextScreen = createNextScreen?.Invoke();
+
+            if (nextScreen != null)
+                LoadComponentAsync(nextScreen);
+        }
+
+        protected void LoadMenu()
+        {
+            if (DidLoadMenu)
+                return;
+
+            beatmap.Return();
+
+            DidLoadMenu = true;
+            if (nextScreen != null)
+                this.Push(nextScreen);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[43,35,43,39,0],[43,40,43,52,0],[56,47,56,51,0],[56,52,56,64,0],[58,47,58,51,0],[58,52,58,64,0],[62,34,62,38,0],[62,39,62,51,0],[69,53,69,66,0],[71,50,71,55,0],[78,38,78,42,0],[78,43,78,47,0],[81,51,81,55,0],[81,56,81,60,0],[87,41,87,45,0],[87,46,87,50,0],[93,43,93,47,0],[93,48,93,60,0],[95,67,98,10,0],[100,58,100,63,0],[102,9,102,82,0],[103,9,103,10,0],[104,13,104,54,0],[105,9,105,10,0],[108,43,108,47,0],[108,48,108,52,0],[112,9,112,10,0],[114,13,114,49,0],[116,13,116,72,0],[117,13,117,72,0],[119,13,119,49,0],[120,17,120,99,0],[122,17,122,60,0],[125,13,125,34,0],[126,13,126,14,0],[127,17,128,17,0],[128,17,128,18,0],[128,18,129,21,0],[129,21,129,134,0],[129,134,131,21,0],[131,21,131,60,0],[131,60,133,21,0],[133,21,133,38,0],[133,38,134,21,0],[134,21,134,22,0],[134,22,135,25,0],[135,25,135,108,0],[135,108,137,25,0],[137,25,137,43,0],[137,43,138,29,0],[138,29,138,80,0],[138,80,139,21,0],[139,21,139,22,0],[139,22,140,17,0],[140,17,140,18,0],[140,18,140,20,0],[141,13,141,14,0],[144,13,144,40,0],[145,13,145,14,0],[148,17,148,73,0],[150,17,150,61,0],[151,17,151,18,0],[154,21,154,148,0],[156,21,156,47,0],[156,47,156,65,0],[156,65,156,67,0],[158,21,158,39,0],[159,17,159,18,0],[160,13,160,14,0],[163,13,163,14,0],[164,17,164,99,0],[166,17,166,37,0],[167,21,167,34,0],[169,17,170,17,0],[170,17,170,18,0],[170,18,171,21,0],[171,21,171,47,0],[171,47,172,25,0],[172,25,172,32,0],[172,32,174,21,0],[174,21,174,82,0],[174,82,178,21,0],[178,21,178,47,0],[178,47,179,25,0],[179,25,179,32,0],[179,32,181,21,0],[181,21,181,46,0],[181,46,182,17,0],[182,17,182,18,0],[182,18,182,20,0],[184,17,184,66,0],[185,13,185,14,0],[187,13,187,58,0],[188,9,188,10,0],[191,9,191,10,0],[192,13,192,32,0],[193,13,193,46,0],[194,9,194,10,0],[197,54,197,58,0],[197,59,197,63,0],[200,9,200,10,0],[201,13,201,20,0],[201,22,201,27,0],[201,28,201,30,0],[201,31,201,59,0],[202,13,202,14,0],[203,24,203,76,0],[204,17,204,18,0],[205,21,205,37,0],[206,25,206,38,0],[207,17,207,18,0],[208,13,208,14,0],[210,13,210,25,0],[211,9,211,10,0],[214,9,214,10,0],[220,13,221,13,0],[221,13,221,14,0],[221,14,222,17,0],[222,17,222,33,0],[222,33,223,21,0],[223,21,223,28,0],[223,28,225,17,0],[225,17,225,35,0],[225,35,226,17,0],[226,17,226,28,0],[226,28,228,17,0],[228,17,228,42,0],[228,42,229,17,0],[229,17,229,18,0],[229,18,230,21,0],[230,21,233,24,0],[233,24,234,17,0],[234,17,234,18,0],[234,18,235,13,0],[235,13,235,14,0],[235,14,235,22,0],[236,9,236,10,0],[239,9,239,10,0],[240,13,240,30,0],[242,13,242,36,0],[242,36,242,67,0],[242,67,242,69,0],[244,13,244,45,0],[246,13,246,54,0],[249,13,249,35,0],[250,13,250,37,0],[253,13,253,33,0],[254,13,254,14,0],[255,17,255,44,0],[256,17,256,18,0],[260,21,260,49,0],[260,49,260,70,0],[260,70,260,72,0],[261,17,261,18,0],[263,21,263,34,0],[268,17,270,73,0],[271,13,271,14,0],[273,13,273,14,0],[274,17,274,35,0],[277,17,277,60,0],[278,13,278,14,0],[281,13,281,61,0],[281,61,281,72,0],[281,72,281,74,0],[283,13,283,32,0],[284,9,284,10,0],[289,9,289,10,0],[290,13,290,36,0],[290,36,290,72,0],[290,72,290,74,0],[291,13,291,36,0],[292,9,292,10,0],[295,9,295,10,0],[296,13,296,34,0],[297,13,297,35,0],[299,13,299,34,0],[300,17,300,39,0],[301,9,301,10,0],[304,9,304,10,0],[305,13,305,62,0],[307,13,307,35,0],[308,13,308,14,0],[309,17,309,70,0],[311,17,311,43,0],[312,17,312,41,0],[313,17,313,65,0],[314,13,314,14,0],[316,13,316,14,0],[317,17,317,41,0],[318,13,318,14,0],[319,9,319,10,0],[322,9,322,10,0],[323,13,323,47,0],[325,13,325,40,0],[326,13,326,36,0],[327,13,327,33,0],[329,13,329,27,0],[330,13,330,14,0],[333,17,333,44,0],[334,21,334,52,0],[335,17,335,45,0],[338,17,338,65,0],[340,17,340,48,0],[341,17,341,43,0],[342,17,342,29,0],[343,13,343,14,0],[345,13,345,14,0],[347,17,347,80,0],[349,17,349,86,0],[351,17,356,42,0],[357,13,357,14,0],[358,9,358,10,0],[361,9,361,10,0],[362,13,362,36,0],[363,17,363,24,0],[365,13,365,53,0],[367,13,367,36,0],[368,17,368,48,0],[369,9,369,10,0],[372,9,372,10,0],[373,13,373,29,0],[374,17,374,24,0],[376,13,376,30,0],[378,13,378,32,0],[379,13,379,36,0],[380,17,380,39,0],[381,9,381,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/UI/Catcher.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Buffers;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Rulesets.Catch.Judgements;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Catch.Objects.Drawables;
+using osu.Game.Rulesets.Catch.Skinning;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Catch.UI
+{
+    [Cached]
+    public partial class Catcher : SkinReloadableDrawable
+    {
+        /// &lt;summary&gt;
+        /// The size of the catcher at 1x scale.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is mainly used to compute catching range, the actual catcher size may differ based on skin implementation and sprite textures.
+        /// This is also equivalent to the &quot;catcherWidth&quot; property in osu-stable when the game field and beatmap difficulty are set to default values.
+        /// &lt;/remarks&gt;
+        /// &lt;seealso cref=&quot;CatchPlayfield.WIDTH&quot;/&gt;
+        /// &lt;seealso cref=&quot;CatchPlayfield.HEIGHT&quot;/&gt;
+        /// &lt;seealso cref=&quot;IBeatmapDifficultyInfo.DEFAULT_DIFFICULTY&quot;/&gt;
+        public const float BASE_SIZE = 106.75f;
+
+        /// &lt;summary&gt;
+        /// The width of the catcher which can receive fruit. Equivalent to &quot;catchMargin&quot; in osu-stable.
+        /// &lt;/summary&gt;
+        public const float ALLOWED_CATCH_RANGE = 0.8f;
+
+        /// &lt;summary&gt;
+        /// The default colour used to tint hyper-dash fruit, along with the moving catcher, its trail and after-image during a hyper-dash.
+        /// &lt;/summary&gt;
+        public static readonly Color4 DEFAULT_HYPER_DASH_COLOUR = Color4.Red;
+
+        /// &lt;summary&gt;
+        /// The duration between transitioning to hyper-dash state.
+        /// &lt;/summary&gt;
+        public const double HYPER_DASH_TRANSITION_DURATION = 180;
+
+        /// &lt;summary&gt;
+        /// Whether we are hyper-dashing or not.
+        /// &lt;/summary&gt;
+        public bool HyperDashing =&gt; hyperDashModifier != 1;
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;DrawablePalpableCatchHitObject&quot;/&gt; fruit should appear on the plate.
+        /// &lt;/summary&gt;
+        public bool CatchFruitOnPlate { get; set; } = true;
+
+        /// &lt;summary&gt;
+        /// The speed of the catcher when the catcher is dashing.
+        /// &lt;/summary&gt;
+        public const double BASE_DASH_SPEED = 1.0;
+
+        /// &lt;summary&gt;
+        /// The speed of the catcher when the catcher is not dashing.
+        /// &lt;/summary&gt;
+        public const double BASE_WALK_SPEED = 0.5;
+
+        /// &lt;summary&gt;
+        /// The current speed of the catcher with the hyper-dash modifier applied.
+        /// &lt;/summary&gt;
+        public double Speed =&gt; (Dashing ? BASE_DASH_SPEED : BASE_WALK_SPEED) * hyperDashModifier;
+
+        /// &lt;summary&gt;
+        /// The amount by which caught fruit should be scaled down to fit on the plate.
+        /// &lt;/summary&gt;
+        private const float caught_fruit_scale_adjust = 0.5f;
+
+        /// &lt;summary&gt;
+        /// Contains caught objects on the plate.
+        /// &lt;/summary&gt;
+        private readonly Container&lt;CaughtObject&gt; caughtObjectContainer;
+
+        /// &lt;summary&gt;
+        /// Contains objects dropped from the plate.
+        /// &lt;/summary&gt;
+        private readonly DroppedObjectContainer droppedObjectTarget;
+
+        public CatcherAnimationState CurrentState
+        {
+            get =&gt; body.AnimationState.Value;
+            private set =&gt; body.AnimationState.Value = value;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether the catcher is currently dashing.
+        /// &lt;/summary&gt;
+        public bool Dashing { get; set; }
+
+        /// &lt;summary&gt;
+        /// The currently facing direction.
+        /// &lt;/summary&gt;
+        public Direction VisualDirection { get; set; } = Direction.Right;
+
+        public Vector2 BodyScale =&gt; Scale * body.Scale;
+
+        /// &lt;summary&gt;
+        /// Width of the area that can be used to attempt catches during gameplay.
+        /// &lt;/summary&gt;
+        public float CatchWidth { get; private set; }
+
+        private readonly SkinnableCatcher body;
+
+        private Color4 hyperDashColour = DEFAULT_HYPER_DASH_COLOUR;
+
+        private double? lastHyperDashStartTime;
+        private double hyperDashModifier = 1;
+        private int hyperDashDirection;
+        private float hyperDashTargetPosition;
+        private Bindable&lt;bool&gt; hitLighting = null!;
+
+        private readonly HitExplosionContainer hitExplosionContainer;
+
+        private readonly DrawablePool&lt;CaughtFruit&gt; caughtFruitPool;
+        private readonly DrawablePool&lt;CaughtBanana&gt; caughtBananaPool;
+        private readonly DrawablePool&lt;CaughtDroplet&gt; caughtDropletPool;
+
+        public Catcher(DroppedObjectContainer droppedObjectTarget, IBeatmapDifficultyInfo? difficulty = null)
+        {
+            this.droppedObjectTarget = droppedObjectTarget;
+
+            Origin = Anchor.TopCentre;
+
+            Size = new Vector2(BASE_SIZE);
+
+            ApplyDifficulty(difficulty);
+
+            InternalChildren = new Drawable[]
+            {
+                caughtFruitPool = new DrawablePool&lt;CaughtFruit&gt;(50),
+                caughtBananaPool = new DrawablePool&lt;CaughtBanana&gt;(100),
+                // less capacity is needed compared to fruit because droplet is not stacked
+                caughtDropletPool = new DrawablePool&lt;CaughtDroplet&gt;(25),
+                caughtObjectContainer = new Container&lt;CaughtObject&gt;
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.BottomCentre,
+                    // offset fruit vertically to better place &quot;above&quot; the plate.
+                    Y = -5
+                },
+                body = new SkinnableCatcher(),
+                hitExplosionContainer = new HitExplosionContainer
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.BottomCentre,
+                },
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            hitLighting = config.GetBindable&lt;bool&gt;(OsuSetting.HitLighting);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates proxied content to be displayed beneath hitobjects.
+        /// &lt;/summary&gt;
+        public Drawable CreateProxiedContent() =&gt; caughtObjectContainer.CreateProxy();
+
+        /// &lt;summary&gt;
+        /// Calculates the width of the area used for attempting catches in gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scale&quot;&gt;The scale of the catcher.&lt;/param&gt;
+        public static float CalculateCatchWidth(Vector2 scale) =&gt; BASE_SIZE * Math.Abs(scale.X) * ALLOWED_CATCH_RANGE;
+
+        /// &lt;summary&gt;
+        /// Calculates the width of the area used for attempting catches in gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;difficulty&quot;&gt;The beatmap difficulty.&lt;/param&gt;
+        public static float CalculateCatchWidth(IBeatmapDifficultyInfo difficulty) =&gt; CalculateCatchWidth(calculateScale(difficulty));
+
+        /// &lt;summary&gt;
+        /// Determine if this catcher can catch a &lt;see cref=&quot;CatchHitObject&quot;/&gt; in the current position.
+        /// &lt;/summary&gt;
+        public bool CanCatch(CatchHitObject hitObject)
+        {
+            if (!(hitObject is PalpableCatchHitObject fruit))
+                return false;
+
+            float halfCatchWidth = CatchWidth * 0.5f;
+            return fruit.EffectiveX &gt;= X - halfCatchWidth &amp;&amp;
+                   fruit.EffectiveX &lt;= X + halfCatchWidth;
+        }
+
+        public void OnNewResult(DrawableCatchHitObject drawableObject, JudgementResult result)
+        {
+            var catchResult = (CatchJudgementResult)result;
+            catchResult.CatcherAnimationState = CurrentState;
+            catchResult.CatcherHyperDash = HyperDashing;
+
+            // Ignore JuiceStreams and BananaShowers
+            if (!(drawableObject is DrawablePalpableCatchHitObject palpableObject)) return;
+
+            var hitObject = palpableObject.HitObject;
+
+            if (result.IsHit)
+            {
+                var positionInStack = computePositionInStack(new Vector2(palpableObject.X - X, 0), palpableObject.DisplaySize.X);
+
+                if (CatchFruitOnPlate)
+                    placeCaughtObject(palpableObject, positionInStack);
+
+                if (hitLighting.Value)
+                    addLighting(result, drawableObject.AccentColour.Value, positionInStack.X);
+            }
+
+            if (result.IsHit)
+                CurrentState = hitObject.Kiai ? CatcherAnimationState.Kiai : CatcherAnimationState.Idle;
+            else if (hitObject is not Banana)
+                CurrentState = CatcherAnimationState.Fail;
+
+            if (palpableObject.HitObject.LastInCombo)
+            {
+                if (result.Judgement is CatchJudgement catchJudgement &amp;&amp; catchJudgement.ShouldExplodeFor(result))
+                    Explode();
+                else
+                    Drop();
+            }
+
+            // droplet doesn&#39;t affect hyperdash state
+            if (hitObject is TinyDroplet) return;
+
+            // if a hyper fruit was already handled this frame, just go where it says to go.
+            // this special-cases some aspire maps that have doubled-up objects (one hyper, one not) at the same time instant.
+            // handling this &quot;properly&quot; elsewhere is impossible as there is no feasible way to ensure
+            // that the hyperfruit gets judged second (especially if it coincides with a last fruit in a juice stream).
+            if (lastHyperDashStartTime != Time.Current)
+            {
+                if (result.IsHit &amp;&amp; hitObject.HyperDashTarget is CatchHitObject target)
+                {
+                    double timeDifference = target.StartTime - hitObject.StartTime;
+                    double positionDifference = target.EffectiveX - X;
+                    double velocity = positionDifference / Math.Max(1.0, timeDifference - 1000.0 / 60.0);
+
+                    SetHyperDashState(Math.Abs(velocity) / BASE_DASH_SPEED, target.EffectiveX);
+                }
+                else
+                    SetHyperDashState();
+            }
+        }
+
+        public void OnRevertResult(JudgementResult result)
+        {
+            var catchResult = (CatchJudgementResult)result;
+
+            CurrentState = catchResult.CatcherAnimationState;
+
+            if (HyperDashing != catchResult.CatcherHyperDash)
+            {
+                if (catchResult.CatcherHyperDash)
+                    SetHyperDashState(2);
+                else
+                    SetHyperDashState();
+            }
+
+            caughtObjectContainer.RemoveAll(d =&gt; d.HitObject == result.HitObject, false);
+            droppedObjectTarget.RemoveAll(d =&gt; d.HitObject == result.HitObject, false);
+        }
+
+        /// &lt;summary&gt;
+        /// Set hyper-dash state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;modifier&quot;&gt;The speed multiplier. If this is less or equals to 1, this catcher will be non-hyper-dashing state.&lt;/param&gt;
+        /// &lt;param name=&quot;targetPosition&quot;&gt;When this catcher crosses this position, this catcher ends hyper-dashing.&lt;/param&gt;
+        public void SetHyperDashState(double modifier = 1, float targetPosition = -1)
+        {
+            bool wasHyperDashing = HyperDashing;
+
+            if (modifier &lt;= 1 || X == targetPosition)
+            {
+                hyperDashModifier = 1;
+                hyperDashDirection = 0;
+
+                if (wasHyperDashing)
+                    runHyperDashStateTransition(false);
+
+                lastHyperDashStartTime = null;
+            }
+            else
+            {
+                hyperDashModifier = modifier;
+                hyperDashDirection = Math.Sign(targetPosition - X);
+                hyperDashTargetPosition = targetPosition;
+
+                if (!wasHyperDashing)
+                    runHyperDashStateTransition(true);
+
+                lastHyperDashStartTime = Time.Current;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Set the scale and catch width.
+        /// &lt;/summary&gt;
+        public void ApplyDifficulty(IBeatmapDifficultyInfo? difficulty)
+        {
+            if (difficulty != null)
+                Scale = calculateScale(difficulty);
+
+            CatchWidth = CalculateCatchWidth(Scale);
+        }
+
+        /// &lt;summary&gt;
+        /// Drop any fruit off the plate.
+        /// &lt;/summary&gt;
+        public void Drop() =&gt; clearPlate(DroppedObjectAnimation.Drop);
+
+        /// &lt;summary&gt;
+        /// Explode all fruit off the plate.
+        /// &lt;/summary&gt;
+        public void Explode() =&gt; clearPlate(DroppedObjectAnimation.Explode);
+
+        private void runHyperDashStateTransition(bool hyperDashing)
+        {
+            this.FadeColour(hyperDashing ? hyperDashColour : Color4.White, HYPER_DASH_TRANSITION_DURATION, Easing.OutQuint);
+        }
+
+        protected override void SkinChanged(ISkinSource skin)
+        {
+            base.SkinChanged(skin);
+
+            hyperDashColour =
+                skin.GetConfig&lt;CatchSkinColour, Color4&gt;(CatchSkinColour.HyperDash)?.Value ??
+                DEFAULT_HYPER_DASH_COLOUR;
+
+            runHyperDashStateTransition(HyperDashing);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            var scaleFromDirection = new Vector2((int)VisualDirection, 1);
+
+            body.Scale = scaleFromDirection;
+            // Inverse of catcher scale is applied here, as catcher gets scaled by circle size and so do the incoming fruit.
+            caughtObjectContainer.Scale = new Vector2(1 / Scale.X);
+
+            // Correct overshooting.
+            if ((hyperDashDirection &gt; 0 &amp;&amp; hyperDashTargetPosition &lt; X) ||
+                (hyperDashDirection &lt; 0 &amp;&amp; hyperDashTargetPosition &gt; X))
+            {
+                X = hyperDashTargetPosition;
+                SetHyperDashState();
+            }
+        }
+
+        private void placeCaughtObject(DrawablePalpableCatchHitObject drawableObject, Vector2 position)
+        {
+            var caughtObject = getCaughtObject(drawableObject.HitObject);
+
+            if (caughtObject == null) return;
+
+            caughtObject.RestoreState(drawableObject.SaveState());
+            caughtObject.Anchor = Anchor.TopCentre;
+            caughtObject.Position = position;
+            caughtObject.Scale *= caught_fruit_scale_adjust;
+
+            caughtObjectContainer.Add(caughtObject);
+
+            if (!caughtObject.StaysOnPlate)
+                removeFromPlate(caughtObject, DroppedObjectAnimation.Explode);
+        }
+
+        private Vector2 computePositionInStack(Vector2 position, float displayRadius)
+        {
+            // this is taken from osu-stable (lenience should be 10 * 10 at standard scale).
+            const float lenience_adjust = 10 / CatchHitObject.OBJECT_RADIUS;
+
+            float adjustedRadius = displayRadius * lenience_adjust;
+            float checkDistance = MathF.Pow(adjustedRadius, 2);
+
+            while (caughtObjectContainer.Any(f =&gt; Vector2Extensions.DistanceSquared(f.Position, position) &lt; checkDistance))
+            {
+                position.X += RNG.NextSingle(-adjustedRadius, adjustedRadius);
+                position.Y -= RNG.NextSingle(0, 5);
+            }
+
+            return position;
+        }
+
+        private void addLighting(JudgementResult judgementResult, Color4 colour, float x) =&gt;
+            hitExplosionContainer.Add(new HitExplosionEntry(Time.Current, judgementResult, colour, x));
+
+        private CaughtObject? getCaughtObject(PalpableCatchHitObject source)
+        {
+            switch (source)
+            {
+                case Fruit:
+                    return caughtFruitPool.Get();
+
+                case Banana:
+                    return caughtBananaPool.Get();
+
+                case Droplet:
+                    return caughtDropletPool.Get();
+
+                default:
+                    return null;
+            }
+        }
+
+        private CaughtObject getDroppedObject(CatchObjectState state)
+        {
+            var droppedObject = getCaughtObject(state.HitObject);
+            Debug.Assert(droppedObject != null);
+
+            droppedObject.RestoreState(state);
+            droppedObject.Anchor = Anchor.TopLeft;
+            droppedObject.Position = caughtObjectContainer.ToSpaceOfOtherDrawable(state.DisplayPosition, droppedObjectTarget);
+
+            return droppedObject;
+        }
+
+        private void clearPlate(DroppedObjectAnimation animation)
+        {
+            int caughtCount = caughtObjectContainer.Children.Count;
+            CatchObjectState[] states = ArrayPool&lt;CatchObjectState&gt;.Shared.Rent(caughtCount);
+
+            try
+            {
+                for (int i = 0; i &lt; caughtCount; i++)
+                    states[i] = caughtObjectContainer.Children[i].SaveState();
+
+                caughtObjectContainer.Clear(false);
+
+                for (int i = 0; i &lt; caughtCount; i++)
+                {
+                    CaughtObject obj = getDroppedObject(states[i]);
+                    droppedObjectTarget.Add(obj);
+                    applyDropAnimation(obj, animation);
+                }
+            }
+            finally
+            {
+                ArrayPool&lt;CatchObjectState&gt;.Shared.Return(states);
+            }
+        }
+
+        private void removeFromPlate(CaughtObject caughtObject, DroppedObjectAnimation animation)
+        {
+            CatchObjectState state = caughtObject.SaveState();
+            caughtObjectContainer.Remove(caughtObject, false);
+
+            var droppedObject = getDroppedObject(state);
+            droppedObjectTarget.Add(droppedObject);
+            applyDropAnimation(droppedObject, animation);
+        }
+
+        private void applyDropAnimation(Drawable d, DroppedObjectAnimation animation)
+        {
+            switch (animation)
+            {
+                case DroppedObjectAnimation.Drop:
+                    d.MoveToY(d.Y + 75, 750, Easing.InSine);
+                    d.FadeOut(750);
+                    break;
+
+                case DroppedObjectAnimation.Explode:
+                    float originalX = droppedObjectTarget.ToSpaceOfOtherDrawable(d.DrawPosition, caughtObjectContainer).X * caughtObjectContainer.Scale.X;
+                    d.MoveToY(d.Y - 50, 250, Easing.OutSine).Then().MoveToY(d.Y + 50, 500, Easing.InSine);
+                    d.MoveToX(d.X + originalX * 6, 1000);
+                    d.FadeOut(750);
+                    break;
+            }
+
+            // Define lifetime start for dropped objects to be disposed correctly when rewinding replay
+            d.LifetimeStart = Clock.CurrentTime;
+            d.Expire();
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the scale of the catcher based off the provided beatmap difficulty.
+        /// &lt;/summary&gt;
+        private static Vector2 calculateScale(IBeatmapDifficultyInfo difficulty) =&gt; new Vector2(LegacyRulesetExtensions.CalculateScaleFromCircleSize(difficulty.CircleSize) * 2);
+
+        private enum DroppedObjectAnimation
+        {
+            Drop,
+            Explode
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[51,9,51,78,0],[61,37,61,59,0],[66,41,66,45,0],[66,46,66,50,0],[66,55,66,59,0],[81,32,81,97,0],[100,20,100,45,0],[101,28,101,61,0],[107,31,107,35,0],[107,36,107,40,0],[112,44,112,48,0],[112,49,112,53,0],[112,58,112,73,0],[114,37,114,55,0],[119,35,119,39,0],[119,40,119,52,0],[123,9,123,68,0],[126,9,126,46,0],[129,9,129,52,0],[137,9,137,110,0],[138,9,138,10,0],[139,13,139,60,0],[141,13,141,39,0],[143,13,143,43,0],[145,13,145,41,0],[147,13,166,15,0],[167,9,167,10,0],[171,9,171,10,0],[172,13,172,76,0],[173,9,173,10,0],[178,51,178,86,0],[184,67,184,118,1],[190,87,190,134,1],[196,9,196,10,0],[197,13,197,62,0],[198,17,198,30,0],[200,13,200,54,0],[201,13,202,59,0],[203,9,203,10,0],[206,9,206,10,0],[207,13,207,60,0],[208,13,208,62,0],[209,13,209,57,0],[212,13,212,84,0],[212,85,212,92,0],[214,13,214,54,0],[216,13,216,30,0],[217,13,217,14,0],[218,17,218,130,0],[220,17,220,39,0],[221,21,221,72,0],[223,17,223,39,0],[224,21,224,95,0],[225,13,225,14,0],[227,13,227,30,0],[228,17,228,105,0],[229,18,229,46,0],[230,17,230,59,0],[232,13,232,54,0],[233,13,233,14,0],[234,17,234,114,0],[235,21,235,31,0],[237,21,237,28,0],[238,13,238,14,0],[241,13,241,42,0],[241,43,241,50,0],[247,13,247,56,0],[248,13,248,14,0],[249,17,249,88,0],[250,17,250,18,0],[251,21,251,84,0],[252,21,252,71,0],[253,21,253,106,0],[255,21,255,96,0],[256,17,256,18,0],[258,21,258,41,0],[259,13,259,14,0],[260,9,260,10,0],[263,9,263,10,0],[264,13,264,60,0],[266,13,266,62,0],[268,13,268,62,0],[269,13,269,14,0],[270,17,270,50,0],[271,21,271,42,0],[273,21,273,41,0],[274,13,274,14,0],[276,13,276,50,0],[276,50,276,81,0],[276,81,276,90,0],[277,13,277,48,0],[277,48,277,79,0],[277,79,277,88,0],[278,9,278,10,0],[286,9,286,10,0],[287,13,287,49,0],[289,13,289,54,0],[290,13,290,14,0],[291,17,291,39,0],[292,17,292,40,0],[294,17,294,37,0],[295,21,295,56,0],[297,17,297,47,0],[298,13,298,14,0],[300,13,300,14,0],[301,17,301,46,0],[302,17,302,68,0],[303,17,303,58,0],[305,17,305,38,0],[306,21,306,55,0],[308,17,308,55,0],[309,13,309,14,0],[310,9,310,10,0],[316,9,316,10,0],[317,13,317,36,0],[318,17,318,52,0],[320,13,320,53,0],[321,9,321,10,0],[326,31,326,70,0],[331,34,331,76,0],[334,9,334,10,0],[335,13,335,125,0],[336,9,336,10,0],[339,9,339,10,0],[340,13,340,36,0],[342,13,344,43,0],[346,13,346,55,0],[347,9,347,10,0],[350,9,350,10,0],[351,13,351,27,0],[353,13,353,75,0],[355,13,355,45,0],[357,13,357,68,0],[360,13,361,73,0],[362,13,362,14,0],[363,17,363,45,0],[364,17,364,37,0],[365,13,365,14,0],[366,9,366,10,0],[369,9,369,10,0],[370,13,370,74,0],[372,13,372,38,0],[372,39,372,46,0],[374,13,374,67,0],[375,13,375,52,0],[376,13,376,46,0],[377,13,377,61,0],[379,13,379,53,0],[381,13,381,44,0],[382,17,382,79,0],[383,9,383,10,0],[386,9,386,10,0],[390,13,390,68,0],[391,13,391,64,0],[393,13,393,51,0],[393,51,393,122,0],[393,122,393,124,0],[394,13,394,14,0],[395,17,395,79,0],[396,17,396,52,0],[397,13,397,14,0],[399,13,399,29,0],[400,9,400,10,0],[403,13,403,103,0],[406,9,406,10,0],[407,13,407,28,0],[410,21,410,50,0],[413,21,413,51,0],[416,21,416,52,0],[419,21,419,33,0],[421,9,421,10,0],[424,9,424,10,0],[425,13,425,66,0],[426,13,426,49,0],[428,13,428,47,0],[429,13,429,51,0],[430,13,430,127,0],[432,13,432,34,0],[433,9,433,10,0],[436,9,436,10,0],[437,13,437,68,0],[438,13,438,94,0],[441,13,441,14,0],[442,22,442,31,0],[442,33,442,48,0],[442,50,442,53,0],[443,21,443,79,0],[445,17,445,52,0],[447,22,447,31,0],[447,33,447,48,0],[447,50,447,53,0],[448,17,448,18,0],[449,21,449,68,0],[450,21,450,50,0],[451,21,451,56,0],[452,17,452,18,0],[453,13,453,14,0],[455,13,455,14,0],[456,17,456,67,0],[457,13,457,14,0],[458,9,458,10,0],[461,9,461,10,0],[462,13,462,63,0],[463,13,463,63,0],[465,13,465,57,0],[466,13,466,52,0],[467,13,467,58,0],[468,9,468,10,0],[471,9,471,10,0],[472,13,472,31,0],[475,21,475,61,0],[476,21,476,36,0],[477,21,477,27,0],[480,21,480,155,0],[481,21,481,107,0],[482,21,482,58,0],[483,21,483,36,0],[484,21,484,27,0],[488,13,488,49,0],[489,13,489,24,0],[490,9,490,10,0],[495,85,495,177,1]]);
+    </script>
+  </body>
+</html>

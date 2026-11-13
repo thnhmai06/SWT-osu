@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/PlayerSettings/BeatmapOffsetControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Settings;
+using osu.Game.Overlays.Settings.Sections.Audio;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Screens.Ranking.Statistics;
+using osuTK;
+
+namespace osu.Game.Screens.Play.PlayerSettings
+{
+    public partial class BeatmapOffsetControl : CompositeDrawable, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        public Bindable&lt;ScoreInfo?&gt; ReferenceScore { get; } = new Bindable&lt;ScoreInfo?&gt;();
+
+        private Bindable&lt;ScoreInfo?&gt; lastAppliedScore { get; } = new Bindable&lt;ScoreInfo?&gt;();
+
+        private readonly Bindable&lt;bool&gt; autoAdjustBeatmapOffset = new Bindable&lt;bool&gt;();
+
+        public BindableDouble Current { get; } = new BindableDouble
+        {
+            MinValue = -50,
+            MaxValue = 50,
+            Precision = 0.1,
+        };
+
+        private readonly FillFlowContainer referenceScoreContainer;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private Player? player { get; set; }
+
+        [Resolved]
+        private SettingsOverlay? settings { get; set; }
+
+        // the last play graph is relative to the offset at the point of the last play, so we need to factor that out for some usages.
+        private double adjustmentSinceLastPlay =&gt; lastPlayBeatmapOffset - Current.Value;
+
+        private double lastPlayMedian;
+        private double lastPlayUnstableRate;
+        private double lastPlayBeatmapOffset;
+        private HitEventTimingDistributionGraph? lastPlayGraph;
+        private SettingsButton? calibrateFromLastPlayButton;
+        private IDisposable? beatmapOffsetSubscription;
+        private Task? realmWriteTask;
+        private ScoreInfo? lastValidScore;
+
+        private bool allowOffsetAdjust =&gt; player?.AllowCriticalSettingsAdjustment != false;
+
+        public BeatmapOffsetControl()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChild = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(10),
+                Children = new Drawable[]
+                {
+                    new OffsetSliderBar
+                    {
+                        KeyboardStep = 5,
+                        LabelText = BeatmapOffsetControlStrings.AudioOffsetThisBeatmap,
+                        Current = Current,
+                    },
+                    referenceScoreContainer = new FillFlowContainer
+                    {
+                        Spacing = new Vector2(10),
+                        Direction = FillDirection.Vertical,
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                    },
+                }
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(SessionStatics statics, OsuConfigManager config)
+        {
+            statics.BindWith(Static.LastAppliedOffsetScore, lastAppliedScore);
+            config.BindWith(OsuSetting.AutomaticallyAdjustBeatmapOffset, autoAdjustBeatmapOffset);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            beatmapOffsetSubscription = realm.SubscribeToPropertyChanged(
+                r =&gt; r.Find&lt;BeatmapInfo&gt;(beatmap.Value.BeatmapInfo.ID)?.UserSettings,
+                settings =&gt; settings.Offset,
+                val =&gt;
+                {
+                    // At the point we reach here, it&#39;s not guaranteed that all realm writes have taken place (there may be some in-flight).
+                    // We are only aware of writes that originated from our own flow, so if we do see one that&#39;s active we can avoid handling the feedback value arriving.
+                    if (realmWriteTask == null)
+                    {
+                        Current.Disabled = false;
+                        Current.Value = val;
+                        Current.Disabled = allowOffsetAdjust;
+                    }
+
+                    if (realmWriteTask?.IsCompleted == true)
+                    {
+                        // we can also mark any in-flight write that is managed locally as &quot;seen&quot; and start handling any incoming changes again.
+                        realmWriteTask = null;
+                    }
+                });
+
+            Current.BindValueChanged(currentChanged);
+            ReferenceScore.BindValueChanged(scoreChanged, true);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            // To match stable, this should adjust by 5 ms, or 1 ms when holding alt.
+            // But that is hard to make work with global actions due to the operating mode.
+            // Let&#39;s use the more precise as a default for now.
+            const double amount = 1;
+
+            switch (e.Action)
+            {
+                case GlobalAction.IncreaseOffset:
+                    if (!Current.Disabled)
+                        Current.Value += amount;
+                    return true;
+
+                case GlobalAction.DecreaseOffset:
+                    if (!Current.Disabled)
+                        Current.Value -= amount;
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            bool allow = allowOffsetAdjust;
+
+            if (calibrateFromLastPlayButton != null)
+            {
+                double suggestedOffset = computeSuggestedOffset(lastPlayMedian, lastPlayUnstableRate, lastPlayBeatmapOffset);
+                calibrateFromLastPlayButton.Enabled.Value = allow &amp;&amp; !Precision.AlmostEquals(suggestedOffset, Current.Value, Current.Precision / 2);
+            }
+
+            Current.Disabled = !allow;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            beatmapOffsetSubscription?.Dispose();
+        }
+
+        private void currentChanged(ValueChangedEvent&lt;double&gt; offset)
+        {
+            // Negative is applied here because the play graph is considering a hit offset, not track (as we currently use for clocks).
+            lastPlayGraph?.UpdateOffset(-adjustmentSinceLastPlay);
+
+            // Calibration button may be hidden due to automatic offset adjustment, but it should be visible when the user manually adjusts their offset away from the applied suggestion.
+            calibrateFromLastPlayButton?.Show();
+
+            // This is intentionally not scheduled as the offset may be changed while the control is hidden and cannot process its scheduler.
+            // This is the case when auto-adjustment is enabled and the offset is adjusted while the player is quick-retrying.
+            writeOffsetToBeatmap();
+        }
+
+        private void writeOffsetToBeatmap()
+        {
+            // ensure the previous write has completed. ignoring performance concerns, if we don&#39;t do this, the async writes could be out of sequence.
+            if (realmWriteTask?.IsCompleted == false)
+            {
+                Scheduler.AddOnce(writeOffsetToBeatmap);
+                return;
+            }
+
+            realmWriteTask = realm.WriteAsync(r =&gt;
+            {
+                var setInfo = r.Find&lt;BeatmapSetInfo&gt;(beatmap.Value.BeatmapSetInfo.ID);
+
+                if (setInfo == null) // only the case for tests.
+                    return;
+
+                // Apply to all difficulties in a beatmap set if they have the same audio
+                // (they generally always share timing).
+                foreach (var b in setInfo.Beatmaps)
+                {
+                    BeatmapUserSettings userSettings = b.UserSettings;
+                    double val = Current.Value;
+
+                    if (userSettings.Offset != val &amp;&amp; b.AudioEquals(beatmap.Value.BeatmapInfo))
+                        userSettings.Offset = val;
+                }
+            });
+        }
+
+        private void scoreChanged(ValueChangedEvent&lt;ScoreInfo?&gt; score)
+        {
+            if (score.NewValue == null)
+                return;
+
+            if (score.NewValue.Equals(lastAppliedScore.Value))
+                return;
+
+            if (!score.NewValue.BeatmapInfo.AsNonNull().Equals(beatmap.Value.BeatmapInfo))
+                return;
+
+            if (score.NewValue.Mods.Any(m =&gt; !m.UserPlayable || m is IHasNoTimedInputs))
+                return;
+
+            var hitEvents = score.NewValue.HitEvents;
+
+            if (hitEvents.CalculateMedianHitError() is not double median)
+                return;
+
+            if (hitEvents.CalculateUnstableRate()?.Result is not double unstableRate)
+                return;
+
+            // affecting unstable rate here is used as a substitute of determining if a hit event represents a *timed* hit event,
+            // i.e. a user input that the user had to *time to the track*,
+            // i.e. one that it *makes sense to use* when doing anything with timing and offsets.
+            bool hasEnoughUsableEvents = hitEvents.Count(HitEventExtensions.AffectsUnstableRate) &gt;= 50;
+
+            // If we already have an old score with enough hit events and the new score doesn&#39;t have enough, continue displaying the old one rather than showing the user &quot;play too short&quot; message.
+            if (lastValidScore != null &amp;&amp; !hasEnoughUsableEvents)
+                return;
+
+            referenceScoreContainer.Children = new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Text = BeatmapOffsetControlStrings.PreviousPlay
+                },
+            };
+
+            if (!hasEnoughUsableEvents)
+            {
+                referenceScoreContainer.AddRange(new Drawable[]
+                {
+                    new OsuTextFlowContainer
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Colour = colours.Red1,
+                        Text = BeatmapOffsetControlStrings.PreviousPlayTooShortToUseForCalibration
+                    },
+                });
+
+                return;
+            }
+
+            lastValidScore = score.NewValue!;
+            lastPlayMedian = median;
+            lastPlayUnstableRate = unstableRate;
+            lastPlayBeatmapOffset = Current.Value;
+
+            LinkFlowContainer offsetText;
+
+            referenceScoreContainer.AddRange(new Drawable[]
+            {
+                lastPlayGraph = new HitEventTimingDistributionGraph(hitEvents)
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Height = 50,
+                },
+                new AverageHitError(hitEvents) { FontSize = OsuFont.Style.Caption1.Size },
+                calibrateFromLastPlayButton = new SettingsButton
+                {
+                    Text = BeatmapOffsetControlStrings.CalibrateUsingLastPlay,
+                    Action = () =&gt;
+                    {
+                        if (!Current.Disabled)
+                            applySuggestedOffset();
+                    },
+                },
+                offsetText = new LinkFlowContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                }
+            });
+
+            if (autoAdjustBeatmapOffset.Value &amp;&amp; !Current.Disabled)
+            {
+                bool offsetChanged = applySuggestedOffset();
+
+                calibrateFromLastPlayButton.Hide();
+
+                if (offsetChanged)
+                {
+                    offsetText.AddText(BeatmapOffsetControlStrings.BeatmapOffsetWasAdjustedTo(Current.Value.ToStandardFormattedString(1)), t =&gt; t.Font = OsuFont.Style.Caption1);
+                    offsetText.NewParagraph();
+                }
+            }
+
+            offsetText.AddText(&quot;You can also &quot;, t =&gt; t.Font = OsuFont.Style.Caption2);
+            offsetText.AddLink(&quot;adjust the global offset&quot;, () =&gt; settings?.ShowAtControl&lt;AudioOffsetAdjustControl&gt;(), creationParameters: t =&gt; t.Font = OsuFont.Style.Caption2);
+            offsetText.AddText(&quot; based off this play.&quot;, t =&gt; t.Font = OsuFont.Style.Caption2);
+        }
+
+        private bool applySuggestedOffset()
+        {
+            double lastOffset = Current.Value;
+
+            Current.Value = computeSuggestedOffset(lastPlayMedian, lastPlayUnstableRate, lastPlayBeatmapOffset);
+            lastAppliedScore.Value = lastValidScore;
+
+            return !Precision.AlmostEquals(Current.Value, lastOffset, Current.Precision / 2);
+        }
+
+        public static LocalisableString GetOffsetExplanatoryText(double offset)
+        {
+            string formatOffset = offset.ToStandardFormattedString(1);
+
+            return formatOffset == &quot;0&quot;
+                ? LocalisableString.Interpolate($@&quot;{formatOffset} ms&quot;)
+                : LocalisableString.Interpolate($@&quot;{formatOffset} ms {getEarlyLateText(offset)}&quot;);
+
+            LocalisableString getEarlyLateText(double value)
+            {
+                Debug.Assert(value != 0);
+
+                return value &gt; 0
+                    ? BeatmapOffsetControlStrings.HitObjectsAppearEarlier
+                    : BeatmapOffsetControlStrings.HitObjectsAppearLater;
+            }
+        }
+
+        private static double computeSuggestedOffset(double median, double unstableRate, double currentOffset)
+        {
+            const double ur_adjustment_cutoff = 90;
+            const double exponential_factor = -0.0116;
+
+            double offsetAdjustment = median;
+
+            if (unstableRate &gt;= ur_adjustment_cutoff)
+            {
+                // A demonstrative graph of this algorithm is embedded in https://github.com/ppy/osu/discussions/30521.
+                // This ultimately prevents scores with high unstable rate from suggesting potentially invalid offsets.
+                offsetAdjustment *= Math.Exp(exponential_factor * (unstableRate - ur_adjustment_cutoff));
+            }
+
+            return currentOffset - offsetAdjustment;
+        }
+
+        private partial class OffsetSliderBar : PlayerSliderBar&lt;double&gt;
+        {
+            protected override Drawable CreateControl() =&gt; new CustomSliderBar();
+
+            protected partial class CustomSliderBar : SliderBar
+            {
+                public override LocalisableString TooltipText =&gt; GetOffsetExplanatoryText(Current.Value);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,54,39,58,0],[39,63,39,89,0],[41,57,41,61,0],[41,66,41,92,0],[43,9,43,88,0],[45,41,45,45,0],[45,50,50,10,0],[55,37,55,41,0],[55,42,55,46,0],[55,51,55,56,0],[58,53,58,57,0],[58,58,58,62,0],[58,67,58,72,0],[61,37,61,41,0],[61,42,61,46,0],[61,51,61,56,0],[64,34,64,38,0],[64,39,64,43,0],[67,45,67,49,0],[67,50,67,54,0],[70,51,70,88,0],[81,43,81,91,0],[83,9,83,38,0],[84,9,84,10,0],[85,13,85,39,0],[86,13,86,35,0],[88,13,110,15,0],[111,9,111,10,0],[115,9,115,10,0],[116,13,116,79,0],[117,13,117,99,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,33,0],[124,13,125,22,0],[125,22,125,85,0],[125,85,128,17,0],[128,17,128,18,0],[128,18,131,21,0],[131,21,131,48,0],[131,48,132,21,0],[132,21,132,22,0],[132,22,133,25,0],[133,25,133,50,0],[133,50,134,25,0],[134,25,134,45,0],[134,45,135,25,0],[135,25,135,62,0],[135,62,136,21,0],[136,21,136,22,0],[136,22,138,21,0],[138,21,138,61,0],[138,61,139,21,0],[139,21,139,22,0],[139,22,141,25,0],[141,25,141,47,0],[141,47,142,21,0],[142,21,142,22,0],[142,22,143,17,0],[143,17,143,18,0],[143,18,143,20,0],[145,13,145,54,0],[146,13,146,65,0],[147,9,147,10,0],[150,9,150,10,0],[156,13,156,30,0],[159,21,159,43,0],[160,25,160,49,0],[161,21,161,33,0],[164,21,164,43,0],[165,25,165,49,0],[166,21,166,33,0],[169,13,169,26,0],[170,9,170,10,0],[173,9,173,10,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,27,0],[180,13,180,44,0],[182,13,182,53,0],[183,13,183,14,0],[184,17,184,126,0],[185,17,185,149,0],[186,13,186,14,0],[188,13,188,39,0],[189,9,189,10,0],[192,9,192,10,0],[193,13,193,39,0],[194,13,194,50,0],[195,9,195,10,0],[198,9,198,10,0],[200,13,200,67,0],[203,13,203,49,0],[207,13,207,36,0],[208,9,208,10,0],[211,9,211,10,0],[213,13,213,54,0],[214,13,214,14,0],[215,17,215,57,0],[216,17,216,24,0],[219,13,220,13,0],[220,13,220,14,0],[220,14,221,17,0],[221,17,221,87,0],[221,87,223,17,0],[223,17,223,37,0],[223,37,224,21,0],[224,21,224,28,0],[224,28,228,17,0],[228,17,228,24,0],[228,24,228,26,0],[228,26,228,31,0],[228,31,228,32,0],[228,32,228,34,0],[228,34,228,35,0],[228,35,228,51,0],[228,51,229,17,0],[229,17,229,18,0],[229,18,230,21,0],[230,21,230,71,0],[230,71,231,21,0],[231,21,231,48,0],[231,48,233,21,0],[233,21,233,96,0],[233,96,234,25,0],[234,25,234,51,0],[234,51,235,17,0],[235,17,235,18,0],[235,18,236,13,0],[236,13,236,14,0],[236,14,236,16,0],[237,9,237,10,0],[240,9,240,10,0],[241,13,241,40,0],[242,17,242,24,0],[244,13,244,63,0],[245,17,245,24,0],[247,13,247,91,0],[248,17,248,24,0],[250,13,250,46,0],[250,46,250,87,0],[250,87,250,89,0],[251,17,251,24,0],[253,13,253,54,0],[255,13,255,74,0],[256,17,256,24,0],[258,13,258,86,0],[259,17,259,24,0],[264,13,264,104,0],[267,13,267,66,0],[268,17,268,24,0],[270,13,276,15,0],[278,13,278,40,0],[279,13,279,14,0],[280,17,289,20,0],[291,17,291,24,0],[294,13,294,46,0],[295,13,295,37,0],[296,13,296,49,0],[297,13,297,51,0],[301,13,313,21,0],[313,21,313,22,0],[313,22,314,25,0],[314,25,314,47,0],[314,47,315,29,0],[315,29,315,52,0],[315,52,316,21,0],[316,21,316,22,0],[316,22,323,16,0],[325,13,325,68,0],[326,13,326,14,0],[327,17,327,61,0],[329,17,329,52,0],[331,17,331,35,0],[332,17,332,18,0],[333,21,333,145,0],[333,145,333,176,0],[333,176,333,178,0],[334,21,334,47,0],[335,17,335,18,0],[336,13,336,14,0],[338,13,338,54,0],[338,54,338,85,0],[338,85,338,87,0],[339,13,339,66,0],[339,66,339,117,0],[339,117,339,144,0],[339,144,339,175,0],[339,175,339,177,0],[340,13,340,62,0],[340,62,340,93,0],[340,93,340,95,0],[341,9,341,10,0],[344,9,344,10,0],[345,13,345,47,0],[347,13,347,113,0],[348,13,348,53,0],[350,13,350,94,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,71,0],[357,13,359,99,0],[362,13,362,14,0],[363,17,363,42,0],[365,17,367,73,0],[368,13,368,14,0],[369,9,369,10,0],[372,9,372,10,0],[376,13,376,46,0],[378,13,378,54,0],[379,13,379,14,0],[382,17,382,106,0],[383,13,383,14,0],[385,13,385,53,0],[386,9,386,10,0],[390,60,390,81,0],[394,66,394,105,0]]);
+    </script>
+  </body>
+</html>

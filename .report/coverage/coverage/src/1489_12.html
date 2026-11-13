@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/Skin.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading;
+using Newtonsoft.Json;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.IO.Stores;
+using osu.Framework.Logging;
+using osu.Game.Audio;
+using osu.Game.Database;
+using osu.Game.IO;
+using osu.Game.Rulesets;
+using osu.Game.Screens.Play.HUD;
+
+namespace osu.Game.Skinning
+{
+    public abstract class Skin : IDisposable, ISkin
+    {
+        private readonly IStorageResourceProvider? resources;
+
+        /// &lt;summary&gt;
+        /// A texture store which can be used to perform user file lookups for this skin.
+        /// &lt;/summary&gt;
+        protected TextureStore? Textures { get; }
+
+        /// &lt;summary&gt;
+        /// A sample store which can be used to perform user file lookups for this skin.
+        /// &lt;/summary&gt;
+        protected internal ISampleStore? Samples { get; private set; }
+
+        public readonly Live&lt;SkinInfo&gt; SkinInfo;
+
+        public SkinConfiguration Configuration { get; set; }
+
+        public IDictionary&lt;GlobalSkinnableContainers, SkinLayoutInfo&gt; LayoutInfos =&gt; layoutInfos;
+
+        private readonly Dictionary&lt;GlobalSkinnableContainers, SkinLayoutInfo&gt; layoutInfos =
+            new Dictionary&lt;GlobalSkinnableContainers, SkinLayoutInfo&gt;();
+
+        public abstract ISample? GetSample(ISampleInfo sampleInfo);
+
+        public Texture? GetTexture(string componentName) =&gt; GetTexture(componentName, default, default);
+
+        public abstract Texture? GetTexture(string componentName, WrapMode wrapModeS, WrapMode wrapModeT);
+
+        public abstract IBindable&lt;TValue&gt;? GetConfig&lt;TLookup, TValue&gt;(TLookup lookup)
+            where TLookup : notnull
+            where TValue : notnull;
+
+        private readonly ResourceStore&lt;byte[]&gt; store = new ResourceStore&lt;byte[]&gt;();
+
+        public string Name { get; }
+
+        protected IResourceStore&lt;byte[]&gt;? FallbackStore { get; }
+
+        /// &lt;summary&gt;
+        /// Construct a new skin.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;skin&quot;&gt;The skin&#39;s metadata. Usually a live realm object.&lt;/param&gt;
+        /// &lt;param name=&quot;resources&quot;&gt;Access to game-wide resources.&lt;/param&gt;
+        /// &lt;param name=&quot;fallbackStore&quot;&gt;An optional fallback store which will be used for file lookups that are not serviced by realm user storage.&lt;/param&gt;
+        /// &lt;param name=&quot;configurationFilename&quot;&gt;An optional filename to read the skin configuration from. If not provided, the configuration will be retrieved from the storage using &quot;skin.ini&quot;.&lt;/param&gt;
+        protected Skin(SkinInfo skin, IStorageResourceProvider? resources, IResourceStore&lt;byte[]&gt;? fallbackStore = null, string configurationFilename = @&quot;skin.ini&quot;)
+        {
+            this.resources = resources;
+
+            Name = skin.Name;
+
+            if (resources != null)
+            {
+                SkinInfo = skin.ToLive(resources.RealmAccess);
+
+                store.AddStore(new RealmBackedResourceStore&lt;SkinInfo&gt;(SkinInfo, resources.Files, resources.RealmAccess));
+
+                RecycleSamples();
+                Textures = new TextureStore(resources.Renderer, CreateTextureLoaderStore(resources, store));
+            }
+            else
+            {
+                // Generally only used for tests.
+                SkinInfo = skin.ToLiveUnmanaged();
+            }
+
+            FallbackStore = fallbackStore;
+            if (fallbackStore != null)
+                store.AddStore(fallbackStore);
+
+            var configurationStream = store.GetStream(configurationFilename);
+
+            if (configurationStream != null)
+            {
+                // stream will be closed after use by LineBufferedReader.
+                ParseConfigurationStream(configurationStream);
+                Debug.Assert(Configuration != null);
+            }
+            else
+            {
+                Configuration = new SkinConfiguration
+                {
+                    // generally won&#39;t be hit as we always write a `skin.ini` on import, but best be safe than sorry.
+                    // see https://github.com/peppy/osu-stable-reference/blob/1531237b63392e82c003c712faa028406073aa8f/osu!/Graphics/Skinning/SkinManager.cs#L297-L298
+                    LegacyVersion = SkinConfiguration.LATEST_VERSION,
+                    IsLatestVersion = true,
+                };
+            }
+
+            // skininfo files may be null for default skin.
+            foreach (GlobalSkinnableContainers skinnableTarget in Enum.GetValues&lt;GlobalSkinnableContainers&gt;())
+            {
+                string filename = $&quot;{skinnableTarget}.json&quot;;
+
+                byte[]? bytes = store?.Get(filename);
+
+                if (bytes == null)
+                    continue;
+
+                try
+                {
+                    string jsonContent = Encoding.UTF8.GetString(bytes);
+
+                    var layoutInfo = parseLayoutInfo(jsonContent, skinnableTarget);
+                    if (layoutInfo == null)
+                        continue;
+
+                    LayoutInfos[skinnableTarget] = layoutInfo;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, &quot;Failed to load skin configuration.&quot;);
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Recreates &lt;see cref=&quot;Samples&quot;/&gt;.
+        /// All users of samples from the skin are expected to manually re-retrieve their samples from this skin after this is called.
+        /// Exposed as public for the purpose of e.g. editing flows where the skin&#39;s set of available samples changes.
+        /// In such a scenario a full recycle of the store is required to avoid accidentally retrieving stale samples that don&#39;t exist in the skin anymore.
+        /// &lt;/summary&gt;
+        public void RecycleSamples()
+        {
+            Samples?.Dispose();
+
+            var samples = resources?.AudioManager?.GetSampleStore(store);
+
+            if (samples != null)
+            {
+                samples.PlaybackConcurrency = OsuGameBase.SAMPLE_CONCURRENCY;
+
+                // osu-stable performs audio lookups in order of wav -&gt; mp3 -&gt; ogg.
+                // The GetSampleStore() call above internally adds wav and mp3, so ogg is added at the end to ensure expected ordering.
+                samples.AddExtension(@&quot;ogg&quot;);
+            }
+
+            Samples = samples;
+        }
+
+        protected virtual IResourceStore&lt;TextureUpload&gt; CreateTextureLoaderStore(IStorageResourceProvider resources, IResourceStore&lt;byte[]&gt; storage)
+            =&gt; new MaxDimensionLimitedTextureLoaderStore(resources.CreateTextureLoaderStore(storage));
+
+        protected virtual void ParseConfigurationStream(Stream stream)
+        {
+            using (LineBufferedReader reader = new LineBufferedReader(stream, true))
+                Configuration = new LegacySkinDecoder().Decode(reader);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove all stored customisations for the provided target.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;targetContainer&quot;&gt;The target container to reset.&lt;/param&gt;
+        public void ResetDrawableTarget(SkinnableContainer targetContainer)
+        {
+            LayoutInfos.Remove(targetContainer.Lookup.Lookup);
+        }
+
+        /// &lt;summary&gt;
+        /// Update serialised information for the provided target.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;targetContainer&quot;&gt;The target container to serialise to this skin.&lt;/param&gt;
+        public void UpdateDrawableTarget(SkinnableContainer targetContainer)
+        {
+            if (!LayoutInfos.TryGetValue(targetContainer.Lookup.Lookup, out var layoutInfo))
+                layoutInfos[targetContainer.Lookup.Lookup] = layoutInfo = new SkinLayoutInfo();
+
+            layoutInfo.Update(targetContainer.Lookup.Ruleset, ((ISerialisableDrawableContainer)targetContainer).CreateSerialisedInfo().ToArray());
+        }
+
+        public virtual Drawable? GetDrawableComponent(ISkinComponentLookup lookup)
+        {
+            switch (lookup)
+            {
+                // This fallback is important for user skins which use SkinnableSprites.
+                case SkinnableSprite.SpriteComponentLookup sprite:
+                    return this.GetAnimation(sprite.LookupName, false, false, maxSize: sprite.MaxSize);
+
+                case UserSkinComponentLookup userLookup:
+                    switch (userLookup.Component)
+                    {
+                        case GlobalSkinnableContainerLookup containerLookup:
+                            // It is important to return null if the user has not configured this yet.
+                            // This allows skin transformers the opportunity to provide default components.
+                            if (!LayoutInfos.TryGetValue(containerLookup.Lookup, out var layoutInfo)) return null;
+                            if (!layoutInfo.TryGetDrawableInfo(containerLookup.Ruleset, out var drawableInfos)) return null;
+
+                            return new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                ChildrenEnumerable = drawableInfos.Select(i =&gt; i.CreateInstance())
+                            };
+                    }
+
+                    break;
+            }
+
+            return null;
+        }
+
+        #region Deserialisation &amp; Migration
+
+        private SkinLayoutInfo? parseLayoutInfo(string jsonContent, GlobalSkinnableContainers target)
+        {
+            SkinLayoutInfo? layout = null;
+
+            // handle namespace changes...
+            jsonContent = jsonContent.Replace(@&quot;osu.Game.Screens.Play.SongProgress&quot;, @&quot;osu.Game.Screens.Play.HUD.DefaultSongProgress&quot;);
+            jsonContent = jsonContent.Replace(@&quot;osu.Game.Screens.Play.HUD.LegacyComboCounter&quot;, @&quot;osu.Game.Skinning.LegacyComboCounter&quot;);
+            jsonContent = jsonContent.Replace(@&quot;osu.Game.Skinning.LegacyComboCounter&quot;, @&quot;osu.Game.Skinning.LegacyDefaultComboCounter&quot;);
+            jsonContent = jsonContent.Replace(@&quot;osu.Game.Screens.Play.HUD.PerformancePointsCounter&quot;, @&quot;osu.Game.Skinning.Triangles.TrianglesPerformancePointsCounter&quot;);
+            jsonContent = jsonContent.Replace(@&quot;osu.Game.Screens.Play.HUD.UnstableRateCounter&quot;, @&quot;osu.Game.Skinning.Triangles.TrianglesUnstableRateCounter&quot;);
+
+            try
+            {
+                // First attempt to deserialise using the new SkinLayoutInfo format
+                layout = JsonConvert.DeserializeObject&lt;SkinLayoutInfo&gt;(jsonContent);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Deserialising skin layout to {nameof(SkinLayoutInfo)} failed. Falling back to {nameof(SerialisedDrawableInfo)}[].\nDetails: {ex}&quot;);
+            }
+
+            // If deserialisation using SkinLayoutInfo fails, attempt to deserialise using the old naked list.
+            if (layout == null)
+            {
+                var deserializedContent = JsonConvert.DeserializeObject&lt;IEnumerable&lt;SerialisedDrawableInfo&gt;&gt;(jsonContent);
+                if (deserializedContent == null)
+                    return null;
+
+                layout = new SkinLayoutInfo { Version = 0 };
+                layout.Update(null, deserializedContent.ToArray());
+
+                Logger.Log($&quot;Ferrying {deserializedContent.Count()} components in {target} to global section of new {nameof(SkinLayoutInfo)} format&quot;);
+            }
+
+            for (int i = layout.Version + 1; i &lt;= SkinLayoutInfo.LATEST_VERSION; i++)
+                applyMigration(layout, target, i);
+
+            layout.Version = SkinLayoutInfo.LATEST_VERSION;
+
+            foreach (var kvp in layout.DrawableInfo.ToArray())
+            {
+                foreach (var di in kvp.Value)
+                {
+                    if (!isValidDrawable(di))
+                        layout.DrawableInfo[kvp.Key] = kvp.Value.Where(i =&gt; i.Type != di.Type).ToArray();
+                }
+            }
+
+            return layout;
+        }
+
+        private bool isValidDrawable(SerialisedDrawableInfo di)
+        {
+            if (!typeof(ISerialisableDrawable).IsAssignableFrom(di.Type))
+                return false;
+
+            foreach (var child in di.Children)
+            {
+                if (!isValidDrawable(child))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void applyMigration(SkinLayoutInfo layout, GlobalSkinnableContainers target, int version)
+        {
+            switch (version)
+            {
+                case 1:
+                {
+                    // Combo counters were moved out of the global HUD components into per-ruleset.
+                    // This is to allow some rulesets to customise further (ie. mania and catch moving the combo to within their play area).
+                    if (target != GlobalSkinnableContainers.MainHUDComponents ||
+                        !layout.TryGetDrawableInfo(null, out var globalHUDComponents) ||
+                        resources == null)
+                        break;
+
+                    var comboCounters = globalHUDComponents.Where(c =&gt;
+                        c.Type.Name == nameof(LegacyDefaultComboCounter) ||
+                        c.Type.Name == nameof(DefaultComboCounter) ||
+                        c.Type.Name == nameof(ArgonComboCounter)).ToArray();
+
+                    layout.Update(null, globalHUDComponents.Except(comboCounters).ToArray());
+
+                    resources.RealmAccess.Run(r =&gt;
+                    {
+                        foreach (var ruleset in r.All&lt;RulesetInfo&gt;())
+                        {
+                            layout.Update(ruleset, layout.TryGetDrawableInfo(ruleset, out var rulesetHUDComponents)
+                                ? rulesetHUDComponents.Concat(comboCounters).ToArray()
+                                : comboCounters);
+                        }
+                    });
+
+                    break;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Disposal
+
+        ~Skin()
+        {
+            // required to potentially clean up sample store from audio hierarchy.
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private bool isDisposed;
+
+        protected virtual void Dispose(bool isDisposing)
+        {
+            if (isDisposed)
+                return;
+
+            isDisposed = true;
+
+            Textures?.Dispose();
+            Samples?.Dispose();
+            FallbackStore?.Dispose();
+
+            store.Dispose();
+        }
+
+        #endregion
+
+        public override string ToString() =&gt; $&quot;{GetType().ReadableName()} {{ Name: {Name} }}&quot;;
+
+        private static readonly ThreadLocal&lt;int&gt; nested_level = new ThreadLocal&lt;int&gt;(() =&gt; 0);
+
+        [Conditional(&quot;SKIN_LOOKUP_DEBUG&quot;)]
+        internal static void LogLookupDebug(object callingClass, object lookup, LookupDebugType type, [CallerMemberName] string callerMethod = &quot;&quot;)
+        {
+            string icon = string.Empty;
+            int level = nested_level.Value;
+
+            switch (type)
+            {
+                case LookupDebugType.Hit:
+                    icon = &quot;&#128994; hit&quot;;
+                    break;
+
+                case LookupDebugType.Miss:
+                    icon = &quot;&#128308; miss&quot;;
+                    break;
+
+                case LookupDebugType.Enter:
+                    nested_level.Value++;
+                    break;
+
+                case LookupDebugType.Exit:
+                    nested_level.Value--;
+                    if (nested_level.Value == 0)
+                        Logger.Log(string.Empty);
+                    return;
+            }
+
+            string lookupString = lookup.ToString() ?? string.Empty;
+            string callingClassString = callingClass.ToString() ?? string.Empty;
+
+            Logger.Log($&quot;{string.Join(null, Enumerable.Repeat(&quot;|-&quot;, level))}{callingClassString}.{callerMethod}(lookup: {lookupString}) {icon}&quot;);
+        }
+
+        internal enum LookupDebugType
+        {
+            Hit,
+            Miss,
+            Enter,
+            Exit
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,44,36,48,0],[41,52,41,56,0],[41,57,41,69,0],[45,50,45,54,0],[45,55,45,59,0],[47,86,47,97,0],[49,9,50,73,0],[54,61,54,104,0],[62,9,62,84,0],[64,30,64,34,0],[66,59,66,63,0],[75,9,75,165,0],[76,9,76,10,0],[77,13,77,40,0],[79,13,79,30,0],[81,13,81,35,0],[82,13,82,14,0],[83,17,83,63,0],[85,17,85,122,0],[87,17,87,34,0],[88,17,88,109,0],[89,13,89,14,0],[91,13,91,14,0],[93,17,93,51,0],[94,13,94,14,0],[96,13,96,43,0],[97,13,97,39,0],[98,17,98,47,0],[100,13,100,78,0],[102,13,102,45,0],[103,13,103,14,0],[105,17,105,63,0],[106,17,106,53,0],[107,13,107,14,0],[109,13,109,14,0],[110,17,116,19,0],[117,13,117,14,0],[120,13,120,20,0],[120,22,120,63,0],[120,64,120,66,0],[120,67,120,110,0],[121,13,121,14,0],[122,17,122,61,0],[124,17,124,54,0],[126,17,126,35,0],[127,21,127,30,0],[130,17,130,18,0],[131,21,131,73,0],[133,21,133,84,0],[134,21,134,44,0],[135,25,135,34,0],[137,21,137,63,0],[138,17,138,18,0],[139,17,139,37,0],[140,17,140,18,0],[141,21,141,76,0],[142,17,142,18,0],[143,13,143,14,0],[144,9,144,10,0],[153,9,153,10,0],[154,13,154,32,0],[156,13,156,74,0],[158,13,158,33,0],[159,13,159,14,0],[160,17,160,78,0],[164,17,164,46,0],[165,13,165,14,0],[167,13,167,31,0],[168,9,168,10,0],[171,16,171,102,0],[174,9,174,10,0],[175,20,175,84,0],[176,17,176,72,0],[177,9,177,10,0],[184,9,184,10,0],[185,13,185,63,0],[186,9,186,10,0],[193,9,193,10,0],[194,13,194,93,0],[195,17,195,96,0],[197,13,197,147,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,28,0],[206,21,206,104,0],[209,21,209,50,0],[214,29,214,102,0],[214,103,214,115,0],[215,29,215,112,0],[215,113,215,125,0],[217,29,220,80,0],[220,80,220,98,0],[220,98,221,31,0],[224,21,224,27,0],[227,13,227,25,0],[228,9,228,10,0],[233,9,233,10,0],[234,13,234,43,0],[237,13,237,136,0],[238,13,238,137,0],[239,13,239,136,0],[240,13,240,168,0],[241,13,241,158,0],[244,13,244,14,0],[246,17,246,85,0],[247,13,247,14,0],[248,13,248,33,0],[249,13,249,14,0],[250,17,250,161,0],[251,13,251,14,0],[254,13,254,32,0],[255,13,255,14,0],[256,17,256,123,0],[257,17,257,49,0],[258,21,258,33,0],[260,17,260,61,0],[261,17,261,68,0],[263,17,263,151,0],[264,13,264,14,0],[266,18,266,44,0],[266,46,266,80,0],[266,82,266,85,0],[267,17,267,51,0],[269,13,269,60,0],[271,13,271,20,0],[271,22,271,29,0],[271,30,271,32,0],[271,33,271,62,0],[272,13,272,14,0],[273,17,273,24,0],[273,26,273,32,0],[273,33,273,35,0],[273,36,273,45,0],[274,17,274,18,0],[275,21,275,46,0],[276,25,276,77,0],[276,77,276,94,0],[276,94,276,106,0],[277,17,277,18,0],[278,13,278,14,0],[280,13,280,27,0],[281,9,281,10,0],[284,9,284,10,0],[285,13,285,74,0],[286,17,286,30,0],[288,13,288,20,0],[288,22,288,31,0],[288,32,288,34,0],[288,35,288,46,0],[289,13,289,14,0],[290,17,290,45,0],[291,21,291,34,0],[292,13,292,14,0],[294,13,294,25,0],[295,9,295,10,0],[298,9,298,10,0],[299,13,299,29,0],[302,17,302,18,0],[305,21,307,43,0],[308,25,308,31,0],[310,21,311,25,0],[311,25,313,65,0],[313,65,313,77,0],[315,21,315,94,0],[317,21,318,21,0],[318,21,318,22,0],[318,22,319,25,0],[319,25,319,32,0],[319,32,319,34,0],[319,34,319,45,0],[319,45,319,46,0],[319,46,319,48,0],[319,48,319,49,0],[319,49,319,69,0],[319,69,320,25,0],[320,25,320,26,0],[320,26,321,29,0],[321,29,323,50,0],[323,50,324,25,0],[324,25,324,26,0],[324,26,325,21,0],[325,21,325,22,0],[325,22,325,24,0],[327,21,327,27,0],[330,9,330,10,0],[337,9,337,10,0],[339,13,339,28,0],[340,9,340,10,0],[343,9,343,10,0],[344,13,344,27,0],[345,13,345,39,0],[346,9,346,10,0],[351,9,351,10,0],[352,13,352,28,0],[353,17,353,24,0],[355,13,355,31,0],[357,13,357,33,0],[358,13,358,32,0],[359,13,359,38,0],[361,13,361,29,0],[362,9,362,10,0],[366,46,366,94,0],[368,9,368,92,0],[368,92,368,93,0],[368,93,368,95,0],[372,9,372,10,0],[373,13,373,40,0],[374,13,374,44,0],[376,13,376,26,0],[379,21,379,37,0],[380,21,380,27,0],[383,21,383,38,0],[384,21,384,27,0],[387,21,387,42,0],[388,21,388,27,0],[391,21,391,42,0],[392,21,392,49,0],[393,25,393,50,0],[394,21,394,28,0],[397,13,397,69,0],[398,13,398,81,0],[400,13,400,146,0],[401,9,401,10,0]]);
+    </script>
+  </body>
+</html>

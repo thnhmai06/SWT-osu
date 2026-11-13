@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapCarouselFilterMatching.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Utils;
+
+namespace osu.Game.Screens.Select
+{
+    public class BeatmapCarouselFilterMatching : ICarouselFilter
+    {
+        private readonly Func&lt;FilterCriteria&gt; getCriteria;
+
+        public int BeatmapItemsCount { get; private set; }
+
+        public BeatmapCarouselFilterMatching(Func&lt;FilterCriteria&gt; getCriteria)
+        {
+            this.getCriteria = getCriteria;
+        }
+
+        public async Task&lt;List&lt;CarouselItem&gt;&gt; Run(IEnumerable&lt;CarouselItem&gt; items, CancellationToken cancellationToken) =&gt; await Task.Run(() =&gt;
+        {
+            var criteria = getCriteria();
+
+            return matchItems(items, criteria).ToList();
+        }, cancellationToken).ConfigureAwait(false);
+
+        private IEnumerable&lt;CarouselItem&gt; matchItems(IEnumerable&lt;CarouselItem&gt; items, FilterCriteria criteria)
+        {
+            int countMatching = 0;
+
+            foreach (var item in items)
+            {
+                var beatmap = (BeatmapInfo)item.Model;
+
+                if (beatmap.Hidden)
+                    continue;
+
+                if (!CheckCriteriaMatch(beatmap, criteria))
+                    continue;
+
+                countMatching++;
+                yield return item;
+            }
+
+            BeatmapItemsCount = countMatching;
+        }
+
+        public static bool CheckCriteriaMatch(BeatmapInfo beatmap, FilterCriteria criteria)
+        {
+            bool match = criteria.Ruleset == null || beatmap.AllowGameplayWithRuleset(criteria.Ruleset!, criteria.AllowConvertedBeatmaps);
+
+            if (criteria.SelectedBeatmapSet != null)
+            {
+                // only check ruleset equality or convertability for selected beatmap
+                return beatmap.BeatmapSet?.Equals(criteria.SelectedBeatmapSet) == true &amp;&amp; match;
+            }
+
+            if (!match) return false;
+
+            if (criteria.SearchTerms.Length &gt; 0)
+            {
+                match = beatmap.Match(criteria.SearchTerms);
+
+                // if a match wasn&#39;t found via text matching of terms, do a second catch-all check matching against online IDs.
+                // this should be done after text matching so we can prioritise matching numbers in metadata.
+                if (!match &amp;&amp; criteria.SearchNumber.HasValue)
+                {
+                    match = (beatmap.OnlineID == criteria.SearchNumber.Value) ||
+                            (beatmap.BeatmapSet?.OnlineID == criteria.SearchNumber.Value);
+                }
+            }
+
+            if (!match) return false;
+
+            match &amp;= !criteria.StarDifficulty.HasFilter || criteria.StarDifficulty.IsInRange(beatmap.StarRating.FloorToDecimalDigits(2));
+            match &amp;= !criteria.ApproachRate.HasFilter || criteria.ApproachRate.IsInRange(beatmap.Difficulty.ApproachRate);
+            match &amp;= !criteria.DrainRate.HasFilter || criteria.DrainRate.IsInRange(beatmap.Difficulty.DrainRate);
+            match &amp;= !criteria.CircleSize.HasFilter || criteria.CircleSize.IsInRange(beatmap.Difficulty.CircleSize);
+            match &amp;= !criteria.OverallDifficulty.HasFilter || criteria.OverallDifficulty.IsInRange(beatmap.Difficulty.OverallDifficulty);
+            match &amp;= !criteria.Length.HasFilter || criteria.Length.IsInRange(beatmap.Length);
+            match &amp;= !criteria.LastPlayed.HasFilter || criteria.LastPlayed.IsInRange(beatmap.LastPlayed ?? DateTimeOffset.MinValue);
+            match &amp;= !criteria.DateRanked.HasFilter || (beatmap.BeatmapSet?.DateRanked != null &amp;&amp; criteria.DateRanked.IsInRange(beatmap.BeatmapSet.DateRanked.Value));
+            match &amp;= !criteria.DateSubmitted.HasFilter || (beatmap.BeatmapSet?.DateSubmitted != null &amp;&amp; criteria.DateSubmitted.IsInRange(beatmap.BeatmapSet.DateSubmitted.Value));
+            match &amp;= !criteria.BPM.HasFilter || criteria.BPM.IsInRange(beatmap.BPM);
+
+            match &amp;= !criteria.BeatDivisor.HasFilter || criteria.BeatDivisor.IsInRange(beatmap.BeatDivisor);
+            match &amp;= !criteria.OnlineStatus.HasFilter || criteria.OnlineStatus.IsInRange(beatmap.Status);
+
+            if (!match) return false;
+
+            match &amp;= !criteria.Creator.HasFilter || criteria.Creator.Matches(beatmap.Metadata.Author.Username);
+
+            if (criteria.Artist.HasFilter)
+            {
+                if (criteria.Artist.ExcludeTerm)
+                    match &amp;= criteria.Artist.Matches(beatmap.Metadata.Artist) &amp;&amp; criteria.Artist.Matches(beatmap.Metadata.ArtistUnicode);
+                else
+                    match &amp;= criteria.Artist.Matches(beatmap.Metadata.Artist) || criteria.Artist.Matches(beatmap.Metadata.ArtistUnicode);
+            }
+
+            if (criteria.Title.HasFilter)
+            {
+                if (criteria.Title.ExcludeTerm)
+                    match &amp;= criteria.Title.Matches(beatmap.Metadata.Title) &amp;&amp; criteria.Title.Matches(beatmap.Metadata.TitleUnicode);
+                else
+                    match &amp;= criteria.Title.Matches(beatmap.Metadata.Title) || criteria.Title.Matches(beatmap.Metadata.TitleUnicode);
+            }
+
+            match &amp;= !criteria.DifficultyName.HasFilter || criteria.DifficultyName.Matches(beatmap.DifficultyName);
+            match &amp;= !criteria.Source.HasFilter || criteria.Source.Matches(beatmap.Metadata.Source);
+
+            if (criteria.UserTags.Any())
+            {
+                foreach (var tagFilter in criteria.UserTags)
+                {
+                    if (tagFilter.ExcludeTerm)
+                    {
+                        // if `ExcludeTerm` is true, `Matches()` will return true if a user tag *doesn&#39;t match* the excluded term.
+                        // thus, every user tag must pass this filter.
+                        foreach (string tag in beatmap.Metadata.UserTags)
+                            match &amp;= tagFilter.Matches(tag);
+                    }
+                    else
+                    {
+                        // if `ExcludeTerm` is false, `Matches()` will return true if a user tag *matches* the expected term.
+                        // the expected behaviour is that a beatmap should be displayed if at least one of the user tags passes the filter.
+                        bool anyTagMatched = false;
+
+                        foreach (string tag in beatmap.Metadata.UserTags)
+                            anyTagMatched |= tagFilter.Matches(tag);
+
+                        match &amp;= anyTagMatched;
+                    }
+                }
+            }
+
+            match &amp;= !criteria.UserStarDifficulty.HasFilter || criteria.UserStarDifficulty.IsInRange(beatmap.StarRating);
+
+            if (!match) return false;
+
+            match &amp;= criteria.CollectionBeatmapMD5Hashes?.Contains(beatmap.MD5Hash) ?? true;
+            if (match &amp;&amp; criteria.RulesetCriteria != null)
+                match &amp;= criteria.RulesetCriteria.Matches(beatmap, criteria);
+
+            if (match &amp;&amp; criteria.HasOnlineID == true)
+                match &amp;= beatmap.OnlineID &gt;= 0;
+
+            if (match &amp;&amp; criteria.BeatmapSetId != null)
+                match &amp;= criteria.BeatmapSetId == beatmap.BeatmapSet?.OnlineID;
+
+            return match;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[19,40,19,44,1],[19,45,19,57,1],[21,9,21,79,1],[22,9,22,10,1],[23,13,23,44,1],[24,9,24,10,1],[26,124,27,9,1],[27,9,27,10,1],[27,10,28,13,1],[28,13,28,42,1],[28,42,30,13,1],[30,13,30,57,1],[30,57,31,9,1],[31,9,31,10,1],[31,10,31,52,1],[34,9,34,10,1],[35,13,35,35,1],[37,13,37,20,1],[37,22,37,30,1],[37,31,37,33,1],[37,34,37,39,1],[38,13,38,14,1],[39,17,39,55,1],[41,17,41,36,1],[42,21,42,30,1],[44,17,44,60,1],[45,21,45,30,1],[47,17,47,33,1],[48,17,48,35,1],[49,13,49,14,1],[51,13,51,47,1],[52,9,52,10,1],[55,9,55,10,1],[56,13,56,139,1],[58,13,58,53,1],[59,13,59,14,1],[61,17,61,97,1],[64,13,64,24,1],[64,25,64,38,1],[66,13,66,49,1],[67,13,67,14,1],[68,17,68,61,1],[72,17,72,62,1],[73,17,73,18,1],[74,21,75,91,1],[76,17,76,18,1],[77,13,77,14,1],[79,13,79,24,1],[79,25,79,38,1],[81,13,81,138,1],[82,13,82,123,1],[83,13,83,114,1],[84,13,84,117,1],[85,13,85,138,1],[86,13,86,94,1],[87,13,87,133,1],[88,13,88,167,1],[89,13,89,179,1],[90,13,90,85,1],[92,13,92,109,1],[93,13,93,106,1],[95,13,95,24,1],[95,25,95,38,1],[97,13,97,112,1],[99,13,99,43,1],[100,13,100,14,1],[101,17,101,49,1],[102,21,102,138,1],[104,21,104,138,1],[105,13,105,14,1],[107,13,107,42,1],[108,13,108,14,1],[109,17,109,48,1],[110,21,110,134,1],[112,21,112,134,1],[113,13,113,14,1],[115,13,115,116,1],[116,13,116,101,1],[118,13,118,41,1],[119,13,119,14,1],[120,17,120,24,1],[120,26,120,39,1],[120,40,120,42,1],[120,43,120,60,1],[121,17,121,18,1],[122,21,122,47,1],[123,21,123,22,1],[126,25,126,32,1],[126,34,126,44,1],[126,45,126,47,1],[126,48,126,73,1],[127,29,127,61,1],[128,21,128,22,1],[130,21,130,22,1],[133,25,133,52,1],[135,25,135,32,1],[135,34,135,44,1],[135,45,135,47,1],[135,48,135,73,1],[136,29,136,69,1],[138,25,138,48,1],[139,21,139,22,1],[140,17,140,18,1],[141,13,141,14,1],[143,13,143,122,1],[145,13,145,24,1],[145,25,145,38,1],[147,13,147,93,1],[148,13,148,59,1],[149,17,149,78,1],[151,13,151,55,1],[152,17,152,48,1],[154,13,154,56,1],[155,17,155,80,1],[157,13,157,26,1],[158,9,158,10,1]]);
+    </script>
+  </body>
+</html>

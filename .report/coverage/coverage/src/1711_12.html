@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/Leaderboards/MultiplayerLeaderboardProvider.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.MatchTypes.TeamVersus;
+using osu.Game.Online.Spectator;
+using osu.Game.Rulesets.Scoring;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.Leaderboards
+{
+    [LongRunningLoad]
+    public partial class MultiplayerLeaderboardProvider : CompositeComponent, IGameplayLeaderboardProvider
+    {
+        public IBindableList&lt;GameplayLeaderboardScore&gt; Scores =&gt; scores;
+        private readonly BindableList&lt;GameplayLeaderboardScore&gt; scores = new BindableList&lt;GameplayLeaderboardScore&gt;();
+
+        protected readonly Dictionary&lt;int, TrackedUserData&gt; UserScores = new Dictionary&lt;int, TrackedUserData&gt;();
+        public readonly SortedDictionary&lt;int, BindableLong&gt; TeamScores = new SortedDictionary&lt;int, BindableLong&gt;();
+
+        public bool HasTeams =&gt; TeamScores.Count &gt; 0;
+
+        private readonly MultiplayerRoomUser[] users;
+
+        private readonly Bindable&lt;ScoringMode&gt; scoringMode = new Bindable&lt;ScoringMode&gt;();
+        private readonly IBindableList&lt;int&gt; playingUserIds = new BindableList&lt;int&gt;();
+
+        [Resolved]
+        private UserLookupCache userLookupCache { get; set; } = null!;
+
+        [Resolved]
+        private SpectatorClient spectatorClient { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient multiplayerClient { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        private readonly Cached sorting = new Cached();
+
+        public MultiplayerLeaderboardProvider(MultiplayerRoomUser[] users)
+        {
+            this.users = users;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config, IAPIProvider api, CancellationToken cancellationToken)
+        {
+            config.BindWith(OsuSetting.ScoreDisplayMode, scoringMode);
+
+            foreach (var user in users)
+            {
+                var scoreProcessor = new SpectatorScoreProcessor(user.UserID);
+                scoreProcessor.Mode.BindTo(scoringMode);
+                scoreProcessor.TotalScore.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateTotals));
+                AddInternal(scoreProcessor);
+
+                var trackedUser = new TrackedUserData(user, scoreProcessor);
+                UserScores[user.UserID] = trackedUser;
+
+                if (trackedUser.Team is int team &amp;&amp; !TeamScores.ContainsKey(team))
+                    TeamScores.Add(team, new BindableLong());
+            }
+
+            userLookupCache.GetUsersAsync(users.Select(u =&gt; u.UserID).ToArray(), cancellationToken)
+                           .ContinueWith(task =&gt;
+                           {
+                               Schedule(() =&gt;
+                               {
+                                   var lookedUpUsers = task.GetResultSafely();
+
+                                   for (int i = 0; i &lt; lookedUpUsers.Length; i++)
+                                   {
+                                       var user = lookedUpUsers[i] ?? APIUser.UnknownUser(users[i].UserID);
+
+                                       var trackedUser = UserScores[user.Id];
+
+                                       var leaderboardScore = new GameplayLeaderboardScore(
+                                           user,
+                                           trackedUser.ScoreProcessor,
+                                           user.Id == api.LocalUser.Value.Id,
+                                           GameplayLeaderboardScore.ComboDisplayMode.Current)
+                                       {
+                                           HasQuit = { BindTarget = trackedUser.UserQuit },
+                                           TeamColour = UserScores[user.OnlineID].Team is int team ? getTeamColour(team) : null,
+                                       };
+                                       leaderboardScore.TotalScore.BindValueChanged(_ =&gt; sorting.Invalidate());
+                                       leaderboardScore.DisplayOrder.BindValueChanged(_ =&gt; sorting.Invalidate(), true);
+                                       scores.Add(leaderboardScore);
+                                   }
+                               });
+                           }, cancellationToken);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // BindableList handles binding in a really bad way (Clear then AddRange) so we need to do this manually..
+            foreach (var user in users)
+            {
+                spectatorClient.WatchUser(user.UserID);
+
+                if (!multiplayerClient.CurrentMatchPlayingUserIds.Contains(user.UserID))
+                    playingUsersChanged(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, new[] { user.UserID }));
+            }
+
+            // bind here is to support players leaving the match.
+            // new players are not supported.
+            playingUserIds.BindTo(multiplayerClient.CurrentMatchPlayingUserIds);
+            playingUserIds.BindCollectionChanged(playingUsersChanged);
+
+            Scheduler.AddDelayed(sort, 1000, true);
+        }
+
+        private void playingUsersChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Remove:
+                    Debug.Assert(e.OldItems != null);
+
+                    foreach (int userId in e.OldItems.OfType&lt;int&gt;())
+                    {
+                        spectatorClient.StopWatchingUser(userId);
+
+                        if (UserScores.TryGetValue(userId, out var trackedData))
+                            trackedData.MarkUserQuit();
+                    }
+
+                    break;
+            }
+        }
+
+        private void updateTotals()
+        {
+            if (!HasTeams)
+                return;
+
+            foreach (var teamTotal in TeamScores.Values) teamTotal.Value = 0;
+
+            foreach (var u in UserScores.Values)
+            {
+                if (u.Team == null)
+                    continue;
+
+                if (TeamScores.TryGetValue(u.Team.Value, out var team))
+                    team.Value += u.ScoreProcessor.TotalScore.Value;
+            }
+        }
+
+        private Color4 getTeamColour(int team)
+        {
+            switch (team)
+            {
+                case 0:
+                    return colours.TeamColourRed.Lighten(1.2f);
+
+                default:
+                    return colours.TeamColourBlue.Lighten(1.2f);
+            }
+        }
+
+        private void sort()
+        {
+            if (sorting.IsValid)
+                return;
+
+            var orderedByScore = scores
+                                 .OrderByDescending(i =&gt; i.TotalScore.Value)
+                                 .ThenBy(i =&gt; i.TotalScoreTiebreaker)
+                                 .ToList();
+
+            for (int i = 0; i &lt; orderedByScore.Count; i++)
+            {
+                var score = orderedByScore[i];
+                score.DisplayOrder.Value = i;
+                score.Position.Value = i + 1;
+            }
+
+            sorting.Validate();
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (spectatorClient.IsNotNull())
+            {
+                foreach (var user in users)
+                    spectatorClient.StopWatchingUser(user.UserID);
+            }
+        }
+
+        protected class TrackedUserData
+        {
+            public readonly MultiplayerRoomUser User;
+            public readonly SpectatorScoreProcessor ScoreProcessor;
+
+            public readonly BindableBool UserQuit = new BindableBool();
+
+            public int? Team =&gt; (User.MatchState as TeamVersusUserState)?.TeamID;
+
+            public TrackedUserData(MultiplayerRoomUser user, SpectatorScoreProcessor scoreProcessor)
+            {
+                User = user;
+                ScoreProcessor = scoreProcessor;
+            }
+
+            public void MarkUserQuit() =&gt; UserQuit.Value = true;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,66,32,72,0],[33,9,33,119,0],[35,9,35,113,0],[36,9,36,116,0],[38,33,38,53,0],[42,9,42,90,0],[43,9,43,86,0],[46,51,46,55,0],[46,56,46,60,0],[46,65,46,70,0],[49,51,49,55,0],[49,56,49,60,0],[49,65,49,70,0],[52,55,52,59,0],[52,60,52,64,0],[52,69,52,74,0],[55,37,55,41,0],[55,42,55,46,0],[55,51,55,56,0],[57,9,57,56,0],[59,9,59,75,0],[60,9,60,10,0],[61,13,61,32,0],[62,9,62,10,0],[66,9,66,10,0],[67,13,67,71,0],[69,13,69,20,0],[69,22,69,30,0],[69,31,69,33,0],[69,34,69,39,0],[70,13,70,14,0],[71,17,71,79,0],[72,17,72,57,0],[73,17,73,65,0],[73,65,73,96,0],[73,96,73,98,0],[74,17,74,45,0],[76,17,76,77,0],[77,17,77,55,0],[79,17,79,83,0],[80,21,80,62,0],[81,13,81,14,0],[83,13,83,61,0],[83,61,83,69,0],[83,69,85,28,0],[85,28,85,29,0],[85,29,86,32,0],[86,32,87,32,0],[87,32,87,33,0],[87,33,88,36,0],[88,36,88,79,0],[88,79,90,41,0],[90,41,90,50,0],[90,50,90,52,0],[90,52,90,76,0],[90,76,90,78,0],[90,78,90,81,0],[90,81,91,36,0],[91,36,91,37,0],[91,37,92,40,0],[92,40,92,108,0],[92,108,94,40,0],[94,40,94,78,0],[94,78,96,40,0],[96,40,104,42,0],[104,42,105,40,0],[105,40,105,90,0],[105,90,105,110,0],[105,110,105,112,0],[105,112,106,40,0],[106,40,106,92,0],[106,92,106,112,0],[106,112,106,120,0],[106,120,107,40,0],[107,40,107,69,0],[107,69,108,36,0],[108,36,108,37,0],[108,37,109,32,0],[109,32,109,33,0],[109,33,109,35,0],[109,35,110,28,0],[110,28,110,29,0],[110,29,110,50,0],[111,9,111,10,0],[114,9,114,10,0],[115,13,115,33,0],[118,13,118,20,0],[118,22,118,30,0],[118,31,118,33,0],[118,34,118,39,0],[119,13,119,14,0],[120,17,120,56,0],[122,17,122,89,0],[123,21,123,146,0],[124,13,124,14,0],[128,13,128,81,0],[129,13,129,71,0],[131,13,131,52,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,30,0],[139,21,139,54,0],[141,21,141,28,0],[141,30,141,40,0],[141,41,141,43,0],[141,44,141,68,0],[142,21,142,22,0],[143,25,143,66,0],[145,25,145,81,0],[146,29,146,56,0],[147,21,147,22,0],[149,21,149,27,0],[151,9,151,10,0],[154,9,154,10,0],[155,13,155,27,0],[156,17,156,24,0],[158,13,158,20,0],[158,22,158,35,0],[158,36,158,38,0],[158,39,158,56,0],[158,58,158,78,0],[160,13,160,20,0],[160,22,160,27,0],[160,28,160,30,0],[160,31,160,48,0],[161,13,161,14,0],[162,17,162,36,0],[163,21,163,30,0],[165,17,165,72,0],[166,21,166,69,0],[167,13,167,14,0],[168,9,168,10,0],[171,9,171,10,0],[172,13,172,26,0],[175,21,175,64,0],[178,21,178,65,0],[180,9,180,10,0],[183,9,183,10,0],[184,13,184,33,0],[185,17,185,24,0],[187,13,188,58,0],[188,58,188,76,0],[188,76,189,47,0],[189,47,189,69,0],[189,69,190,44,0],[192,18,192,27,0],[192,29,192,53,0],[192,55,192,58,0],[193,13,193,14,0],[194,17,194,47,0],[195,17,195,46,0],[196,17,196,46,0],[197,13,197,14,0],[199,13,199,32,0],[200,9,200,10,0],[203,9,203,10,0],[204,13,204,39,0],[206,13,206,45,0],[207,13,207,14,0],[208,17,208,24,0],[208,26,208,34,0],[208,35,208,37,0],[208,38,208,43,0],[209,21,209,67,0],[210,13,210,14,0],[211,9,211,10,0],[218,13,218,72,0],[220,33,220,81,0],[222,13,222,101,0],[223,13,223,14,0],[224,17,224,29,0],[225,17,225,49,0],[226,13,226,14,0],[228,43,228,64,0]]);
+    </script>
+  </body>
+</html>

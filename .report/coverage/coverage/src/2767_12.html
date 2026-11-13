@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Mods/ModSelectFooterContent.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osuTK;
+
+namespace osu.Game.Overlays.Mods
+{
+    public partial class ModSelectFooterContent : VisibilityContainer
+    {
+        private readonly ModSelectOverlay overlay;
+
+        private RankingInformationDisplay? rankingInformationDisplay;
+        private BeatmapAttributesDisplay? beatmapAttributesDisplay;
+        private FillFlowContainer&lt;ShearedButton&gt; buttonFlow = null!;
+        private FillFlowContainer contentFlow = null!;
+
+        public DeselectAllModsButton? DeselectAllModsButton { get; set; }
+
+        public readonly IBindable&lt;WorkingBeatmap?&gt; Beatmap = new Bindable&lt;WorkingBeatmap?&gt;();
+        public readonly IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; ActiveMods = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;();
+        public readonly IBindable&lt;RulesetInfo?&gt; Ruleset = new Bindable&lt;RulesetInfo?&gt;();
+
+        /// &lt;summary&gt;
+        /// Whether the effects (on score multiplier, on or beatmap difficulty) of the current selected set of mods should be shown.
+        /// &lt;/summary&gt;
+        protected virtual bool ShowModEffects =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Whether the ranking information and beatmap attributes displays are stacked vertically due to small space.
+        /// &lt;/summary&gt;
+        public bool DisplaysStackedVertically { get; private set; }
+
+        public ModSelectFooterContent(ModSelectOverlay overlay)
+        {
+            this.overlay = overlay;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChild = buttonFlow = new FillFlowContainer&lt;ShearedButton&gt;
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Horizontal,
+                Anchor = Anchor.BottomLeft,
+                Origin = Anchor.BottomLeft,
+                Padding = new MarginPadding { Horizontal = 20 },
+                Spacing = new Vector2(10),
+                ChildrenEnumerable = CreateButtons(),
+            };
+
+            if (ShowModEffects)
+            {
+                AddInternal(contentFlow = new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Spacing = new Vector2(30, 10),
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    Margin = new MarginPadding { Horizontal = 20 },
+                    Children = new Drawable[]
+                    {
+                        rankingInformationDisplay = new RankingInformationDisplay
+                        {
+                            Anchor = Anchor.BottomRight,
+                            Origin = Anchor.BottomRight
+                        },
+                        beatmapAttributesDisplay = new BeatmapAttributesDisplay
+                        {
+                            Anchor = Anchor.BottomRight,
+                            Origin = Anchor.BottomRight,
+                            BeatmapInfo = { Value = Beatmap.Value?.BeatmapInfo },
+                        },
+                    }
+                });
+            }
+        }
+
+        private ModSettingChangeTracker? modSettingChangeTracker;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Beatmap.BindValueChanged(b =&gt;
+            {
+                beatmapAttributesDisplay?.BeatmapInfo.Value = b.NewValue?.BeatmapInfo;
+
+                updateInformation();
+            }, true);
+
+            Ruleset.BindValueChanged(_ =&gt; updateInformation());
+            ActiveMods.BindValueChanged(m =&gt;
+            {
+                updateInformation();
+
+                modSettingChangeTracker?.Dispose();
+
+                // Importantly, use ActiveMods.Value here (and not the ValueChanged NewValue) as the latter can
+                // potentially be stale, due to complexities in the way change trackers work.
+                //
+                // See https://github.com/ppy/osu/pull/23284#issuecomment-1529056988
+                modSettingChangeTracker = new ModSettingChangeTracker(ActiveMods.Value);
+                modSettingChangeTracker.SettingChanged += _ =&gt; updateInformation();
+            }, true);
+        }
+
+        private void updateInformation()
+        {
+            WorkingBeatmap? workingBeatmap = Beatmap.Value;
+
+            if (rankingInformationDisplay != null &amp;&amp; workingBeatmap != null)
+            {
+                var scoreMultiplierCalculator = Ruleset.Value?.CreateInstance().CreateScoreMultiplierCalculator(new ScoreMultiplierContext(workingBeatmap.BeatmapInfo.Difficulty));
+                double multiplier = scoreMultiplierCalculator?.CalculateFor(ActiveMods.Value) ?? 1;
+
+                rankingInformationDisplay.ModMultiplier.Value = multiplier;
+                rankingInformationDisplay.Ranked.Value = ActiveMods.Value.All(m =&gt; m.Ranked);
+            }
+
+            beatmapAttributesDisplay?.Mods.Value = ActiveMods.Value;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (beatmapAttributesDisplay != null)
+            {
+                float rightEdgeOfLastButton = buttonFlow[^1].ScreenSpaceDrawQuad.TopRight.X;
+
+                // this is cheating a bit; the 640 value is hardcoded based on how wide the expanded panel _generally_ is.
+                // due to the transition applied, the raw screenspace quad of the panel cannot be used, as it will trigger an ugly feedback cycle of expanding and collapsing.
+                float projectedLeftEdgeOfExpandedBeatmapAttributesDisplay = buttonFlow.ToScreenSpace(buttonFlow.DrawSize - new Vector2(640, 0)).X;
+
+                DisplaysStackedVertically = rightEdgeOfLastButton &gt; projectedLeftEdgeOfExpandedBeatmapAttributesDisplay;
+
+                // only update preview panel&#39;s collapsed state after we are fully visible, to ensure all the buttons are where we expect them to be.
+                if (Alpha == 1)
+                    beatmapAttributesDisplay.Collapsed.Value = DisplaysStackedVertically;
+
+                contentFlow.LayoutDuration = 200;
+                contentFlow.LayoutEasing = Easing.OutQuint;
+                contentFlow.Direction = DisplaysStackedVertically ? FillDirection.Vertical : FillDirection.Horizontal;
+            }
+        }
+
+        protected virtual IEnumerable&lt;ShearedButton&gt; CreateButtons() =&gt; new[]
+        {
+            DeselectAllModsButton = new DeselectAllModsButton(overlay)
+        };
+
+        protected override void PopIn()
+        {
+            this.MoveToY(0, 400, Easing.OutQuint)
+                .FadeIn(400, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            this.MoveToY(-20f, 200, Easing.OutQuint)
+                .FadeOut(200, Easing.OutQuint);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,69,0],[27,9,27,55,0],[29,63,29,67,0],[29,68,29,72,0],[31,9,31,94,0],[32,9,32,103,0],[33,9,33,88,0],[38,50,38,54,0],[43,49,43,53,0],[43,54,43,66,0],[45,9,45,64,0],[46,9,46,10,0],[47,13,47,36,0],[48,9,48,10,0],[52,9,52,10,0],[53,13,53,42,0],[55,13,65,15,0],[67,13,67,32,0],[68,13,68,14,0],[69,17,91,20,0],[92,13,92,14,0],[93,9,93,10,0],[98,9,98,10,0],[99,13,99,33,0],[101,13,102,13,0],[102,13,102,14,0],[102,14,103,17,0],[103,17,103,87,0],[103,87,105,17,0],[105,17,105,37,0],[105,37,106,13,0],[106,13,106,14,0],[106,14,106,22,0],[108,13,108,43,0],[108,43,108,62,0],[108,62,108,64,0],[109,13,110,13,0],[110,13,110,14,0],[110,14,111,17,0],[111,17,111,37,0],[111,37,113,17,0],[113,17,113,52,0],[113,52,119,17,0],[119,17,119,89,0],[119,89,120,17,0],[120,17,120,64,0],[120,64,120,83,0],[120,83,120,84,0],[120,84,121,13,0],[121,13,121,14,0],[121,14,121,22,0],[122,9,122,10,0],[125,9,125,10,0],[126,13,126,60,0],[128,13,128,77,0],[129,13,129,14,0],[130,17,130,180,0],[131,17,131,100,0],[133,17,133,76,0],[134,17,134,84,0],[134,84,134,92,0],[134,92,134,94,0],[135,13,135,14,0],[137,13,137,69,0],[138,9,138,10,0],[141,9,141,10,0],[142,13,142,27,0],[144,13,144,50,0],[145,13,145,14,0],[146,17,146,93,0],[150,17,150,147,0],[152,17,152,121,0],[155,17,155,32,0],[156,21,156,90,0],[158,17,158,50,0],[159,17,159,60,0],[160,17,160,119,0],[161,13,161,14,0],[162,9,162,10,0],[164,73,167,10,0],[170,9,170,10,0],[171,13,172,47,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,178,48,0],[179,9,179,10,0]]);
+    </script>
+  </body>
+</html>

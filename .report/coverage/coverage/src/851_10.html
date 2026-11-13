@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/Objects/JuiceStreamPath.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osuTK;
+
+namespace osu.Game.Rulesets.Catch.Objects
+{
+    /// &lt;summary&gt;
+    /// Represents the path of a juice stream.
+    /// &lt;para&gt;
+    /// A &lt;see cref=&quot;JuiceStream&quot;/&gt; holds a legacy &lt;see cref=&quot;SliderPath&quot;/&gt; as the representation of the path.
+    /// However, the &lt;see cref=&quot;SliderPath&quot;/&gt; representation is difficult to work with.
+    /// This &lt;see cref=&quot;JuiceStreamPath&quot;/&gt; represents the path in a more convenient way, a polyline connecting list of &lt;see cref=&quot;JuiceStreamPathVertex&quot;/&gt;s.
+    /// &lt;/para&gt;
+    /// &lt;/summary&gt;
+    public class JuiceStreamPath
+    {
+        /// &lt;summary&gt;
+        /// The height of legacy osu!standard playfield.
+        /// The sliders converted by &lt;see cref=&quot;ConvertToSliderPath&quot;/&gt; are vertically contained in this height.
+        /// &lt;/summary&gt;
+        internal const float OSU_PLAYFIELD_HEIGHT = 384;
+
+        /// &lt;summary&gt;
+        /// The list of vertices of the path, which is represented as a polyline connecting the vertices.
+        /// &lt;/summary&gt;
+        public IReadOnlyList&lt;JuiceStreamPathVertex&gt; Vertices =&gt; vertices;
+
+        /// &lt;summary&gt;
+        /// The current version number.
+        /// This starts from &lt;c&gt;1&lt;/c&gt; and incremented whenever this &lt;see cref=&quot;JuiceStreamPath&quot;/&gt; is modified.
+        /// &lt;/summary&gt;
+        public int InvalidationID { get; private set; } = 1;
+
+        /// &lt;summary&gt;
+        /// The difference between first vertex&#39;s &lt;see cref=&quot;JuiceStreamPathVertex.Time&quot;/&gt; and last vertex&#39;s &lt;see cref=&quot;JuiceStreamPathVertex.Time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double Duration =&gt; vertices[^1].Time - vertices[0].Time;
+
+        /// &lt;remarks&gt;
+        /// This list should always be non-empty.
+        /// &lt;/remarks&gt;
+        private readonly List&lt;JuiceStreamPathVertex&gt; vertices = new List&lt;JuiceStreamPathVertex&gt;
+        {
+            new JuiceStreamPathVertex()
+        };
+
+        /// &lt;summary&gt;
+        /// Compute the x-position of the path at the given &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// When the given time is outside of the path, the x position at the corresponding endpoint is returned,
+        /// &lt;/remarks&gt;
+        public float PositionAtTime(double time)
+        {
+            int index = vertexIndexAtTime(time);
+            return positionAtTime(time, index);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove all vertices of this path, then add a new vertex &lt;c&gt;(0, 0)&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        public void Clear()
+        {
+            vertices.Clear();
+            vertices.Add(new JuiceStreamPathVertex());
+            invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Insert a vertex at given &lt;paramref name=&quot;time&quot;/&gt;.
+        /// The &lt;see cref=&quot;PositionAtTime&quot;/&gt; is used as the position of the new vertex.
+        /// Thus, the set of points of the path is not changed (up to floating-point precision).
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The index of the new vertex.&lt;/returns&gt;
+        public int InsertVertex(double time)
+        {
+            if (!double.IsFinite(time))
+                throw new ArgumentOutOfRangeException(nameof(time));
+
+            int index = vertexIndexAtTime(time);
+            float x = positionAtTime(time, index);
+            vertices.Insert(index, new JuiceStreamPathVertex(time, x));
+
+            invalidate();
+            return index;
+        }
+
+        /// &lt;summary&gt;
+        /// Move the vertex of given &lt;paramref name=&quot;index&quot;/&gt; to the given position &lt;paramref name=&quot;newX&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void SetVertexPosition(int index, float newX)
+        {
+            if (index &lt; 0 || index &gt;= vertices.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+
+            if (!float.IsFinite(newX))
+                throw new ArgumentOutOfRangeException(nameof(newX));
+
+            vertices[index] = new JuiceStreamPathVertex(vertices[index].Time, newX);
+
+            invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Add a new vertex at given &lt;paramref name=&quot;time&quot;/&gt; and position.
+        /// &lt;/summary&gt;
+        public void Add(double time, float x)
+        {
+            int index = InsertVertex(time);
+            SetVertexPosition(index, x);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove all vertices that satisfy the given &lt;paramref name=&quot;predicate&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If all vertices are removed, a new vertex &lt;c&gt;(0, 0)&lt;/c&gt; is added.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;predicate&quot;&gt;The predicate to determine whether a vertex should be removed given the vertex and its index in the path.&lt;/param&gt;
+        /// &lt;returns&gt;The number of removed vertices.&lt;/returns&gt;
+        public int RemoveVertices(Func&lt;JuiceStreamPathVertex, int, bool&gt; predicate)
+        {
+            int index = 0;
+            int removeCount = vertices.RemoveAll(vertex =&gt; predicate(vertex, index++));
+
+            if (vertices.Count == 0)
+                vertices.Add(new JuiceStreamPathVertex());
+
+            if (removeCount != 0)
+                invalidate();
+
+            return removeCount;
+        }
+
+        /// &lt;summary&gt;
+        /// Recreate this path by using difference set of vertices at given time points.
+        /// In addition to the given &lt;paramref name=&quot;sampleTimes&quot;/&gt;, the first vertex and the last vertex are always added to the new path.
+        /// New vertices use the positions on the original path. Thus, &lt;see cref=&quot;PositionAtTime&quot;/&gt;s at &lt;paramref name=&quot;sampleTimes&quot;/&gt; are preserved.
+        /// &lt;/summary&gt;
+        public void ResampleVertices(IEnumerable&lt;double&gt; sampleTimes)
+        {
+            var sampledVertices = new List&lt;JuiceStreamPathVertex&gt;();
+
+            foreach (double time in sampleTimes)
+            {
+                if (!double.IsFinite(time))
+                    throw new ArgumentOutOfRangeException(nameof(sampleTimes));
+
+                double clampedTime = Math.Clamp(time, vertices[0].Time, vertices[^1].Time);
+                float x = PositionAtTime(clampedTime);
+                sampledVertices.Add(new JuiceStreamPathVertex(clampedTime, x));
+            }
+
+            sampledVertices.Sort();
+
+            // The first vertex and the last vertex are always used in the result.
+            vertices.RemoveRange(1, vertices.Count - (vertices.Count == 1 ? 1 : 2));
+            vertices.InsertRange(1, sampledVertices);
+
+            invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Convert a &lt;see cref=&quot;SliderPath&quot;/&gt; to list of vertices and write the result to this &lt;see cref=&quot;JuiceStreamPath&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Duplicated vertices are automatically removed.
+        /// &lt;/remarks&gt;
+        public void ConvertFromSliderPath(SliderPath sliderPath, double velocity)
+        {
+            var sliderPathVertices = sliderPath.CalculatedPath;
+
+            double time = 0;
+
+            vertices.Clear();
+            vertices.Add(new JuiceStreamPathVertex(0, sliderPathVertices.FirstOrDefault().X));
+
+            for (int i = 1; i &lt; sliderPathVertices.Count; i++)
+            {
+                time += Vector2.Distance(sliderPathVertices[i - 1], sliderPathVertices[i]) / velocity;
+
+                if (!Precision.AlmostEquals(vertices[^1].Time, time))
+                    Add(time, sliderPathVertices[i].X);
+            }
+
+            invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Computes the minimum slider velocity required to convert this path to a &lt;see cref=&quot;SliderPath&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double ComputeRequiredVelocity()
+        {
+            double maximumSlope = 0;
+
+            for (int i = 1; i &lt; vertices.Count; i++)
+            {
+                double xDifference = Math.Abs((double)vertices[i].X - vertices[i - 1].X);
+                double timeDifference = vertices[i].Time - vertices[i - 1].Time;
+
+                // A short segment won&#39;t affect the resulting path much anyways so ignore it to avoid divide-by-zero.
+                if (Precision.AlmostEquals(timeDifference, 0))
+                    continue;
+
+                maximumSlope = Math.Max(maximumSlope, xDifference / timeDifference);
+            }
+
+            return maximumSlope;
+        }
+
+        /// &lt;summary&gt;
+        /// Convert the path of this &lt;see cref=&quot;JuiceStreamPath&quot;/&gt; to a &lt;see cref=&quot;SliderPath&quot;/&gt; and write the result to &lt;paramref name=&quot;sliderPath&quot;/&gt;.
+        /// The resulting slider is &quot;folded&quot; to make it vertically contained in the playfield `(0..&lt;see cref=&quot;OSU_PLAYFIELD_HEIGHT&quot;/&gt;)` assuming the slider start position is &lt;paramref name=&quot;sliderStartY&quot;/&gt;.
+        ///
+        /// The velocity of the converted slider is assumed to be &lt;paramref name=&quot;velocity&quot;/&gt;.
+        /// To preserve the path, &lt;paramref name=&quot;velocity&quot;/&gt; should be at least the value returned by &lt;see cref=&quot;ComputeRequiredVelocity&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void ConvertToSliderPath(SliderPath sliderPath, float sliderStartY, double velocity)
+        {
+            const float margin = 1;
+
+            // Note: these two variables and `sliderPath` are modified by the local functions.
+            double currentTime = 0;
+            Vector2 lastPosition = new Vector2(vertices[0].X, 0);
+
+            sliderPath.ControlPoints.Clear();
+            sliderPath.ControlPoints.Add(new PathControlPoint(lastPosition));
+
+            for (int i = 1; i &lt; vertices.Count; i++)
+            {
+                sliderPath.ControlPoints[^1].Type = PathType.LINEAR;
+
+                float deltaX = vertices[i].X - lastPosition.X;
+                double length = (vertices[i].Time - currentTime) * velocity;
+
+                // Should satisfy `deltaX^2 + deltaY^2 = length^2`.
+                // The expression inside the `sqrt` is (almost) non-negative if the slider velocity is large enough.
+                double deltaY = Math.Sqrt(Math.Max(0, length * length - (double)deltaX * deltaX));
+
+                // When `deltaY` is small, one segment is always enough.
+                // This case is handled separately to prevent divide-by-zero.
+                if (deltaY &lt;= OSU_PLAYFIELD_HEIGHT / 2 - margin)
+                {
+                    float nextX = vertices[i].X;
+                    float nextY = (float)(lastPosition.Y + getYDirection() * deltaY);
+                    addControlPoint(nextX, nextY);
+                    continue;
+                }
+
+                // When `deltaY` is large or when the slider velocity is fast, the segment must be partitioned to subsegments to stay in bounds.
+                for (double currentProgress = 0; currentProgress &lt; deltaY;)
+                {
+                    double nextProgress = Math.Min(currentProgress + getMaxDeltaY(), deltaY);
+                    float nextX = (float)(vertices[i - 1].X + nextProgress / deltaY * deltaX);
+                    float nextY = (float)(lastPosition.Y + getYDirection() * (nextProgress - currentProgress));
+                    addControlPoint(nextX, nextY);
+                    currentProgress = nextProgress;
+                }
+            }
+
+            int getYDirection()
+            {
+                float lastSliderY = sliderStartY + lastPosition.Y;
+                return lastSliderY &lt; OSU_PLAYFIELD_HEIGHT / 2 ? 1 : -1;
+            }
+
+            float getMaxDeltaY()
+            {
+                float lastSliderY = sliderStartY + lastPosition.Y;
+                return Math.Max(lastSliderY, OSU_PLAYFIELD_HEIGHT - lastSliderY) - margin;
+            }
+
+            void addControlPoint(float nextX, float nextY)
+            {
+                Vector2 nextPosition = new Vector2(nextX, nextY);
+                sliderPath.ControlPoints.Add(new PathControlPoint(nextPosition));
+                currentTime += Vector2.Distance(lastPosition, nextPosition) / velocity;
+                lastPosition = nextPosition;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Find the index at which a new vertex with &lt;paramref name=&quot;time&quot;/&gt; can be inserted.
+        /// &lt;/summary&gt;
+        private int vertexIndexAtTime(double time)
+        {
+            // The position of `(time, Infinity)` is uniquely determined because infinite positions are not allowed.
+            int i = vertices.BinarySearch(new JuiceStreamPathVertex(time, float.PositiveInfinity));
+            return i &lt; 0 ? ~i : i;
+        }
+
+        /// &lt;summary&gt;
+        /// Compute the position at the given &lt;paramref name=&quot;time&quot;/&gt;, assuming &lt;paramref name=&quot;index&quot;/&gt; is the vertex index returned by &lt;see cref=&quot;vertexIndexAtTime&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private float positionAtTime(double time, int index)
+        {
+            if (index &lt;= 0)
+                return vertices[0].X;
+            if (index &gt;= vertices.Count)
+                return vertices[^1].X;
+
+            double duration = vertices[index].Time - vertices[index - 1].Time;
+            if (Precision.AlmostEquals(duration, 0))
+                return vertices[index].X;
+
+            float deltaX = vertices[index].X - vertices[index - 1].X;
+
+            return (float)(vertices[index - 1].X + deltaX * ((time - vertices[index - 1].Time) / duration));
+        }
+
+        private void invalidate() =&gt; InvalidationID++;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,65,33,73,1],[39,37,39,41,1],[39,42,39,54,1],[39,59,39,60,1],[44,35,44,71,0],[49,9,52,11,1],[61,9,61,10,1],[62,13,62,49,1],[63,13,63,48,1],[64,9,64,10,1],[70,9,70,10,1],[71,13,71,30,1],[72,13,72,55,1],[73,13,73,26,1],[74,9,74,10,1],[83,9,83,10,1],[84,13,84,40,1],[85,17,85,69,1],[87,13,87,49,1],[88,13,88,51,1],[89,13,89,72,1],[91,13,91,26,1],[92,13,92,26,1],[93,9,93,10,1],[99,9,99,10,1],[100,13,100,54,1],[101,17,101,70,1],[103,13,103,39,1],[104,17,104,69,1],[106,13,106,85,1],[108,13,108,26,1],[109,9,109,10,1],[115,9,115,10,1],[116,13,116,44,1],[117,13,117,41,1],[118,9,118,10,1],[129,9,129,10,1],[130,13,130,27,1],[131,13,131,60,1],[131,60,131,86,1],[131,86,131,88,1],[133,13,133,37,1],[134,17,134,59,1],[136,13,136,34,1],[137,17,137,30,1],[139,13,139,32,1],[140,9,140,10,1],[148,9,148,10,1],[149,13,149,69,1],[151,13,151,20,1],[151,22,151,33,1],[151,34,151,36,1],[151,37,151,48,1],[152,13,152,14,1],[153,17,153,44,1],[154,21,154,80,1],[156,17,156,92,1],[157,17,157,55,1],[158,17,158,80,1],[159,13,159,14,1],[161,13,161,36,1],[164,13,164,85,1],[165,13,165,54,1],[167,13,167,26,1],[168,9,168,10,1],[177,9,177,10,1],[178,13,178,64,1],[180,13,180,29,1],[182,13,182,30,1],[183,13,183,95,1],[185,18,185,27,1],[185,29,185,57,1],[185,59,185,62,1],[186,13,186,14,1],[187,17,187,103,1],[189,17,189,70,1],[190,21,190,56,1],[191,13,191,14,1],[193,13,193,26,1],[194,9,194,10,1],[200,9,200,10,1],[201,13,201,37,1],[203,18,203,27,1],[203,29,203,47,1],[203,49,203,52,1],[204,13,204,14,1],[205,17,205,90,1],[206,17,206,81,1],[209,17,209,63,1],[210,21,210,30,1],[212,17,212,85,1],[213,13,213,14,1],[215,13,215,33,1],[216,9,216,10,1],[226,9,226,10,1],[230,13,230,36,1],[231,13,231,66,1],[233,13,233,46,1],[234,13,234,78,1],[236,18,236,27,1],[236,29,236,47,1],[236,49,236,52,1],[237,13,237,14,1],[238,17,238,69,1],[240,17,240,63,1],[241,17,241,77,1],[245,17,245,99,1],[249,17,249,65,1],[250,17,250,18,1],[251,21,251,49,1],[252,21,252,86,1],[253,21,253,51,1],[254,21,254,30,1],[258,22,258,48,1],[258,50,258,74,1],[259,17,259,18,1],[260,21,260,94,1],[261,21,261,95,1],[262,21,262,112,1],[263,21,263,51,1],[264,21,264,52,1],[265,17,265,18,1],[266,13,266,14,1],[269,13,269,14,1],[270,17,270,67,1],[271,17,271,72,1],[272,13,272,14,1],[275,13,275,14,1],[276,17,276,67,1],[277,17,277,91,1],[278,13,278,14,1],[281,13,281,14,1],[282,17,282,66,1],[283,17,283,82,1],[284,17,284,88,1],[285,17,285,45,1],[286,13,286,14,1],[287,9,287,10,1],[293,9,293,10,1],[295,13,295,100,1],[296,13,296,35,1],[297,9,297,10,1],[303,9,303,10,1],[304,13,304,28,1],[305,17,305,38,1],[306,13,306,41,1],[307,17,307,39,1],[309,13,309,79,1],[310,13,310,53,1],[311,17,311,42,0],[313,13,313,70,1],[315,13,315,109,1],[316,9,316,10,1],[318,38,318,54,1]]);
+    </script>
+  </body>
+</html>

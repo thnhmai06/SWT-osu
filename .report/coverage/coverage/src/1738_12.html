@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/DrawableGameplayLeaderboard.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Configuration;
+using osu.Game.Graphics.Containers;
+using osu.Game.Localisation.SkinComponents;
+using osu.Game.Screens.Play.Leaderboards;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public partial class DrawableGameplayLeaderboard : CompositeDrawable, ISerialisableDrawable
+    {
+        protected readonly FillFlowContainer&lt;DrawableGameplayLeaderboardScore&gt; Flow;
+
+        private bool requiresScroll;
+        private readonly OsuScrollContainer scroll;
+
+        public DrawableGameplayLeaderboardScore? TrackedScore { get; private set; }
+
+        public bool AlwaysShown { get; init; }
+
+        [SettingSource(typeof(SkinnableComponentStrings), nameof(SkinnableComponentStrings.CollapseDuringGameplay), nameof(SkinnableComponentStrings.CollapseDuringGameplayDescription))]
+        public Bindable&lt;bool&gt; CollapseDuringGameplay { get; } = new BindableBool(true);
+
+        private readonly Bindable&lt;bool&gt; expanded = new BindableBool();
+
+        [Resolved]
+        private Player? player { get; set; }
+
+        [Resolved]
+        private IGameplayLeaderboardProvider leaderboardProvider { get; set; } = null!;
+
+        private readonly IBindableList&lt;GameplayLeaderboardScore&gt; scores = new BindableList&lt;GameplayLeaderboardScore&gt;();
+        private readonly Bindable&lt;bool&gt; configVisibility = new Bindable&lt;bool&gt;();
+        private readonly IBindable&lt;LocalUserPlayingState&gt; userPlayingState = new Bindable&lt;LocalUserPlayingState&gt;();
+        private readonly IBindable&lt;bool&gt; holdingForHUD = new Bindable&lt;bool&gt;();
+
+        /// &lt;summary&gt;
+        /// Create a new leaderboard.
+        /// &lt;/summary&gt;
+        public DrawableGameplayLeaderboard()
+        {
+            // Extra lenience is applied so the scores don&#39;t get cut off from the left due to elastic easing transforms.
+            float xOffset = DrawableGameplayLeaderboardScore.SHEAR_WIDTH + DrawableGameplayLeaderboardScore.ELASTIC_WIDTH_LENIENCE;
+
+            Width = 260 + xOffset;
+            Height = 300;
+
+            InternalChildren = new Drawable[]
+            {
+                scroll = new InputDisabledScrollContainer
+                {
+                    ClampExtension = 0,
+                    RelativeSizeAxes = Axes.Both,
+                    Child = Flow = new FillFlowContainer&lt;DrawableGameplayLeaderboardScore&gt;
+                    {
+                        Alpha = 0f,
+                        RelativeSizeAxes = Axes.X,
+                        X = xOffset,
+                        AutoSizeAxes = Axes.Y,
+                        Direction = FillDirection.Vertical,
+                        Spacing = new Vector2(2.5f),
+                        LayoutDuration = 450,
+                        LayoutEasing = Easing.OutQuint,
+                    }
+                }
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config, GameplayState? gameplayState, HUDOverlay? hudOverlay)
+        {
+            config.BindWith(OsuSetting.GameplayLeaderboard, configVisibility);
+
+            if (gameplayState != null)
+                userPlayingState.BindTo(gameplayState.PlayingState);
+
+            if (hudOverlay != null)
+                holdingForHUD.BindTo(hudOverlay.HoldingForHUD);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            scores.BindTo(leaderboardProvider.Scores);
+            scores.BindCollectionChanged((_, _) =&gt;
+            {
+                Clear();
+                foreach (var score in scores)
+                    Add(score);
+            }, true);
+
+            configVisibility.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateState));
+            userPlayingState.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateState));
+            holdingForHUD.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateState));
+            CollapseDuringGameplay.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateState));
+            updateState();
+        }
+
+        private void updateState()
+        {
+            // prevents weird delay in the flow correctly appearing when toggling the leaderboard on.
+            if (Flow.Alpha &lt; 1)
+                scroll.ScrollToStart(false);
+
+            Flow.FadeTo(player?.Configuration.ShowLeaderboard != false &amp;&amp; (configVisibility.Value || AlwaysShown) ? 1 : 0, 100, Easing.OutQuint);
+            expanded.Value = !CollapseDuringGameplay.Value || userPlayingState.Value != LocalUserPlayingState.Playing || holdingForHUD.Value;
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a player to the leaderboard.
+        /// &lt;/summary&gt;
+        public void Add(GameplayLeaderboardScore score)
+        {
+            var drawable = CreateLeaderboardScoreDrawable(score);
+
+            if (score.Tracked)
+            {
+                if (TrackedScore != null)
+                    throw new InvalidOperationException(&quot;Cannot track more than one score.&quot;);
+
+                TrackedScore = drawable;
+            }
+
+            drawable.Expanded.BindTo(expanded);
+
+            Flow.Add(drawable);
+            drawable.ScorePosition.BindValueChanged(_ =&gt; Scheduler.AddOnce(sort));
+            drawable.DisplayOrder.BindValueChanged(_ =&gt; Scheduler.AddOnce(sort), true);
+        }
+
+        public void Clear()
+        {
+            Flow.Clear();
+            TrackedScore = null;
+            scroll.ScrollToStart(false);
+        }
+
+        protected virtual DrawableGameplayLeaderboardScore CreateLeaderboardScoreDrawable(GameplayLeaderboardScore score) =&gt;
+            new DrawableGameplayLeaderboardScore(score);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // limit leaderboard dimensions to a sane minimum.
+            Width = Math.Max(Width, Flow.X + DrawableGameplayLeaderboardScore.MIN_WIDTH);
+            Height = Math.Max(Height, DrawableGameplayLeaderboardScore.PANEL_HEIGHT);
+
+            requiresScroll = Flow.DrawHeight &gt; Height;
+
+            if (requiresScroll &amp;&amp; TrackedScore != null)
+            {
+                double scrollTarget = scroll.GetChildPosInContent(TrackedScore) + TrackedScore.DrawHeight / 2 - scroll.DrawHeight / 2;
+
+                scroll.ScrollTo(scrollTarget);
+            }
+
+            const float panel_height = DrawableGameplayLeaderboardScore.PANEL_HEIGHT;
+
+            float fadeBottom = (float)(scroll.Current + scroll.DrawHeight);
+            float fadeTop = (float)(scroll.Current + panel_height);
+
+            if (scroll.IsScrolledToStart()) fadeTop -= panel_height;
+            if (!scroll.IsScrolledToEnd()) fadeBottom -= panel_height;
+
+            // logic is mostly shared with Leaderboard, copied here for simplicity.
+            foreach (var c in Flow)
+            {
+                float topY = c.ToSpaceOfOtherDrawable(Vector2.Zero, Flow).Y;
+                float bottomY = topY + panel_height;
+
+                bool requireTopFade = requiresScroll &amp;&amp; topY &lt;= fadeTop;
+                bool requireBottomFade = requiresScroll &amp;&amp; bottomY &gt;= fadeBottom;
+
+                if (!requireTopFade &amp;&amp; !requireBottomFade)
+                    c.Colour = Color4.White;
+                else if (topY &gt; fadeBottom + panel_height || bottomY &lt; fadeTop - panel_height)
+                    c.Colour = Color4.Transparent;
+                else
+                {
+                    if (requireBottomFade)
+                    {
+                        c.Colour = ColourInfo.GradientVertical(
+                            Color4.White.Opacity(Math.Min(1 - (topY - fadeBottom) / panel_height, 1)),
+                            Color4.White.Opacity(Math.Min(1 - (bottomY - fadeBottom) / panel_height, 1)));
+                    }
+                    else if (requiresScroll)
+                    {
+                        c.Colour = ColourInfo.GradientVertical(
+                            Color4.White.Opacity(Math.Min(1 - (fadeTop - topY) / panel_height, 1)),
+                            Color4.White.Opacity(Math.Min(1 - (fadeTop - bottomY) / panel_height, 1)));
+                    }
+                }
+            }
+        }
+
+        private void sort()
+        {
+            foreach (var score in Flow.ToArray())
+                Flow.SetLayoutPosition(score, score.DisplayOrder.Value);
+        }
+
+        private partial class InputDisabledScrollContainer : OsuScrollContainer
+        {
+            public InputDisabledScrollContainer()
+            {
+                ScrollbarVisible = false;
+            }
+
+            public override bool HandlePositionalInput =&gt; false;
+            public override bool HandleNonPositionalInput =&gt; false;
+        }
+
+        public bool UsesFixedAnchor { get; set; }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,65,29,69,0],[29,70,29,82,0],[31,35,31,39,0],[31,40,31,45,0],[34,56,34,60,0],[34,65,34,87,0],[36,9,36,71,0],[39,34,39,38,0],[39,39,39,43,0],[42,68,42,72,0],[42,73,42,77,0],[42,82,42,87,0],[44,9,44,120,0],[45,9,45,81,0],[46,9,46,116,0],[47,9,47,79,0],[52,9,52,45,0],[53,9,53,10,0],[55,13,55,132,0],[57,13,57,35,0],[58,13,58,26,0],[60,13,78,15,0],[79,9,79,10,0],[83,9,83,10,0],[84,13,84,79,0],[86,13,86,39,0],[87,17,87,69,0],[89,13,89,36,0],[90,17,90,64,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,33,0],[97,13,97,55,0],[98,13,99,13,0],[99,13,99,14,0],[99,14,100,17,0],[100,17,100,25,0],[100,25,101,17,0],[101,17,101,24,0],[101,24,101,26,0],[101,26,101,35,0],[101,35,101,36,0],[101,36,101,38,0],[101,38,101,39,0],[101,39,101,45,0],[101,45,102,21,0],[102,21,102,32,0],[102,32,103,13,0],[103,13,103,14,0],[103,14,103,22,0],[105,13,105,52,0],[105,52,105,82,0],[105,82,105,84,0],[106,13,106,52,0],[106,52,106,82,0],[106,82,106,84,0],[107,13,107,49,0],[107,49,107,79,0],[107,79,107,81,0],[108,13,108,58,0],[108,58,108,88,0],[108,88,108,90,0],[109,13,109,27,0],[110,9,110,10,0],[113,9,113,10,0],[115,13,115,32,0],[116,17,116,45,0],[118,13,118,146,0],[119,13,119,142,0],[120,9,120,10,0],[126,9,126,10,0],[127,13,127,66,0],[129,13,129,31,0],[130,13,130,14,0],[131,17,131,42,0],[132,21,132,94,0],[134,17,134,41,0],[135,13,135,14,0],[137,13,137,48,0],[139,13,139,32,0],[140,13,140,58,0],[140,58,140,81,0],[140,81,140,83,0],[141,13,141,57,0],[141,57,141,80,0],[141,80,141,88,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,26,0],[147,13,147,33,0],[148,13,148,41,0],[149,9,149,10,0],[152,13,152,56,0],[155,9,155,10,0],[156,13,156,27,0],[159,13,159,90,0],[160,13,160,86,0],[162,13,162,55,0],[164,13,164,56,0],[165,13,165,14,0],[166,17,166,135,0],[168,17,168,47,0],[169,13,169,14,0],[173,13,173,76,0],[174,13,174,68,0],[176,13,176,44,0],[176,45,176,69,0],[177,13,177,43,0],[177,44,177,71,0],[180,13,180,20,0],[180,22,180,27,0],[180,28,180,30,0],[180,31,180,35,0],[181,13,181,14,0],[182,17,182,77,0],[183,17,183,53,0],[185,17,185,73,0],[186,17,186,82,0],[188,17,188,59,0],[189,21,189,45,0],[190,22,190,95,0],[191,21,191,51,0],[193,17,193,18,0],[194,21,194,43,0],[195,21,195,22,0],[196,25,198,107,0],[199,21,199,22,0],[200,26,200,45,0],[201,21,201,22,0],[202,25,204,104,0],[205,21,205,22,0],[206,17,206,18,0],[207,13,207,14,0],[208,9,208,10,0],[211,9,211,10,0],[212,13,212,20,0],[212,22,212,31,0],[212,32,212,34,0],[212,35,212,49,0],[213,17,213,73,0],[214,9,214,10,0],[218,13,218,50,0],[219,13,219,14,0],[220,17,220,42,0],[221,13,221,14,0],[223,59,223,64,0],[224,62,224,67,0],[227,39,227,43,0],[227,44,227,48,0]]);
+    </script>
+  </body>
+</html>

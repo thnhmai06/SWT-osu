@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Drawings/DrawingsScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Tournament.Components;
+using osu.Game.Tournament.Models;
+using osu.Game.Tournament.Screens.Drawings.Components;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Tournament.Screens.Drawings
+{
+    public partial class DrawingsScreen : TournamentScreen
+    {
+        private const string results_filename = &quot;drawings_results.txt&quot;;
+
+        private ScrollingTeamContainer teamsContainer = null!;
+        private GroupContainer groupsContainer = null!;
+        private TournamentSpriteText fullTeamNameText = null!;
+
+        private readonly List&lt;TournamentTeam&gt; allTeams = new List&lt;TournamentTeam&gt;();
+
+        private DrawingsConfigManager drawingsConfig = null!;
+
+        private Task? writeOp;
+
+        private Storage storage = null!;
+
+        public ITeamList TeamList = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(Storage storage)
+        {
+            this.storage = storage;
+
+            RelativeSizeAxes = Axes.Both;
+
+            if (TeamList.IsNull())
+                TeamList = new StorageBackedTeamList(storage);
+
+            if (!TeamList.Teams.Any())
+            {
+                LinkFlowContainer links;
+
+                InternalChildren = new Drawable[]
+                {
+                    new Box
+                    {
+                        Colour = Color4.Black,
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Height = 0.3f,
+                    },
+                    new WarningBox(&quot;No drawings.txt file found. Please create one and restart the client.&quot;),
+                    links = new LinkFlowContainer
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Y = 60,
+                        AutoSizeAxes = Axes.Both
+                    }
+                };
+
+                links.AddLink(&quot;Click for details on the file format&quot;, &quot;https://osu.ppy.sh/wiki/en/Tournament_Drawings&quot;, t =&gt; t.Colour = Color4.White);
+                return;
+            }
+
+            drawingsConfig = new DrawingsConfigManager(storage);
+
+            InternalChildren = new Drawable[]
+            {
+                // Main container
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        new TourneyVideo(&quot;drawings&quot;)
+                        {
+                            Loop = true,
+                            RelativeSizeAxes = Axes.Both,
+                        },
+                        // Visualiser
+                        new VisualiserContainer
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+
+                            RelativeSizeAxes = Axes.X,
+                            Size = new Vector2(1, 10),
+
+                            Colour = new Color4(255, 204, 34, 255),
+
+                            Lines = 6
+                        },
+                        // Groups
+                        groupsContainer = new GroupContainer(drawingsConfig.Get&lt;int&gt;(DrawingsConfig.Groups), drawingsConfig.Get&lt;int&gt;(DrawingsConfig.TeamsPerGroup))
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+
+                            RelativeSizeAxes = Axes.Y,
+                            AutoSizeAxes = Axes.X,
+
+                            Padding = new MarginPadding
+                            {
+                                Top = 35f,
+                                Bottom = 35f
+                            }
+                        },
+                        // Scrolling teams
+                        teamsContainer = new ScrollingTeamContainer
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+
+                            RelativeSizeAxes = Axes.X,
+                        },
+                        // Scrolling team name
+                        fullTeamNameText = new TournamentSpriteText
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.TopCentre,
+
+                            Position = new Vector2(0, 45f),
+
+                            Colour = OsuColour.Gray(0.95f),
+
+                            Alpha = 0,
+
+                            Font = OsuFont.Torus.With(weight: FontWeight.Light, size: 42),
+                        }
+                    }
+                },
+                // Control panel container
+                new ControlPanel
+                {
+                    new TourneyButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+
+                        Text = &quot;Begin random&quot;,
+                        Action = teamsContainer.StartScrolling,
+                    },
+                    new TourneyButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+
+                        Text = &quot;Stop random&quot;,
+                        Action = teamsContainer.StopScrolling,
+                    },
+                    new TourneyButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+
+                        Text = &quot;Reload&quot;,
+                        Action = reloadTeams
+                    },
+                    new ControlPanel.Spacer(),
+                    new TourneyButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+
+                        Text = &quot;Reset&quot;,
+                        Action = () =&gt; reset()
+                    }
+                }
+            };
+
+            teamsContainer.OnSelected += onTeamSelected;
+            teamsContainer.OnScrollStarted += () =&gt; fullTeamNameText.FadeOut(200);
+
+            reset(true);
+        }
+
+        private void onTeamSelected(TournamentTeam team)
+        {
+            groupsContainer.AddTeam(team);
+
+            fullTeamNameText.Text = team.FullName.Value;
+            fullTeamNameText.FadeIn(200);
+
+            writeResults(groupsContainer.GetStringRepresentation());
+        }
+
+        private void writeResults(string text)
+        {
+            void writeAction()
+            {
+                try
+                {
+                    // Write to drawings_results
+                    using (Stream stream = storage.CreateFileSafely(results_filename))
+                    using (StreamWriter sw = new StreamWriter(stream))
+                    {
+                        sw.Write(text);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, &quot;Failed to write results.&quot;);
+                }
+            }
+
+            writeOp = writeOp?.ContinueWith(_ =&gt; { writeAction(); }) ?? Task.Run(writeAction);
+        }
+
+        private void reloadTeams()
+        {
+            teamsContainer.ClearTeams();
+            allTeams.Clear();
+
+            foreach (TournamentTeam t in TeamList.Teams)
+            {
+                if (groupsContainer.ContainsTeam(t.FullName.Value))
+                    continue;
+
+                allTeams.Add(t);
+                teamsContainer.AddTeam(t);
+            }
+        }
+
+        private void reset(bool loadLastResults = false)
+        {
+            groupsContainer.ClearTeams();
+
+            reloadTeams();
+
+            if (!storage.Exists(results_filename))
+                return;
+
+            if (loadLastResults)
+            {
+                try
+                {
+                    // Read from drawings_results
+                    using (Stream stream = storage.GetStream(results_filename, FileAccess.Read, FileMode.Open))
+                    using (StreamReader sr = new StreamReader(stream))
+                    {
+                        string? line;
+
+                        while ((line = sr.ReadLine()?.Trim()) != null)
+                        {
+                            if (string.IsNullOrEmpty(line))
+                                continue;
+
+                            if (line.ToUpperInvariant().StartsWith(&quot;GROUP&quot;, StringComparison.Ordinal))
+                                continue;
+
+                            TournamentTeam? teamToAdd = allTeams.FirstOrDefault(t =&gt; t.FullName.Value == line);
+
+                            if (teamToAdd == null)
+                                continue;
+
+                            groupsContainer.AddTeam(teamToAdd);
+                            teamsContainer.RemoveTeam(teamToAdd);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, &quot;Failed to read last drawings results.&quot;);
+                }
+            }
+            else
+            {
+                writeResults(string.Empty);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,9,30,63,0],[31,9,31,56,0],[32,9,32,63,0],[34,9,34,85,0],[36,9,36,62,0],[40,9,40,41,0],[42,9,42,43,0],[46,9,46,10,0],[47,13,47,36,0],[49,13,49,42,0],[51,13,51,35,0],[52,17,52,63,0],[54,13,54,39,0],[55,13,55,14,0],[58,17,76,19,0],[78,17,78,126,0],[78,126,78,149,0],[78,149,78,151,0],[79,17,79,24,0],[82,13,82,65,0],[84,13,179,40,0],[179,40,179,47,0],[179,47,182,15,0],[184,13,184,57,0],[185,13,185,53,0],[185,53,185,82,0],[185,82,185,83,0],[187,13,187,25,0],[188,9,188,10,0],[191,9,191,10,0],[192,13,192,43,0],[194,13,194,57,0],[195,13,195,42,0],[197,13,197,69,0],[198,9,198,10,0],[201,9,201,10,0],[203,13,203,14,0],[205,17,205,18,0],[207,28,207,86,0],[208,28,208,70,0],[209,21,209,22,0],[210,25,210,40,0],[211,21,211,22,0],[212,17,212,18,0],[213,17,213,37,0],[214,17,214,18,0],[215,21,215,66,0],[216,17,216,18,0],[217,13,217,14,0],[219,13,219,50,0],[219,50,219,51,0],[219,51,219,52,0],[219,52,219,66,0],[219,66,219,67,0],[219,67,219,68,0],[219,68,219,95,0],[220,9,220,10,0],[223,9,223,10,0],[224,13,224,41,0],[225,13,225,30,0],[227,13,227,20,0],[227,22,227,38,0],[227,39,227,41,0],[227,42,227,56,0],[228,13,228,14,0],[229,17,229,68,0],[230,21,230,30,0],[232,17,232,33,0],[233,17,233,43,0],[234,13,234,14,0],[235,9,235,10,0],[238,9,238,10,0],[239,13,239,42,0],[241,13,241,27,0],[243,13,243,51,0],[244,17,244,24,0],[246,13,246,33,0],[247,13,247,14,0],[249,17,249,18,0],[251,28,251,111,0],[252,28,252,70,0],[253,21,253,22,0],[256,25,256,71,0],[257,25,257,26,0],[258,29,258,60,0],[259,33,259,42,0],[261,29,261,103,0],[262,33,262,42,0],[264,29,264,86,0],[264,86,264,110,0],[264,110,264,112,0],[266,29,266,51,0],[267,33,267,42,0],[269,29,269,64,0],[270,29,270,66,0],[271,25,271,26,0],[272,21,272,22,0],[273,17,273,18,0],[274,17,274,37,0],[275,17,275,18,0],[276,21,276,79,0],[277,17,277,18,0],[278,13,278,14,0],[280,13,280,14,0],[281,17,281,44,0],[282,13,282,14,0],[283,9,283,10,0]]);
+    </script>
+  </body>
+</html>

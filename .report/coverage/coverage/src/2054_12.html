@@ -1,0 +1,1705 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Editor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Framework.Testing;
+using osu.Framework.Threading;
+using osu.Framework.Timing;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Overlays.OSD;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Screens.Edit.Components.Menus;
+using osu.Game.Screens.Edit.Compose;
+using osu.Game.Screens.Edit.Compose.Components.Timeline;
+using osu.Game.Screens.Edit.Design;
+using osu.Game.Screens.Edit.GameplayTest;
+using osu.Game.Screens.Edit.Setup;
+using osu.Game.Screens.Edit.Submission;
+using osu.Game.Screens.Edit.Timing;
+using osu.Game.Screens.Edit.Verify;
+using osu.Game.Screens.OnlinePlay;
+using osu.Game.Users;
+using WebCommonStrings = osu.Game.Resources.Localisation.Web.CommonStrings;
+
+namespace osu.Game.Screens.Edit
+{
+    [Cached(typeof(IBeatSnapProvider))]
+    [Cached]
+    public partial class Editor : OsuScreen, IKeyBindingHandler&lt;GlobalAction&gt;, IKeyBindingHandler&lt;PlatformAction&gt;, IBeatSnapProvider, ISamplePlaybackDisabler, IBeatSyncProvider
+    {
+        /// &lt;summary&gt;
+        /// An offset applied to waveform visuals to align them with expectations.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Historically, osu! beatmaps have an assumption of full system latency baked in.
+        /// This comes from a culmination of stable&#39;s platform offset, average hardware playback
+        /// latency, and users having their universal offsets tweaked to previous beatmaps.
+        ///
+        /// Coming to this value involved running various tests with existing users / beatmaps.
+        /// This included both visual and audible comparisons. Ballpark confidence is ≈2 ms.
+        /// &lt;/remarks&gt;
+        public const float WAVEFORM_VISUAL_OFFSET = 20;
+
+        public override float BackgroundParallaxAmount =&gt; 0.1f;
+
+        public override bool HideOverlaysOnEnter =&gt; true;
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        public override bool? ApplyModTrackAdjustments =&gt; false;
+
+        protected override bool PlayExitSound =&gt; !ExitConfirmed &amp;&amp; !switchingDifficulty;
+
+        protected bool HasUnsavedChanges
+        {
+            get
+            {
+                if (!canSave)
+                    return false;
+
+                return lastSavedHash != changeHandler?.CurrentStateHash;
+            }
+        }
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; }
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private IDialogOverlay dialogOverlay { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private INotificationOverlay notifications { get; set; }
+
+        [Resolved(canBeNull: true)]
+        [CanBeNull]
+        private LoginOverlay loginOverlay { get; set; }
+
+        [Resolved]
+        private RealmAccess realm { get; set; }
+
+        public readonly Bindable&lt;EditorScreenMode&gt; Mode = new Bindable&lt;EditorScreenMode&gt;();
+
+        public IBindable&lt;bool&gt; SamplePlaybackDisabled =&gt; samplePlaybackDisabled;
+
+        /// &lt;summary&gt;
+        /// Ensure all asynchronously loading pieces of the editor are in a good state.
+        /// This exists here for convenience for tests, not for actual use.
+        /// Eventually we&#39;d probably want a better way to signal this.
+        /// &lt;/summary&gt;
+        public bool ReadyForUse
+        {
+            get
+            {
+                if (!workingBeatmapUpdated)
+                    return false;
+
+                if (currentScreen?.IsLoaded != true)
+                    return false;
+
+                if (currentScreen is EditorScreenWithTimeline)
+                    return currentScreen.ChildrenOfType&lt;TimelineArea&gt;().FirstOrDefault()?.IsLoaded == true;
+
+                return true;
+            }
+        }
+
+        private bool workingBeatmapUpdated;
+
+        private readonly Bindable&lt;bool&gt; samplePlaybackDisabled = new Bindable&lt;bool&gt;();
+
+        private bool canSave;
+        private readonly List&lt;MenuItem&gt; saveRelatedMenuItems = new List&lt;MenuItem&gt;();
+
+        /// &lt;summary&gt;
+        /// Tracks ongoing mutually-exclusive operations related to changing the beatmap
+        /// (e.g. save, export).
+        /// &lt;/summary&gt;
+        public OngoingOperationTracker MutationTracker { get; } = new OngoingOperationTracker();
+
+        protected bool ExitConfirmed { get; private set; }
+
+        private bool switchingDifficulty;
+
+        private string lastSavedHash;
+        private EditorMenuItem discardChangesMenuItem;
+
+        private ScreenContainer screenContainer;
+
+        [CanBeNull]
+        private readonly EditorLoader loader;
+
+        private EditorScreen currentScreen;
+
+        private readonly BindableBeatDivisor beatDivisor = new BindableBeatDivisor();
+        private EditorClock clock;
+
+        private IBeatmap playableBeatmap;
+        private EditorBeatmap editorBeatmap;
+
+        private BottomBar bottomBar;
+
+        [CanBeNull] // Should be non-null once it can support custom rulesets.
+        private EditorChangeHandler changeHandler;
+
+        private DependencyContainer dependencies;
+
+        private bool isNewBeatmap;
+
+        protected override UserActivity InitialActivity =&gt; getCurrentUserActivity();
+
+        private UserActivity getCurrentUserActivity()
+        {
+            if (Beatmap.Value.Metadata.Author.OnlineID == api.LocalUser.Value.OnlineID)
+                return new UserActivity.EditingBeatmap(Beatmap.Value.BeatmapInfo);
+
+            return new UserActivity.ModdingBeatmap(Beatmap.Value.BeatmapInfo);
+        }
+
+        protected override bool InitialBackButtonVisibility =&gt; false;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+            =&gt; dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Cached]
+        public readonly EditorClipboard Clipboard = new EditorClipboard();
+
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Aquamarine);
+
+        [Resolved(canBeNull: true)]
+        private OnScreenDisplay onScreenDisplay { get; set; }
+
+        private Bindable&lt;float&gt; editorBackgroundDim;
+        private Bindable&lt;bool&gt; editorShowStoryboard;
+        private Bindable&lt;bool&gt; editorHitMarkers;
+        private Bindable&lt;bool&gt; editorAutoSeekOnPlacement;
+        private Bindable&lt;bool&gt; editorLimitedDistanceSnap;
+        private Bindable&lt;bool&gt; editorTimelineShowTimingChanges;
+        private Bindable&lt;bool&gt; editorTimelineShowBreaks;
+        private Bindable&lt;bool&gt; editorTimelineShowTicks;
+        private Bindable&lt;bool&gt; editorContractSidebars;
+
+        /// &lt;summary&gt;
+        /// This controls the opacity of components like the timelines, sidebars, etc.
+        /// In &quot;composer focus&quot; mode the opacity of the aforementioned components is reduced so that the user can focus on the composer better.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The state of this bindable is controlled by &lt;see cref=&quot;HitObjectComposer&quot;/&gt; when in &lt;see cref=&quot;EditorScreenMode.Compose&quot;/&gt; mode.
+        /// &lt;/remarks&gt;
+        public Bindable&lt;bool&gt; ComposerFocusMode { get; } = new Bindable&lt;bool&gt;();
+
+        [CanBeNull]
+        public event Action&lt;double&gt; ShowSampleEditPopoverRequested;
+
+        public Editor(EditorLoader loader = null)
+        {
+            this.loader = loader;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            var loadableBeatmap = Beatmap.Value;
+
+            if (loadableBeatmap is DummyWorkingBeatmap)
+            {
+                Logger.Log(&quot;Editor was loaded without a valid beatmap; creating a new beatmap.&quot;);
+
+                isNewBeatmap = true;
+
+                loadableBeatmap = beatmapManager.CreateNew(Ruleset.Value, api.LocalUser.Value);
+
+                // required so we can get the track length in EditorClock.
+                // this is ONLY safe because the track being provided is a `TrackVirtual` which we don&#39;t really care about disposing.
+                loadableBeatmap.LoadTrack();
+
+                // this is a bit haphazard, but guards against setting the lease Beatmap bindable if
+                // the editor has already been exited.
+                if (!ValidForPush)
+                {
+                    beatmapManager.Delete(loadableBeatmap.BeatmapSetInfo);
+                    return;
+                }
+            }
+
+            try
+            {
+                playableBeatmap = loadableBeatmap.GetPlayableBeatmap(loadableBeatmap.BeatmapInfo.Ruleset);
+
+                // clone these locally for now to avoid incurring overhead on GetPlayableBeatmap usages.
+                // eventually we will want to improve how/where this is done as there are issues with *not* cloning it in all cases.
+                playableBeatmap.ControlPointInfo = playableBeatmap.ControlPointInfo.DeepClone();
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;Could not load beatmap successfully!&quot;);
+                // couldn&#39;t load, hard abort!
+                this.Exit();
+                return;
+            }
+
+            // Todo: should probably be done at a DrawableRuleset level to share logic with Player.
+            clock = new EditorClock(playableBeatmap, beatDivisor);
+            clock.ChangeSource(loadableBeatmap.Track);
+
+            dependencies.CacheAs(clock);
+            AddInternal(clock);
+
+            clock.SeekingOrStopped.BindValueChanged(_ =&gt; updateSampleDisabledState());
+
+            // todo: remove caching of this and consume via editorBeatmap?
+            dependencies.Cache(beatDivisor);
+
+            AddInternal(editorBeatmap = new EditorBeatmap(playableBeatmap, loadableBeatmap.GetSkin(), loadableBeatmap.Storyboard, loadableBeatmap.BeatmapInfo));
+            dependencies.CacheAs(editorBeatmap);
+
+            editorBeatmap.UpdateInProgress.BindValueChanged(_ =&gt; updateSampleDisabledState());
+
+            canSave = editorBeatmap.BeatmapInfo.Ruleset.CreateInstance() is ILegacyRuleset;
+
+            if (canSave)
+            {
+                changeHandler = new BeatmapEditorChangeHandler(editorBeatmap);
+                dependencies.CacheAs&lt;IEditorChangeHandler&gt;(changeHandler);
+            }
+
+            beatDivisor.SetArbitraryDivisor(editorBeatmap.BeatmapInfo.BeatDivisor);
+            beatDivisor.BindValueChanged(divisor =&gt; editorBeatmap.BeatmapInfo.BeatDivisor = divisor.NewValue);
+
+            updateLastSavedHash();
+
+            Schedule(() =&gt;
+            {
+                // we need to avoid changing the beatmap from an asynchronous load thread. it can potentially cause weirdness including crashes.
+                // this assumes that nothing during the rest of this load() method is accessing Beatmap.Value (loadableBeatmap should be preferred).
+                // generally this is quite safe, as the actual load of editor content comes after menuBar.Mode.ValueChanged is fired in its own LoadComplete.
+                Beatmap.Value = loadableBeatmap;
+                workingBeatmapUpdated = true;
+            });
+
+            var bookmarkController = new BookmarkController();
+            AddInternal(bookmarkController);
+
+            OsuMenuItem undoMenuItem;
+            OsuMenuItem redoMenuItem;
+
+            editorBackgroundDim = config.GetBindable&lt;float&gt;(OsuSetting.EditorDim);
+            editorShowStoryboard = config.GetBindable&lt;bool&gt;(OsuSetting.EditorShowStoryboard);
+            editorHitMarkers = config.GetBindable&lt;bool&gt;(OsuSetting.EditorShowHitMarkers);
+            editorAutoSeekOnPlacement = config.GetBindable&lt;bool&gt;(OsuSetting.EditorAutoSeekOnPlacement);
+            editorLimitedDistanceSnap = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+            editorTimelineShowTimingChanges = config.GetBindable&lt;bool&gt;(OsuSetting.EditorTimelineShowTimingChanges);
+            editorTimelineShowBreaks = config.GetBindable&lt;bool&gt;(OsuSetting.EditorTimelineShowBreaks);
+            editorTimelineShowTicks = config.GetBindable&lt;bool&gt;(OsuSetting.EditorTimelineShowTicks);
+            editorContractSidebars = config.GetBindable&lt;bool&gt;(OsuSetting.EditorContractSidebars);
+
+            // These two settings don&#39;t work together. Make them mutually exclusive to let the user know.
+            editorAutoSeekOnPlacement.BindValueChanged(enabled =&gt;
+            {
+                if (enabled.NewValue)
+                    editorLimitedDistanceSnap.Value = false;
+            });
+            editorLimitedDistanceSnap.BindValueChanged(enabled =&gt;
+            {
+                if (enabled.NewValue)
+                    editorAutoSeekOnPlacement.Value = false;
+            });
+
+            AddInternal(new OsuContextMenuContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    new Container
+                    {
+                        Name = &quot;Screen container&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        Padding = new MarginPadding { Top = 40, Bottom = 50 },
+                        Child = screenContainer = new ScreenContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                        }
+                    },
+                    new Container
+                    {
+                        Name = &quot;Top bar&quot;,
+                        RelativeSizeAxes = Axes.X,
+                        Height = 40,
+                        Children = new Drawable[]
+                        {
+                            new EditorMenuBar
+                            {
+                                Anchor = Anchor.CentreLeft,
+                                Origin = Anchor.CentreLeft,
+                                RelativeSizeAxes = Axes.Both,
+                                MaxHeight = 600,
+                                Items = new[]
+                                {
+                                    new MenuItem(CommonStrings.MenuBarFile)
+                                    {
+                                        Items = createFileMenuItems().ToList()
+                                    },
+                                    new MenuItem(CommonStrings.MenuBarEdit)
+                                    {
+                                        Items = new[]
+                                        {
+                                            undoMenuItem = new EditorMenuItem(CommonStrings.Undo, MenuItemType.Standard, Undo) { Hotkey = new Hotkey(PlatformAction.Undo) },
+                                            redoMenuItem = new EditorMenuItem(CommonStrings.Redo, MenuItemType.Standard, Redo) { Hotkey = new Hotkey(PlatformAction.Redo) },
+                                            new OsuMenuItemSpacer(),
+                                            cutMenuItem = new EditorMenuItem(CommonStrings.Cut, MenuItemType.Standard, Cut) { Hotkey = new Hotkey(PlatformAction.Cut) },
+                                            copyMenuItem = new EditorMenuItem(CommonStrings.Copy, MenuItemType.Standard, Copy) { Hotkey = new Hotkey(PlatformAction.Copy) },
+                                            pasteMenuItem = new EditorMenuItem(CommonStrings.Paste, MenuItemType.Standard, Paste) { Hotkey = new Hotkey(PlatformAction.Paste) },
+                                            cloneMenuItem = new EditorMenuItem(CommonStrings.Clone, MenuItemType.Standard, Clone) { Hotkey = new Hotkey(GlobalAction.EditorCloneSelection) },
+                                        }
+                                    },
+                                    new MenuItem(CommonStrings.MenuBarView)
+                                    {
+                                        Items = new[]
+                                        {
+                                            new MenuItem(EditorStrings.Timeline)
+                                            {
+                                                Items =
+                                                [
+                                                    new WaveformOpacityMenuItem(config.GetBindable&lt;float&gt;(OsuSetting.EditorWaveformOpacity)),
+                                                    new ToggleMenuItem(EditorStrings.TimelineShowTimingChanges)
+                                                    {
+                                                        State = { BindTarget = editorTimelineShowTimingChanges }
+                                                    },
+                                                    new ToggleMenuItem(EditorStrings.TimelineShowTicks)
+                                                    {
+                                                        State = { BindTarget = editorTimelineShowTicks }
+                                                    },
+                                                    new ToggleMenuItem(EditorStrings.TimelineShowBreaks)
+                                                    {
+                                                        State = { BindTarget = editorTimelineShowBreaks }
+                                                    },
+                                                ]
+                                            },
+                                            new OsuMenuItemSpacer(),
+                                            new BackgroundDimMenuItem(editorBackgroundDim),
+                                            new ToggleMenuItem(EditorStrings.ShowStoryboard)
+                                            {
+                                                State = { BindTarget = editorShowStoryboard },
+                                            },
+                                            new OsuMenuItemSpacer(),
+                                            new ToggleMenuItem(EditorStrings.ShowHitMarkers)
+                                            {
+                                                State = { BindTarget = editorHitMarkers },
+                                            },
+                                            new ToggleMenuItem(EditorStrings.AutoSeekOnPlacement)
+                                            {
+                                                State = { BindTarget = editorAutoSeekOnPlacement },
+                                            },
+                                            new ToggleMenuItem(EditorStrings.LimitedDistanceSnap)
+                                            {
+                                                State = { BindTarget = editorLimitedDistanceSnap },
+                                            },
+                                            new ToggleMenuItem(EditorStrings.ContractSidebars)
+                                            {
+                                                State = { BindTarget = editorContractSidebars }
+                                            },
+                                        }
+                                    },
+                                    new MenuItem(EditorStrings.Timing)
+                                    {
+                                        Items = new MenuItem[]
+                                        {
+                                            new EditorMenuItem(EditorStrings.SetPreviewPointToCurrent, MenuItemType.Standard, SetPreviewPointToCurrentTime),
+                                            new EditorMenuItem(EditorStrings.SnapAllNotesToCurrentSnapDivisor, MenuItemType.Destructive, confirmSnapAllHitObjectsToCurrentDivisor),
+                                            new EditorMenuItem(EditorStrings.Synchronise, MenuItemType.Destructive, confirmSyncTimingAttributes)
+                                            {
+                                                Action = { Disabled = loadableBeatmap.BeatmapSetInfo.Beatmaps.Count &lt; 2 }
+                                            },
+                                            bookmarkController.Menu,
+                                        }
+                                    }
+                                }
+                            },
+                            screenSwitcher = new EditorScreenSwitcherControl
+                            {
+                                Anchor = Anchor.BottomRight,
+                                Origin = Anchor.BottomRight,
+                                X = -10,
+                                Current = Mode,
+                            },
+                        },
+                    },
+                    bottomBar = new BottomBar(),
+                    MutationTracker,
+                }
+            });
+
+            changeHandler?.CanUndo.BindValueChanged(v =&gt; undoMenuItem.Action.Disabled = !v.NewValue, true);
+            changeHandler?.CanRedo.BindValueChanged(v =&gt; redoMenuItem.Action.Disabled = !v.NewValue, true);
+        }
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        protected override BackgroundScreen CreateBackground() =&gt; new EditorBackgroundScreen(editorBeatmap);
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            setUpClipboardActionAvailability();
+
+            Mode.Value = isNewBeatmap ? EditorScreenMode.SongSetup : EditorScreenMode.Compose;
+            Mode.BindValueChanged(onModeChanged, true);
+
+            MutationTracker.InProgress.BindValueChanged(_ =&gt;
+            {
+                foreach (var item in saveRelatedMenuItems)
+                    item.Action.Disabled = MutationTracker.InProgress.Value;
+            }, true);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            // redundant (should have happened via a `resetTrack()` call in `OnExiting()`), but done for safety
+            musicController.TrackChanged -= onTrackChanged;
+        }
+
+        private void onTrackChanged(WorkingBeatmap working, TrackChangeDirection direction) =&gt; clock.ChangeSource(working.Track);
+
+        /// &lt;summary&gt;
+        /// Creates an &lt;see cref=&quot;EditorState&quot;/&gt; instance representing the current state of the editor.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;nextRuleset&quot;&gt;
+        /// The ruleset of the next beatmap to be shown, in the case of difficulty switch.
+        /// &lt;see langword=&quot;null&quot;/&gt; indicates that the beatmap will not be changing.
+        /// &lt;/param&gt;
+        public EditorState GetState([CanBeNull] RulesetInfo nextRuleset = null) =&gt; new EditorState
+        {
+            Mode = Mode.Value,
+            Time = clock.CurrentTimeAccurate,
+            ClipboardContent = nextRuleset == null || editorBeatmap.BeatmapInfo.Ruleset.ShortName == nextRuleset.ShortName ? Clipboard.Content.Value : string.Empty
+        };
+
+        /// &lt;summary&gt;
+        /// Restore the editor to a provided state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;state&quot;&gt;The state to restore.&lt;/param&gt;
+        public void RestoreState([NotNull] EditorState state) =&gt; Schedule(() =&gt;
+        {
+            Mode.Value = state.Mode;
+            clock.Seek(state.Time);
+            Clipboard.Content.Value = state.ClipboardContent;
+        });
+
+        public void TestGameplay()
+        {
+            clock.Stop();
+
+            if (HasUnsavedChanges)
+            {
+                dialogOverlay.Push(new SaveRequiredPopupDialog(() =&gt; attemptMutationOperation(() =&gt;
+                {
+                    if (!Save()) return false;
+
+                    pushEditorPlayer();
+                    return true;
+                })));
+            }
+            else
+            {
+                pushEditorPlayer();
+            }
+
+            void pushEditorPlayer() =&gt; this.Push(new EditorPlayerLoader(this));
+        }
+
+        private bool attemptMutationOperation(Func&lt;bool&gt; mutationOperation)
+        {
+            if (MutationTracker.InProgress.Value)
+                return false;
+
+            using (MutationTracker.BeginOperation())
+                return mutationOperation.Invoke();
+        }
+
+        private bool attemptAsyncMutationOperation(Func&lt;Task&gt; mutationTask)
+        {
+            if (MutationTracker.InProgress.Value)
+                return false;
+
+            var operation = MutationTracker.BeginOperation();
+            var task = mutationTask.Invoke();
+            task.FireAndForget(operation.Dispose, _ =&gt; operation.Dispose());
+            return true;
+        }
+
+        [CanBeNull]
+        internal event Action Saved;
+
+        /// &lt;summary&gt;
+        /// Saves the currently edited beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether the save was successful.&lt;/returns&gt;
+        internal bool Save()
+        {
+            if (!canSave)
+            {
+                notifications?.Post(new SimpleErrorNotification { Text = EditorStrings.RulesetNotSupportSaving });
+                return false;
+            }
+
+            try
+            {
+                // save the loaded beatmap&#39;s data stream.
+                beatmapManager.Save(editorBeatmap.BeatmapInfo, editorBeatmap.PlayableBeatmap, editorBeatmap.BeatmapSkin, editorBeatmap.Storyboard);
+            }
+            catch (Exception ex)
+            {
+                // can fail e.g. due to duplicated difficulty names.
+                Logger.Error(ex, ex.Message);
+                return false;
+            }
+
+            // no longer new after first user-triggered save.
+            isNewBeatmap = false;
+            updateLastSavedHash();
+            onScreenDisplay?.Display(new BeatmapEditorToast(ToastStrings.BeatmapSaved, editorBeatmap.BeatmapInfo.GetDisplayTitle()));
+            Saved?.Invoke();
+
+            // This triggers an update to the window title post-save (ie if the difficulty name changed).
+            Activity.Value = getCurrentUserActivity();
+            return true;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+            clock.ProcessFrame();
+
+            discardChangesMenuItem.Action.Disabled = !HasUnsavedChanges;
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;PlatformAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case PlatformAction.Cut:
+                    Cut();
+                    return true;
+
+                case PlatformAction.Copy:
+                    Copy();
+                    return true;
+
+                case PlatformAction.Paste:
+                    Paste();
+                    return true;
+
+                case PlatformAction.Undo:
+                    Undo();
+                    return true;
+
+                case PlatformAction.Redo:
+                    Redo();
+                    return true;
+
+                case PlatformAction.Save:
+                    if (e.Repeat)
+                        return false;
+
+                    return attemptMutationOperation(Save);
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;PlatformAction&gt; e)
+        {
+        }
+
+        private double scrollAccumulation;
+
+        protected override bool OnScroll(ScrollEvent e)
+        {
+            if (e.ControlPressed || e.AltPressed || e.SuperPressed)
+                return false;
+
+            const double precision = 1;
+
+            double scrollComponent = e.ScrollDelta.X + e.ScrollDelta.Y;
+
+            double scrollDirection = Math.Sign(scrollComponent);
+
+            // this is a special case to handle the &quot;pivot&quot; scenario.
+            // if we are precise scrolling in one direction then change our mind and scroll backwards,
+            // the existing accumulation should be applied in the inverse direction to maintain responsiveness.
+            if (scrollAccumulation != 0 &amp;&amp; Math.Sign(scrollAccumulation) != scrollDirection)
+                scrollAccumulation = scrollDirection * (precision - Math.Abs(scrollAccumulation));
+
+            scrollAccumulation += scrollComponent;
+
+            // because we are doing snapped seeking, we need to add up precise scrolls until they accumulate to an arbitrary cut-off.
+            while (Math.Abs(scrollAccumulation) &gt;= precision)
+            {
+                if (scrollAccumulation &gt; 0)
+                    seek(e, -1);
+                else
+                    seek(e, 1);
+
+                scrollAccumulation = scrollAccumulation &lt; 0 ? Math.Min(0, scrollAccumulation + precision) : Math.Max(0, scrollAccumulation - precision);
+            }
+
+            return true;
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            // Repeatable actions
+            switch (e.Action)
+            {
+                case GlobalAction.EditorSeekBackwards:
+                    seek(e, -1);
+                    return true;
+
+                case GlobalAction.EditorSeekForwards:
+                    seek(e, 1);
+                    return true;
+
+                case GlobalAction.EditorSeekToPreviousTimingPoint:
+                    seekControlPoint(-1);
+                    return true;
+
+                case GlobalAction.EditorSeekToNextTimingPoint:
+                    seekControlPoint(1);
+                    return true;
+
+                case GlobalAction.EditorSeekToPreviousHitObject:
+                    if (editorBeatmap.SelectedHitObjects.Any())
+                        return false;
+
+                    seekHitObject(-1);
+                    return true;
+
+                case GlobalAction.EditorSeekToNextHitObject:
+                    if (editorBeatmap.SelectedHitObjects.Any())
+                        return false;
+
+                    seekHitObject(1);
+                    return true;
+
+                case GlobalAction.EditorSeekToPreviousSamplePoint:
+                    seekSamplePoint(-1);
+                    return true;
+
+                case GlobalAction.EditorSeekToNextSamplePoint:
+                    seekSamplePoint(1);
+                    return true;
+            }
+
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.EditorCloneSelection:
+                    Clone();
+                    return true;
+
+                case GlobalAction.EditorComposeMode:
+                    screenSwitcher.SelectItem(EditorScreenMode.Compose);
+                    return true;
+
+                case GlobalAction.EditorDesignMode:
+                    screenSwitcher.SelectItem(EditorScreenMode.Design);
+                    return true;
+
+                case GlobalAction.EditorTimingMode:
+                    screenSwitcher.SelectItem(EditorScreenMode.Timing);
+                    return true;
+
+                case GlobalAction.EditorSetupMode:
+                    screenSwitcher.SelectItem(EditorScreenMode.SongSetup);
+                    return true;
+
+                case GlobalAction.EditorVerifyMode:
+                    screenSwitcher.SelectItem(EditorScreenMode.Verify);
+                    return true;
+
+                case GlobalAction.EditorTestGameplay:
+                    bottomBar.TestGameplayButton.TriggerClick();
+                    return true;
+
+                case GlobalAction.EditorDiscardUnsavedChanges:
+                    DiscardUnsavedChanges();
+                    return true;
+
+                case GlobalAction.EditorEditExternally:
+                    editExternally();
+                    return true;
+
+                case GlobalAction.EditorSubmitBeatmap:
+                    submitBeatmap();
+                    return true;
+
+                // Track traversal keys.
+                // Matching osu-stable implementations.
+                case GlobalAction.EditorSeekToStart:
+                    if (e.Repeat)
+                        return false;
+
+                    // Seek to first object time, or track start if already there.
+                    double? firstObjectTime = editorBeatmap.HitObjects.FirstOrDefault()?.StartTime;
+
+                    if (firstObjectTime == null || clock.CurrentTime == firstObjectTime)
+                        clock.Seek(0);
+                    else
+                        clock.Seek(firstObjectTime.Value);
+                    return true;
+
+                case GlobalAction.EditorPlayFromStart:
+                    if (e.Repeat)
+                        return false;
+
+                    // Restart playback from beginning of track.
+                    clock.Seek(0);
+                    clock.Start();
+                    return true;
+
+                case GlobalAction.EditorTogglePause:
+                    if (e.Repeat)
+                        return false;
+
+                    // Pause or resume.
+                    if (clock.IsRunning)
+                        clock.Stop();
+                    else
+                        clock.Start();
+                    return true;
+
+                case GlobalAction.EditorSeekToEnd:
+                    if (e.Repeat)
+                        return false;
+
+                    // Seek to last object time, or track end if already there.
+                    // Note that in osu-stable subsequent presses when at track end won&#39;t return to last object.
+                    // This has intentionally been changed to make it more useful.
+                    if (!editorBeatmap.HitObjects.Any())
+                    {
+                        clock.Seek(clock.TrackLength);
+                        return true;
+                    }
+
+                    double lastObjectTime = editorBeatmap.GetLastObjectTime();
+                    clock.Seek(clock.CurrentTime == lastObjectTime ? clock.TrackLength : lastObjectTime);
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+            setUpTrack(seekToStart: true);
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+            setUpTrack();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            currentScreen?.OnExiting(e);
+
+            if (!ExitConfirmed)
+            {
+                // dialog overlay may not be available in visual tests.
+                if (dialogOverlay == null)
+                {
+                    confirmExit();
+                    return true;
+                }
+
+                // if the dialog is already displayed, block exiting until the user explicitly makes a decision.
+                if (dialogOverlay.CurrentDialog is PromptForSaveDialog saveDialog)
+                {
+                    saveDialog.Flash();
+                    return true;
+                }
+
+                if (isNewBeatmap || HasUnsavedChanges)
+                {
+                    updateSampleDisabledState();
+                    dialogOverlay?.Push(new PromptForSaveDialog(confirmExit, confirmExitWithSave, cancelExit));
+                    return true;
+                }
+            }
+
+            realm.Write(r =&gt;
+            {
+                var beatmap = r.Find&lt;BeatmapInfo&gt;(editorBeatmap.BeatmapInfo.ID);
+                beatmap?.EditorTimestamp = clock.CurrentTime;
+            });
+
+            // `resetTrack()` MUST happen before `refetchBeatmap()`, because along other things, `refetchBeatmap()` causes a global working beatmap change,
+            // which would cause `EditorClock` to reload the track and automatically reapply adjustments to it if not preceded by `resetTrack()`.
+            resetTrack();
+            refetchBeatmap();
+
+            return base.OnExiting(e);
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            // `resetTrack()` MUST happen before `refetchBeatmap()`, because along other things, `refetchBeatmap()` causes a global working beatmap change,
+            // which would cause `EditorClock` to reload the track and automatically reapply adjustments to it if not preceded by `resetTrack()`.
+            resetTrack();
+            refetchBeatmap();
+        }
+
+        private void refetchBeatmap()
+        {
+            // To update the game-wide beatmap with any changes, perform a re-fetch on exit/suspend.
+            // This is required as the editor makes its local changes via EditorBeatmap
+            // (which are not propagated outwards to a potentially cached WorkingBeatmap).
+            var refetchedBeatmap = beatmapManager.GetWorkingBeatmap(Beatmap.Value.BeatmapInfo, true);
+
+            if (!(refetchedBeatmap is DummyWorkingBeatmap))
+            {
+                Logger.Log(@&quot;Editor providing re-fetched beatmap post edit session&quot;);
+                Beatmap.Value = refetchedBeatmap;
+            }
+        }
+
+        private void confirmExitWithSave()
+        {
+            if (!attemptMutationOperation(Save))
+                return;
+
+            ExitConfirmed = true;
+            this.Exit();
+        }
+
+        private void confirmExit()
+        {
+            // stop the track if playing to allow the parent screen to choose a suitable playback mode.
+            Beatmap.Value.Track.Stop();
+
+            if (isNewBeatmap)
+            {
+                // confirming exit without save means we should delete the new beatmap completely.
+                if (playableBeatmap.BeatmapInfo.BeatmapSet != null)
+                    beatmapManager.Delete(playableBeatmap.BeatmapInfo.BeatmapSet);
+
+                // eagerly clear contents before restoring default beatmap to prevent value change callbacks from firing.
+                ClearInternal();
+
+                // in theory this shouldn&#39;t be required but due to EF core not sharing instance states 100%
+                // MusicController is unaware of the changed DeletePending state.
+                Beatmap.SetDefault();
+            }
+
+            ExitConfirmed = true;
+            this.Exit();
+        }
+
+        #region Clipboard support
+
+        private EditorMenuItem cutMenuItem;
+        private EditorMenuItem copyMenuItem;
+        private EditorMenuItem cloneMenuItem;
+        private EditorMenuItem pasteMenuItem;
+
+        private readonly BindableWithCurrent&lt;bool&gt; canCut = new BindableWithCurrent&lt;bool&gt;();
+        private readonly BindableWithCurrent&lt;bool&gt; canCopy = new BindableWithCurrent&lt;bool&gt;();
+        private readonly BindableWithCurrent&lt;bool&gt; canPaste = new BindableWithCurrent&lt;bool&gt;();
+
+        private void setUpClipboardActionAvailability()
+        {
+            canCut.Current.BindValueChanged(cut =&gt; cutMenuItem.Action.Disabled = !cut.NewValue, true);
+            canCopy.Current.BindValueChanged(copy =&gt;
+            {
+                copyMenuItem.Action.Disabled = !copy.NewValue;
+                cloneMenuItem.Action.Disabled = !copy.NewValue;
+            }, true);
+            canPaste.Current.BindValueChanged(paste =&gt; pasteMenuItem.Action.Disabled = !paste.NewValue, true);
+        }
+
+        private void rebindClipboardBindables()
+        {
+            canCut.Current = currentScreen.CanCut;
+            canCopy.Current = currentScreen.CanCopy;
+            canPaste.Current = currentScreen.CanPaste;
+        }
+
+        protected void Cut() =&gt; currentScreen?.Cut();
+
+        protected void Copy() =&gt; currentScreen?.Copy();
+
+        protected void Clone()
+        {
+            // Avoid attempting to clone if copying is not available (as it may result in pasting something unexpected).
+            if (!canCopy.Value)
+                return;
+
+            // This is an initial implementation just to get an idea of how people used this function.
+            // There are a couple of differences from osu!stable&#39;s implementation which will require more work to match:
+            // - The &quot;clipboard&quot; is not populated during the duplication process.
+            // - The duplicated hitobjects are inserted after the original pattern (add one beat_length and then quantize using beat snap).
+            // - The duplicated hitobjects are selected (but this is also applied for all paste operations so should be changed there).
+            Copy();
+            Paste();
+        }
+
+        protected void Paste() =&gt; currentScreen?.Paste();
+
+        #endregion
+
+        protected void Undo() =&gt; changeHandler?.RestoreState(-1);
+
+        protected void Redo() =&gt; changeHandler?.RestoreState(1);
+
+        protected void DiscardUnsavedChanges()
+        {
+            if (!HasUnsavedChanges)
+                return;
+
+            // we&#39;re not doing this via `changeHandler` because `changeHandler` has limited number of undo actions
+            // and therefore there&#39;s no guarantee that it even *has* the beatmap&#39;s last saved state in its history still.
+            dialogOverlay.Push(new DiscardUnsavedChangesDialog(() =&gt;
+            {
+                updateLastSavedHash(); // without this a second dialog will show (the standard &quot;save unsaved changes&quot; one that shows on exit).
+                SwitchToDifficulty(editorBeatmap.BeatmapInfo);
+            }));
+        }
+
+        protected void SetPreviewPointToCurrentTime()
+        {
+            editorBeatmap.PreviewTime.Value = (int)clock.CurrentTime;
+        }
+
+        private void confirmSyncTimingAttributes()
+        {
+            dialogOverlay.Push(new SyncTimingConfirmationDialog((syncBookmarks, syncPreviewPoint) =&gt;
+            {
+                if (Beatmap.Value.BeatmapSetInfo.Beatmaps.Count &lt;= 1)
+                    return;
+
+                if (!syncBookmarks &amp;&amp; !syncPreviewPoint)
+                    return;
+
+                int[] sourceBookmarks = editorBeatmap.Bookmarks.ToArray();
+                int sourcePreviewTime = editorBeatmap.BeatmapInfo.Metadata.PreviewTime;
+
+                foreach (var beatmapInfo in Beatmap.Value.BeatmapSetInfo.Beatmaps)
+                {
+                    if (beatmapInfo.Equals(editorBeatmap.BeatmapInfo))
+                        continue;
+
+                    try
+                    {
+                        var targetWorking = beatmapManager.GetWorkingBeatmap(beatmapInfo);
+                        var playable = targetWorking.GetPlayableBeatmap(beatmapInfo.Ruleset);
+
+                        if (syncBookmarks)
+                            playable.Bookmarks = sourceBookmarks;
+
+                        if (syncPreviewPoint)
+                            beatmapInfo.Metadata.PreviewTime = sourcePreviewTime;
+
+                        beatmapManager.Save(beatmapInfo, playable, targetWorking.GetSkin(), targetWorking.Storyboard);
+                    }
+                    catch (Exception e)
+                    {
+                        Logger.Error(e, $@&quot;Failed to sync bookmarks/preview to {beatmapInfo.GetDisplayTitle()}&quot;);
+                        return;
+                    }
+                }
+
+                SaveAndReload(withDialog: false);
+            }));
+        }
+
+        private void confirmSnapAllHitObjectsToCurrentDivisor()
+        {
+            dialogOverlay.Push(new SnapAllNotesConfirmationDialog(SnapAllHitObjectsToCurrentDivisor));
+        }
+
+        protected void SnapAllHitObjectsToCurrentDivisor() =&gt; editorBeatmap.SnapAllHitObjectsToCurrentDivisor();
+
+        private void setUpTrack(bool seekToStart = false)
+        {
+            clock.Stop();
+
+            if (seekToStart)
+            {
+                double targetTime = 0;
+
+                if (editorBeatmap.BeatmapInfo.EditorTimestamp != null)
+                {
+                    targetTime = editorBeatmap.BeatmapInfo.EditorTimestamp.Value;
+                }
+                else if (Beatmap.Value.Beatmap.HitObjects.Count &gt; 0)
+                {
+                    // seek to one beat length before the first hitobject
+                    targetTime = Beatmap.Value.Beatmap.HitObjects[0].StartTime;
+                    targetTime -= Beatmap.Value.Beatmap.ControlPointInfo.TimingPointAt(targetTime).BeatLength;
+                }
+
+                clock.Seek(Math.Max(0, targetTime));
+            }
+
+            clock.BindAdjustments();
+            musicController.TrackChanged += onTrackChanged;
+        }
+
+        private void resetTrack()
+        {
+            clock.Stop();
+            clock.UnbindAdjustments();
+            musicController.TrackChanged -= onTrackChanged;
+        }
+
+        private void onModeChanged(ValueChangedEvent&lt;EditorScreenMode&gt; e)
+        {
+            var lastScreen = currentScreen;
+
+            lastScreen?.Hide();
+
+            try
+            {
+                if ((currentScreen = screenContainer.SingleOrDefault(s =&gt; s.Type == e.NewValue)) != null)
+                {
+                    screenContainer.ChangeChildDepth(currentScreen, lastScreen?.Depth + 1 ?? 0);
+
+                    currentScreen.Show();
+                    return;
+                }
+
+                switch (e.NewValue)
+                {
+                    case EditorScreenMode.SongSetup:
+                        currentScreen = new SetupScreen();
+                        break;
+
+                    case EditorScreenMode.Compose:
+                        currentScreen = new ComposeScreen();
+                        break;
+
+                    case EditorScreenMode.Design:
+                        currentScreen = new DesignScreen();
+                        break;
+
+                    case EditorScreenMode.Timing:
+                        currentScreen = new TimingScreen();
+                        break;
+
+                    case EditorScreenMode.Verify:
+                        currentScreen = new VerifyScreen();
+                        break;
+
+                    default:
+                        throw new InvalidOperationException(&quot;Editor menu bar switched to an unsupported mode&quot;);
+                }
+
+                screenContainer.LoadComponentAsync(currentScreen, newScreen =&gt;
+                {
+                    if (newScreen == currentScreen)
+                    {
+                        screenContainer.Add(newScreen);
+                        newScreen.Show();
+                    }
+                });
+            }
+            finally
+            {
+                if (Mode.Value != EditorScreenMode.Compose)
+                    ComposerFocusMode.Value = false;
+
+                updateSampleDisabledState();
+                rebindClipboardBindables();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Forces a reload of the compose screen after significant configuration changes.
+        /// &lt;/summary&gt;
+        public void ReloadComposeScreen()
+        {
+            screenContainer.SingleOrDefault(s =&gt; s.Type == EditorScreenMode.Compose)?.RemoveAndDisposeImmediately();
+
+            // If not currently on compose screen, the reload will happen on next mode change.
+            // That said, control points *can* change on compose screen (e.g. via undo), so we have to handle that case too.
+            if (Mode.Value == EditorScreenMode.Compose)
+                Mode.TriggerChange();
+        }
+
+        [CanBeNull]
+        private ScheduledDelegate playbackDisabledDebounce;
+
+        private EditorScreenSwitcherControl screenSwitcher;
+
+        private void updateSampleDisabledState()
+        {
+            bool shouldDisableSamples = clock.SeekingOrStopped.Value
+                                        || currentScreen is not ComposeScreen
+                                        || editorBeatmap.UpdateInProgress.Value
+                                        || dialogOverlay?.CurrentDialog != null;
+
+            playbackDisabledDebounce?.Cancel();
+
+            if (shouldDisableSamples)
+            {
+                samplePlaybackDisabled.Value = true;
+            }
+            else
+            {
+                // Debounce re-enabling arbitrarily high enough to avoid flip-flopping during beatmap updates
+                // or rapid user seeks.
+                playbackDisabledDebounce = Scheduler.AddDelayed(() =&gt; samplePlaybackDisabled.Value = false, 50);
+            }
+        }
+
+        private void seekControlPoint(int direction)
+        {
+            // In the case of a backwards seek while playing, it can be hard to jump before a timing point.
+            // Adding some lenience here makes it more user-friendly.
+            double seekLenience = clock.IsRunning ? 1000 * ((IAdjustableClock)clock).Rate : 0;
+
+            ControlPoint found = direction &lt; 1
+                ? editorBeatmap.ControlPointInfo.AllControlPoints.LastOrDefault(p =&gt; p.Time &lt; clock.CurrentTime - seekLenience)
+                : editorBeatmap.ControlPointInfo.AllControlPoints.FirstOrDefault(p =&gt; p.Time &gt; clock.CurrentTime);
+
+            if (found != null)
+                clock.Seek(found.Time);
+        }
+
+        private void seekHitObject(int direction)
+        {
+            var found = direction &lt; 1
+                ? editorBeatmap.HitObjects.LastOrDefault(p =&gt; p.StartTime &lt; clock.CurrentTimeAccurate)
+                : editorBeatmap.HitObjects.FirstOrDefault(p =&gt; p.StartTime &gt; clock.CurrentTimeAccurate);
+
+            if (found != null)
+                clock.SeekSmoothlyTo(found.StartTime);
+        }
+
+        private void seekSamplePoint(int direction)
+        {
+            double currentTime = clock.CurrentTimeAccurate;
+
+            // Check if we are currently inside a hit object with node samples, if so seek to the next node sample point
+            var current = direction &lt; 1
+                ? editorBeatmap.HitObjects.LastOrDefault(p =&gt; p is IHasRepeats r &amp;&amp; p.StartTime &lt; currentTime &amp;&amp; r.EndTime &gt;= currentTime)
+                : editorBeatmap.HitObjects.LastOrDefault(p =&gt; p is IHasRepeats r &amp;&amp; p.StartTime &lt;= currentTime &amp;&amp; r.EndTime &gt; currentTime);
+
+            if (current != null)
+            {
+                // Find the next node sample point
+                var r = (IHasRepeats)current;
+                double[] nodeSamplePointTimes = new double[r.RepeatCount + 3];
+
+                nodeSamplePointTimes[0] = current.StartTime;
+                // The sample point for the main samples is sandwiched between the head and the first repeat
+                nodeSamplePointTimes[1] = current.StartTime + r.Duration / r.SpanCount() / 2;
+
+                for (int i = 0; i &lt; r.SpanCount(); i++)
+                {
+                    nodeSamplePointTimes[i + 2] = current.StartTime + r.Duration * (i + 1) / r.SpanCount();
+                }
+
+                double found = direction &lt; 1
+                    ? nodeSamplePointTimes.Last(p =&gt; p &lt; currentTime)
+                    : nodeSamplePointTimes.First(p =&gt; p &gt; currentTime);
+
+                clock.SeekSmoothlyTo(found);
+            }
+            else
+            {
+                if (direction &lt; 1)
+                {
+                    current = editorBeatmap.HitObjects.LastOrDefault(p =&gt; p.StartTime &lt; currentTime);
+                    if (current != null)
+                        clock.SeekSmoothlyTo(current is IHasRepeats r ? r.EndTime : current.StartTime);
+                }
+                else
+                {
+                    current = editorBeatmap.HitObjects.FirstOrDefault(p =&gt; p.StartTime &gt; currentTime);
+                    if (current != null)
+                        clock.SeekSmoothlyTo(current.StartTime);
+                }
+            }
+
+            // Show the sample edit popover at the current time
+            ShowSampleEditPopoverRequested?.Invoke(clock.CurrentTimeAccurate);
+        }
+
+        private void seek(UIEvent e, int direction)
+        {
+            double amount = e.ShiftPressed ? 4 : 1;
+
+            bool trackPlaying = clock.IsRunning;
+
+            if (trackPlaying)
+            {
+                // generally users are not looking to perform tiny seeks when the track is playing.
+                // this multiplication undoes the division that will be applied in the underlying seek operation.
+                // scale by BPM to keep the seek amount constant across all BPMs.
+                var timingPoint = editorBeatmap.ControlPointInfo.TimingPointAt(clock.CurrentTimeAccurate);
+                amount *= beatDivisor.Value * (timingPoint.BPM / 120);
+            }
+
+            if (direction &lt; 1)
+                clock.SeekBackward(!trackPlaying, amount);
+            else
+                clock.SeekForward(!trackPlaying, amount);
+        }
+
+        private void updateLastSavedHash()
+        {
+            lastSavedHash = changeHandler?.CurrentStateHash;
+        }
+
+        private IEnumerable&lt;MenuItem&gt; createFileMenuItems()
+        {
+            yield return createDifficultyCreationMenu();
+            yield return createDifficultySwitchMenu();
+            yield return new OsuMenuItemSpacer();
+            yield return new EditorMenuItem(EditorStrings.DeleteDifficulty, MenuItemType.Destructive, deleteDifficulty) { Action = { Disabled = Beatmap.Value.BeatmapSetInfo.Beatmaps.Count &lt; 2 } };
+            yield return new OsuMenuItemSpacer();
+
+            var save = new EditorMenuItem(WebCommonStrings.ButtonsSave, MenuItemType.Standard, () =&gt; attemptMutationOperation(Save)) { Hotkey = new Hotkey(PlatformAction.Save) };
+            saveRelatedMenuItems.Add(save);
+            yield return save;
+
+            yield return discardChangesMenuItem = new EditorMenuItem(GlobalActionKeyBindingStrings.EditorDiscardUnsavedChanges, MenuItemType.Destructive, DiscardUnsavedChanges)
+            {
+                Hotkey = new Hotkey(GlobalAction.EditorDiscardUnsavedChanges)
+            };
+
+            var export = createExportMenu();
+            saveRelatedMenuItems.AddRange(export.Items);
+            yield return export;
+
+            if (RuntimeInfo.IsDesktop)
+            {
+                var externalEdit = new EditorMenuItem(EditorStrings.EditExternally, MenuItemType.Standard, editExternally)
+                {
+                    Hotkey = new Hotkey(GlobalAction.EditorEditExternally)
+                };
+                saveRelatedMenuItems.Add(externalEdit);
+                yield return externalEdit;
+            }
+
+            bool isSetMadeOfLegacyRulesetBeatmaps = (isNewBeatmap &amp;&amp; Ruleset.Value.IsLegacyRuleset())
+                                                    || (!isNewBeatmap &amp;&amp; Beatmap.Value.BeatmapSetInfo.Beatmaps.All(b =&gt; b.Ruleset.IsLegacyRuleset()));
+            bool submissionAvailable = api.Endpoints.BeatmapSubmissionServiceUrl != null;
+
+            if (isSetMadeOfLegacyRulesetBeatmaps &amp;&amp; submissionAvailable)
+            {
+                var upload = new EditorMenuItem(EditorStrings.SubmitBeatmap, MenuItemType.Standard, submitBeatmap)
+                {
+                    Hotkey = new Hotkey(GlobalAction.EditorSubmitBeatmap)
+                };
+                saveRelatedMenuItems.Add(upload);
+                yield return upload;
+            }
+
+            if (editorBeatmap.BeatmapInfo.OnlineID &gt; 0)
+            {
+                yield return new OsuMenuItemSpacer();
+                yield return new EditorMenuItem(EditorStrings.OpenInfoPage, MenuItemType.Standard,
+                    () =&gt; (Game as OsuGame)?.OpenUrlExternally(editorBeatmap.BeatmapInfo.GetOnlineURL(api, editorBeatmap.BeatmapInfo.Ruleset)));
+                yield return new EditorMenuItem(EditorStrings.OpenDiscussionPage, MenuItemType.Standard,
+                    () =&gt; (Game as OsuGame)?.OpenUrlExternally(
+                        $@&quot;{api.Endpoints.WebsiteUrl}/beatmapsets/{editorBeatmap.BeatmapInfo.BeatmapSet!.OnlineID}/discussion/{editorBeatmap.BeatmapInfo.OnlineID}&quot;));
+            }
+
+            yield return new OsuMenuItemSpacer();
+            yield return new EditorMenuItem(CommonStrings.Exit, MenuItemType.Standard, this.Exit);
+        }
+
+        private EditorMenuItem createExportMenu()
+        {
+            var exportItems = new List&lt;MenuItem&gt;
+            {
+                new EditorMenuItem(EditorStrings.ExportForEditing, MenuItemType.Standard, () =&gt; runExport(manager =&gt; manager.Export(Beatmap.Value.BeatmapSetInfo))),
+                new EditorMenuItem(EditorStrings.ExportForCompatibility, MenuItemType.Standard, () =&gt; runExport(manager =&gt; manager.ExportLegacy(Beatmap.Value.BeatmapSetInfo))),
+                new EditorMenuItem(EditorStrings.ExportGuestDifficulty, MenuItemType.Standard, () =&gt; runExport(manager =&gt; manager.ExportLegacy(Beatmap.Value.BeatmapInfo))),
+            };
+
+            return new EditorMenuItem(CommonStrings.Export) { Items = exportItems };
+        }
+
+        private void editExternally()
+        {
+            if (HasUnsavedChanges)
+            {
+                dialogOverlay.Push(new SaveRequiredPopupDialog(() =&gt; attemptMutationOperation(() =&gt;
+                {
+                    if (!Save())
+                        return false;
+
+                    startEdit();
+                    return true;
+                })));
+            }
+            else
+            {
+                startEdit();
+            }
+
+            void startEdit()
+            {
+                this.Push(new ExternalEditScreen());
+            }
+        }
+
+        private void submitBeatmap()
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            if (!editorBeatmap.HitObjects.Any())
+            {
+                notifications?.Post(new SimpleNotification
+                {
+                    Text = BeatmapSubmissionStrings.EmptyBeatmapsCannotBeSubmitted,
+                });
+                return;
+            }
+
+            if (HasUnsavedChanges)
+            {
+                dialogOverlay.Push(new SaveRequiredPopupDialog(() =&gt; attemptMutationOperation(() =&gt;
+                {
+                    if (!Save())
+                        return false;
+
+                    startSubmission();
+                    return true;
+                })));
+            }
+            else
+            {
+                startSubmission();
+            }
+
+            void startSubmission() =&gt; this.Push(new BeatmapSubmissionScreen());
+        }
+
+        private void runExport(Func&lt;BeatmapManager, Task&gt; exportAction)
+        {
+            if (HasUnsavedChanges)
+            {
+                dialogOverlay.Push(new SaveRequiredPopupDialog(() =&gt; attemptAsyncMutationOperation(() =&gt;
+                {
+                    if (!Save())
+                        return Task.CompletedTask;
+
+                    return exportAction.Invoke(beatmapManager);
+                })));
+            }
+            else
+            {
+                attemptAsyncMutationOperation(() =&gt; exportAction(beatmapManager));
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Beatmaps of the currently edited set, grouped by ruleset and ordered by difficulty.
+        /// &lt;/summary&gt;
+        private IOrderedEnumerable&lt;IGrouping&lt;RulesetInfo, BeatmapInfo&gt;&gt; groupedOrderedBeatmaps =&gt; Beatmap.Value.BeatmapSetInfo.Beatmaps
+                                                                                                         .OrderBy(b =&gt; b.StarRating)
+                                                                                                         .GroupBy(b =&gt; b.Ruleset)
+                                                                                                         .OrderBy(group =&gt; group.Key);
+
+        private void deleteDifficulty()
+        {
+            if (dialogOverlay == null)
+                delete();
+            else
+                dialogOverlay.Push(new DeleteDifficultyConfirmationDialog(playableBeatmap.BeatmapInfo.DifficultyName, editorBeatmap.HitObjects.Count, delete));
+
+            void delete()
+            {
+                BeatmapInfo difficultyToDelete = playableBeatmap.BeatmapInfo;
+
+                var difficultiesBeforeDeletion = groupedOrderedBeatmaps.SelectMany(g =&gt; g).ToList();
+
+                // if the difficulty being currently deleted has unsaved changes,
+                // the editor exit flow would prompt for save *after* this method has done its thing.
+                // this is generally undesirable and also ends up leaving the user in a broken state.
+                // therefore, just update the last saved hash to make the exit flow think the deleted beatmap is not dirty,
+                // so that it will not show the save dialog on exit.
+                updateLastSavedHash();
+
+                beatmapManager.DeleteDifficultyImmediately(difficultyToDelete);
+
+                int deletedIndex = difficultiesBeforeDeletion.IndexOf(difficultyToDelete);
+                // of note, we&#39;re still working with the cloned version, so indices are all prior to deletion.
+                BeatmapInfo nextToShow = difficultiesBeforeDeletion[deletedIndex == 0 ? 1 : deletedIndex - 1];
+
+                Beatmap.Value = beatmapManager.GetWorkingBeatmap(nextToShow);
+
+                SwitchToDifficulty(nextToShow);
+            }
+        }
+
+        private EditorMenuItem createDifficultyCreationMenu()
+        {
+            var rulesetItems = new List&lt;MenuItem&gt;();
+
+            foreach (var ruleset in rulesets.AvailableRulesets)
+                rulesetItems.Add(new EditorMenuItem(ruleset.Name, MenuItemType.Standard, () =&gt; CreateNewDifficulty(ruleset)));
+
+            saveRelatedMenuItems.AddRange(rulesetItems);
+
+            return new EditorMenuItem(EditorStrings.CreateNewDifficulty) { Items = rulesetItems };
+        }
+
+        protected internal void CreateNewDifficulty(RulesetInfo rulesetInfo)
+        {
+            if (isNewBeatmap)
+            {
+                dialogOverlay.Push(new SaveRequiredPopupDialog(() =&gt; attemptMutationOperation(() =&gt;
+                {
+                    if (!Save())
+                        return false;
+
+                    CreateNewDifficulty(rulesetInfo);
+                    return true;
+                })));
+
+                return;
+            }
+
+            if (!rulesetInfo.Equals(editorBeatmap.BeatmapInfo.Ruleset))
+            {
+                switchToNewDifficulty(rulesetInfo, false);
+                return;
+            }
+
+            dialogOverlay.Push(new CreateNewDifficultyDialog(createCopy =&gt; switchToNewDifficulty(rulesetInfo, createCopy)));
+        }
+
+        private void switchToNewDifficulty(RulesetInfo rulesetInfo, bool createCopy)
+        {
+            switchingDifficulty = true;
+            loader?.ScheduleSwitchToNewDifficulty(editorBeatmap.BeatmapInfo, rulesetInfo, createCopy, GetState(rulesetInfo));
+        }
+
+        private EditorMenuItem createDifficultySwitchMenu()
+        {
+            var difficultyItems = new List&lt;MenuItem&gt;();
+
+            foreach (var rulesetBeatmaps in groupedOrderedBeatmaps)
+            {
+                if (difficultyItems.Count &gt; 0)
+                    difficultyItems.Add(new OsuMenuItemSpacer());
+
+                foreach (var beatmap in rulesetBeatmaps)
+                {
+                    bool isCurrentDifficulty = playableBeatmap.BeatmapInfo.Equals(beatmap);
+                    var difficultyMenuItem = new DifficultyMenuItem(beatmap, isCurrentDifficulty, SwitchToDifficulty);
+                    difficultyItems.Add(difficultyMenuItem);
+                }
+            }
+
+            // Ensure difficulty names are updated when modified in the editor.
+            // Maybe we could trigger less often but this seems to work well enough.
+            editorBeatmap.SaveStateTriggered += () =&gt;
+            {
+                foreach (var beatmapInfo in Beatmap.Value.BeatmapSetInfo.Beatmaps)
+                {
+                    var menuItem = difficultyItems.OfType&lt;DifficultyMenuItem&gt;().FirstOrDefault(i =&gt; i.BeatmapInfo.Equals(beatmapInfo));
+                    menuItem?.Text.Value = string.IsNullOrEmpty(beatmapInfo.DifficultyName) ? &quot;(unnamed)&quot; : beatmapInfo.DifficultyName;
+                }
+            };
+
+            return new EditorMenuItem(EditorStrings.ChangeDifficulty) { Items = difficultyItems };
+        }
+
+        public void SwitchToDifficulty(BeatmapInfo nextBeatmap)
+        {
+            switchingDifficulty = true;
+            loader?.ScheduleSwitchToExistingDifficulty(nextBeatmap, GetState(nextBeatmap.Ruleset));
+        }
+
+        private void cancelExit()
+        {
+            updateSampleDisabledState();
+            loader?.CancelPendingDifficultySwitch();
+        }
+
+        public Task&lt;bool&gt; SaveAndReload(bool withDialog = true)
+        {
+            var tcs = new TaskCompletionSource&lt;bool&gt;();
+
+            void performReload()
+            {
+                bool reloadedSuccessfully = attemptMutationOperation(() =&gt;
+                {
+                    if (!Save()) return false;
+
+                    SwitchToDifficulty(editorBeatmap.BeatmapInfo);
+                    return true;
+                });
+                tcs.SetResult(reloadedSuccessfully);
+            }
+
+            if (withDialog)
+            {
+                dialogOverlay.Push(new SaveAndReloadEditorDialog(
+                    reload: performReload,
+                    cancel: () =&gt; tcs.SetResult(false)));
+            }
+            else
+            {
+                performReload();
+            }
+
+            return tcs.Task;
+        }
+
+        public bool HandleTimestamp(string timestamp, bool notifyOnError = false)
+        {
+            if (!EditorTimestampParser.TryParse(timestamp, out var timeSpan, out string selection))
+            {
+                if (notifyOnError)
+                {
+                    Schedule(() =&gt; notifications?.Post(new SimpleErrorNotification
+                    {
+                        Icon = FontAwesome.Solid.ExclamationTriangle,
+                        Text = EditorStrings.FailedToParseEditorLink
+                    }));
+                }
+
+                return false;
+            }
+
+            editorBeatmap.SelectedHitObjects.Clear();
+
+            if (clock.IsRunning)
+                clock.Stop();
+
+            double position = timeSpan.Value.TotalMilliseconds;
+
+            if (string.IsNullOrEmpty(selection))
+            {
+                clock.SeekSmoothlyTo(position);
+                return true;
+            }
+
+            // Seek to the next closest HitObject instead
+            HitObject nextObject = editorBeatmap.HitObjects.FirstOrDefault(x =&gt; x.StartTime &gt;= position);
+
+            if (nextObject != null)
+                position = nextObject.StartTime;
+
+            clock.SeekSmoothlyTo(position);
+
+            Mode.Value = EditorScreenMode.Compose;
+
+            // Delegate handling the selection to the ruleset.
+            currentScreen.Dependencies.Get&lt;HitObjectComposer&gt;().SelectFromTimestamp(position, selection);
+            return true;
+        }
+
+        public double SnapTime(double time, double? referenceTime) =&gt; editorBeatmap.SnapTime(time, referenceTime);
+
+        public double GetBeatLengthAtTime(double referenceTime) =&gt; editorBeatmap.GetBeatLengthAtTime(referenceTime);
+
+        public int BeatDivisor =&gt; beatDivisor.Value;
+
+        ControlPointInfo IBeatSyncProvider.ControlPoints =&gt; editorBeatmap.ControlPointInfo;
+        IClock IBeatSyncProvider.Clock =&gt; clock;
+        ChannelAmplitudes IHasAmplitudes.CurrentAmplitudes =&gt; Beatmap.Value.TrackLoaded ? Beatmap.Value.Track.CurrentAmplitudes : ChannelAmplitudes.Empty;
+
+        private partial class BeatmapEditorToast : Toast
+        {
+            public BeatmapEditorToast(LocalisableString value, string beatmapDisplayName)
+                : base(InputSettingsStrings.EditorSection, value)
+            {
+                ExtraText = beatmapDisplayName;
+            }
+        }
+
+        private partial class ScreenContainer : Container&lt;EditorScreen&gt;
+        {
+            public new Task LoadComponentAsync&lt;TLoadable&gt;([NotNull] TLoadable component, Action&lt;TLoadable&gt; onLoaded = null, CancellationToken cancellation = default, Scheduler scheduler = null)
+                where TLoadable : Drawable
+                =&gt; base.LoadComponentAsync(component, onLoaded, cancellation, scheduler);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[82,59,82,63,0],[84,53,84,57,0],[86,71,86,75,0],[88,59,88,64,0],[90,50,90,88,0],[95,13,95,14,0],[96,17,96,30,0],[97,21,97,34,0],[99,17,99,73,0],[100,13,100,14,0],[104,49,104,53,0],[104,54,104,58,0],[107,41,107,45,0],[107,46,107,50,0],[110,48,110,52,0],[110,53,110,57,0],[113,54,113,58,0],[113,59,113,63,0],[117,45,117,49,0],[117,50,117,54,0],[120,37,120,41,0],[120,42,120,46,0],[122,9,122,92,0],[124,58,124,80,0],[134,13,134,14,0],[135,17,135,44,0],[136,21,136,34,0],[138,17,138,53,0],[139,21,139,34,0],[141,17,141,63,0],[142,21,142,108,0],[144,17,144,29,0],[145,13,145,14,0],[150,9,150,87,0],[153,9,153,85,0],[159,58,159,62,0],[159,67,159,96,0],[161,40,161,44,0],[161,45,161,57,0],[175,9,175,86,0],[190,60,190,84,0],[193,9,193,10,0],[194,13,194,88,0],[195,17,195,83,0],[197,13,197,79,0],[198,9,198,10,0],[200,64,200,69,0],[203,16,203,92,0],[206,36,206,40,0],[206,41,206,45,0],[209,9,209,75,0],[212,9,212,123,0],[215,51,215,55,0],[215,56,215,60,0],[234,51,234,55,0],[234,60,234,80,0],[239,9,239,50,0],[240,9,240,10,0],[241,13,241,34,0],[242,9,242,10,0],[246,9,246,10,0],[247,13,247,49,0],[249,13,249,56,0],[250,13,250,14,0],[251,17,251,98,0],[253,17,253,37,0],[255,17,255,96,0],[259,17,259,45,0],[263,17,263,35,0],[264,17,264,18,0],[265,21,265,75,0],[266,21,266,28,0],[268,13,268,14,0],[271,13,271,14,0],[272,17,272,107,0],[276,17,276,97,0],[277,13,277,14,0],[278,13,278,32,0],[279,13,279,14,0],[280,17,280,73,0],[282,17,282,29,0],[283,17,283,24,0],[287,13,287,67,0],[288,13,288,55,0],[290,13,290,41,0],[291,13,291,32,0],[293,13,293,58,0],[293,58,293,85,0],[293,85,293,87,0],[296,13,296,45,0],[298,13,298,161,0],[299,13,299,49,0],[301,13,301,66,0],[301,66,301,93,0],[301,93,301,95,0],[303,13,303,92,0],[305,13,305,25,0],[306,13,306,14,0],[307,17,307,79,0],[308,17,308,75,0],[309,13,309,14,0],[311,13,311,84,0],[312,13,312,53,0],[312,53,312,109,0],[312,109,312,111,0],[314,13,314,35,0],[316,13,317,13,0],[317,13,317,14,0],[317,14,321,17,0],[321,17,321,49,0],[321,49,322,17,0],[322,17,322,46,0],[322,46,323,13,0],[323,13,323,14,0],[323,14,323,16,0],[325,13,325,63,0],[326,13,326,45,0],[331,13,331,83,0],[332,13,332,94,0],[333,13,333,90,0],[334,13,334,104,0],[335,13,335,104,0],[336,13,336,116,0],[337,13,337,102,0],[338,13,338,100,0],[339,13,339,98,0],[342,13,343,13,0],[343,13,343,14,0],[343,14,344,17,0],[344,17,344,38,0],[344,38,345,21,0],[345,21,345,61,0],[345,61,346,13,0],[346,13,346,14,0],[346,14,346,16,0],[347,13,348,13,0],[348,13,348,14,0],[348,14,349,17,0],[349,17,349,38,0],[349,38,350,21,0],[350,21,350,61,0],[350,61,351,13,0],[351,13,351,14,0],[351,14,351,16,0],[353,13,475,16,0],[477,13,477,58,0],[477,58,477,100,0],[477,100,477,108,0],[478,13,478,58,0],[478,58,478,100,0],[478,100,478,108,0],[479,9,479,10,0],[482,51,482,55,0],[482,56,482,60,0],[484,67,484,108,0],[487,9,487,10,0],[488,13,488,33,0],[489,13,489,48,0],[491,13,491,95,0],[492,13,492,56,0],[494,13,495,13,0],[495,13,495,14,0],[495,14,496,17,0],[496,17,496,24,0],[496,24,496,26,0],[496,26,496,34,0],[496,34,496,35,0],[496,35,496,37,0],[496,37,496,38,0],[496,38,496,58,0],[496,58,497,21,0],[497,21,497,77,0],[497,77,498,13,0],[498,13,498,14,0],[498,14,498,22,0],[499,9,499,10,0],[502,9,502,10,0],[503,13,503,39,0],[506,13,506,60,0],[507,9,507,10,0],[509,96,509,129,0],[518,84,523,10,0],[529,66,530,9,0],[530,9,530,10,0],[530,10,531,13,0],[531,13,531,37,0],[531,37,532,13,0],[532,13,532,36,0],[532,36,533,13,0],[533,13,533,62,0],[533,62,534,9,0],[534,9,534,10,0],[534,10,534,11,0],[537,9,537,10,0],[538,13,538,26,0],[540,13,540,35,0],[541,13,541,14,0],[542,17,542,70,0],[542,70,543,17,0],[543,17,543,18,0],[543,18,544,21,0],[544,21,544,33,0],[544,33,544,34,0],[544,34,544,47,0],[544,47,546,21,0],[546,21,546,40,0],[546,40,547,21,0],[547,21,547,33,0],[547,33,548,17,0],[548,17,548,18,0],[548,18,548,19,0],[548,19,548,22,0],[549,13,549,14,0],[551,13,551,14,0],[552,17,552,36,0],[553,13,553,14,0],[555,40,555,79,0],[556,9,556,10,0],[559,9,559,10,0],[560,13,560,50,0],[561,17,561,30,0],[563,13,563,53,0],[564,17,564,51,0],[565,9,565,10,0],[568,9,568,10,0],[569,13,569,50,0],[570,17,570,30,0],[572,13,572,62,0],[573,13,573,46,0],[574,13,574,56,0],[574,56,574,75,0],[574,75,574,77,0],[575,13,575,25,0],[576,9,576,10,0],[586,9,586,10,0],[587,13,587,26,0],[588,13,588,14,0],[589,17,589,115,0],[590,17,590,30,0],[594,13,594,14,0],[596,17,596,148,0],[597,13,597,14,0],[598,13,598,33,0],[599,13,599,14,0],[601,17,601,46,0],[602,17,602,30,0],[606,13,606,34,0],[607,13,607,35,0],[608,13,608,134,0],[609,13,609,29,0],[612,13,612,55,0],[613,13,613,25,0],[614,9,614,10,0],[617,9,617,10,0],[618,13,618,27,0],[619,13,619,34,0],[621,13,621,73,0],[622,9,622,10,0],[625,9,625,10,0],[626,13,626,30,0],[629,21,629,27,0],[630,21,630,33,0],[633,21,633,28,0],[634,21,634,33,0],[637,21,637,29,0],[638,21,638,33,0],[641,21,641,28,0],[642,21,642,33,0],[645,21,645,28,0],[646,21,646,33,0],[649,21,649,34,0],[650,25,650,38,0],[652,21,652,59,0],[655,13,655,26,0],[656,9,656,10,0],[659,9,659,10,0],[660,9,660,10,0],[665,9,665,10,0],[666,13,666,68,0],[667,17,667,30,0],[671,13,671,72,0],[673,13,673,65,0],[678,13,678,93,0],[679,17,679,99,0],[681,13,681,51,0],[684,13,684,62,0],[685,13,685,14,0],[686,17,686,44,0],[687,21,687,33,0],[689,21,689,32,0],[691,17,691,153,0],[692,13,692,14,0],[694,13,694,25,0],[695,9,695,10,0],[698,9,698,10,0],[700,13,700,30,0],[703,21,703,33,0],[704,21,704,33,0],[707,21,707,32,0],[708,21,708,33,0],[711,21,711,42,0],[712,21,712,33,0],[715,21,715,41,0],[716,21,716,33,0],[719,21,719,64,0],[720,25,720,38,0],[722,21,722,39,0],[723,21,723,33,0],[726,21,726,64,0],[727,25,727,38,0],[729,21,729,38,0],[730,21,730,33,0],[733,21,733,41,0],[734,21,734,33,0],[737,21,737,40,0],[738,21,738,33,0],[741,13,741,26,0],[742,17,742,30,0],[744,13,744,30,0],[747,21,747,29,0],[748,21,748,33,0],[751,21,751,73,0],[752,21,752,33,0],[755,21,755,72,0],[756,21,756,33,0],[759,21,759,72,0],[760,21,760,33,0],[763,21,763,75,0],[764,21,764,33,0],[767,21,767,72,0],[768,21,768,33,0],[771,21,771,65,0],[772,21,772,33,0],[775,21,775,45,0],[776,21,776,33,0],[779,21,779,38,0],[780,21,780,33,0],[783,21,783,37,0],[784,21,784,33,0],[789,21,789,34,0],[790,25,790,38,0],[793,21,793,100,0],[795,21,795,89,0],[796,25,796,39,0],[798,25,798,59,0],[799,21,799,33,0],[802,21,802,34,0],[803,25,803,38,0],[806,21,806,35,0],[807,21,807,35,0],[808,21,808,33,0],[811,21,811,34,0],[812,25,812,38,0],[815,21,815,41,0],[816,25,816,38,0],[818,25,818,39,0],[819,21,819,33,0],[822,21,822,34,0],[823,25,823,38,0],[828,21,828,57,0],[829,21,829,22,0],[830,25,830,55,0],[831,25,831,37,0],[834,21,834,79,0],[835,21,835,106,0],[836,21,836,33,0],[839,13,839,26,0],[840,9,840,10,0],[843,9,843,10,0],[844,9,844,10,0],[847,9,847,10,0],[848,13,848,32,0],[849,13,849,43,0],[850,9,850,10,0],[853,9,853,10,0],[854,13,854,32,0],[855,13,855,26,0],[856,9,856,10,0],[859,9,859,10,0],[860,13,860,41,0],[862,13,862,32,0],[863,13,863,14,0],[865,17,865,43,0],[866,17,866,18,0],[867,21,867,35,0],[868,21,868,33,0],[872,17,872,83,0],[873,17,873,18,0],[874,21,874,40,0],[875,21,875,33,0],[878,17,878,55,0],[879,17,879,18,0],[880,21,880,49,0],[881,21,881,112,0],[882,21,882,33,0],[884,13,884,14,0],[886,13,887,13,0],[887,13,887,14,0],[887,14,888,17,0],[888,17,888,81,0],[888,81,889,17,0],[889,17,889,62,0],[889,62,890,13,0],[890,13,890,14,0],[890,14,890,16,0],[894,13,894,26,0],[895,13,895,30,0],[897,13,897,38,0],[898,9,898,10,0],[901,9,901,10,0],[902,13,902,34,0],[906,13,906,26,0],[907,13,907,30,0],[908,9,908,10,0],[911,9,911,10,0],[915,13,915,102,0],[917,13,917,60,0],[918,13,918,14,0],[919,17,919,86,0],[920,17,920,50,0],[921,13,921,14,0],[922,9,922,10,0],[925,9,925,10,0],[926,13,926,49,0],[927,17,927,24,0],[929,13,929,34,0],[930,13,930,25,0],[931,9,931,10,0],[934,9,934,10,0],[936,13,936,40,0],[938,13,938,30,0],[939,13,939,14,0],[941,17,941,68,0],[942,21,942,83,0],[945,17,945,33,0],[949,17,949,38,0],[950,13,950,14,0],[952,13,952,34,0],[953,13,953,25,0],[954,9,954,10,0],[963,9,963,93,0],[964,9,964,94,0],[965,9,965,95,0],[968,9,968,10,0],[969,13,969,52,0],[969,52,969,95,0],[969,95,969,103,0],[970,13,971,13,0],[971,13,971,14,0],[971,14,972,17,0],[972,17,972,63,0],[972,63,973,17,0],[973,17,973,64,0],[973,64,974,13,0],[974,13,974,14,0],[974,14,974,22,0],[975,13,975,56,0],[975,56,975,103,0],[975,103,975,111,0],[976,9,976,10,0],[979,9,979,10,0],[980,13,980,51,0],[981,13,981,53,0],[982,13,982,55,0],[983,9,983,10,0],[985,33,985,53,0],[987,34,987,55,0],[990,9,990,10,0],[992,13,992,32,0],[993,17,993,24,0],[1000,13,1000,20,0],[1001,13,1001,21,0],[1002,9,1002,10,0],[1004,35,1004,57,0],[1008,34,1008,65,0],[1010,34,1010,64,0],[1013,9,1013,10,0],[1014,13,1014,36,0],[1015,17,1015,24,0],[1019,13,1020,13,0],[1020,13,1020,14,0],[1020,14,1021,17,0],[1021,17,1021,39,0],[1021,39,1022,17,0],[1022,17,1022,63,0],[1022,63,1023,13,0],[1023,13,1023,14,0],[1023,14,1023,17,0],[1024,9,1024,10,0],[1027,9,1027,10,0],[1028,13,1028,70,0],[1029,9,1029,10,0],[1032,9,1032,10,0],[1033,13,1034,13,0],[1034,13,1034,14,0],[1034,14,1035,17,0],[1035,17,1035,70,0],[1035,70,1036,21,0],[1036,21,1036,28,0],[1036,28,1038,17,0],[1038,17,1038,57,0],[1038,57,1039,21,0],[1039,21,1039,28,0],[1039,28,1041,17,0],[1041,17,1041,75,0],[1041,75,1042,17,0],[1042,17,1042,88,0],[1042,88,1044,17,0],[1044,17,1044,24,0],[1044,24,1044,26,0],[1044,26,1044,41,0],[1044,41,1044,42,0],[1044,42,1044,44,0],[1044,44,1044,45,0],[1044,45,1044,82,0],[1044,82,1045,17,0],[1045,17,1045,18,0],[1045,18,1046,21,0],[1046,21,1046,71,0],[1046,71,1047,25,0],[1047,25,1047,34,0],[1047,34,1050,21,0],[1050,21,1050,22,0],[1050,22,1051,25,0],[1051,25,1051,91,0],[1051,91,1052,25,0],[1052,25,1052,94,0],[1052,94,1054,25,0],[1054,25,1054,43,0],[1054,43,1055,29,0],[1055,29,1055,66,0],[1055,66,1057,25,0],[1057,25,1057,46,0],[1057,46,1058,29,0],[1058,29,1058,82,0],[1058,82,1060,25,0],[1060,25,1060,119,0],[1060,119,1061,21,0],[1061,21,1061,22,0],[1061,22,1062,21,0],[1062,21,1062,40,0],[1062,40,1063,21,0],[1063,21,1063,22,0],[1063,22,1064,25,0],[1064,25,1064,114,0],[1064,114,1065,25,0],[1065,25,1065,32,0],[1065,32,1067,17,0],[1067,17,1067,18,0],[1067,18,1069,17,0],[1069,17,1069,50,0],[1069,50,1070,13,0],[1070,13,1070,14,0],[1070,14,1070,17,0],[1071,9,1071,10,0],[1074,9,1074,10,0],[1075,13,1075,103,0],[1076,9,1076,10,0],[1078,63,1078,112,0],[1081,9,1081,10,0],[1082,13,1082,26,0],[1084,13,1084,29,0],[1085,13,1085,14,0],[1086,17,1086,39,0],[1088,17,1088,71,0],[1089,17,1089,18,0],[1090,21,1090,82,0],[1091,17,1091,18,0],[1092,22,1092,69,0],[1093,17,1093,18,0],[1095,21,1095,80,0],[1096,21,1096,111,0],[1097,17,1097,18,0],[1099,17,1099,53,0],[1100,13,1100,14,0],[1102,13,1102,37,0],[1103,13,1103,60,0],[1104,9,1104,10,0],[1107,9,1107,10,0],[1108,13,1108,26,0],[1109,13,1109,39,0],[1110,13,1110,60,0],[1111,9,1111,10,0],[1114,9,1114,10,0],[1115,13,1115,44,0],[1117,13,1117,32,0],[1120,13,1120,14,0],[1121,17,1121,75,0],[1121,75,1121,95,0],[1121,95,1121,106,0],[1122,17,1122,18,0],[1123,21,1123,97,0],[1125,21,1125,42,0],[1126,21,1126,28,0],[1129,17,1129,36,0],[1132,25,1132,59,0],[1133,25,1133,31,0],[1136,25,1136,61,0],[1137,25,1137,31,0],[1140,25,1140,60,0],[1141,25,1141,31,0],[1144,25,1144,60,0],[1145,25,1145,31,0],[1148,25,1148,60,0],[1149,25,1149,31,0],[1152,25,1152,112,0],[1155,17,1156,17,0],[1156,17,1156,18,0],[1156,18,1157,21,0],[1157,21,1157,52,0],[1157,52,1158,21,0],[1158,21,1158,22,0],[1158,22,1159,25,0],[1159,25,1159,56,0],[1159,56,1160,25,0],[1160,25,1160,42,0],[1160,42,1161,21,0],[1161,21,1161,22,0],[1161,22,1162,17,0],[1162,17,1162,18,0],[1162,18,1162,20,0],[1163,13,1163,14,0],[1165,13,1165,14,0],[1166,17,1166,60,0],[1167,21,1167,53,0],[1169,17,1169,45,0],[1170,17,1170,44,0],[1171,13,1171,14,0],[1172,9,1172,10,0],[1178,9,1178,10,0],[1179,13,1179,50,0],[1179,50,1179,84,0],[1179,84,1179,117,0],[1183,13,1183,56,0],[1184,17,1184,38,0],[1185,9,1185,10,0],[1193,9,1193,10,0],[1194,13,1197,81,0],[1199,13,1199,48,0],[1201,13,1201,38,0],[1202,13,1202,14,0],[1203,17,1203,53,0],[1204,13,1204,14,0],[1206,13,1206,14,0],[1209,17,1209,71,0],[1209,71,1209,107,0],[1209,107,1209,113,0],[1210,13,1210,14,0],[1211,9,1211,10,0],[1214,9,1214,10,0],[1217,13,1217,95,0],[1219,13,1220,86,0],[1220,86,1220,127,0],[1220,127,1221,87,0],[1221,87,1221,113,0],[1221,113,1221,115,0],[1223,13,1223,31,0],[1224,17,1224,40,0],[1225,9,1225,10,0],[1228,9,1228,10,0],[1229,13,1230,63,0],[1230,63,1230,102,0],[1230,102,1231,64,0],[1231,64,1231,103,0],[1231,103,1231,105,0],[1233,13,1233,31,0],[1234,17,1234,55,0],[1235,9,1235,10,0],[1238,9,1238,10,0],[1239,13,1239,60,0],[1242,13,1243,63,0],[1243,63,1243,138,0],[1243,138,1244,63,0],[1244,63,1244,138,0],[1244,138,1244,140,0],[1246,13,1246,33,0],[1247,13,1247,14,0],[1249,17,1249,46,0],[1250,17,1250,79,0],[1252,17,1252,61,0],[1254,17,1254,94,0],[1256,22,1256,31,0],[1256,33,1256,50,0],[1256,52,1256,55,0],[1257,17,1257,18,0],[1258,21,1258,108,0],[1259,17,1259,18,0],[1261,17,1262,54,0],[1262,54,1262,69,0],[1262,69,1263,55,0],[1263,55,1263,70,0],[1263,70,1263,72,0],[1265,17,1265,45,0],[1266,13,1266,14,0],[1268,13,1268,14,0],[1269,17,1269,35,0],[1270,17,1270,18,0],[1271,21,1271,75,0],[1271,75,1271,100,0],[1271,100,1271,102,0],[1272,21,1272,41,0],[1273,25,1273,104,0],[1274,17,1274,18,0],[1276,17,1276,18,0],[1277,21,1277,76,0],[1277,76,1277,101,0],[1277,101,1277,103,0],[1278,21,1278,41,0],[1279,25,1279,65,0],[1280,17,1280,18,0],[1281,13,1281,14,0],[1284,13,1284,79,0],[1285,9,1285,10,0],[1288,9,1288,10,0],[1289,13,1289,52,0],[1291,13,1291,49,0],[1293,13,1293,30,0],[1294,13,1294,14,0],[1298,17,1298,107,0],[1299,17,1299,71,0],[1300,13,1300,14,0],[1302,13,1302,31,0],[1303,17,1303,59,0],[1305,17,1305,58,0],[1306,9,1306,10,0],[1309,9,1309,10,0],[1310,13,1310,61,0],[1311,9,1311,10,0],[1314,9,1314,10,0],[1315,13,1315,57,0],[1316,13,1316,55,0],[1317,13,1317,50,0],[1318,13,1318,197,0],[1319,13,1319,50,0],[1321,13,1321,102,0],[1321,102,1321,132,0],[1321,132,1321,179,0],[1322,13,1322,44,0],[1323,13,1323,31,0],[1325,13,1328,15,0],[1330,13,1330,45,0],[1331,13,1331,57,0],[1332,13,1332,33,0],[1334,13,1334,39,0],[1335,13,1335,14,0],[1336,17,1339,19,0],[1340,17,1340,56,0],[1341,17,1341,43,0],[1342,13,1342,14,0],[1344,13,1345,121,0],[1345,121,1345,148,0],[1345,148,1345,151,0],[1346,13,1346,90,0],[1348,13,1348,73,0],[1349,13,1349,14,0],[1350,17,1353,19,0],[1354,17,1354,50,0],[1355,17,1355,37,0],[1356,13,1356,14,0],[1358,13,1358,56,0],[1359,13,1359,14,0],[1360,17,1360,54,0],[1361,17,1362,27,0],[1362,27,1362,143,0],[1362,143,1362,145,0],[1363,17,1364,27,0],[1364,27,1365,165,0],[1365,165,1365,167,0],[1366,13,1366,14,0],[1368,13,1368,50,0],[1369,13,1369,99,0],[1370,9,1370,10,0],[1373,9,1373,10,0],[1374,13,1376,97,0],[1376,97,1376,118,0],[1376,118,1376,162,0],[1376,162,1376,163,0],[1376,163,1377,103,0],[1377,103,1377,124,0],[1377,124,1377,174,0],[1377,174,1377,175,0],[1377,175,1378,102,0],[1378,102,1378,123,0],[1378,123,1378,170,0],[1378,170,1378,171,0],[1378,171,1379,15,0],[1381,13,1381,85,0],[1382,9,1382,10,0],[1385,9,1385,10,0],[1386,13,1386,35,0],[1387,13,1387,14,0],[1388,17,1388,70,0],[1388,70,1389,17,0],[1389,17,1389,18,0],[1389,18,1390,21,0],[1390,21,1390,33,0],[1390,33,1391,25,0],[1391,25,1391,38,0],[1391,38,1393,21,0],[1393,21,1393,33,0],[1393,33,1394,21,0],[1394,21,1394,33,0],[1394,33,1395,17,0],[1395,17,1395,18,0],[1395,18,1395,19,0],[1395,19,1395,22,0],[1396,13,1396,14,0],[1398,13,1398,14,0],[1399,17,1399,29,0],[1400,13,1400,14,0],[1403,13,1403,14,0],[1404,17,1404,53,0],[1405,13,1405,14,0],[1406,9,1406,10,0],[1409,9,1409,10,0],[1410,13,1410,52,0],[1411,13,1411,14,0],[1412,17,1412,38,0],[1413,17,1413,24,0],[1416,13,1416,49,0],[1417,13,1417,14,0],[1418,17,1421,20,0],[1422,17,1422,24,0],[1425,13,1425,35,0],[1426,13,1426,14,0],[1427,17,1427,70,0],[1427,70,1428,17,0],[1428,17,1428,18,0],[1428,18,1429,21,0],[1429,21,1429,33,0],[1429,33,1430,25,0],[1430,25,1430,38,0],[1430,38,1432,21,0],[1432,21,1432,39,0],[1432,39,1433,21,0],[1433,21,1433,33,0],[1433,33,1434,17,0],[1434,17,1434,18,0],[1434,18,1434,19,0],[1434,19,1434,22,0],[1435,13,1435,14,0],[1437,13,1437,14,0],[1438,17,1438,35,0],[1439,13,1439,14,0],[1441,39,1441,79,0],[1442,9,1442,10,0],[1445,9,1445,10,0],[1446,13,1446,35,0],[1447,13,1447,14,0],[1448,17,1448,70,0],[1448,70,1449,17,0],[1449,17,1449,18,0],[1449,18,1450,21,0],[1450,21,1450,33,0],[1450,33,1451,25,0],[1451,25,1451,51,0],[1451,51,1453,21,0],[1453,21,1453,64,0],[1453,64,1454,17,0],[1454,17,1454,18,0],[1454,18,1454,19,0],[1454,19,1454,22,0],[1455,13,1455,14,0],[1457,13,1457,14,0],[1458,17,1458,53,0],[1458,53,1458,81,0],[1458,81,1458,83,0],[1459,13,1459,14,0],[1460,9,1460,10,0],[1465,99,1466,120,0],[1466,120,1466,132,0],[1466,132,1467,120,0],[1467,120,1467,129,0],[1467,129,1468,124,0],[1468,124,1468,133,0],[1468,133,1468,134,0],[1471,9,1471,10,0],[1472,13,1472,39,0],[1473,17,1473,26,0],[1475,17,1475,160,0],[1478,13,1478,14,0],[1479,17,1479,78,0],[1481,17,1481,89,0],[1481,89,1481,90,0],[1481,90,1481,101,0],[1488,17,1488,39,0],[1490,17,1490,80,0],[1492,17,1492,91,0],[1494,17,1494,111,0],[1496,17,1496,78,0],[1498,17,1498,48,0],[1499,13,1499,14,0],[1500,9,1500,10,0],[1503,9,1503,10,0],[1504,13,1504,53,0],[1506,13,1506,20,0],[1506,22,1506,33,0],[1506,34,1506,36,0],[1506,37,1506,63,0],[1507,17,1507,96,0],[1507,96,1507,124,0],[1507,124,1507,127,0],[1509,13,1509,57,0],[1511,13,1511,99,0],[1512,9,1512,10,0],[1515,9,1515,10,0],[1516,13,1516,30,0],[1517,13,1517,14,0],[1518,17,1518,70,0],[1518,70,1519,17,0],[1519,17,1519,18,0],[1519,18,1520,21,0],[1520,21,1520,33,0],[1520,33,1521,25,0],[1521,25,1521,38,0],[1521,38,1523,21,0],[1523,21,1523,54,0],[1523,54,1524,21,0],[1524,21,1524,33,0],[1524,33,1525,17,0],[1525,17,1525,18,0],[1525,18,1525,19,0],[1525,19,1525,22,0],[1527,17,1527,24,0],[1530,13,1530,72,0],[1531,13,1531,14,0],[1532,17,1532,59,0],[1533,17,1533,24,0],[1536,13,1536,76,0],[1536,76,1536,122,0],[1536,122,1536,125,0],[1537,9,1537,10,0],[1540,9,1540,10,0],[1541,13,1541,40,0],[1542,13,1542,126,0],[1543,9,1543,10,0],[1546,9,1546,10,0],[1547,13,1547,56,0],[1549,13,1549,20,0],[1549,22,1549,41,0],[1549,42,1549,44,0],[1549,45,1549,67,0],[1550,13,1550,14,0],[1551,17,1551,47,0],[1552,21,1552,66,0],[1554,17,1554,24,0],[1554,26,1554,37,0],[1554,38,1554,40,0],[1554,41,1554,56,0],[1555,17,1555,18,0],[1556,21,1556,92,0],[1557,21,1557,119,0],[1558,21,1558,61,0],[1559,17,1559,18,0],[1560,13,1560,14,0],[1564,13,1565,13,0],[1565,13,1565,14,0],[1565,14,1566,17,0],[1566,17,1566,24,0],[1566,24,1566,26,0],[1566,26,1566,41,0],[1566,41,1566,42,0],[1566,42,1566,44,0],[1566,44,1566,45,0],[1566,45,1566,82,0],[1566,82,1567,17,0],[1567,17,1567,18,0],[1567,18,1568,21,0],[1568,21,1568,101,0],[1568,101,1568,134,0],[1568,134,1568,136,0],[1568,136,1569,21,0],[1569,21,1569,136,0],[1569,136,1570,17,0],[1570,17,1570,18,0],[1570,18,1571,13,0],[1571,13,1571,14,0],[1571,14,1571,15,0],[1573,13,1573,99,0],[1574,9,1574,10,0],[1577,9,1577,10,0],[1578,13,1578,40,0],[1579,13,1579,100,0],[1580,9,1580,10,0],[1583,9,1583,10,0],[1584,13,1584,41,0],[1585,13,1585,53,0],[1586,9,1586,10,0],[1589,9,1589,10,0],[1590,13,1590,56,0],[1593,13,1593,14,0],[1594,17,1595,17,0],[1595,17,1595,18,0],[1595,18,1596,21,0],[1596,21,1596,33,0],[1596,33,1596,34,0],[1596,34,1596,47,0],[1596,47,1598,21,0],[1598,21,1598,67,0],[1598,67,1599,21,0],[1599,21,1599,33,0],[1599,33,1600,17,0],[1600,17,1600,18,0],[1600,18,1600,20,0],[1601,17,1601,53,0],[1602,13,1602,14,0],[1604,13,1604,28,0],[1605,13,1605,14,0],[1606,17,1608,35,0],[1608,35,1608,55,0],[1608,55,1608,58,0],[1609,13,1609,14,0],[1611,13,1611,14,0],[1612,17,1612,33,0],[1613,13,1613,14,0],[1615,13,1615,29,0],[1616,9,1616,10,0],[1619,9,1619,10,0],[1620,13,1620,100,0],[1621,13,1621,14,0],[1622,17,1622,35,0],[1623,17,1623,18,0],[1624,21,1624,36,0],[1624,36,1628,23,0],[1628,23,1628,25,0],[1629,17,1629,18,0],[1631,17,1631,30,0],[1634,13,1634,54,0],[1636,13,1636,33,0],[1637,17,1637,30,0],[1639,13,1639,64,0],[1641,13,1641,49,0],[1642,13,1642,14,0],[1643,17,1643,48,0],[1644,17,1644,29,0],[1648,13,1648,81,0],[1648,81,1648,104,0],[1648,104,1648,106,0],[1650,13,1650,36,0],[1651,17,1651,49,0],[1653,13,1653,44,0],[1655,13,1655,51,0],[1658,13,1658,106,0],[1659,13,1659,25,0],[1660,9,1660,10,0],[1662,71,1662,114,0],[1664,68,1664,116,0],[1666,35,1666,52,0],[1668,61,1668,91,0],[1669,43,1669,48,0],[1670,63,1670,154,0],[1675,19,1675,66,0],[1676,13,1676,14,0],[1677,17,1677,48,0],[1678,13,1678,14,0],[1685,20,1685,89,0]]);
+    </script>
+  </body>
+</html>

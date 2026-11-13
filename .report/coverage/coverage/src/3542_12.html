@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/Carousel/Carousel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Development;
+using osu.Framework.Extensions.PolygonExtensions;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Layout;
+using osu.Framework.Logging;
+using osu.Framework.Utils;
+using osu.Game.Input.Bindings;
+using osu.Game.Online.Multiplayer;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Graphics.Carousel
+{
+    /// &lt;summary&gt;
+    /// A highly efficient vertical list display that is used primarily for the song select screen,
+    /// but flexible enough to be used for other use cases.
+    /// &lt;/summary&gt;
+    public abstract partial class Carousel&lt;T&gt; : CompositeDrawable, IKeyBindingHandler&lt;GlobalAction&gt;
+        where T : notnull
+    {
+        #region Properties and methods for external usage
+
+        /// &lt;summary&gt;
+        /// Called after a filter operation or change in items results in the visible carousel items changing.
+        /// &lt;/summary&gt;
+        public Action&lt;IEnumerable&lt;CarouselItem&gt;&gt;? NewItemsPresented { private get; init; }
+
+        /// &lt;summary&gt;
+        /// Height of the area above the carousel that should be treated as visible due to transparency of elements in front of it.
+        /// &lt;/summary&gt;
+        public float BleedTop { get; set; }
+
+        /// &lt;summary&gt;
+        /// Height of the area below the carousel that should be treated as visible due to transparency of elements in front of it.
+        /// &lt;/summary&gt;
+        public float BleedBottom { get; set; }
+
+        /// &lt;summary&gt;
+        /// The number of pixels outside the carousel&#39;s vertical bounds to manifest drawables.
+        /// This allows preloading content before it scrolls into view.
+        /// &lt;/summary&gt;
+        public float DistanceOffscreenToPreload { get; set; }
+
+        /// &lt;summary&gt;
+        /// When a new request arrives to change filtering, the number of milliseconds to wait before performing the filter.
+        /// Regardless of any external debouncing, this is a safety measure to avoid triggering too many threaded operations.
+        /// &lt;/summary&gt;
+        public int DebounceDelay { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether an asynchronous filter / group operation is currently underway.
+        /// &lt;/summary&gt;
+        public bool IsFiltering =&gt; !filterTask.IsCompleted;
+
+        /// &lt;summary&gt;
+        /// Whether absolute scrolling is currently triggered.
+        /// &lt;/summary&gt;
+        public bool AbsoluteScrolling =&gt; Scroll.AbsoluteScrolling;
+
+        /// &lt;summary&gt;
+        /// The number of times filter operations have been triggered.
+        /// &lt;/summary&gt;
+        public int FilterCount { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The number of displayable items currently being tracked (before filtering).
+        /// &lt;/summary&gt;
+        public int ItemsTracked =&gt; Items.Count;
+
+        /// &lt;summary&gt;
+        /// The items currently in rotation for display.
+        /// &lt;/summary&gt;
+        public int DisplayableItems =&gt; carouselItems?.Count ?? 0;
+
+        /// &lt;summary&gt;
+        /// The number of items currently actualised into drawables.
+        /// &lt;/summary&gt;
+        public int VisibleItems =&gt; Scroll.Panels.Count;
+
+        /// &lt;summary&gt;
+        /// The currently selected model. Generally of type T.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// A carousel may create panels for non-T types.
+        /// To keep things simple, we therefore avoid generic constraints on the current selection.
+        ///
+        /// The selection is never reset due to not existing. It can be set to anything.
+        /// If no matching carousel item exists, there will be no visually selected item while waiting for potential new item which matches.
+        /// &lt;/remarks&gt;
+        protected object? CurrentSelection
+        {
+            get =&gt; currentSelection.Model;
+            set
+            {
+                if (!CheckModelEquality(currentSelection.Model, value))
+                {
+                    HandleItemSelected(value);
+
+                    if (currentSelection.Model != null)
+                        HandleItemDeselected(currentSelection.Model);
+
+                    currentSelection = new Selection(value);
+                    currentKeyboardSelection = currentSelection;
+                    selectionValid.Invalidate();
+                }
+
+                // Check keyboard selection equality separately.
+                //
+                // If current selection set to an already-selected value, we want to ensure
+                // that keyboard selection (which basically represents the &quot;visual&quot; tracking of selection)
+                // is still reset back to the newly set value.
+                //
+                // The main case this handles is when a set header is clicked and we want to make sure one of its
+                // &quot;children&quot; are re-selected.
+                if (!CheckModelEquality(currentKeyboardSelection.Model, value))
+                {
+                    currentKeyboardSelection = currentSelection;
+                    selectionValid.Invalidate();
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Activate the specified item.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;item&quot;&gt;&lt;/param&gt;
+        public void Activate(CarouselItem item)
+        {
+            // Regardless of how the item handles activation, update keyboard selection to the activated panel.
+            // In other words, when a panel is clicked, keyboard selection should default to matching the clicked
+            // item.
+            setKeyboardSelection(item.Model);
+
+            (GetMaterialisedDrawableForItem(item) as ICarouselPanel)?.Activated();
+            HandleItemActivated(item);
+
+            selectionValid.Invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Scroll carousel to the selected item if available.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;immediate&quot;&gt;
+        /// Whether the scroll position should immediately be shifted to the target, delegating animation to visible panels.
+        /// This should be true for operations like filtering - where panels are changing visibility state - to avoid large jumps in animation.
+        /// &lt;/param&gt;
+        public void ScrollToSelection(bool immediate = false)
+        {
+            // if an immediate scroll is already requested, don&#39;t override it with a slower scroll
+            if (scrollToSelection == PendingScrollOperation.Immediate)
+                return;
+
+            scrollToSelection = immediate ? PendingScrollOperation.Immediate : PendingScrollOperation.Standard;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the vertical spacing between two given carousel items. Negative value can be used to create an overlapping effect.
+        /// &lt;/summary&gt;
+        protected virtual float GetSpacingBetweenPanels(CarouselItem top, CarouselItem bottom) =&gt; 0f;
+
+        #endregion
+
+        #region Properties and methods concerning implementations
+
+        /// &lt;summary&gt;
+        /// A collection of filters which should be run each time a &lt;see cref=&quot;FilterAsync&quot;/&gt; is executed.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Implementations should add all required filters as part of their initialisation.
+        ///
+        /// Importantly, each filter is sequentially run in the order provided.
+        /// Each filter receives the output of the previous filter.
+        ///
+        /// A filter may add, mutate or remove items.
+        /// &lt;/remarks&gt;
+        public IEnumerable&lt;ICarouselFilter&gt; Filters { get; init; } = Enumerable.Empty&lt;ICarouselFilter&gt;();
+
+        /// &lt;summary&gt;
+        /// All items which are to be considered for display in this carousel.
+        /// Mutating this list will automatically queue a &lt;see cref=&quot;FilterAsync&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Note that an &lt;see cref=&quot;ICarouselFilter&quot;/&gt; may add new items which are displayed but not tracked in this list.
+        /// &lt;/remarks&gt;
+        protected readonly BindableList&lt;T&gt; Items = new BindableList&lt;T&gt;();
+
+        /// &lt;summary&gt;
+        /// Queue an asynchronous filter operation.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clearExistingPanels&quot;&gt;Whether all existing drawable panels should be reset post filter.&lt;/param&gt;
+        protected virtual Task&lt;IEnumerable&lt;CarouselItem&gt;&gt; FilterAsync(bool clearExistingPanels = false)
+        {
+            FilterCount++;
+
+            if (clearExistingPanels)
+                filterReusesPanels.Invalidate();
+
+            filterAfterItemsChanged.Validate();
+
+            filterTask = performFilter();
+            filterTask.FireAndForget();
+            return filterTask;
+        }
+
+        /// &lt;summary&gt;
+        /// Called when &lt;see cref=&quot;Items&quot;/&gt; changes in any way.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether a re-filter is required.&lt;/returns&gt;
+        protected virtual bool HandleItemsChanged(NotifyCollectionChangedEventArgs args) =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Fired after a filter operation completed.
+        /// &lt;/summary&gt;
+        protected virtual void HandleFilterCompleted()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Check whether two models are the same for display purposes.
+        /// &lt;/summary&gt;
+        protected virtual bool CheckModelEquality(object? x, object? y) =&gt; ReferenceEquals(x, y);
+
+        /// &lt;summary&gt;
+        /// Create a drawable for the given carousel item so it can be displayed.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// For efficiency, it is recommended the drawables are retrieved from a &lt;see cref=&quot;DrawablePool{T}&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The item which should be represented by the returned drawable.&lt;/param&gt;
+        /// &lt;returns&gt;The manifested drawable.&lt;/returns&gt;
+        protected abstract Drawable GetDrawableForDisplay(CarouselItem item);
+
+        /// &lt;summary&gt;
+        /// Given a &lt;see cref=&quot;CarouselItem&quot;/&gt;, find a drawable representation if it is currently displayed in the carousel.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This will only return a drawable if it is &quot;on-screen&quot;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The item to find a related drawable representation.&lt;/param&gt;
+        /// &lt;returns&gt;The drawable representation if it exists.&lt;/returns&gt;
+        protected Drawable? GetMaterialisedDrawableForItem(CarouselItem item) =&gt;
+            Scroll.Panels.SingleOrDefault(p =&gt; ((ICarouselPanel)p).Item == item);
+
+        /// &lt;summary&gt;
+        /// When a user is traversing the carousel via group selection keys, assert whether the item provided is a valid target.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The candidate item.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the provided item is a valid group target. If &lt;c&gt;false&lt;/c&gt;, more panels will be checked in the user&#39;s requested direction until a valid target is found.&lt;/returns&gt;
+        protected virtual bool CheckValidForGroupSelection(CarouselItem item) =&gt; false;
+
+        /// &lt;summary&gt;
+        /// When a user is traversing the carousel via set selection keys, assert whether the item provided is a valid target.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The candidate item.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the provided item is a valid set target. If &lt;c&gt;false&lt;/c&gt;, more panels will be checked in the user&#39;s requested direction until a valid target is found.&lt;/returns&gt;
+        protected virtual bool CheckValidForSetSelection(CarouselItem item) =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Keyboard selection usually does not automatically activate an item. There may be exceptions to this rule.
+        /// Returning &lt;c&gt;true&lt;/c&gt; here will make keyboard traversal act like set traversal for the target item.
+        /// &lt;/summary&gt;
+        protected virtual bool ShouldActivateOnKeyboardSelection(CarouselItem item) =&gt; false;
+
+        /// &lt;summary&gt;
+        /// Called after an item becomes the &lt;see cref=&quot;CurrentSelection&quot;/&gt;.
+        /// Should be used to handle any set expansion, item visibility changes, etc.
+        /// &lt;/summary&gt;
+        protected virtual void HandleItemSelected(object? model) { }
+
+        /// &lt;summary&gt;
+        /// Called when the &lt;see cref=&quot;CurrentSelection&quot;/&gt; changes to a new selection.
+        /// Should be used to handle any set expansion, item visibility changes, etc.
+        /// &lt;/summary&gt;
+        protected virtual void HandleItemDeselected(object? model) { }
+
+        /// &lt;summary&gt;
+        /// Called when an item is activated via user input (keyboard traversal or a mouse click).
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// An activated item should decide to perform an action, such as:
+        /// - Change its expanded state (and show / hide children items).
+        /// - Set the item to the &lt;see cref=&quot;CurrentSelection&quot;/&gt;.
+        /// - Start gameplay on a beatmap difficulty if already selected.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;item&quot;&gt;The carousel item which was activated.&lt;/param&gt;
+        protected virtual void HandleItemActivated(CarouselItem item) { }
+
+        #endregion
+
+        #region Initialisation
+
+        protected readonly ScrollContainer Scroll;
+
+        protected Carousel()
+        {
+            InternalChild = Scroll = new ScrollContainer
+            {
+                Masking = false,
+                RelativeSizeAxes = Axes.Both,
+                OnPageUp = () =&gt; Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Page, -1)),
+                OnPageDown = () =&gt; Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Page, 1)),
+                OnListStart = () =&gt; Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Edge, -1)),
+                OnListEnd = () =&gt; Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Edge, 1)),
+            };
+
+            Items.BindCollectionChanged((_, args) =&gt;
+            {
+                if (HandleItemsChanged(args))
+                    filterAfterItemsChanged.Invalidate();
+            });
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            loadSamples(audio);
+        }
+
+        #endregion
+
+        #region Filtering and display preparation
+
+        /// &lt;summary&gt;
+        /// Retrieve a list of all &lt;see cref=&quot;CarouselItem&quot;/&gt;s currently displayed.
+        /// &lt;/summary&gt;
+        public IList&lt;CarouselItem&gt;? GetCarouselItems() =&gt; carouselItems;
+
+        private List&lt;CarouselItem&gt;? carouselItems;
+
+        private Task&lt;IEnumerable&lt;CarouselItem&gt;&gt; filterTask = Task.FromResult(Enumerable.Empty&lt;CarouselItem&gt;());
+        private CancellationTokenSource cancellationSource = new CancellationTokenSource();
+
+        /// &lt;summary&gt;
+        /// For background re-filters, ensure we wait for the previous filter operation to complete before starting another.
+        /// This avoids the carousel never updating its display in high churn scenarios.
+        /// &lt;/summary&gt;
+        private readonly Cached filterAfterItemsChanged = new Cached();
+
+        private async Task&lt;IEnumerable&lt;CarouselItem&gt;&gt; performFilter()
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            var cts = new CancellationTokenSource();
+
+            var previousCancellationSource = Interlocked.Exchange(ref cancellationSource, cts);
+            await previousCancellationSource.CancelAsync().ConfigureAwait(true);
+
+            if (DebounceDelay &gt; 0)
+            {
+                log($&quot;Filter operation queued, waiting for {DebounceDelay} ms debounce&quot;);
+                await Task.Delay(DebounceDelay, cts.Token).ConfigureAwait(true);
+            }
+
+            // Copy must be performed on update thread for now (see ConfigureAwait above).
+            // Could potentially be optimised in the future if it becomes an issue.
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+            List&lt;CarouselItem&gt; items = new List&lt;CarouselItem&gt;(Items.Select(m =&gt; new CarouselItem(m)));
+
+            await Task.Run(async () =&gt;
+            {
+                try
+                {
+                    foreach (var filter in Filters)
+                    {
+                        log($&quot;Performing {filter.GetType().ReadableName()}&quot;);
+                        items = await filter.Run(items, cts.Token).ConfigureAwait(false);
+                    }
+
+                    log(&quot;Updating Y positions&quot;);
+                    updateYPositions(items, visibleHalfHeight);
+                }
+                catch (OperationCanceledException)
+                {
+                    log(&quot;Cancelled due to newer request arriving&quot;);
+                }
+            }, cts.Token).ConfigureAwait(false);
+
+            if (cts.Token.IsCancellationRequested)
+                return Enumerable.Empty&lt;CarouselItem&gt;();
+
+            Schedule(() =&gt;
+            {
+                log(&quot;Items ready for display&quot;);
+                carouselItems = items;
+                displayedRange = null;
+
+                if (!filterReusesPanels.IsValid)
+                {
+                    foreach (var panel in Scroll.Panels)
+                        expirePanel(panel);
+
+                    filterReusesPanels.Validate();
+                }
+
+                HandleFilterCompleted();
+
+                refreshAfterSelection();
+                if (!Scroll.UserScrolling)
+                    ScrollToSelection(immediate: true);
+
+                NewItemsPresented?.Invoke(carouselItems);
+            });
+
+            return items;
+
+            void log(string text) =&gt; Logger.Log($&quot;Carousel[op {cts.GetHashCode().ToString()}] {stopwatch.ElapsedMilliseconds} ms: {text}&quot;);
+        }
+
+        private void updateYPositions(IEnumerable&lt;CarouselItem&gt; carouselItems, float offset)
+        {
+            CarouselItem? previousVisible = null;
+
+            foreach (var item in carouselItems)
+                updateItemYPosition(item, ref previousVisible, ref offset);
+        }
+
+        private void updateItemYPosition(CarouselItem item, ref CarouselItem? previousVisible, ref float offset)
+        {
+            float spacing = previousVisible == null || !item.IsVisible ? 0 : GetSpacingBetweenPanels(previousVisible, item);
+
+            offset += spacing;
+            item.CarouselYPosition = offset;
+
+            // ensure there are no input gaps where clicking will fall through the carousel.
+            // notably, only do this where there&#39;s positive spacing between panels (negative spacing means they overlap already and there is no gap to fill).
+            if (spacing &gt; 0)
+            {
+                item.CarouselInputLenienceAbove = spacing / 2;
+                previousVisible?.CarouselInputLenienceBelow = item.CarouselInputLenienceAbove;
+            }
+
+            if (item.IsVisible)
+            {
+                offset += item.DrawHeight;
+                previousVisible = item;
+            }
+        }
+
+        #endregion
+
+        #region Input handling
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            switch (e.Key)
+            {
+                // this is a special hard-coded case; we can&#39;t rely on OnPressed as GlobalActionContainer is
+                // matching with exact modifier consideration (so Ctrl+Enter would be ignored).
+                case Key.Enter:
+                case Key.KeypadEnter:
+                    return activateSelection();
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.Select:
+                    return activateSelection();
+
+                // the selection traversal handlers below are scheduled to avoid an issue
+                // wherein if the update frame rate is low, keeping one of the actions below pressed leads to selection moving back to the start / end.
+                // the reason why that happens is that the code managing `current(Keyboard)?Selection` can lose track of the index of the selected item
+                // if the selection is changed more than once during an update frame,
+                // which can happen if repeat inputs are enqueued for processing at a rate faster than the update refresh rate.
+                // `refreshAfterSelection()` is the method responsible for updating the index of the selected item here which runs once per frame.
+                case GlobalAction.SelectPrevious:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Keyboard, -1));
+                    return true;
+
+                case GlobalAction.SelectNext:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Keyboard, 1));
+                    return true;
+
+                case GlobalAction.ActivatePreviousSet:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Set, -1));
+                    return true;
+
+                case GlobalAction.ActivateNextSet:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Set, 1));
+                    return true;
+
+                case GlobalAction.ExpandPreviousGroup:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Group, -1));
+                    return true;
+
+                case GlobalAction.ExpandNextGroup:
+                    Scheduler.AddOnce(traverseFromKey, new TraversalOperation(TraversalType.Group, 1));
+                    return true;
+
+                case GlobalAction.ToggleCurrentGroup:
+                    if (carouselItems == null || carouselItems.Count == 0)
+                        return true;
+
+                    if (currentKeyboardSelection.CarouselItem == null || currentKeyboardSelection.Index == null)
+                        return true;
+
+                    if (CheckValidForGroupSelection(currentKeyboardSelection.CarouselItem))
+                    {
+                        // If keyboard selection is a group, toggle group and then change keyboard selection to actual selection.
+                        Activate(currentKeyboardSelection.CarouselItem);
+                    }
+                    else
+                    {
+                        // If current keyboard selection is not a group, toggle the closest group and move keyboard selection to that group.
+                        for (int i = currentKeyboardSelection.Index.Value; i &gt;= 0; i--)
+                        {
+                            var newItem = carouselItems[i];
+
+                            if (CheckValidForGroupSelection(newItem))
+                            {
+                                Activate(newItem);
+                                return true;
+                            }
+                        }
+                    }
+
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void traverseFromKey(TraversalOperation traversal)
+        {
+            switch (traversal.Type)
+            {
+                case TraversalType.Keyboard:
+                    traverseKeyboardSelection(traversal.Direction);
+                    break;
+
+                case TraversalType.Page:
+                    traverseKeyboardPage(traversal.Direction);
+                    break;
+
+                case TraversalType.Edge:
+                    traverseKeyboardEdge(traversal.Direction);
+                    break;
+
+                case TraversalType.Set:
+                    traverseSetSelection(traversal.Direction);
+                    break;
+
+                case TraversalType.Group:
+                    traverseGroupSelection(traversal.Direction);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        private enum TraversalType
+        {
+            Keyboard,
+            Set,
+            Page,
+            Edge,
+            Group
+        }
+
+        private record TraversalOperation(TraversalType Type, int Direction);
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        private bool activateSelection()
+        {
+            if (currentKeyboardSelection.CarouselItem != null)
+            {
+                Activate(currentKeyboardSelection.CarouselItem);
+                return true;
+            }
+
+            return false;
+        }
+
+        private void traverseKeyboardSelection(int direction)
+        {
+            if (carouselItems == null || carouselItems.Count == 0) return;
+
+            int originalIndex;
+
+            if (currentKeyboardSelection.Index != null)
+                originalIndex = currentKeyboardSelection.Index.Value;
+            else if (direction &gt; 0)
+                originalIndex = carouselItems.Count - 1;
+            else
+                originalIndex = 0;
+
+            int newIndex = originalIndex;
+
+            // Iterate over every item back to the current selection, finding the first valid item.
+            // The fail condition is when we reach the selection after a cyclic loop over every item.
+            do
+            {
+                newIndex = (newIndex + direction + carouselItems.Count) % carouselItems.Count;
+                var newItem = carouselItems[newIndex];
+
+                if (newItem.IsVisible)
+                {
+                    if (!CheckModelEquality(currentSelection.Model, newItem.Model) &amp;&amp; ShouldActivateOnKeyboardSelection(newItem))
+                        Activate(newItem);
+                    else
+                    {
+                        playTraversalSound();
+                        setKeyboardSelection(newItem.Model);
+                    }
+
+                    return;
+                }
+            } while (newIndex != originalIndex);
+        }
+
+        /// &lt;summary&gt;
+        /// Performs a page-wise keyboard traversal in the carousel, moving the selection by approximately one &quot;page&quot; of items.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;Positive for downwards, negative for upwards.&lt;/param&gt;
+        private void traverseKeyboardPage(int direction)
+        {
+            if (carouselItems == null || carouselItems.Count == 0)
+                return;
+
+            int startIndex = currentKeyboardSelection.Index ?? (direction &gt; 0 ? carouselItems.Count - 1 : 0);
+
+            // Compute the number of visible panels to treat as one page.
+            // Reduced by 50% to account for the search bar covering the top items.
+            int visiblePanelsCount = Math.Max(1, Scroll.Panels.Count / 2);
+            int visibleCount = 0;
+            int i = startIndex;
+
+            while (i &gt;= 0 &amp;&amp; i &lt; carouselItems.Count)
+            {
+                i += direction;
+
+                if (i &lt; 0 || i &gt;= carouselItems.Count)
+                    break;
+
+                var item = carouselItems[i];
+
+                if (!item.IsVisible)
+                    continue;
+
+                visibleCount++;
+
+                if (visibleCount &gt;= visiblePanelsCount)
+                {
+                    setKeyboardSelection(item.Model);
+                    ScrollToSelection();
+                    playTraversalSound();
+                    return;
+                }
+            }
+
+            // If we are at the beginning or end and there are not enough items left to scroll through a complete page, then we go to the last or first item.
+            var fallback = direction &gt; 0
+                ? carouselItems.LastOrDefault(x =&gt; x.IsVisible)
+                : carouselItems.FirstOrDefault(x =&gt; x.IsVisible);
+
+            if (fallback != null &amp;&amp; !CheckModelEquality(fallback.Model, currentKeyboardSelection.Model))
+            {
+                setKeyboardSelection(fallback.Model);
+                ScrollToSelection();
+                playTraversalSound();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Select the first or last item in the carousel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;Positive for last item, negative for first item.&lt;/param&gt;
+        private void traverseKeyboardEdge(int direction)
+        {
+            if (carouselItems == null || carouselItems.Count == 0)
+                return;
+
+            var item = direction &gt; 0
+                ? carouselItems.LastOrDefault(x =&gt; x.IsVisible)
+                : carouselItems.FirstOrDefault(x =&gt; x.IsVisible);
+
+            if (item != null &amp;&amp; !CheckModelEquality(item.Model, currentKeyboardSelection.Model))
+            {
+                setKeyboardSelection(item.Model);
+                ScrollToSelection();
+                playTraversalSound();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Select the next valid group selection relative to a current selection.
+        /// This is generally for keyboard based traversal.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;Positive for downwards, negative for upwards.&lt;/param&gt;
+        /// &lt;returns&gt;Whether selection was possible.&lt;/returns&gt;
+        private void traverseGroupSelection(int direction) =&gt; traverseSelection(direction, CheckValidForGroupSelection);
+
+        /// &lt;summary&gt;
+        /// Select the next valid set selection relative to a current selection.
+        /// This is generally for keyboard based traversal.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;Positive for downwards, negative for upwards.&lt;/param&gt;
+        /// &lt;returns&gt;Whether selection was possible.&lt;/returns&gt;
+        private void traverseSetSelection(int direction)
+        {
+            // If the user has a different keyboard selection and requests
+            // set selection, first transfer the keyboard selection to actual selection.
+            //
+            // It is assumed that selecting a set will immediately change selection to one of its children.
+            if (currentKeyboardSelection.CarouselItem != null &amp;&amp; currentSelection.CarouselItem != currentKeyboardSelection.CarouselItem)
+            {
+                Activate(currentKeyboardSelection.CarouselItem);
+                return;
+            }
+
+            traverseSelection(direction, CheckValidForSetSelection);
+        }
+
+        private void traverseSelection(int direction, Func&lt;CarouselItem, bool&gt; predicate)
+        {
+            if (carouselItems == null || carouselItems.Count == 0) return;
+
+            int originalIndex;
+            int newIndex;
+
+            if (currentKeyboardSelection.Index == null)
+            {
+                // If there&#39;s no current selection, start from either end of the full list.
+                newIndex = originalIndex = direction &gt; 0 ? carouselItems.Count - 1 : 0;
+            }
+            else
+            {
+                newIndex = originalIndex = currentKeyboardSelection.Index.Value;
+
+                // As a second special case, if we&#39;re set selecting backwards and the current selection isn&#39;t a set,
+                // make sure to go back to the set header this item belongs to, so that the block below doesn&#39;t find it and stop too early.
+                if (direction &lt; 0)
+                {
+                    while (newIndex &gt; 0 &amp;&amp; !predicate(carouselItems[newIndex]))
+                        newIndex--;
+                }
+            }
+
+            // Iterate over every item back to the current selection, finding the first valid item.
+            // The fail condition is when we reach the selection after a cyclic loop over every item.
+            do
+            {
+                newIndex = (newIndex + direction + carouselItems.Count) % carouselItems.Count;
+
+                if (newIndex == originalIndex)
+                    break;
+
+                var newItem = carouselItems[newIndex];
+
+                if (!newItem.IsExpanded &amp;&amp; predicate(newItem))
+                {
+                    Activate(newItem);
+                    return;
+                }
+            } while (true);
+        }
+
+        #endregion
+
+        #region Scrolling
+
+        /// &lt;summary&gt;
+        /// Scrolling to selection relies on &lt;see cref=&quot;currentKeyboardSelection&quot;/&gt; being fully populated.
+        /// This flag ensures it runs after &lt;see cref=&quot;refreshAfterSelection&quot;/&gt; validates this.
+        /// &lt;/summary&gt;
+        private PendingScrollOperation scrollToSelection = PendingScrollOperation.None;
+
+        private enum PendingScrollOperation
+        {
+            None,
+            Standard,
+            Immediate,
+        }
+
+        #endregion
+
+        #region Audio
+
+        private Sample? sampleKeyboardTraversal;
+
+        private double audioFeedbackLastPlaybackTime;
+
+        private void loadSamples(AudioManager audio)
+        {
+            sampleKeyboardTraversal = audio.Samples.Get(@&quot;SongSelect/select-difficulty&quot;);
+        }
+
+        private void playTraversalSound()
+        {
+            if (Time.Current - audioFeedbackLastPlaybackTime &gt;= OsuGameBase.SAMPLE_DEBOUNCE_TIME)
+            {
+                sampleKeyboardTraversal?.Play();
+                audioFeedbackLastPlaybackTime = Time.Current;
+            }
+        }
+
+        #endregion
+
+        #region Selection handling
+
+        /// &lt;summary&gt;
+        /// The currently selected &lt;see cref=&quot;CarouselItem&quot;/&gt;, if any is selected.
+        /// &lt;/summary&gt;
+        protected CarouselItem? CurrentSelectionItem =&gt; currentSelection.CarouselItem;
+
+        /// &lt;summary&gt;
+        /// The index in &lt;see cref=&quot;GetCarouselItems&quot;/&gt; of the current selection, if available.
+        /// &lt;/summary&gt;
+        protected int? CurrentSelectionIndex =&gt; currentSelection.Index;
+
+        /// &lt;summary&gt;
+        /// Becomes invalid when the current selection has changed and needs to be updated visually.
+        /// &lt;/summary&gt;
+        private readonly Cached selectionValid = new Cached();
+
+        private Selection currentKeyboardSelection = new Selection();
+        private Selection currentSelection = new Selection();
+
+        private void setKeyboardSelection(object? model)
+        {
+            currentKeyboardSelection = new Selection(model);
+            selectionValid.Invalidate();
+        }
+
+        /// &lt;summary&gt;
+        /// Call after a selection of items change to re-attach &lt;see cref=&quot;CarouselItem&quot;/&gt;s to current &lt;see cref=&quot;Selection&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        private void refreshAfterSelection()
+        {
+            float yPos = visibleHalfHeight;
+
+            // Invalidate display range as panel positions and visible status may have changed.
+            // Position transfer won&#39;t happen unless we invalidate this.
+            displayedRange = null;
+
+            Selection prevKeyboard = currentKeyboardSelection;
+
+            // Importantly, we also reset the `Selection` to the most basic state.
+            // Removing the index and carousel item here is important to ensure we are aware of if a selection has been filtered away.
+            // If it hasn&#39;t been filtered, the full details will be re-populated just below in the loop.
+            currentKeyboardSelection = new Selection(currentKeyboardSelection.Model);
+            currentSelection = new Selection(currentSelection.Model);
+
+            if (carouselItems == null)
+                return;
+
+            CarouselItem? lastVisible = null;
+            int count = carouselItems.Count;
+
+            // We are performing two important operations here:
+            // - Update all Y positions. After a selection occurs, panels may have changed visibility state and therefore Y positions.
+            // - Link selected models to CarouselItems. If a selection changed, this is where we find the relevant CarouselItems for further use.
+            FindCarouselItemsForSelection(ref currentKeyboardSelection, ref currentSelection, carouselItems);
+
+            for (int i = 0; i &lt; count; i++)
+            {
+                var item = carouselItems[i];
+                updateItemYPosition(item, ref lastVisible, ref yPos);
+            }
+
+            if (currentKeyboardSelection.CarouselItem is CarouselItem currentKeyboardSelectionItem)
+                currentKeyboardSelection = currentKeyboardSelection with { YPosition = currentKeyboardSelectionItem.CarouselYPosition + currentKeyboardSelectionItem.DrawHeight / 2 };
+
+            if (currentSelection.CarouselItem is CarouselItem currentSelectionItem)
+                currentSelection = currentSelection with { YPosition = currentSelectionItem.CarouselYPosition + currentSelectionItem.DrawHeight / 2 };
+
+            // Update the total height of all items (to make the scroll container scrollable through the full height even though
+            // most items are not displayed / loaded).
+            Scroll.SetLayoutHeight(yPos + visibleHalfHeight);
+
+            // If a keyboard selection is currently made, we want to keep the view stable around the selection.
+            // That means that we should offset the immediate scroll position by any change in Y position for the selection.
+            if (prevKeyboard.YPosition != null &amp;&amp; currentKeyboardSelection.YPosition != null &amp;&amp; currentKeyboardSelection.YPosition != prevKeyboard.YPosition)
+                Scroll.OffsetScrollPosition((float)(currentKeyboardSelection.YPosition!.Value - prevKeyboard.YPosition.Value));
+        }
+
+        protected virtual void FindCarouselItemsForSelection(ref Selection keyboardSelection, ref Selection selection, IList&lt;CarouselItem&gt; items)
+        {
+            for (int i = 0; i &lt; items.Count; i++)
+            {
+                var item = items[i];
+
+                bool isKeyboardSelection = CheckModelEquality(item.Model, keyboardSelection.Model!);
+                bool isSelection = CheckModelEquality(item.Model, selection.Model!);
+
+                // while we don&#39;t know the Y position of the item yet, as it&#39;s about to be updated,
+                // consumers (specifically `BeatmapCarousel.GetSpacingBetweenPanels()`) benefit from `CurrentSelectionItem` already pointing
+                // at the correct item to avoid redundant local equality checks.
+                // the Y positions will be filled in after they&#39;re computed.
+                if (isKeyboardSelection)
+                    keyboardSelection = new Selection(keyboardSelection.Model, item, null, i);
+
+                if (isSelection)
+                    selection = new Selection(selection.Model, item, null, i);
+            }
+        }
+
+        #endregion
+
+        #region Display handling
+
+        private DisplayRange? displayedRange;
+
+        private readonly CarouselItem carouselBoundsItem = new CarouselItem(new object());
+
+        /// &lt;summary&gt;
+        /// The position of the lower visible bound with respect to the current scroll position.
+        /// &lt;/summary&gt;
+        private float visibleBottomBound;
+
+        /// &lt;summary&gt;
+        /// The position of the upper visible bound with respect to the current scroll position.
+        /// &lt;/summary&gt;
+        private float visibleUpperBound;
+
+        /// &lt;summary&gt;
+        /// Half the height of the visible content.
+        /// &lt;/summary&gt;
+        private float visibleHalfHeight;
+
+        /// &lt;summary&gt;
+        /// Whether existing panels can be re-used in the next filter.
+        /// &lt;/summary&gt;
+        private readonly Cached filterReusesPanels = new Cached();
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (carouselItems == null)
+                return;
+
+            visibleBottomBound = (float)(Scroll.Current + DrawHeight + BleedBottom);
+            visibleUpperBound = (float)(Scroll.Current - BleedTop);
+            visibleHalfHeight = (DrawHeight + BleedBottom + BleedTop) / 2;
+
+            if (!selectionValid.IsValid)
+            {
+                refreshAfterSelection();
+
+                // Always scroll to selection in this case (regardless of `UserScrolling` state), centering the selection.
+                ScrollToSelection();
+
+                selectionValid.Validate();
+            }
+
+            var range = getDisplayRange();
+
+            if (range != displayedRange)
+            {
+                displayedRange = range;
+                updateDisplayedRange(range);
+            }
+
+            double selectedYPos = currentSelection.CarouselItem?.CarouselYPosition ?? 0;
+
+            foreach (var panel in Scroll.Panels)
+            {
+                var c = (ICarouselPanel)panel;
+
+                // panel in the process of expiring, ignore it.
+                if (c.Item == null)
+                    continue;
+
+                float normalisedDepth = (float)(Math.Abs(selectedYPos - c.Item.CarouselYPosition) / DrawHeight);
+                Scroll.Panels.ChangeChildDepth(panel, c.Item.DepthLayer + normalisedDepth);
+
+                if (c.DrawYPosition != c.Item.CarouselYPosition)
+                    c.DrawYPosition = Interpolation.DampContinuously(c.DrawYPosition, c.Item.CarouselYPosition, 50, Time.Elapsed);
+
+                panel.X = GetPanelXOffset(panel);
+
+                c.Selected.Value = currentSelection?.CarouselItem != null &amp;&amp; CheckModelEquality(c.Item, currentSelection.CarouselItem);
+                c.KeyboardSelected.Value = c.Item == currentKeyboardSelection?.CarouselItem;
+                c.Expanded.Value = c.Item.IsExpanded;
+            }
+
+            if (!filterAfterItemsChanged.IsValid &amp;&amp; !IsFiltering)
+                FilterAsync();
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (scrollToSelection != PendingScrollOperation.None)
+            {
+                if (GetScrollTarget() is double scrollTarget)
+                    Scroll.ScrollTo(scrollTarget - visibleHalfHeight + BleedTop, animated: scrollToSelection == PendingScrollOperation.Standard);
+
+                scrollToSelection = PendingScrollOperation.None;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the Y position to scroll to in order to show the most relevant carousel item(s).
+        /// &lt;/summary&gt;
+        protected virtual double? GetScrollTarget() =&gt; currentKeyboardSelection.YPosition;
+
+        protected virtual float GetPanelXOffset(Drawable panel)
+        {
+            Vector2 posInScroll = Scroll.ToLocalSpace(panel.ScreenSpaceDrawQuad.Centre);
+            float dist = Math.Abs(1f - (posInScroll.Y + BleedTop) / visibleHalfHeight);
+
+            return offsetX(dist, visibleHalfHeight);
+        }
+
+        /// &lt;summary&gt;
+        /// Computes the x-offset of currently visible items. Makes the carousel appear round.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;dist&quot;&gt;
+        /// Vertical distance from the center of the carousel container
+        /// ranging from -1 to 1.
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;halfHeight&quot;&gt;Half the height of the carousel container.&lt;/param&gt;
+        private static float offsetX(float dist, float halfHeight)
+        {
+            // The radius of the circle the carousel moves on.
+            const float circle_radius = 3;
+            float discriminant = MathF.Max(0, circle_radius * circle_radius - dist * dist);
+            return (circle_radius - MathF.Sqrt(discriminant)) * halfHeight;
+        }
+
+        private DisplayRange getDisplayRange()
+        {
+            Debug.Assert(carouselItems != null);
+
+            if (carouselItems.Count == 0)
+                return DisplayRange.EMPTY;
+
+            // Find index range of all items that should be on-screen
+            carouselBoundsItem.CarouselYPosition = visibleUpperBound - DistanceOffscreenToPreload;
+            int firstIndex = carouselItems.BinarySearch(carouselBoundsItem);
+            if (firstIndex &lt; 0) firstIndex = ~firstIndex;
+
+            carouselBoundsItem.CarouselYPosition = visibleBottomBound + DistanceOffscreenToPreload;
+            int lastIndex = carouselItems.BinarySearch(carouselBoundsItem);
+            if (lastIndex &lt; 0) lastIndex = ~lastIndex;
+
+            firstIndex = Math.Max(0, firstIndex - 1);
+            lastIndex = Math.Max(0, lastIndex - 1);
+
+            return new DisplayRange(firstIndex, lastIndex);
+        }
+
+        private void updateDisplayedRange(DisplayRange range)
+        {
+            Debug.Assert(carouselItems != null);
+
+            List&lt;CarouselItem&gt; toDisplay = range == DisplayRange.EMPTY
+                ? new List&lt;CarouselItem&gt;()
+                : carouselItems.GetRange(range.First, range.Last - range.First + 1);
+
+            toDisplay.RemoveAll(i =&gt; !i.IsVisible);
+
+            // Iterate over all panels which are already displayed and figure which need to be displayed / removed.
+            foreach (var panel in Scroll.Panels)
+            {
+                var carouselPanel = (ICarouselPanel)panel;
+
+                if (carouselPanel.Item == null)
+                {
+                    // Item is null when a panel is already fading away from existence; should be ignored for tracking purposes.
+                    continue;
+                }
+
+                var existing = toDisplay.FirstOrDefault(i =&gt; CheckModelEquality(i.Model, carouselPanel.Item!.Model));
+
+                if (existing != null)
+                {
+                    carouselPanel.Item = existing;
+                    toDisplay.Remove(existing);
+                    continue;
+                }
+
+                // If the new display range doesn&#39;t contain the panel, it&#39;s no longer required for display.
+                expirePanel(panel);
+            }
+
+            // Add any new items which need to be displayed and haven&#39;t yet.
+            foreach (var item in toDisplay)
+            {
+                var drawable = GetDrawableForDisplay(item);
+
+                if (drawable is not ICarouselPanel carouselPanel)
+                    throw new InvalidOperationException($&quot;Carousel panel drawables must implement {typeof(ICarouselPanel)}&quot;);
+
+                carouselPanel.Item = item;
+                carouselPanel.DrawYPosition = item.CarouselYPosition;
+
+                Scroll.Add(drawable);
+            }
+
+            if (toDisplay.Any())
+            {
+                // To make transitions of items appearing in the flow look good, do a pass and make sure newly added items spawn from
+                // just beneath the *current interpolated position* of the previous panel.
+                var orderedPanels = Scroll.Panels
+                                          .Where(p =&gt; Scroll.ScreenSpaceDrawQuad.Intersects(p.ScreenSpaceDrawQuad))
+                                          .OfType&lt;ICarouselPanel&gt;()
+                                          .Where(p =&gt; p.Item != null)
+                                          .OrderBy(p =&gt; p.Item!.CarouselYPosition)
+                                          .ToList();
+
+                for (int i = 0; i &lt; orderedPanels.Count; i++)
+                {
+                    var panel = orderedPanels[i];
+
+                    if (toDisplay.Contains(panel.Item!))
+                    {
+                        // Don&#39;t apply to the last because animating the tail of the list looks bad.
+                        // It&#39;s usually off-screen anyway.
+                        if (i &gt; 0 &amp;&amp; i &lt; orderedPanels.Count - 1)
+                            panel.DrawYPosition = orderedPanels[i - 1].DrawYPosition;
+                    }
+                }
+            }
+        }
+
+        private void expirePanel(Drawable panel)
+        {
+            var carouselPanel = (ICarouselPanel)panel;
+
+            // expired panels should have a depth behind all other panels to make the transition not look weird.
+            Scroll.Panels.ChangeChildDepth(panel, panel.Depth + 1024);
+
+            panel.FadeOut(150, Easing.OutQuint);
+            panel.MoveToX(panel.X + 100, 200, Easing.Out);
+
+            panel.Expire();
+
+            carouselPanel.Item = null;
+            carouselPanel.Selected.Value = false;
+            carouselPanel.KeyboardSelected.Value = false;
+            carouselPanel.Expanded.Value = false;
+        }
+
+        protected override bool OnInvalidate(Invalidation invalidation, InvalidationSource source)
+        {
+            // handles the vertical size of the carousel changing (ie. on window resize when aspect ratio has changed).
+            if (invalidation.HasFlag(Invalidation.DrawSize))
+                selectionValid.Invalidate();
+
+            return base.OnInvalidate(invalidation, source);
+        }
+
+        #endregion
+
+        #region Internal helper classes
+
+        /// &lt;summary&gt;
+        /// Bookkeeping for a current selection.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;Model&quot;&gt;The selected model. If &lt;c&gt;null&lt;/c&gt;, there&#39;s no selection.&lt;/param&gt;
+        /// &lt;param name=&quot;CarouselItem&quot;&gt;A related carousel item representation for the model. May be null if selection is not present as an item, or if &lt;see cref=&quot;Carousel{T}.refreshAfterSelection&quot;/&gt; has not been run yet.&lt;/param&gt;
+        /// &lt;param name=&quot;YPosition&quot;&gt;The Y position of the selection as of the last run of &lt;see cref=&quot;Carousel{T}.refreshAfterSelection&quot;/&gt;. May be null if selection is not present as an item, or if &lt;see cref=&quot;Carousel{T}.refreshAfterSelection&quot;/&gt; has not been run yet.&lt;/param&gt;
+        /// &lt;param name=&quot;Index&quot;&gt;The index of the selection as of the last run of &lt;see cref=&quot;Carousel{T}.refreshAfterSelection&quot;/&gt;. May be null if selection is not present as an item, or if &lt;see cref=&quot;Carousel{T}.refreshAfterSelection&quot;/&gt; has not been run yet.&lt;/param&gt;
+        protected record Selection(object? Model = null, CarouselItem? CarouselItem = null, double? YPosition = null, int? Index = null);
+
+        private record DisplayRange(int First, int Last)
+        {
+            public static readonly DisplayRange EMPTY = new DisplayRange(-1, -1);
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[46,71,46,83,0],[46,84,46,89,0],[51,33,51,37,0],[51,38,51,42,0],[56,36,56,40,0],[56,41,56,45,0],[62,51,62,55,0],[62,56,62,60,0],[68,36,68,40,0],[68,41,68,45,0],[73,36,73,59,0],[78,42,78,66,0],[83,34,83,38,0],[83,39,83,51,0],[88,36,88,47,0],[93,40,93,65,0],[98,36,98,55,0],[112,20,112,42,0],[114,13,114,14,0],[115,17,115,72,0],[116,17,116,18,0],[117,21,117,47,0],[119,21,119,56,0],[120,25,120,70,0],[122,21,122,61,0],[123,21,123,65,0],[124,21,124,49,0],[125,17,125,18,0],[135,17,135,80,0],[136,17,136,18,0],[137,21,137,65,0],[138,21,138,49,0],[139,17,139,18,0],[140,13,140,14,0],[148,9,148,10,0],[152,13,152,46,0],[154,13,154,83,0],[155,13,155,39,0],[157,13,157,41,0],[158,9,158,10,0],[168,9,168,10,0],[170,13,170,71,0],[171,17,171,24,0],[173,13,173,112,0],[174,9,174,10,0],[179,99,179,101,0],[196,55,196,59,0],[196,60,196,65,0],[196,70,196,105,0],[205,9,205,74,0],[212,9,212,10,0],[213,13,213,27,0],[215,13,215,37,0],[216,17,216,49,0],[218,13,218,48,0],[220,13,220,42,0],[221,13,221,40,0],[222,13,222,31,0],[223,9,223,10,0],[229,93,229,97,0],[235,9,235,10,0],[236,9,236,10,0],[241,76,241,97,0],[262,13,262,48,0],[262,48,262,80,0],[262,80,262,81,0],[269,82,269,87,0],[276,80,276,84,0],[282,88,282,93,0],[288,66,288,67,0],[288,68,288,69,0],[294,68,294,69,0],[294,70,294,71,0],[306,71,306,72,0],[306,73,306,74,0],[314,9,314,29,0],[315,9,315,10,0],[316,13,320,34,0],[320,34,320,116,0],[320,116,321,36,0],[321,36,321,117,0],[321,117,322,37,0],[322,37,322,119,0],[322,119,323,35,0],[323,35,323,116,0],[323,116,324,15,0],[326,13,327,13,0],[327,13,327,14,0],[327,14,328,17,0],[328,17,328,46,0],[328,46,329,21,0],[329,21,329,58,0],[329,58,330,13,0],[330,13,330,14,0],[330,14,330,16,0],[331,9,331,10,0],[335,9,335,10,0],[336,13,336,32,0],[337,9,337,10,0],[346,59,346,72,0],[350,9,350,112,0],[351,9,351,92,0],[357,9,357,72,0],[360,9,360,10,0],[361,13,361,56,0],[362,13,362,53,0],[364,13,364,96,0],[365,13,365,81,0],[367,13,367,35,0],[368,13,368,14,0],[369,17,369,90,0],[370,17,370,81,0],[371,13,371,14,0],[375,13,375,55,0],[376,13,376,81,0],[376,81,376,100,0],[376,100,376,103,0],[378,13,379,13,0],[379,13,379,14,0],[379,14,381,17,0],[381,17,381,18,0],[381,18,382,21,0],[382,21,382,28,0],[382,28,382,30,0],[382,30,382,40,0],[382,40,382,41,0],[382,41,382,43,0],[382,43,382,44,0],[382,44,382,51,0],[382,51,383,21,0],[383,21,383,22,0],[383,22,384,25,0],[384,25,384,78,0],[384,78,385,25,0],[385,25,385,90,0],[385,90,386,21,0],[386,21,386,22,0],[386,22,388,21,0],[388,21,388,49,0],[388,49,389,21,0],[389,21,389,64,0],[389,64,390,17,0],[390,17,390,18,0],[390,18,391,17,0],[391,17,391,51,0],[391,51,392,17,0],[392,17,392,18,0],[392,18,393,21,0],[393,21,393,68,0],[393,68,394,17,0],[394,17,394,18,0],[394,18,395,13,0],[395,13,395,14,0],[395,14,395,49,0],[397,13,397,51,0],[398,17,398,57,0],[400,13,401,13,0],[401,13,401,14,0],[401,14,402,17,0],[402,17,402,48,0],[402,48,403,17,0],[403,17,403,39,0],[403,39,404,17,0],[404,17,404,39,0],[404,39,406,17,0],[406,17,406,49,0],[406,49,407,17,0],[407,17,407,18,0],[407,18,408,21,0],[408,21,408,28,0],[408,28,408,30,0],[408,30,408,39,0],[408,39,408,40,0],[408,40,408,42,0],[408,42,408,43,0],[408,43,408,56,0],[408,56,409,25,0],[409,25,409,44,0],[409,44,411,21,0],[411,21,411,51,0],[411,51,412,17,0],[412,17,412,18,0],[412,18,414,17,0],[414,17,414,41,0],[414,41,416,17,0],[416,17,416,41,0],[416,41,417,17,0],[417,17,417,43,0],[417,43,418,21,0],[418,21,418,56,0],[418,56,420,17,0],[420,17,420,58,0],[420,58,421,13,0],[421,13,421,14,0],[421,14,421,16,0],[423,13,423,26,0],[425,38,425,139,0],[426,9,426,10,0],[429,9,429,10,0],[430,13,430,50,0],[432,13,432,20,0],[432,22,432,30,0],[432,31,432,33,0],[432,34,432,47,0],[433,17,433,76,0],[434,9,434,10,0],[437,9,437,10,0],[438,13,438,125,0],[440,13,440,31,0],[441,13,441,45,0],[445,13,445,29,0],[446,13,446,14,0],[447,17,447,63,0],[448,17,448,95,0],[449,13,449,14,0],[451,13,451,32,0],[452,13,452,14,0],[453,17,453,43,0],[454,17,454,40,0],[455,13,455,14,0],[456,9,456,10,0],[463,9,463,10,0],[464,13,464,27,0],[470,21,470,48,0],[473,13,473,38,0],[474,9,474,10,0],[477,9,477,10,0],[478,13,478,30,0],[481,21,481,48,0],[490,21,490,108,0],[491,21,491,33,0],[494,21,494,107,0],[495,21,495,33,0],[498,21,498,103,0],[499,21,499,33,0],[502,21,502,102,0],[503,21,503,33,0],[506,21,506,105,0],[507,21,507,33,0],[510,21,510,104,0],[511,21,511,33,0],[514,21,514,75,0],[515,25,515,37,0],[517,21,517,113,0],[518,25,518,37,0],[520,21,520,92,0],[521,21,521,22,0],[523,25,523,73,0],[524,21,524,22,0],[526,21,526,22,0],[528,30,528,74,0],[528,76,528,82,0],[528,84,528,87,0],[529,25,529,26,0],[530,29,530,60,0],[532,29,532,70,0],[533,29,533,30,0],[534,33,534,51,0],[535,33,535,45,0],[537,25,537,26,0],[538,21,538,22,0],[540,21,540,33,0],[543,13,543,26,0],[544,9,544,10,0],[547,9,547,10,0],[548,13,548,36,0],[551,21,551,68,0],[552,21,552,27,0],[555,21,555,63,0],[556,21,556,27,0],[559,21,559,63,0],[560,21,560,27,0],[563,21,563,63,0],[564,21,564,27,0],[567,21,567,65,0],[568,21,568,27,0],[571,21,571,61,0],[573,9,573,10,0],[587,9,587,10,0],[588,9,588,10,0],[591,9,591,10,0],[592,13,592,63,0],[593,13,593,14,0],[594,17,594,65,0],[595,17,595,29,0],[598,13,598,26,0],[599,9,599,10,0],[602,9,602,10,0],[603,13,603,67,0],[603,68,603,75,0],[607,13,607,56,0],[608,17,608,70,0],[609,18,609,36,0],[610,17,610,57,0],[612,17,612,35,0],[614,13,614,42,0],[619,13,619,14,0],[620,17,620,95,0],[621,17,621,55,0],[623,17,623,39,0],[624,17,624,18,0],[625,21,625,130,0],[626,25,626,43,0],[628,21,628,22,0],[629,25,629,46,0],[630,25,630,61,0],[631,21,631,22,0],[633,21,633,28,0],[635,13,635,14,0],[635,15,635,49,0],[636,9,636,10,0],[643,9,643,10,0],[644,13,644,67,0],[645,17,645,24,0],[647,13,647,110,0],[651,13,651,75,0],[652,13,652,34,0],[653,13,653,32,0],[655,13,655,54,0],[656,13,656,14,0],[657,17,657,32,0],[659,17,659,55,0],[660,21,660,27,0],[662,17,662,45,0],[664,17,664,37,0],[665,21,665,30,0],[667,17,667,32,0],[669,17,669,56,0],[670,17,670,18,0],[671,21,671,54,0],[672,21,672,41,0],[673,21,673,42,0],[674,21,674,28,0],[676,13,676,14,0],[679,13,680,52,0],[680,52,680,63,0],[680,63,681,53,0],[681,53,681,64,0],[681,64,681,66,0],[683,13,683,105,0],[684,13,684,14,0],[685,17,685,54,0],[686,17,686,37,0],[687,17,687,38,0],[688,13,688,14,0],[689,9,689,10,0],[696,9,696,10,0],[697,13,697,67,0],[698,17,698,24,0],[700,13,701,52,0],[701,52,701,63,0],[701,63,702,53,0],[702,53,702,64,0],[702,64,702,66,0],[704,13,704,97,0],[705,13,705,14,0],[706,17,706,50,0],[707,17,707,37,0],[708,17,708,38,0],[709,13,709,14,0],[710,9,710,10,0],[718,63,718,120,0],[727,9,727,10,0],[732,13,732,137,0],[733,13,733,14,0],[734,17,734,65,0],[735,17,735,24,0],[738,13,738,69,0],[739,9,739,10,0],[742,9,742,10,0],[743,13,743,67,0],[743,68,743,75,0],[748,13,748,56,0],[749,13,749,14,0],[751,17,751,88,0],[752,13,752,14,0],[754,13,754,14,0],[755,17,755,81,0],[759,17,759,35,0],[760,17,760,18,0],[761,21,761,80,0],[762,25,762,36,0],[763,17,763,18,0],[764,13,764,14,0],[769,13,769,14,0],[770,17,770,95,0],[772,17,772,47,0],[773,21,773,27,0],[775,17,775,55,0],[777,17,777,63,0],[778,17,778,18,0],[779,21,779,39,0],[780,21,780,28,0],[782,13,782,14,0],[782,15,782,28,0],[783,9,783,10,0],[793,9,793,88,0],[811,9,811,10,0],[812,13,812,90,0],[813,9,813,10,0],[816,9,816,10,0],[817,13,817,98,0],[818,13,818,14,0],[819,17,819,49,0],[820,17,820,62,0],[821,13,821,14,0],[822,9,822,10,0],[831,57,831,86,0],[836,49,836,71,0],[841,9,841,63,0],[843,9,843,70,0],[844,9,844,62,0],[847,9,847,10,0],[848,13,848,61,0],[849,13,849,41,0],[850,9,850,10,0],[856,9,856,10,0],[857,13,857,44,0],[861,13,861,35,0],[863,13,863,63,0],[868,13,868,86,0],[869,13,869,70,0],[871,13,871,39,0],[872,17,872,24,0],[874,13,874,46,0],[875,13,875,45,0],[880,13,880,110,0],[882,18,882,27,0],[882,29,882,38,0],[882,40,882,43,0],[883,13,883,14,0],[884,17,884,45,0],[885,17,885,70,0],[886,13,886,14,0],[888,13,888,100,0],[889,17,889,183,0],[891,13,891,84,0],[892,17,892,151,0],[896,13,896,62,0],[900,13,900,158,0],[901,17,901,128,0],[902,9,902,10,0],[905,9,905,10,0],[906,18,906,27,0],[906,29,906,44,0],[906,46,906,49,0],[907,13,907,14,0],[908,17,908,37,0],[910,17,910,101,0],[911,17,911,85,0],[917,17,917,41,0],[918,21,918,95,0],[920,17,920,33,0],[921,21,921,79,0],[922,13,922,14,0],[923,9,923,10,0],[931,9,931,91,0],[951,9,951,67,0],[954,9,954,10,0],[955,13,955,27,0],[957,13,957,39,0],[958,17,958,24,0],[960,13,960,85,0],[961,13,961,68,0],[962,13,962,75,0],[964,13,964,41,0],[965,13,965,14,0],[966,17,966,41,0],[969,17,969,37,0],[971,17,971,43,0],[972,13,972,14,0],[974,13,974,43,0],[976,13,976,41,0],[977,13,977,14,0],[978,17,978,40,0],[979,17,979,45,0],[980,13,980,14,0],[982,13,982,89,0],[984,13,984,20,0],[984,22,984,31,0],[984,32,984,34,0],[984,35,984,48,0],[985,13,985,14,0],[986,17,986,47,0],[989,17,989,36,0],[990,21,990,30,0],[992,17,992,113,0],[993,17,993,92,0],[995,17,995,65,0],[996,21,996,131,0],[998,17,998,50,0],[1000,17,1000,136,0],[1001,17,1001,93,0],[1002,17,1002,54,0],[1003,13,1003,14,0],[1005,13,1005,66,0],[1006,17,1006,31,0],[1007,9,1007,10,0],[1010,9,1010,10,0],[1011,13,1011,40,0],[1013,13,1013,66,0],[1014,13,1014,14,0],[1015,17,1015,62,0],[1016,21,1016,146,0],[1018,17,1018,65,0],[1019,13,1019,14,0],[1020,9,1020,10,0],[1025,56,1025,90,0],[1028,9,1028,10,0],[1029,13,1029,89,0],[1030,13,1030,88,0],[1032,13,1032,53,0],[1033,9,1033,10,0],[1044,9,1044,10,0],[1047,13,1047,92,0],[1048,13,1048,76,0],[1049,9,1049,10,0],[1052,9,1052,10,0],[1053,13,1053,49,0],[1055,13,1055,42,0],[1056,17,1056,43,0],[1059,13,1059,99,0],[1060,13,1060,77,0],[1061,13,1061,32,0],[1061,33,1061,58,0],[1063,13,1063,100,0],[1064,13,1064,76,0],[1065,13,1065,31,0],[1065,32,1065,55,0],[1067,13,1067,54,0],[1068,13,1068,52,0],[1070,13,1070,60,0],[1071,9,1071,10,0],[1074,9,1074,10,0],[1075,13,1075,49,0],[1077,13,1079,85,0],[1081,13,1081,38,0],[1081,38,1081,50,0],[1081,50,1081,52,0],[1084,13,1084,20,0],[1084,22,1084,31,0],[1084,32,1084,34,0],[1084,35,1084,48,0],[1085,13,1085,14,0],[1086,17,1086,59,0],[1088,17,1088,48,0],[1089,17,1089,18,0],[1091,21,1091,30,0],[1094,17,1094,62,0],[1094,62,1094,116,0],[1094,116,1094,118,0],[1096,17,1096,38,0],[1097,17,1097,18,0],[1098,21,1098,51,0],[1099,21,1099,48,0],[1100,21,1100,30,0],[1104,17,1104,36,0],[1105,13,1105,14,0],[1108,13,1108,20,0],[1108,22,1108,30,0],[1108,31,1108,33,0],[1108,34,1108,43,0],[1109,13,1109,14,0],[1110,17,1110,60,0],[1112,17,1112,66,0],[1113,21,1113,126,0],[1115,17,1115,43,0],[1116,17,1116,70,0],[1118,17,1118,38,0],[1119,13,1119,14,0],[1121,13,1121,33,0],[1122,13,1122,14,0],[1125,17,1126,55,0],[1126,55,1126,115,0],[1126,115,1128,55,0],[1128,55,1128,69,0],[1128,69,1129,57,0],[1129,57,1129,82,0],[1129,82,1130,53,0],[1132,22,1132,31,0],[1132,33,1132,56,0],[1132,58,1132,61,0],[1133,17,1133,18,0],[1134,21,1134,50,0],[1136,21,1136,57,0],[1137,21,1137,22,0],[1140,25,1140,66,0],[1141,29,1141,86,0],[1142,21,1142,22,0],[1143,17,1143,18,0],[1144,13,1144,14,0],[1145,9,1145,10,0],[1148,9,1148,10,0],[1149,13,1149,55,0],[1152,13,1152,71,0],[1154,13,1154,49,0],[1155,13,1155,59,0],[1157,13,1157,28,0],[1159,13,1159,39,0],[1160,13,1160,50,0],[1161,13,1161,58,0],[1162,13,1162,50,0],[1163,9,1163,10,0],[1166,9,1166,10,0],[1168,13,1168,61,0],[1169,17,1169,45,0],[1171,13,1171,60,0],[1172,9,1172,10,0],[1189,13,1189,82,0]]);
+    </script>
+  </body>
+</html>

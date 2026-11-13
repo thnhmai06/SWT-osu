@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/MultiplayerPositionDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Play.Leaderboards;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer
+{
+    public partial class MultiplayerPositionDisplay : VisibilityContainer
+    {
+        private readonly IBindable&lt;APIUser&gt; user = new Bindable&lt;APIUser&gt;();
+        private readonly IBindableList&lt;GameplayLeaderboardScore&gt; scores = new BindableList&lt;GameplayLeaderboardScore&gt;();
+        private readonly BindableBool showLeaderboard = new BindableBool();
+        private readonly IBindable&lt;LocalUserPlayingState&gt; localUserPlayingState = new Bindable&lt;LocalUserPlayingState&gt;();
+
+        private readonly Bindable&lt;int?&gt; position = new Bindable&lt;int?&gt;();
+
+        private RollingCounter&lt;int&gt; positionText = null!;
+
+        private Drawable localPlayerMarker = null!;
+
+        private const float marker_size = 5;
+        private const float width = 90;
+
+        private const float min_alpha = 0.2f;
+        private const float max_alpha = 0.4f;
+
+        private GameplayLeaderboardScore? userScore;
+
+        protected override bool StartHidden =&gt; true;
+
+        [BackgroundDependencyLoader]
+        private void load(IGameplayLeaderboardProvider leaderboardProvider, IAPIProvider api, OsuConfigManager configManager, GameplayState gameplayState, OsuColour colours)
+        {
+            scores.BindTo(leaderboardProvider.Scores);
+            user.BindTo(api.LocalUser);
+            configManager.BindWith(OsuSetting.GameplayLeaderboard, showLeaderboard);
+            localUserPlayingState.BindTo(gameplayState.PlayingState);
+
+            AutoSizeAxes = Axes.Y;
+            Width = width;
+
+            InternalChildren = new Drawable[]
+            {
+                positionText = new PositionCounter
+                {
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    Alpha = 0,
+                    Padding = new MarginPadding { Right = -5 },
+                },
+                new Container
+                {
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    RelativeSizeAxes = Axes.X,
+                    Height = marker_size - 2,
+                    Children = new[]
+                    {
+                        new Circle
+                        {
+                            Colour = ColourInfo.GradientHorizontal(
+                                Color4.White.Opacity(max_alpha),
+                                Color4.White.Opacity(min_alpha)
+                            ),
+                            RelativeSizeAxes = Axes.Both,
+                            Masking = true,
+                        },
+                        localPlayerMarker = new Circle
+                        {
+                            Anchor = Anchor.CentreLeft,
+                            Origin = Anchor.Centre,
+                            Colour = colours.Blue1,
+                            Size = new Vector2(marker_size),
+                            Blending = BlendingParameters.Additive,
+                            Alpha = 0.4f,
+                        },
+                    }
+                },
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            user.BindValueChanged(_ =&gt; updateScoreBindings());
+            scores.BindCollectionChanged((_, __) =&gt; updateScoreBindings(), true);
+
+            showLeaderboard.BindValueChanged(_ =&gt; updateVisibility());
+            localUserPlayingState.BindValueChanged(_ =&gt; updateVisibility(), true);
+
+            State.BindValueChanged(_ =&gt; updatePosition());
+            position.BindValueChanged(_ =&gt; updatePosition(), true);
+        }
+
+        protected override void PopIn()
+        {
+            this.FadeIn(500, Easing.OutQuint);
+            localPlayerMarker.ScaleTo(Vector2.One, 500, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            this.FadeOut(500, Easing.OutQuint);
+            localPlayerMarker.ScaleTo(new Vector2(0.8f), 500, Easing.Out);
+        }
+
+        private void updateVisibility()
+        {
+            bool shouldDisplay = userScore != null &amp;&amp; (showLeaderboard.Value || localUserPlayingState.Value == LocalUserPlayingState.Break);
+
+            State.Value = shouldDisplay ? Visibility.Visible : Visibility.Hidden;
+        }
+
+        private void updateScoreBindings()
+        {
+            position.UnbindBindings();
+
+            userScore = scores.SingleOrDefault(s =&gt; s.User.Equals(user.Value));
+            if (userScore != null)
+                position.BindTo(userScore.Position);
+            else
+                position.Value = null;
+
+            updateVisibility();
+            updatePosition();
+        }
+
+        private void updatePosition()
+        {
+            // only update when visible to delay animations.
+            if (State.Value != Visibility.Visible) return;
+
+            if (position.Value == null)
+            {
+                positionText.Alpha = min_alpha;
+                positionText.Current.Value = -1;
+                localPlayerMarker.FadeOut();
+                return;
+            }
+
+            float relativePosition = Math.Clamp((float)(position.Value.Value - 1) / Math.Max(scores.Count - 1, 1), 0, 1);
+
+            positionText.Current.Value = position.Value.Value;
+            positionText.FadeTo(min_alpha + (max_alpha - min_alpha) * (1 - relativePosition), 1000, Easing.OutPow10);
+
+            localPlayerMarker.FadeIn();
+            float markerWidth = Math.Max(marker_size, width / scores.Count);
+            localPlayerMarker.ResizeWidthTo(markerWidth, 1000, Easing.OutPow10);
+            localPlayerMarker.MoveToX(markerWidth / 2 + (width - markerWidth) * relativePosition, 1000, Easing.OutPow10);
+        }
+
+        private partial class PositionCounter : RollingCounter&lt;int&gt;
+        {
+            protected override double RollingDuration =&gt; Current.Value &gt; 0 ? 1000 : 0;
+            protected override Easing RollingEasing =&gt; Easing.OutPow10;
+
+            protected override LocalisableString FormatCount(int count)
+            {
+                if (count &lt;= 0)
+                    return &quot;-&quot;;
+
+                return &quot;#&quot; + base.FormatCount(count);
+            }
+
+            protected override OsuSpriteText CreateSpriteText()
+            {
+                return new OsuSpriteText
+                {
+                    Font = OsuFont.Torus.With(size: 60, weight: FontWeight.Light, fixedWidth: true),
+                    Spacing = new Vector2(-8, 0),
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,9,29,76,0],[30,9,30,120,0],[31,9,31,76,0],[32,9,32,121,0],[34,9,34,73,0],[36,9,36,58,0],[38,9,38,52,0],[48,48,48,52,0],[52,9,52,10,0],[53,13,53,55,0],[54,13,54,40,0],[55,13,55,85,0],[56,13,56,70,0],[58,13,58,35,0],[59,13,59,27,0],[61,13,98,15,0],[99,9,99,10,0],[102,9,102,10,0],[103,13,103,33,0],[105,13,105,40,0],[105,40,105,61,0],[105,61,105,63,0],[106,13,106,53,0],[106,53,106,74,0],[106,74,106,82,0],[108,13,108,51,0],[108,51,108,69,0],[108,69,108,71,0],[109,13,109,57,0],[109,57,109,75,0],[109,75,109,83,0],[111,13,111,41,0],[111,41,111,57,0],[111,57,111,59,0],[112,13,112,44,0],[112,44,112,60,0],[112,60,112,68,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,47,0],[118,13,118,74,0],[119,9,119,10,0],[122,9,122,10,0],[123,13,123,48,0],[124,13,124,75,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,141,0],[131,13,131,82,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,39,0],[138,13,138,53,0],[138,53,138,78,0],[138,78,138,80,0],[139,13,139,35,0],[140,17,140,53,0],[142,17,142,39,0],[144,13,144,32,0],[145,13,145,30,0],[146,9,146,10,0],[149,9,149,10,0],[151,13,151,51,0],[151,52,151,59,0],[153,13,153,40,0],[154,13,154,14,0],[155,17,155,48,0],[156,17,156,49,0],[157,17,157,45,0],[158,17,158,24,0],[161,13,161,122,0],[163,13,163,63,0],[164,13,164,118,0],[166,13,166,40,0],[167,13,167,77,0],[168,13,168,81,0],[169,13,169,122,0],[170,9,170,10,0],[174,58,174,86,0],[175,56,175,71,0],[178,13,178,14,0],[179,17,179,32,0],[180,21,180,32,0],[182,17,182,54,0],[183,13,183,14,0],[186,13,186,14,0],[187,17,191,19,0],[192,13,192,14,0]]);
+    </script>
+  </body>
+</html>

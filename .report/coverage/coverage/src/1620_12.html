@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/Statistics/PerformanceBreakdownChart.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Difficulty;
+using osu.Game.Scoring;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Ranking.Statistics
+{
+    public partial class PerformanceBreakdownChart : Container
+    {
+        private readonly ScoreInfo score;
+
+        private Drawable spinner = null!;
+        private Drawable content = null!;
+        private GridContainer chart = null!;
+        private OsuSpriteText achievedPerformance = null!;
+        private OsuSpriteText maximumPerformance = null!;
+
+        private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+
+        [Resolved]
+        private BeatmapDifficultyCache difficultyCache { get; set; } = null!;
+
+        public PerformanceBreakdownChart(ScoreInfo score)
+        {
+            this.score = score;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Children = new[]
+            {
+                spinner = new LoadingSpinner(true)
+                {
+                    Origin = Anchor.Centre,
+                    Anchor = Anchor.Centre
+                },
+                content = new GridContainer
+                {
+                    Alpha = 0,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Origin = Anchor.TopCentre,
+                    Anchor = Anchor.TopCentre,
+                    RowDimensions = new[] { new Dimension(GridSizeMode.AutoSize) },
+                    ColumnDimensions = new[]
+                    {
+                        new Dimension(),
+                        new Dimension(GridSizeMode.Absolute, 50),
+                        new Dimension()
+                    },
+                    Content = new[]
+                    {
+                        new Drawable[]
+                        {
+                            chart = new GridContainer
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                AutoSizeAxes = Axes.Y,
+                                Origin = Anchor.Centre,
+                                Anchor = Anchor.Centre,
+                                ColumnDimensions = new[]
+                                {
+                                    new Dimension(GridSizeMode.AutoSize),
+                                    new Dimension(),
+                                    new Dimension(GridSizeMode.AutoSize)
+                                }
+                            },
+                            new SimpleStatisticTable.Spacer(),
+                            new GridContainer
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                AutoSizeAxes = Axes.Y,
+                                Origin = Anchor.Centre,
+                                Anchor = Anchor.Centre,
+                                ColumnDimensions = new[]
+                                {
+                                    new Dimension(),
+                                    new Dimension(GridSizeMode.AutoSize)
+                                },
+                                RowDimensions = new[]
+                                {
+                                    new Dimension(GridSizeMode.AutoSize),
+                                    new Dimension(GridSizeMode.AutoSize)
+                                },
+                                Content = new[]
+                                {
+                                    new Drawable[]
+                                    {
+                                        new OsuSpriteText
+                                        {
+                                            Origin = Anchor.CentreLeft,
+                                            Anchor = Anchor.CentreLeft,
+                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: StatisticItem.FONT_SIZE),
+                                            Text = &quot;Achieved PP&quot;,
+                                            Colour = Color4Extensions.FromHex(&quot;#66FFCC&quot;)
+                                        },
+                                        achievedPerformance = new OsuSpriteText
+                                        {
+                                            Origin = Anchor.CentreRight,
+                                            Anchor = Anchor.CentreRight,
+                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: StatisticItem.FONT_SIZE),
+                                            Colour = Color4Extensions.FromHex(&quot;#66FFCC&quot;)
+                                        }
+                                    },
+                                    new Drawable[]
+                                    {
+                                        new OsuSpriteText
+                                        {
+                                            Origin = Anchor.CentreLeft,
+                                            Anchor = Anchor.CentreLeft,
+                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: StatisticItem.FONT_SIZE),
+                                            Text = &quot;Maximum&quot;,
+                                            Colour = OsuColour.Gray(0.7f)
+                                        },
+                                        maximumPerformance = new OsuSpriteText
+                                        {
+                                            Origin = Anchor.CentreLeft,
+                                            Anchor = Anchor.CentreLeft,
+                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: StatisticItem.FONT_SIZE),
+                                            Colour = OsuColour.Gray(0.7f)
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            };
+
+            spinner.Show();
+
+            computePerformance(cancellationTokenSource.Token)
+                .ContinueWith(t =&gt; Schedule(() =&gt;
+                {
+                    if (t.GetResultSafely() is PerformanceBreakdown breakdown)
+                        setPerformance(breakdown);
+                }), TaskContinuationOptions.OnlyOnRanToCompletion);
+        }
+
+        private async Task&lt;PerformanceBreakdown?&gt; computePerformance(CancellationToken token)
+        {
+            var performanceCalculator = score.Ruleset.CreateInstance().CreatePerformanceCalculator();
+            if (performanceCalculator == null)
+                return null;
+
+            var starsTask = difficultyCache.GetDifficultyAsync(score.BeatmapInfo!, score.Ruleset, score.Mods, token).ConfigureAwait(false);
+            if (await starsTask is not StarDifficulty stars)
+                return null;
+
+            if (stars.DifficultyAttributes == null || stars.PerformanceAttributes == null)
+                return null;
+
+            return new PerformanceBreakdown(
+                await performanceCalculator.CalculateAsync(score, stars.DifficultyAttributes, token).ConfigureAwait(false),
+                stars.PerformanceAttributes);
+        }
+
+        private void setPerformance(PerformanceBreakdown breakdown)
+        {
+            spinner.Hide();
+            content.FadeIn(200);
+
+            var displayAttributes = breakdown.Performance.GetAttributesForDisplay();
+            var perfectDisplayAttributes = breakdown.PerfectPerformance.GetAttributesForDisplay();
+
+            setTotalValues(
+                displayAttributes.First(a =&gt; a.PropertyName == nameof(PerformanceAttributes.Total)),
+                perfectDisplayAttributes.First(a =&gt; a.PropertyName == nameof(PerformanceAttributes.Total))
+            );
+
+            var rowDimensions = new List&lt;Dimension&gt;();
+            var rows = new List&lt;Drawable[]&gt;();
+
+            foreach (PerformanceDisplayAttribute attr in displayAttributes)
+            {
+                if (attr.PropertyName == nameof(PerformanceAttributes.Total)) continue;
+
+                var row = createAttributeRow(attr, perfectDisplayAttributes.First(a =&gt; a.PropertyName == attr.PropertyName));
+
+                if (row != null)
+                {
+                    rows.Add(row);
+                    rowDimensions.Add(new Dimension(GridSizeMode.AutoSize));
+                }
+            }
+
+            chart.RowDimensions = rowDimensions.ToArray();
+            chart.Content = rows.ToArray();
+        }
+
+        private void setTotalValues(PerformanceDisplayAttribute attribute, PerformanceDisplayAttribute perfectAttribute)
+        {
+            achievedPerformance.Text = Math.Round(attribute.Value, MidpointRounding.AwayFromZero).ToLocalisableString();
+            maximumPerformance.Text = Math.Round(perfectAttribute.Value, MidpointRounding.AwayFromZero).ToLocalisableString();
+        }
+
+        private Drawable[]? createAttributeRow(PerformanceDisplayAttribute attribute, PerformanceDisplayAttribute perfectAttribute)
+        {
+            // Don&#39;t display the attribute if its maximum is 0
+            // For example, flashlight bonus would be zero if flashlight mod isn&#39;t on
+            if (Precision.AlmostEquals(perfectAttribute.Value, 0f))
+                return null;
+
+            float percentage = (float)(attribute.Value / perfectAttribute.Value);
+
+            return new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Origin = Anchor.CentreLeft,
+                    Anchor = Anchor.CentreLeft,
+                    Font = OsuFont.GetFont(weight: FontWeight.Regular, size: StatisticItem.FONT_SIZE),
+                    Text = attribute.DisplayName,
+                    Colour = Colour4.White
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding { Left = 10, Right = 10 },
+                    Child = new Bar
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Origin = Anchor.Centre,
+                        Anchor = Anchor.Centre,
+                        CornerRadius = 2.5f,
+                        Masking = true,
+                        Height = 5,
+                        BackgroundColour = Color4.White.Opacity(0.5f),
+                        AccentColour = Color4Extensions.FromHex(&quot;#66FFCC&quot;),
+                        Length = percentage
+                    }
+                },
+                new OsuSpriteText
+                {
+                    Origin = Anchor.CentreRight,
+                    Anchor = Anchor.CentreRight,
+                    Font = OsuFont.GetFont(weight: FontWeight.SemiBold, size: StatisticItem.FONT_SIZE),
+                    Text = percentage.ToLocalisableString(&quot;0%&quot;),
+                    Colour = Colour4.White
+                }
+            };
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            cancellationTokenSource.Cancel();
+            cancellationTokenSource.Dispose();
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,9,30,42,0],[31,9,31,42,0],[32,9,32,45,0],[33,9,33,59,0],[34,9,34,58,0],[36,9,36,106,0],[39,58,39,62,0],[39,63,39,67,0],[39,72,39,77,0],[41,9,41,58,0],[42,9,42,10,0],[43,13,43,32,0],[44,9,44,10,0],[48,9,48,10,0],[49,13,147,15,0],[149,13,149,28,0],[151,13,152,36,0],[152,36,153,17,0],[153,17,153,18,0],[153,18,154,21,0],[154,21,154,79,0],[154,79,155,25,0],[155,25,155,51,0],[155,51,156,17,0],[156,17,156,18,0],[156,18,156,19,0],[156,19,156,68,0],[157,9,157,10,0],[160,9,160,10,0],[161,13,161,102,0],[162,13,162,47,0],[163,17,163,29,0],[165,13,165,140,0],[166,13,166,61,0],[167,17,167,29,0],[169,13,169,91,0],[170,17,170,29,0],[172,13,174,46,0],[175,9,175,10,0],[178,9,178,10,0],[179,13,179,28,0],[180,13,180,33,0],[182,13,182,85,0],[183,13,183,99,0],[185,13,186,46,0],[186,46,186,99,0],[186,99,187,53,0],[187,53,187,106,0],[187,106,188,15,0],[190,13,190,55,0],[191,13,191,47,0],[193,13,193,20,0],[193,22,193,54,0],[193,55,193,57,0],[193,58,193,75,0],[194,13,194,14,0],[195,17,195,78,0],[195,79,195,88,0],[197,17,197,88,0],[197,88,197,123,0],[197,123,197,126,0],[199,17,199,33,0],[200,17,200,18,0],[201,21,201,35,0],[202,21,202,77,0],[203,17,203,18,0],[204,13,204,14,0],[206,13,206,59,0],[207,13,207,44,0],[208,9,208,10,0],[211,9,211,10,0],[212,13,212,121,0],[213,13,213,127,0],[214,9,214,10,0],[217,9,217,10,0],[220,13,220,68,0],[221,17,221,29,0],[223,13,223,82,0],[225,13,260,15,0],[261,9,261,10,0],[264,9,264,10,0],[265,13,265,46,0],[266,13,266,47,0],[268,13,268,39,0],[269,9,269,10,0]]);
+    </script>
+  </body>
+</html>

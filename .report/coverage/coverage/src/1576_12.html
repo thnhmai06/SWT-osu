@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/FooterButtonMods.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Mods;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Select
+{
+    public partial class FooterButtonMods : ScreenFooterButton
+    {
+        public Action? RequestDeselectAllMods { get; init; }
+
+        public const float BAR_HEIGHT = 30f;
+
+        private const float mod_display_portion = 0.65f;
+
+        private readonly BindableWithCurrent&lt;IReadOnlyList&lt;Mod&gt;&gt; mods = new BindableWithCurrent&lt;IReadOnlyList&lt;Mod&gt;&gt;(Array.Empty&lt;Mod&gt;());
+
+        public Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; Mods
+        {
+            get =&gt; mods.Current;
+            set =&gt; mods.Current = value;
+        }
+
+        private readonly BindableWithCurrent&lt;RulesetInfo?&gt; ruleset = new BindableWithCurrent&lt;RulesetInfo?&gt;();
+
+        public Bindable&lt;RulesetInfo?&gt; Ruleset
+        {
+            get =&gt; ruleset.Current;
+            set =&gt; ruleset.Current = value;
+        }
+
+        private Container modDisplayBar = null!;
+
+        private Drawable unrankedBadge = null!;
+
+        private ModDisplay modDisplay = null!;
+
+        private OsuSpriteText multiplierText { get; set; } = null!;
+
+        private Container modContainer = null!;
+
+        private ModCountText overflowModCountDisplay = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private OsuGameBase game { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        private IBindable&lt;Language&gt; currentLanguage = null!;
+
+        public FooterButtonMods(ModSelectOverlay overlay)
+            : base(overlay)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Text = SongSelectStrings.Mods;
+            Icon = FontAwesome.Solid.ExchangeAlt;
+            AccentColour = colours.Lime1;
+
+            AddRange(new[]
+            {
+                unrankedBadge = new UnrankedBadge(),
+                modDisplayBar = new InputBlockingContainer
+                {
+                    Y = -5f,
+                    Depth = float.MaxValue,
+                    Origin = Anchor.BottomLeft,
+                    Shear = OsuGame.SHEAR,
+                    CornerRadius = CORNER_RADIUS,
+                    Size = new Vector2(BUTTON_WIDTH, BAR_HEIGHT),
+                    Masking = true,
+                    EdgeEffect = new EdgeEffectParameters
+                    {
+                        Type = EdgeEffectType.Shadow,
+                        Radius = 4,
+                        // Figma says 50% opacity, but it does not match up visually if taken at face value, and looks bad.
+                        Colour = Colour4.Black.Opacity(0.25f),
+                        Offset = new Vector2(0, 2),
+                    },
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            Colour = colourProvider.Background4,
+                            RelativeSizeAxes = Axes.Both,
+                        },
+                        new Container
+                        {
+                            Anchor = Anchor.CentreRight,
+                            Origin = Anchor.CentreRight,
+                            RelativeSizeAxes = Axes.Both,
+                            Width = 1f - mod_display_portion,
+                            Masking = true,
+                            Child = multiplierText = new OsuSpriteText
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                Shear = -OsuGame.SHEAR,
+                                UseFullGlyphHeight = false,
+                                Font = OsuFont.Torus.With(size: 14f, weight: FontWeight.Bold)
+                            }
+                        },
+                        modContainer = new Container
+                        {
+                            CornerRadius = CORNER_RADIUS,
+                            RelativeSizeAxes = Axes.Both,
+                            Width = mod_display_portion,
+                            Masking = true,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    Colour = colourProvider.Background3,
+                                    RelativeSizeAxes = Axes.Both,
+                                },
+                                modDisplay = new ModDisplay(showExtendedInformation: true)
+                                {
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    Shear = -OsuGame.SHEAR,
+                                    Scale = new Vector2(0.5f),
+                                    Current = { BindTarget = Mods },
+                                    ExpansionMode = ExpansionMode.AlwaysContracted,
+                                },
+                                overflowModCountDisplay = new ModCountText { Mods = { BindTarget = Mods }, },
+                            }
+                        },
+                    }
+                },
+            });
+        }
+
+        private ModSettingChangeTracker? modSettingChangeTracker;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            currentLanguage = game.CurrentLanguage.GetBoundCopy();
+            currentLanguage.BindValueChanged(_ =&gt; ScheduleAfterChildren(updateDisplay));
+
+            Ruleset.BindValueChanged(_ =&gt; updateDisplay());
+            beatmap.BindValueChanged(_ =&gt; updateDisplay());
+            Mods.BindValueChanged(m =&gt;
+            {
+                modSettingChangeTracker?.Dispose();
+
+                updateDisplay();
+
+                if (m.NewValue != null)
+                {
+                    modSettingChangeTracker = new ModSettingChangeTracker(m.NewValue);
+                    modSettingChangeTracker.SettingChanged += _ =&gt; updateDisplay();
+                }
+            }, true);
+
+            FinishTransforms(true);
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            // should probably be OnClick but right mouse button clicks isn&#39;t setup well.
+            if (e.Button == MouseButton.Right)
+            {
+                RequestDeselectAllMods?.Invoke();
+                return true;
+            }
+
+            return base.OnMouseDown(e);
+        }
+
+        private const double duration = 240;
+        private const Easing easing = Easing.OutQuint;
+
+        private void updateDisplay()
+        {
+            if (Mods.Value.Count == 0)
+            {
+                modDisplayBar.MoveToY(20, duration, easing);
+                modDisplayBar.FadeOut(duration, easing);
+                modDisplay.FadeOut(duration, easing);
+                overflowModCountDisplay.FadeOut(duration, easing);
+
+                unrankedBadge.MoveToY(20, duration, easing);
+                unrankedBadge.FadeOut(duration, easing);
+
+                // add delay to let unranked indicator hide first before resizing the button back to its original width.
+                this.Delay(duration).ResizeWidthTo(BUTTON_WIDTH, duration, easing);
+            }
+            else
+            {
+                if (Mods.Value.Any(m =&gt; !m.Ranked))
+                {
+                    unrankedBadge.MoveToX(0, duration, easing);
+                    unrankedBadge.FadeIn(duration, easing);
+
+                    this.ResizeWidthTo(BUTTON_WIDTH + 5 + unrankedBadge.DrawWidth, duration, easing);
+                }
+                else
+                {
+                    unrankedBadge.MoveToX(-unrankedBadge.DrawWidth, duration, easing);
+                    unrankedBadge.FadeOut(duration, easing);
+
+                    this.ResizeWidthTo(BUTTON_WIDTH, duration, easing);
+                }
+
+                modDisplayBar.MoveToY(-5, duration, Easing.OutQuint);
+                unrankedBadge.MoveToY(-5, duration, easing);
+                modDisplayBar.FadeIn(duration, easing);
+                modDisplay.FadeIn(duration, easing);
+            }
+
+            var scoreMultiplierCalculator = Ruleset.Value?.CreateInstance().CreateScoreMultiplierCalculator(new ScoreMultiplierContext(beatmap.Value.BeatmapInfo.Difficulty));
+            double multiplier = scoreMultiplierCalculator?.CalculateFor(Mods.Value) ?? 1;
+            multiplierText.Text = ModUtils.FormatScoreMultiplier(multiplier);
+
+            if (multiplier &gt; 1)
+                multiplierText.FadeColour(colours.Red1, duration, easing);
+            else if (multiplier &lt; 1)
+                multiplierText.FadeColour(colours.Lime1, duration, easing);
+            else
+                multiplierText.FadeColour(Color4.White, duration, easing);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (Mods.Value.Count == 0)
+                return;
+
+            if (modDisplay.DrawWidth * modDisplay.Scale.X &gt; modContainer.DrawWidth)
+                overflowModCountDisplay.Show();
+            else
+                overflowModCountDisplay.Hide();
+        }
+
+        public partial class ModCountText : VisibilityContainer, IHasCustomTooltip&lt;IReadOnlyList&lt;Mod&gt;&gt;
+        {
+            public readonly Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; Mods = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;();
+
+            private LocalisableString? customText;
+
+            /// &lt;summary&gt;
+            /// When set, this will be shown instead of a mod count.
+            /// &lt;/summary&gt;
+            public LocalisableString? CustomText
+            {
+                get =&gt; customText;
+                set
+                {
+                    customText = value;
+                    if (IsLoaded)
+                        updateText();
+                }
+            }
+
+            private OsuSpriteText text = null!;
+
+            [Resolved]
+            private OverlayColourProvider colourProvider { get; set; } = null!;
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                RelativeSizeAxes = Axes.Both;
+
+                InternalChildren = new Drawable[]
+                {
+                    new Box
+                    {
+                        Colour = colourProvider.Background3,
+                        Alpha = 0.8f,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    text = new OsuSpriteText
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Font = OsuFont.Torus.With(size: 14f, weight: FontWeight.Bold),
+                        Shear = -OsuGame.SHEAR,
+                    }
+                };
+
+                Mods.BindValueChanged(_ =&gt; updateText(), true);
+            }
+
+            public ITooltip&lt;IReadOnlyList&lt;Mod&gt;&gt; GetCustomTooltip() =&gt; new ModOverflowTooltip(colourProvider);
+
+            public IReadOnlyList&lt;Mod&gt;? TooltipContent =&gt; Mods.Value;
+
+            protected override void PopIn() =&gt; this.FadeIn(300, Easing.OutExpo);
+            protected override void PopOut() =&gt; this.FadeOut(300, Easing.OutExpo);
+
+            private void updateText()
+            {
+                if (CustomText != null)
+                    text.Text = CustomText.Value;
+                else
+                    text.Text = ModSelectOverlayStrings.Mods(Mods.Value.Count).ToUpper();
+            }
+
+            public partial class ModOverflowTooltip : VisibilityContainer, ITooltip&lt;IReadOnlyList&lt;Mod&gt;&gt;
+            {
+                private ModFlowDisplay extendedModDisplay = null!;
+
+                [Cached]
+                private OverlayColourProvider colourProvider;
+
+                public ModOverflowTooltip(OverlayColourProvider colourProvider)
+                {
+                    this.colourProvider = colourProvider;
+                }
+
+                [BackgroundDependencyLoader]
+                private void load()
+                {
+                    AutoSizeAxes = Axes.Both;
+                    CornerRadius = CORNER_RADIUS;
+                    Masking = true;
+
+                    InternalChildren = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colourProvider.Background5,
+                        },
+                        extendedModDisplay = new ModFlowDisplay
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            MaximumSize = new Vector2(400, 0),
+                            Margin = new MarginPadding { Vertical = 2f, Horizontal = 10f },
+                            Scale = new Vector2(0.6f),
+                        },
+                    };
+                }
+
+                public void SetContent(IReadOnlyList&lt;Mod&gt; content)
+                {
+                    extendedModDisplay.Current.Value = content;
+                }
+
+                public void Move(Vector2 pos) =&gt; Position = pos;
+
+                protected override void PopIn() =&gt; this.FadeIn(240, Easing.OutQuint);
+                protected override void PopOut() =&gt; this.FadeOut(240, Easing.OutQuint);
+            }
+        }
+
+        internal partial class UnrankedBadge : InputBlockingContainer, IHasTooltip
+        {
+            public LocalisableString TooltipText { get; }
+
+            public UnrankedBadge()
+            {
+                Margin = new MarginPadding { Left = BUTTON_WIDTH + 5f };
+                Y = -5f;
+                Depth = float.MaxValue;
+                Origin = Anchor.BottomLeft;
+                Shear = OsuGame.SHEAR;
+                CornerRadius = CORNER_RADIUS;
+                AutoSizeAxes = Axes.X;
+                Height = BAR_HEIGHT;
+                Masking = true;
+                BorderColour = Color4.White;
+                BorderThickness = 2f;
+                TooltipText = ModSelectOverlayStrings.UnrankedExplanation;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours)
+            {
+                InternalChildren = new Drawable[]
+                {
+                    new Box
+                    {
+                        Colour = colours.Orange2,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    new OsuSpriteText
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Shear = -OsuGame.SHEAR,
+                        Text = ModSelectOverlayStrings.Unranked.ToUpper(),
+                        Margin = new MarginPadding { Horizontal = 15 },
+                        UseFullGlyphHeight = false,
+                        Font = OsuFont.Torus.With(size: 14f, weight: FontWeight.Bold),
+                        Colour = Color4.Black,
+                    }
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,49,39,53,0],[39,54,39,59,0],[45,9,45,137,0],[49,20,49,32,0],[50,20,50,40,0],[53,9,53,110,0],[57,20,57,35,0],[58,20,58,43,0],[61,9,61,49,0],[63,9,63,48,0],[65,9,65,47,0],[67,48,67,52,0],[67,53,67,57,0],[67,62,67,67,0],[69,9,69,48,0],[71,9,71,62,0],[74,37,74,41,0],[74,42,74,46,0],[74,51,74,56,0],[77,56,77,60,0],[77,61,77,65,0],[77,70,77,75,0],[80,36,80,40,0],[80,41,80,45,0],[80,50,80,55,0],[83,53,83,57,0],[83,58,83,62,0],[83,67,83,72,0],[85,9,85,61,0],[88,15,88,28,0],[89,9,89,10,0],[90,9,90,10,0],[94,9,94,10,0],[95,13,95,43,0],[96,13,96,50,0],[97,13,97,42,0],[99,13,169,16,0],[170,9,170,10,0],[175,9,175,10,0],[176,13,176,33,0],[178,13,178,67,0],[179,13,179,51,0],[179,51,179,87,0],[179,87,179,89,0],[181,13,181,43,0],[181,43,181,58,0],[181,58,181,60,0],[182,13,182,43,0],[182,43,182,58,0],[182,58,182,60,0],[183,13,184,13,0],[184,13,184,14,0],[184,14,185,17,0],[185,17,185,52,0],[185,52,187,17,0],[187,17,187,33,0],[187,33,189,17,0],[189,17,189,40,0],[189,40,190,17,0],[190,17,190,18,0],[190,18,191,21,0],[191,21,191,87,0],[191,87,192,21,0],[192,21,192,68,0],[192,68,192,83,0],[192,83,192,84,0],[192,84,193,17,0],[193,17,193,18,0],[193,18,194,13,0],[194,13,194,14,0],[194,14,194,22,0],[196,13,196,36,0],[197,9,197,10,0],[200,9,200,10,0],[202,13,202,47,0],[203,13,203,14,0],[204,17,204,50,0],[205,17,205,29,0],[208,13,208,40,0],[209,9,209,10,0],[215,9,215,10,0],[216,13,216,39,0],[217,13,217,14,0],[218,17,218,61,0],[219,17,219,57,0],[220,17,220,54,0],[221,17,221,67,0],[223,17,223,61,0],[224,17,224,57,0],[227,17,227,84,0],[228,13,228,14,0],[230,13,230,14,0],[231,17,231,41,0],[231,41,231,50,0],[231,50,231,52,0],[232,17,232,18,0],[233,21,233,64,0],[234,21,234,60,0],[236,21,236,102,0],[237,17,237,18,0],[239,17,239,18,0],[240,21,240,87,0],[241,21,241,61,0],[243,21,243,72,0],[244,17,244,18,0],[246,17,246,70,0],[247,17,247,61,0],[248,17,248,56,0],[249,17,249,53,0],[250,13,250,14,0],[252,13,252,175,0],[253,13,253,90,0],[254,13,254,78,0],[256,13,256,32,0],[257,17,257,75,0],[258,18,258,37,0],[259,17,259,76,0],[261,17,261,75,0],[262,9,262,10,0],[265,9,265,10,0],[266,13,266,27,0],[268,13,268,39,0],[269,17,269,24,0],[271,13,271,84,0],[272,17,272,48,0],[274,17,274,48,0],[275,9,275,10,0],[279,13,279,100,0],[288,24,288,34,0],[290,17,290,18,0],[291,21,291,40,0],[292,21,292,34,0],[293,25,293,38,0],[294,17,294,18,0],[297,13,297,48,0],[300,60,300,64,0],[300,65,300,69,0],[300,74,300,79,0],[303,13,303,14,0],[304,17,304,37,0],[306,17,306,46,0],[308,17,323,19,0],[325,17,325,44,0],[325,44,325,56,0],[325,56,325,64,0],[326,13,326,14,0],[328,71,328,109,0],[330,58,330,68,0],[332,48,332,80,0],[333,49,333,82,0],[336,13,336,14,0],[337,17,337,40,0],[338,21,338,50,0],[340,21,340,90,0],[341,13,341,14,0],[345,17,345,67,0],[350,17,350,80,0],[351,17,351,18,0],[352,21,352,58,0],[353,17,353,18,0],[357,17,357,18,0],[358,21,358,46,0],[359,21,359,50,0],[360,21,360,36,0],[362,21,376,23,0],[377,17,377,18,0],[380,17,380,18,0],[381,21,381,64,0],[382,17,382,18,0],[384,50,384,64,0],[386,52,386,85,0],[387,53,387,87,0],[393,52,393,56,0],[395,13,395,35,0],[396,13,396,14,0],[397,17,397,73,0],[398,17,398,25,0],[399,17,399,40,0],[400,17,400,44,0],[401,17,401,39,0],[402,17,402,46,0],[403,17,403,39,0],[404,17,404,37,0],[405,17,405,32,0],[406,17,406,45,0],[407,17,407,38,0],[408,17,408,75,0],[409,13,409,14,0],[413,13,413,14,0],[414,17,432,19,0],[433,13,433,14,0]]);
+    </script>
+  </body>
+</html>

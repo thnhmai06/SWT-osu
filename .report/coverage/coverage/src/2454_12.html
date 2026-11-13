@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/NotificationOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Resources.Localisation.Web;
+using osuTK;
+using osuTK.Graphics;
+using NotificationsStrings = osu.Game.Localisation.NotificationsStrings;
+
+namespace osu.Game.Overlays
+{
+    public partial class NotificationOverlay : OsuFocusedOverlayContainer, INamedOverlayComponent, INotificationOverlay
+    {
+        public IconUsage Icon =&gt; OsuIcon.Notification;
+        public LocalisableString Title =&gt; NotificationsStrings.HeaderTitle;
+        public LocalisableString Description =&gt; NotificationsStrings.HeaderDescription;
+
+        protected override double PopInOutSampleBalance =&gt; OsuGameBase.SFX_STEREO_STRENGTH;
+
+        public const float WIDTH = 320;
+
+        public const float TRANSITION_LENGTH = 600;
+
+        public IEnumerable&lt;Notification&gt; AllNotifications =&gt;
+            IsLoaded ? toastTray.Notifications.Concat(sections.SelectMany(s =&gt; s.Notifications)) : Array.Empty&lt;Notification&gt;();
+
+        private FlowContainer&lt;NotificationSection&gt; sections = null!;
+
+        [Resolved]
+        private AudioManager audio { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Cached]
+        private OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Purple);
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+        {
+            if (State.Value == Visibility.Visible)
+                return base.ReceivePositionalInputAt(screenSpacePos);
+
+            if (toastTray.IsDisplayingToasts)
+                return toastTray.ReceivePositionalInputAt(screenSpacePos);
+
+            return false;
+        }
+
+        public override bool PropagatePositionalInputSubTree =&gt; base.PropagatePositionalInputSubTree || toastTray.IsDisplayingToasts;
+
+        private NotificationOverlayToastTray toastTray = null!;
+
+        private Container mainContent = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            X = WIDTH;
+            Width = WIDTH;
+            RelativeSizeAxes = Axes.Y;
+
+            Children = new Drawable[]
+            {
+                toastTray = new NotificationOverlayToastTray
+                {
+                    ForwardNotificationToPermanentStore = addPermanently,
+                    Origin = Anchor.TopRight,
+                },
+                mainContent = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Masking = true,
+                    EdgeEffect = new EdgeEffectParameters
+                    {
+                        Colour = Color4.Black.Opacity(0),
+                        Type = EdgeEffectType.Shadow,
+                        Radius = 10,
+                        Hollow = true,
+                    },
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colourProvider.Background4,
+                        },
+                        new OsuScrollContainer
+                        {
+                            Masking = true,
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new[]
+                            {
+                                sections = new FillFlowContainer&lt;NotificationSection&gt;
+                                {
+                                    Direction = FillDirection.Vertical,
+                                    AutoSizeAxes = Axes.Y,
+                                    RelativeSizeAxes = Axes.X,
+                                    Children = new[]
+                                    {
+                                        // The main section adds as a catch-all for notifications which don&#39;t group into other sections.
+                                        new NotificationSection(AccountsStrings.NotificationsTitle),
+                                        new NotificationSection(NotificationsStrings.RunningTasks, new[] { typeof(ProgressNotification) }),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            };
+        }
+
+        private ScheduledDelegate? notificationsEnabler;
+
+        private void updateProcessingMode()
+        {
+            bool enabled = OverlayActivationMode.Value != OverlayActivation.Disabled || State.Value == Visibility.Visible;
+
+            notificationsEnabler?.Cancel();
+
+            if (enabled)
+                // we want a slight delay before toggling notifications on to avoid the user becoming overwhelmed.
+                notificationsEnabler = Scheduler.AddDelayed(() =&gt; processingPosts = true, State.Value == Visibility.Visible ? 0 : 250);
+            else
+            {
+                processingPosts = false;
+                toastTray.FlushAllToasts();
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            State.BindValueChanged(_ =&gt; updateProcessingMode());
+            OverlayActivationMode.BindValueChanged(_ =&gt; updateProcessingMode(), true);
+        }
+
+        public IBindable&lt;int&gt; UnreadCount =&gt; unreadCount;
+
+        public int ToastCount =&gt; toastTray.UnreadCount;
+
+        private readonly BindableInt unreadCount = new BindableInt();
+
+        private int runningDepth;
+
+        private readonly Scheduler postScheduler = new Scheduler();
+        private readonly Scheduler criticalPostScheduler = new Scheduler();
+
+        public override bool IsPresent =&gt;
+            // Delegate presence as we need to consider the toast tray in addition to the main overlay.
+            State.Value == Visibility.Visible || mainContent.IsPresent || toastTray.IsPresent || postScheduler.HasPendingTasks || criticalPostScheduler.HasPendingTasks;
+
+        private bool processingPosts = true;
+
+        private double? lastSamplePlayback;
+
+        public void Post(Notification notification) =&gt; (notification.IsCritical ? criticalPostScheduler : postScheduler).Add(() =&gt;
+        {
+            ++runningDepth;
+
+            Logger.Log($&quot;⚠️ {notification.Text}&quot;);
+
+            notification.Closed += () =&gt; notificationClosed(notification);
+
+            if (notification is IHasCompletionTarget hasCompletionTarget)
+                hasCompletionTarget.CompletionTarget ??= Post;
+
+            playDebouncedSample(notification.PopInSampleName);
+
+            if (notification.IsImportant)
+            {
+                game?.Window?.Flash();
+                notification.Closed += () =&gt; game?.Window?.CancelFlash();
+            }
+
+            if (State.Value == Visibility.Hidden)
+            {
+                notification.IsInToastTray = true;
+                toastTray.Post(notification);
+            }
+            else
+                addPermanently(notification);
+
+            updateCounts();
+        });
+
+        private void addPermanently(Notification notification)
+        {
+            notification.IsInToastTray = false;
+
+            var ourType = notification.GetType();
+            int depth = notification.DisplayOnTop ? -runningDepth : runningDepth;
+
+            var section = sections.Children.FirstOrDefault(s =&gt; s.AcceptedNotificationTypes?.Any(accept =&gt; accept.IsAssignableFrom(ourType)) == true)
+                          ?? sections.First();
+
+            section.Add(notification, depth);
+
+            updateCounts();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            criticalPostScheduler.Update();
+
+            if (processingPosts)
+                postScheduler.Update();
+        }
+
+        protected override void PopIn()
+        {
+            this.MoveToX(0, TRANSITION_LENGTH, Easing.OutQuint);
+            mainContent.FadeTo(1, TRANSITION_LENGTH / 2, Easing.OutQuint);
+            mainContent.FadeEdgeEffectTo(WaveContainer.SHADOW_OPACITY, WaveContainer.APPEAR_DURATION, Easing.Out);
+
+            toastTray.FlushAllToasts(true);
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            markAllRead();
+
+            this.MoveToX(WIDTH, TRANSITION_LENGTH, Easing.OutQuint);
+            mainContent.FadeTo(0, TRANSITION_LENGTH / 2, Easing.OutQuint);
+            mainContent.FadeEdgeEffectTo(0, WaveContainer.DISAPPEAR_DURATION, Easing.In);
+        }
+
+        private void notificationClosed(Notification notification) =&gt; Schedule(() =&gt;
+        {
+            updateCounts();
+
+            // this debounce is currently shared between popin/popout sounds, which means one could potentially not play when the user is expecting it.
+            // popout is constant across all notification types, and should therefore be handled using playback concurrency instead, but seems broken at the moment.
+            playDebouncedSample(notification.PopOutSampleName);
+        });
+
+        private void playDebouncedSample(string sampleName)
+        {
+            if (string.IsNullOrEmpty(sampleName))
+                return;
+
+            if (lastSamplePlayback == null || Time.Current - lastSamplePlayback &gt; OsuGameBase.SAMPLE_DEBOUNCE_TIME)
+            {
+                audio.Samples.Get(sampleName)?.Play();
+                lastSamplePlayback = Time.Current;
+            }
+        }
+
+        private void markAllRead()
+        {
+            sections.Children.ForEach(s =&gt; s.MarkAllRead());
+            toastTray.MarkAllRead();
+            updateCounts();
+        }
+
+        private void updateCounts()
+        {
+            unreadCount.Value = sections.Select(c =&gt; c.UnreadCount).Sum() + toastTray.UnreadCount;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,34,32,54,0],[33,43,33,75,0],[34,49,34,87,0],[36,60,36,91,0],[43,13,43,80,0],[43,80,43,95,0],[43,95,43,127,0],[45,9,45,69,0],[48,38,48,42,0],[48,43,48,47,0],[48,52,48,57,0],[51,33,51,37,0],[51,38,51,42,0],[54,9,54,110,0],[57,9,57,10,0],[58,13,58,51,0],[59,17,59,70,0],[61,13,61,46,0],[62,17,62,75,0],[64,13,64,26,0],[65,9,65,10,0],[67,65,67,133,0],[69,9,69,64,0],[71,9,71,47,0],[75,9,75,10,0],[76,13,76,23,0],[77,13,77,27,0],[78,13,78,39,0],[80,13,127,15,0],[128,9,128,10,0],[133,9,133,10,0],[134,13,134,123,0],[136,13,136,44,0],[138,13,138,25,0],[140,17,140,67,0],[140,67,140,89,0],[140,89,140,136,0],[142,13,142,14,0],[143,17,143,41,0],[144,17,144,44,0],[145,13,145,14,0],[146,9,146,10,0],[149,9,149,10,0],[150,13,150,33,0],[152,13,152,41,0],[152,41,152,63,0],[152,63,152,65,0],[153,13,153,57,0],[153,57,153,79,0],[153,79,153,87,0],[154,9,154,10,0],[156,46,156,57,0],[158,34,158,55,0],[160,9,160,70,0],[164,9,164,68,0],[165,9,165,76,0],[169,13,169,168,0],[171,9,171,45,0],[175,56,176,9,0],[176,9,176,10,0],[176,10,177,13,0],[177,13,177,28,0],[177,28,179,13,0],[179,13,179,51,0],[179,51,181,13,0],[181,13,181,42,0],[181,42,181,74,0],[181,74,181,75,0],[181,75,183,13,0],[183,13,183,74,0],[183,74,184,17,0],[184,17,184,63,0],[184,63,186,13,0],[186,13,186,63,0],[186,63,188,13,0],[188,13,188,42,0],[188,42,189,13,0],[189,13,189,14,0],[189,14,190,17,0],[190,17,190,39,0],[190,39,191,17,0],[191,17,191,46,0],[191,46,191,73,0],[191,73,191,74,0],[191,74,192,13,0],[192,13,192,14,0],[192,14,194,13,0],[194,13,194,50,0],[194,50,195,13,0],[195,13,195,14,0],[195,14,196,17,0],[196,17,196,51,0],[196,51,197,17,0],[197,17,197,46,0],[197,46,198,13,0],[198,13,198,14,0],[198,14,200,17,0],[200,17,200,46,0],[200,46,202,13,0],[202,13,202,28,0],[202,28,203,9,0],[203,9,203,10,0],[203,10,203,11,0],[206,9,206,10,0],[207,13,207,48,0],[209,13,209,50,0],[210,13,210,82,0],[212,13,212,65,0],[212,65,212,108,0],[212,108,212,140,0],[212,140,212,149,0],[212,149,213,47,0],[215,13,215,46,0],[217,13,217,28,0],[218,9,218,10,0],[221,9,221,10,0],[222,13,222,27,0],[224,13,224,44,0],[226,13,226,33,0],[227,17,227,40,0],[228,9,228,10,0],[231,9,231,10,0],[232,13,232,65,0],[233,13,233,75,0],[234,13,234,115,0],[236,13,236,44,0],[237,9,237,10,0],[240,9,240,10,0],[241,13,241,27,0],[243,13,243,27,0],[245,13,245,69,0],[246,13,246,75,0],[247,13,247,90,0],[248,9,248,10,0],[250,71,251,9,0],[251,9,251,10,0],[251,10,252,13,0],[252,13,252,28,0],[252,28,256,13,0],[256,13,256,64,0],[256,64,257,9,0],[257,9,257,10,0],[257,10,257,11,0],[260,9,260,10,0],[261,13,261,50,0],[262,17,262,24,0],[264,13,264,116,0],[265,13,265,14,0],[266,17,266,55,0],[267,17,267,51,0],[268,13,268,14,0],[269,9,269,10,0],[272,9,272,10,0],[273,13,273,44,0],[273,44,273,59,0],[273,59,273,61,0],[274,13,274,37,0],[275,13,275,28,0],[276,9,276,10,0],[279,9,279,10,0],[280,13,280,54,0],[280,54,280,67,0],[280,67,280,99,0],[281,9,281,10,0]]);
+    </script>
+  </body>
+</html>

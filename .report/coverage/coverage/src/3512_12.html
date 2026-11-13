@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/Containers/ScalingContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Input.Handlers.Tablet;
+using osu.Framework.Layout;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Game.Configuration;
+using osu.Game.Screens;
+using osu.Game.Screens.Backgrounds;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Graphics.Containers
+{
+    /// &lt;summary&gt;
+    /// Handles user-defined scaling, allowing application at multiple levels defined by &lt;see cref=&quot;ScalingMode&quot;/&gt;.
+    /// &lt;/summary&gt;
+    public partial class ScalingContainer : Container
+    {
+        internal const float TRANSITION_DURATION = 500;
+
+        private Bindable&lt;float&gt; sizeX = null!;
+        private Bindable&lt;float&gt; sizeY = null!;
+        private Bindable&lt;float&gt; posX = null!;
+        private Bindable&lt;float&gt; posY = null!;
+        private Bindable&lt;bool&gt; applySafeAreaPadding = null!;
+
+        private Bindable&lt;MarginPadding&gt; safeAreaPadding = null!;
+
+        private readonly ScalingMode? targetMode;
+
+        private Bindable&lt;ScalingMode&gt; scalingMode = null!;
+
+        private readonly Container content;
+        protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+        private readonly Container sizableContainer;
+
+        private BackgroundScreenStack? backgroundStack;
+
+        private Bindable&lt;float&gt; scalingMenuBackgroundDim = null!;
+
+        private RectangleF? customRect;
+        private bool customRectIsRelativePosition;
+
+        private ITabletHandler? tabletHandler;
+
+        /// &lt;summary&gt;
+        /// Set a custom position and scale which overrides any user specification.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;rect&quot;&gt;A rectangle with positional and sizing information for this container to conform to. &lt;c&gt;null&lt;/c&gt; will clear the custom rect and revert to user settings.&lt;/param&gt;
+        /// &lt;param name=&quot;relativePosition&quot;&gt;Whether the position portion of the provided rect is in relative coordinate space or not.&lt;/param&gt;
+        public void SetCustomRect(RectangleF? rect, bool relativePosition = false)
+        {
+            customRect = rect;
+            customRectIsRelativePosition = relativePosition;
+
+            if (IsLoaded) Scheduler.AddOnce(updateSize);
+        }
+
+        private const float corner_radius = 10;
+
+        /// &lt;summary&gt;
+        /// Create a new instance.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;targetMode&quot;&gt;The mode which this container should be handling. Handles all modes if null.&lt;/param&gt;
+        public ScalingContainer(ScalingMode? targetMode = null)
+        {
+            this.targetMode = targetMode;
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChild = sizableContainer = new SizeableAlwaysInputContainer(targetMode == ScalingMode.Everything)
+            {
+                RelativeSizeAxes = Axes.Both,
+                RelativePositionAxes = Axes.Both,
+                CornerRadius = corner_radius,
+                Child = content = new ScalingDrawSizePreservingFillContainer(targetMode != ScalingMode.Gameplay)
+            };
+        }
+
+        public partial class ScalingDrawSizePreservingFillContainer : DrawSizePreservingFillContainer
+        {
+            private readonly bool applyUIScale;
+
+            private Bindable&lt;float&gt;? uiScale;
+
+            protected float CurrentScale { get; private set; } = 1;
+
+            public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+            public ScalingDrawSizePreservingFillContainer(bool applyUIScale)
+            {
+                this.applyUIScale = applyUIScale;
+            }
+
+            [Resolved(canBeNull: true)]
+            private OsuGame? game { get; set; }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuConfigManager osuConfig)
+            {
+                if (applyUIScale)
+                {
+                    uiScale = osuConfig.GetBindable&lt;float&gt;(OsuSetting.UIScale);
+                    uiScale.BindValueChanged(args =&gt; this.TransformTo(nameof(CurrentScale), args.NewValue, TRANSITION_DURATION, Easing.OutQuart), true);
+                }
+            }
+
+            protected override void Update()
+            {
+                if (game != null)
+                    TargetDrawSize = game.ScalingContainerTargetDrawSize;
+                Scale = new Vector2(CurrentScale);
+                Size = new Vector2(1 / CurrentScale);
+
+                base.Update();
+            }
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(GameHost host, OsuConfigManager config, ISafeArea safeArea)
+        {
+            scalingMode = config.GetBindable&lt;ScalingMode&gt;(OsuSetting.Scaling);
+            scalingMode.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            sizeX = config.GetBindable&lt;float&gt;(OsuSetting.ScalingSizeX);
+            sizeX.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            sizeY = config.GetBindable&lt;float&gt;(OsuSetting.ScalingSizeY);
+            sizeY.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            posX = config.GetBindable&lt;float&gt;(OsuSetting.ScalingPositionX);
+            posX.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            posY = config.GetBindable&lt;float&gt;(OsuSetting.ScalingPositionY);
+            posY.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            applySafeAreaPadding = config.GetBindable&lt;bool&gt;(OsuSetting.SafeAreaConsiderations);
+            applySafeAreaPadding.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateSize));
+
+            safeAreaPadding = safeArea.SafeAreaPadding.GetBoundCopy();
+            safeAreaPadding.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateSize));
+
+            scalingMenuBackgroundDim = config.GetBindable&lt;float&gt;(OsuSetting.ScalingBackgroundDim);
+            scalingMenuBackgroundDim.ValueChanged += _ =&gt; Scheduler.AddOnce(updateSize);
+
+            tabletHandler = host.AvailableInputHandlers.OfType&lt;ITabletHandler&gt;().SingleOrDefault();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            updateSize();
+            sizableContainer.FinishTransforms();
+        }
+
+        private bool requiresBackgroundVisible =&gt; (scalingMode.Value == ScalingMode.Everything || scalingMode.Value == ScalingMode.ExcludeOverlays)
+                                                  &amp;&amp; (sizeX.Value != 1 || sizeY.Value != 1)
+                                                  &amp;&amp; scalingMenuBackgroundDim.Value &lt; 1;
+
+        private void updateSize()
+        {
+            if (targetMode == ScalingMode.Everything)
+            {
+                // the top level scaling container manages the background to be displayed while scaling.
+                if (requiresBackgroundVisible)
+                {
+                    if (backgroundStack == null)
+                    {
+                        AddInternal(backgroundStack = new BackgroundScreenStack
+                        {
+                            Alpha = 0,
+                            Colour = Color4.Black,
+                            Depth = float.MaxValue
+                        });
+
+                        backgroundStack.Push(new ScalingBackgroundScreen());
+                    }
+
+                    backgroundStack.FadeIn(TRANSITION_DURATION);
+                    backgroundStack.FadeColour(OsuColour.Gray(1.0f - scalingMenuBackgroundDim.Value), TRANSITION_DURATION, Easing.OutQuint);
+                }
+                else
+                    backgroundStack?.FadeOut(TRANSITION_DURATION);
+            }
+
+            RectangleF targetRect = new RectangleF(Vector2.Zero, Vector2.One);
+
+            if (customRect != null)
+            {
+                sizableContainer.RelativePositionAxes = customRectIsRelativePosition ? Axes.Both : Axes.None;
+
+                targetRect = customRect.Value;
+            }
+            else if (targetMode == null || scalingMode.Value == targetMode)
+            {
+                sizableContainer.RelativePositionAxes = Axes.Both;
+
+                Vector2 scale = new Vector2(sizeX.Value, sizeY.Value);
+                Vector2 pos = new Vector2(posX.Value, posY.Value) * (Vector2.One - scale);
+
+                targetRect = new RectangleF(pos, scale);
+            }
+
+            bool requiresMasking = targetRect.Size != Vector2.One
+                                   // For the top level scaling container, for now we apply masking if safe areas are in use.
+                                   // In the future this can likely be removed as more of the actual UI supports overflowing into the safe areas.
+                                   || (targetMode == ScalingMode.Everything &amp;&amp; (applySafeAreaPadding.Value &amp;&amp; safeAreaPadding.Value.Total != Vector2.Zero));
+
+            if (requiresMasking)
+                sizableContainer.Masking = true;
+
+            sizableContainer.MoveTo(targetRect.Location, TRANSITION_DURATION, Easing.OutQuart);
+            sizableContainer.ResizeTo(targetRect.Size, TRANSITION_DURATION, Easing.OutQuart);
+
+            // Of note, this will not work great in the case of nested ScalingContainers where multiple are applying corner radius.
+            // Masking and corner radius should likely only be applied at one point in the full game stack to fix this.
+            // An example of how this can occur is when the skin editor is visible and the game screen scaling is set to &quot;Everything&quot;.
+            sizableContainer.TransformTo(nameof(CornerRadius), requiresMasking ? corner_radius : 0, TRANSITION_DURATION, requiresMasking ? Easing.OutQuart : Easing.None)
+                            .OnComplete(_ =&gt; { sizableContainer.Masking = requiresMasking; });
+
+            // when &quot;everything&quot; scaling mode is active, tablets are expected to constrain output area to the scaled size of the game
+            if (tabletHandler != null)
+            {
+                tabletHandler.OutputAreaSize.Value = scalingMode.Value == ScalingMode.Everything ? new Vector2(sizeX.Value, sizeY.Value) : Vector2.One;
+                tabletHandler.OutputAreaOffset.Value = scalingMode.Value == ScalingMode.Everything ? new Vector2(posX.Value, posY.Value) : new Vector2(0.5f);
+            }
+        }
+
+        private partial class ScalingBackgroundScreen : BackgroundScreenDefault
+        {
+            protected override bool AllowStoryboardBackground =&gt; false;
+
+            public override void OnEntering(ScreenTransitionEvent e)
+            {
+                this.FadeInFromZero(4000, Easing.OutQuint);
+            }
+        }
+
+        private partial class SizeableAlwaysInputContainer : Container
+        {
+            [Resolved]
+            private GameHost host { get; set; } = null!;
+
+            [Resolved]
+            private ISafeArea safeArea { get; set; } = null!;
+
+            [Resolved]
+            private OsuConfigManager config { get; set; } = null!;
+
+            private readonly bool confineHostCursor;
+            private readonly LayoutValue cursorRectCache = new LayoutValue(Invalidation.RequiredParentSizeToFit);
+
+            public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+            /// &lt;summary&gt;
+            /// Container used for sizing/positioning purposes in &lt;see cref=&quot;ScalingContainer&quot;/&gt;. Always receives mouse input.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;confineHostCursor&quot;&gt;Whether to confine the host cursor to the draw area of this container.&lt;/param&gt;
+            /// &lt;remarks&gt;Cursor confinement will abide by the &lt;see cref=&quot;OsuSetting.ConfineMouseMode&quot;/&gt; setting.&lt;/remarks&gt;
+            public SizeableAlwaysInputContainer(bool confineHostCursor)
+            {
+                RelativeSizeAxes = Axes.Both;
+                this.confineHostCursor = confineHostCursor;
+
+                if (confineHostCursor)
+                    AddLayout(cursorRectCache);
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                if (confineHostCursor &amp;&amp; !cursorRectCache.IsValid)
+                {
+                    updateHostCursorConfineRect();
+                    cursorRectCache.Validate();
+                }
+            }
+
+            private void updateHostCursorConfineRect()
+            {
+                if (host.Window == null) return;
+
+                bool coversWholeScreen = Size == Vector2.One &amp;&amp; (!config.Get&lt;bool&gt;(OsuSetting.SafeAreaConsiderations) || safeArea.SafeAreaPadding.Value.Total == Vector2.Zero);
+                host.Window.CursorConfineRect = coversWholeScreen ? null : ToScreenSpace(DrawRectangle).AABBFloat;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,9,29,47,0],[30,9,30,47,0],[31,9,31,46,0],[32,9,32,46,0],[33,9,33,61,0],[35,9,35,65,0],[39,9,39,59,0],[42,59,42,66,0],[44,82,44,86,0],[50,9,50,66,0],[63,9,63,10,0],[64,13,64,31,0],[65,13,65,61,0],[67,13,67,26,0],[67,27,67,57,0],[68,9,68,10,0],[76,9,76,64,0],[77,9,77,10,0],[78,13,78,42,0],[79,13,79,42,0],[81,13,87,15,0],[88,9,88,10,0],[96,44,96,48,0],[96,49,96,61,0],[96,66,96,67,0],[98,86,98,90,0],[100,13,100,77,0],[101,13,101,14,0],[102,17,102,50,0],[103,13,103,14,0],[106,37,106,41,0],[106,42,106,46,0],[110,13,110,14,0],[111,17,111,34,0],[112,17,112,18,0],[113,21,113,80,0],[114,21,114,54,0],[114,54,114,145,0],[114,145,114,153,0],[115,17,115,18,0],[116,13,116,14,0],[119,13,119,14,0],[120,17,120,34,0],[121,21,121,74,0],[122,17,122,51,0],[123,17,123,54,0],[125,17,125,31,0],[126,13,126,14,0],[131,9,131,10,0],[132,13,132,79,0],[133,13,133,46,0],[133,46,133,75,0],[133,75,133,76,0],[135,13,135,72,0],[136,13,136,40,0],[136,40,136,69,0],[136,69,136,70,0],[138,13,138,72,0],[139,13,139,40,0],[139,40,139,69,0],[139,69,139,70,0],[141,13,141,75,0],[142,13,142,39,0],[142,39,142,68,0],[142,68,142,69,0],[144,13,144,75,0],[145,13,145,39,0],[145,39,145,68,0],[145,68,145,69,0],[147,13,147,96,0],[148,13,148,56,0],[148,56,148,85,0],[148,85,148,87,0],[150,13,150,71,0],[151,13,151,51,0],[151,51,151,80,0],[151,80,151,82,0],[153,13,153,99,0],[154,13,154,59,0],[154,59,154,88,0],[154,88,154,89,0],[156,13,156,100,0],[157,9,157,10,0],[160,9,160,10,0],[161,13,161,33,0],[163,13,163,26,0],[164,13,164,49,0],[165,9,165,10,0],[167,51,169,88,0],[172,9,172,10,0],[173,13,173,54,0],[174,13,174,14,0],[176,17,176,47,0],[177,17,177,18,0],[178,21,178,49,0],[179,21,179,22,0],[180,25,185,28,0],[187,25,187,77,0],[188,21,188,22,0],[190,21,190,65,0],[191,21,191,141,0],[192,17,192,18,0],[194,21,194,67,0],[195,13,195,14,0],[197,13,197,79,0],[199,13,199,36,0],[200,13,200,14,0],[201,17,201,110,0],[203,17,203,47,0],[204,13,204,14,0],[205,18,205,76,0],[206,13,206,14,0],[207,17,207,67,0],[209,17,209,71,0],[210,17,210,91,0],[212,17,212,57,0],[213,13,213,14,0],[215,13,218,157,0],[220,13,220,33,0],[221,17,221,49,0],[223,13,223,96,0],[224,13,224,94,0],[229,13,230,46,0],[230,46,230,47,0],[230,47,230,48,0],[230,48,230,91,0],[230,91,230,92,0],[230,92,230,93,0],[230,93,230,95,0],[233,13,233,39,0],[234,13,234,14,0],[235,17,235,152,0],[236,17,236,158,0],[237,13,237,14,0],[238,9,238,10,0],[242,66,242,71,0],[245,13,245,14,0],[246,17,246,60,0],[247,13,247,14,0],[253,37,253,41,0],[253,42,253,46,0],[253,51,253,56,0],[256,42,256,46,0],[256,47,256,51,0],[256,56,256,61,0],[259,47,259,51,0],[259,52,259,56,0],[259,61,259,66,0],[262,13,262,114,0],[264,86,264,90,0],[271,13,271,72,0],[272,13,272,14,0],[273,17,273,46,0],[274,17,274,60,0],[276,17,276,39,0],[277,21,277,48,0],[278,13,278,14,0],[281,13,281,14,0],[282,17,282,31,0],[284,17,284,67,0],[285,17,285,18,0],[286,21,286,51,0],[287,21,287,48,0],[288,17,288,18,0],[289,13,289,14,0],[292,13,292,14,0],[293,17,293,41,0],[293,42,293,49,0],[295,17,295,176,0],[296,17,296,115,0],[297,13,297,14,0]]);
+    </script>
+  </body>
+</html>

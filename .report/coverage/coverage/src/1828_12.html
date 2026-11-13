@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/MultiplayerMatchSongSelect.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using Humanizer;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Mods;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Select;
+using osu.Game.Users;
+using osu.Game.Utils;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer
+{
+    public partial class MultiplayerMatchSongSelect : SongSelect, IOnlinePlaySubScreen, ISongSelect
+    {
+        public string ShortTitle =&gt; &quot;song selection&quot;;
+
+        public override string Title =&gt; ShortTitle.Humanize();
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        [Resolved]
+        private OngoingOperationTracker operationTracker { get; set; } = null!;
+
+        [Resolved]
+        private IOverlayManager? overlayManager { get; set; }
+
+        private readonly Room room;
+        private readonly IBindable&lt;bool&gt; operationInProgress = new Bindable&lt;bool&gt;();
+        private readonly PlaylistItem? itemToEdit;
+
+        private ModSelectOverlay modSelect = null!;
+        private LoadingLayer loadingLayer = null!;
+        private IDisposable? selectionOperation;
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        protected override UserActivity InitialActivity =&gt; new UserActivity.InLobby(room);
+
+        protected readonly Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; FreeMods = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;(Array.Empty&lt;Mod&gt;());
+
+        private readonly Bindable&lt;bool&gt; freestyle = new Bindable&lt;bool&gt;(true);
+
+        private readonly PlaylistItem? initialItem;
+        private readonly FreeModSelectOverlay freeModSelect;
+
+        private IDisposable? freeModSelectOverlayRegistration;
+
+        /// &lt;summary&gt;
+        /// Construct a new instance of multiplayer song select.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The room.&lt;/param&gt;
+        /// &lt;param name=&quot;itemToEdit&quot;&gt;The item to be edited. May be null, in which case a new item will be added to the playlist.&lt;/param&gt;
+        public MultiplayerMatchSongSelect(Room room, PlaylistItem? itemToEdit = null)
+        {
+            this.room = room;
+            this.itemToEdit = itemToEdit;
+            initialItem = itemToEdit ?? room.Playlist.LastOrDefault();
+
+            Padding = new MarginPadding { Horizontal = HORIZONTAL_OVERFLOW_PADDING };
+            TopPadding = Header.HEIGHT - 10;
+
+            freeModSelect = new FreeModSelectOverlay
+            {
+                SelectedMods = { BindTarget = FreeMods },
+                IsValidMod = isValidAllowedMod,
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            LoadComponent(freeModSelect);
+            AddInternal(loadingLayer = new LoadingLayer(true)
+            {
+                BlockNonPositionalInput = true,
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (initialItem != null)
+            {
+                // Prefer using a local databased beatmap lookup since OnlineId may be -1 for an invalid beatmap selection.
+                BeatmapInfo? beatmapInfo = initialItem.Beatmap as BeatmapInfo;
+
+                // And in the case that this isn&#39;t a local databased beatmap, query by online ID.
+                if (beatmapInfo == null)
+                {
+                    int onlineId = initialItem.Beatmap.OnlineID;
+                    beatmapInfo = beatmapManager.QueryBeatmap(b =&gt; b.OnlineID == onlineId);
+                }
+
+                if (beatmapInfo != null)
+                    Beatmap.Value = beatmapManager.GetWorkingBeatmap(beatmapInfo);
+
+                RulesetInfo? ruleset = rulesets.GetRuleset(initialItem.RulesetID);
+
+                if (ruleset != null)
+                {
+                    Ruleset.Value = ruleset;
+
+                    var rulesetInstance = ruleset.CreateInstance();
+                    Debug.Assert(rulesetInstance != null);
+
+                    // At this point, Mods contains both the required and allowed mods. For selection purposes, it should only contain the required mods.
+                    // Similarly, freeMods is currently empty but should only contain the allowed mods.
+                    Mods.Value = initialItem.RequiredMods.Select(m =&gt; m.ToMod(rulesetInstance)).ToArray();
+                    FreeMods.Value = initialItem.AllowedMods.Select(m =&gt; m.ToMod(rulesetInstance)).ToArray();
+                }
+
+                freestyle.Value = initialItem.Freestyle;
+            }
+
+            Mods.BindValueChanged(_ =&gt; updateValidMods());
+            Ruleset.BindValueChanged(onRulesetChanged);
+            freestyle.BindValueChanged(onFreestyleChanged);
+
+            freeModSelectOverlayRegistration = overlayManager?.RegisterBlockingOverlay(freeModSelect);
+
+            updateFooterButtons();
+            updateValidMods();
+
+            operationInProgress.BindTo(operationTracker.InProgress);
+            operationInProgress.BindValueChanged(operation =&gt;
+            {
+                if (operation.NewValue)
+                    loadingLayer.Show();
+                else
+                    loadingLayer.Hide();
+            }, true);
+        }
+
+        private void onFreestyleChanged(ValueChangedEvent&lt;bool&gt; enabled)
+        {
+            updateFooterButtons();
+            updateValidMods();
+
+            if (enabled.NewValue)
+            {
+                // Freestyle allows all mods to be selected as freemods. This does not play nicely for some components:
+                // - We probably don&#39;t want to store a gigantic list of acronyms to the database.
+                // - The mod select overlay isn&#39;t built to handle duplicate mods/mods from all rulesets being shoved into it.
+                // Instead, freestyle inherently assumes this list is empty, and must be empty for server-side validation to pass.
+                FreeMods.Value = [];
+            }
+            else
+            {
+                // When disabling freestyle, enable freemods by default.
+                FreeMods.Value = freeModSelect.AllAvailableMods.Where(state =&gt; state.ValidForSelection.Value).Select(state =&gt; state.Mod).ToArray();
+            }
+        }
+
+        private void onRulesetChanged(ValueChangedEvent&lt;RulesetInfo&gt; ruleset)
+        {
+            // Todo: We can probably attempt to preserve across rulesets like the global mods do.
+            FreeMods.Value = [];
+        }
+
+        private void updateFooterButtons()
+        {
+            if (freestyle.Value)
+                freeModSelect.Hide();
+        }
+
+        /// &lt;summary&gt;
+        /// Removes invalid mods from &lt;see cref=&quot;OsuScreen.Mods&quot;/&gt; and &lt;see cref=&quot;FreeMods&quot;/&gt;,
+        /// and updates mod selection overlays to display the new mods valid for selection.
+        /// &lt;/summary&gt;
+        private void updateValidMods()
+        {
+            Mod[] validMods = Mods.Value.Where(isValidRequiredMod).ToArray();
+            if (!validMods.SequenceEqual(Mods.Value))
+                Mods.Value = validMods;
+
+            Mod[] validFreeMods = FreeMods.Value.Where(isValidAllowedMod).ToArray();
+            if (!validFreeMods.SequenceEqual(FreeMods.Value))
+                FreeMods.Value = validFreeMods;
+
+            modSelect.IsValidMod = isValidRequiredMod;
+            freeModSelect.IsValidMod = isValidAllowedMod;
+        }
+
+        protected sealed override void OnStart()
+        {
+            var item = new PlaylistItem(Beatmap.Value.BeatmapInfo)
+            {
+                RulesetID = Ruleset.Value.OnlineID,
+                RequiredMods = Mods.Value.Select(m =&gt; new APIMod(m)).ToArray(),
+                AllowedMods = FreeMods.Value.Select(m =&gt; new APIMod(m)).ToArray(),
+                Freestyle = freestyle.Value
+            };
+
+            selectItem(item);
+        }
+
+        private bool selectItem(PlaylistItem item)
+        {
+            if (operationInProgress.Value)
+            {
+                Logger.Log($&quot;{nameof(selectItem)} aborted due to {nameof(operationInProgress)}&quot;);
+                return false;
+            }
+
+            // If the client is already in a room, update via the client.
+            // Otherwise, update the playlist directly in preparation for it to be submitted to the API on match creation.
+            if (client.Room != null)
+            {
+                selectionOperation = operationTracker.BeginOperation();
+
+                var multiplayerItem = new MultiplayerPlaylistItem
+                {
+                    ID = itemToEdit?.ID ?? 0,
+                    BeatmapID = item.Beatmap.OnlineID,
+                    BeatmapChecksum = item.Beatmap.MD5Hash,
+                    RulesetID = item.RulesetID,
+                    RequiredMods = item.RequiredMods.ToArray(),
+                    AllowedMods = item.AllowedMods.ToArray(),
+                    Freestyle = item.Freestyle
+                };
+
+                Task task = itemToEdit != null ? client.EditPlaylistItem(multiplayerItem) : client.AddPlaylistItem(multiplayerItem);
+
+                task.FireAndForget(onSuccess: () =&gt;
+                {
+                    selectionOperation.Dispose();
+
+                    Schedule(() =&gt;
+                    {
+                        // If an error or server side trigger occurred this screen may have already exited by external means.
+                        if (this.IsCurrentScreen())
+                            this.Exit();
+                    });
+                }, onError: _ =&gt;
+                {
+                    selectionOperation.Dispose();
+                });
+            }
+            else
+            {
+                room.Playlist = [item];
+                this.Exit();
+            }
+
+            return true;
+        }
+
+        public override bool OnBackButton()
+        {
+            if (freeModSelect.State.Value == Visibility.Visible)
+            {
+                freeModSelect.Hide();
+                return true;
+            }
+
+            return base.OnBackButton();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            freeModSelect.Hide();
+            return base.OnExiting(e);
+        }
+
+        protected override ModSelectOverlay CreateModSelectOverlay() =&gt; modSelect = new UserModSelectOverlay(OverlayColourScheme.Plum)
+        {
+            IsValidMod = isValidRequiredMod,
+        };
+
+        public override IReadOnlyList&lt;ScreenFooterButton&gt; CreateFooterButtons()
+        {
+            var buttons = base.CreateFooterButtons().ToList();
+
+            buttons.Single(i =&gt; i is FooterButtonMods).TooltipText = MultiplayerMatchStrings.RequiredModsButtonTooltip;
+
+            buttons.InsertRange(buttons.FindIndex(b =&gt; b is FooterButtonMods) + 1,
+            [
+                new FooterButtonFreeMods(freeModSelect)
+                {
+                    FreeMods = { BindTarget = FreeMods },
+                    Freestyle = { BindTarget = freestyle }
+                },
+                new FooterButtonFreestyle
+                {
+                    Freestyle = { BindTarget = freestyle }
+                }
+            ]);
+
+            return buttons;
+        }
+
+        /// &lt;summary&gt;
+        /// Checks whether a given &lt;see cref=&quot;Mod&quot;/&gt; is valid to be selected as a required mod.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mod&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; to check.&lt;/param&gt;
+        private bool isValidRequiredMod(Mod mod) =&gt; ModUtils.IsValidModForMatch(mod, true, room.Type, freestyle.Value);
+
+        /// &lt;summary&gt;
+        /// Checks whether a given &lt;see cref=&quot;Mod&quot;/&gt; is valid to be selected as an allowed mod.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mod&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; to check.&lt;/param&gt;
+        private bool isValidAllowedMod(Mod mod) =&gt; ModUtils.IsValidModForMatch(mod, false, room.Type, freestyle.Value)
+                                                   // Mod must not be contained in the required mods.
+                                                   &amp;&amp; Mods.Value.All(m =&gt; m.Acronym != mod.Acronym)
+                                                   // Mod must be compatible with all the required mods.
+                                                   &amp;&amp; ModUtils.CheckCompatibleSet(Mods.Value.Append(mod).ToArray());
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            freeModSelectOverlayRegistration?.Dispose();
+        }
+
+        bool ISongSelect.CanPresentScore =&gt; false;
+
+        void ISongSelect.PresentScore(ScoreInfo score, ScorePresentType presentType) { }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,37,36,53,0],[38,41,38,62,0],[41,44,41,48,0],[41,49,41,53,0],[41,58,41,63,0],[44,60,44,64,0],[44,65,44,69,0],[44,74,44,79,0],[47,51,47,55,0],[47,56,47,60,0],[50,9,50,85,0],[53,9,53,52,0],[54,9,54,51,0],[58,41,58,45,0],[58,46,58,50,0],[58,55,58,60,0],[61,49,61,53,0],[61,54,61,58,0],[61,63,61,68,0],[63,60,63,90,0],[65,9,65,121,0],[67,9,67,78,0],[79,9,79,86,0],[80,9,80,10,0],[81,13,81,30,0],[82,13,82,42,0],[83,13,83,71,0],[85,13,85,86,0],[86,13,86,45,0],[88,13,92,15,0],[93,9,93,10,0],[97,9,97,10,0],[98,13,98,42,0],[99,13,102,16,0],[103,9,103,10,0],[106,9,106,10,0],[107,13,107,33,0],[109,13,109,37,0],[110,13,110,14,0],[112,17,112,79,0],[115,17,115,41,0],[116,17,116,18,0],[117,21,117,65,0],[118,21,118,92,0],[119,17,119,18,0],[121,17,121,41,0],[122,21,122,83,0],[124,17,124,83,0],[126,17,126,37,0],[127,17,127,18,0],[128,21,128,45,0],[130,21,130,68,0],[131,21,131,59,0],[135,21,135,71,0],[135,71,135,95,0],[135,95,135,107,0],[136,21,136,74,0],[136,74,136,98,0],[136,98,136,110,0],[137,17,137,18,0],[139,17,139,57,0],[140,13,140,14,0],[142,13,142,40,0],[142,40,142,57,0],[142,57,142,59,0],[143,13,143,56,0],[144,13,144,60,0],[146,13,146,103,0],[148,13,148,35,0],[149,13,149,31,0],[151,13,151,69,0],[152,13,153,13,0],[153,13,153,14,0],[153,14,154,17,0],[154,17,154,40,0],[154,40,155,21,0],[155,21,155,41,0],[155,41,157,21,0],[157,21,157,41,0],[157,41,158,13,0],[158,13,158,14,0],[158,14,158,22,0],[159,9,159,10,0],[162,9,162,10,0],[163,13,163,35,0],[164,13,164,31,0],[166,13,166,34,0],[167,13,167,14,0],[172,17,172,37,0],[173,13,173,14,0],[175,13,175,14,0],[177,17,177,80,0],[177,80,177,109,0],[177,109,177,127,0],[177,127,177,136,0],[177,136,177,148,0],[178,13,178,14,0],[179,9,179,10,0],[182,9,182,10,0],[184,13,184,33,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,33,0],[190,17,190,38,0],[191,9,191,10,0],[198,9,198,10,0],[199,13,199,78,0],[200,13,200,54,0],[201,17,201,40,0],[203,13,203,85,0],[204,13,204,62,0],[205,17,205,48,0],[207,13,207,55,0],[208,13,208,58,0],[209,9,209,10,0],[212,9,212,10,0],[213,13,216,55,0],[216,55,216,68,0],[216,68,217,58,0],[217,58,217,71,0],[217,71,219,15,0],[221,13,221,30,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,43,0],[227,13,227,14,0],[228,17,228,98,0],[229,17,229,30,0],[234,13,234,37,0],[235,13,235,14,0],[236,17,236,72,0],[238,17,247,19,0],[249,17,249,133,0],[251,17,252,17,0],[252,17,252,18,0],[252,18,253,21,0],[253,21,253,50,0],[253,50,255,21,0],[255,21,256,21,0],[256,21,256,22,0],[256,22,258,25,0],[258,25,258,52,0],[258,52,259,29,0],[259,29,259,41,0],[259,41,260,21,0],[260,21,260,22,0],[260,22,260,24,0],[260,24,261,17,0],[261,17,261,18,0],[261,18,262,17,0],[262,17,262,18,0],[262,18,263,21,0],[263,21,263,50,0],[263,50,264,17,0],[264,17,264,18,0],[264,18,264,20,0],[265,13,265,14,0],[267,13,267,14,0],[268,17,268,40,0],[269,17,269,29,0],[270,13,270,14,0],[272,13,272,25,0],[273,9,273,10,0],[276,9,276,10,0],[277,13,277,65,0],[278,13,278,14,0],[279,17,279,38,0],[280,17,280,29,0],[283,13,283,40,0],[284,9,284,10,0],[287,9,287,10,0],[288,13,288,34,0],[289,13,289,38,0],[290,9,290,10,0],[292,73,295,10,0],[298,9,298,10,0],[299,13,299,63,0],[301,13,301,33,0],[301,33,301,54,0],[301,54,301,120,0],[303,13,303,56,0],[303,56,303,77,0],[303,77,314,16,0],[316,13,316,28,0],[317,9,317,10,0],[323,53,323,119,0],[329,52,331,75,0],[331,75,331,99,0],[331,99,333,116,0],[336,9,336,10,0],[337,13,337,39,0],[338,13,338,57,0],[339,9,339,10,0],[341,45,341,50,0],[343,86,343,87,0],[343,88,343,89,0]]);
+    </script>
+  </body>
+</html>

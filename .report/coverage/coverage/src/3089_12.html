@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/API/APIRequest.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Globalization;
+using System.Threading;
+using Newtonsoft.Json;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.IO.Network;
+using osu.Framework.Logging;
+using osu.Game.Extensions;
+using osu.Game.Online.API.Requests.Responses;
+
+namespace osu.Game.Online.API
+{
+    /// &lt;summary&gt;
+    /// An API request with a well-defined response type.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;T&quot;&gt;Type of the response (used for deserialisation).&lt;/typeparam&gt;
+    public abstract class APIRequest&lt;T&gt; : APIRequest where T : class
+    {
+        protected override WebRequest CreateWebRequest() =&gt; new OsuJsonWebRequest&lt;T&gt;(Uri);
+
+        /// &lt;summary&gt;
+        /// The deserialised response object. May be null if the request or deserialisation failed.
+        /// &lt;/summary&gt;
+        public T? Response { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Invoked on successful completion of an API request.
+        /// This will be scheduled to the API&#39;s internal scheduler (run on update thread automatically).
+        /// &lt;/summary&gt;
+        public new event APISuccessHandler&lt;T&gt;? Success;
+
+        protected APIRequest()
+        {
+            base.Success += () =&gt; Success?.Invoke(Response!);
+        }
+
+        protected override void PostProcess()
+        {
+            base.PostProcess();
+
+            if (WebRequest != null)
+            {
+                Response = ((OsuJsonWebRequest&lt;T&gt;)WebRequest).ResponseObject;
+                Logger.Log($&quot;{GetType().ReadableName()} finished with response size of {WebRequest.ResponseStream.Length:#,0} bytes&quot;, LoggingTarget.Network);
+            }
+
+            if (Response == null)
+                TriggerFailure(new ArgumentNullException(nameof(Response)));
+        }
+
+        internal void TriggerSuccess(T result)
+        {
+            if (Response != null)
+                throw new InvalidOperationException(&quot;Attempted to trigger success more than once&quot;);
+
+            Response = result;
+
+            TriggerSuccess();
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// AN API request with no specified response type.
+    /// &lt;/summary&gt;
+    public abstract class APIRequest
+    {
+        protected abstract string Target { get; }
+
+        protected virtual WebRequest CreateWebRequest() =&gt; new OsuWebRequest(Uri);
+
+        protected virtual string Uri =&gt; $@&quot;{API!.Endpoints.APIUrl}/api/v2/{Target}&quot;;
+
+        protected IAPIProvider? API;
+
+        protected WebRequest? WebRequest;
+
+        /// &lt;summary&gt;
+        /// The currently logged in user. Note that this will only be populated during &lt;see cref=&quot;Perform&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected APIUser? User { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Invoked on successful completion of an API request.
+        /// This will be scheduled to the API&#39;s internal scheduler (run on update thread automatically).
+        /// &lt;/summary&gt;
+        public event APISuccessHandler? Success;
+
+        /// &lt;summary&gt;
+        /// Invoked on failure to complete an API request.
+        /// This will be scheduled to the API&#39;s internal scheduler (run on update thread automatically).
+        /// &lt;/summary&gt;
+        public event APIFailureHandler? Failure;
+
+        private readonly Lock completionStateLock = new Lock();
+
+        /// &lt;summary&gt;
+        /// The state of this request, from an outside perspective.
+        /// This is used to ensure correct notification events are fired.
+        /// &lt;/summary&gt;
+        [JsonIgnore]
+        public APIRequestCompletionState CompletionState { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Should be called before &lt;see cref=&quot;Perform&quot;/&gt; to give API context.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This allows scheduling of operations back to the correct thread (which may be required before &lt;see cref=&quot;Perform&quot;/&gt; is called).
+        /// &lt;/remarks&gt;
+        public void AttachAPI(IAPIProvider apiAccess)
+        {
+            if (API != null &amp;&amp; API != apiAccess)
+                throw new InvalidOperationException(&quot;Attached API cannot be changed after initial set.&quot;);
+
+            API = apiAccess;
+        }
+
+        public void Perform()
+        {
+            if (API == null)
+            {
+                Fail(new NotSupportedException($&quot;A {nameof(APIAccess)} is required to perform requests.&quot;));
+                return;
+            }
+
+            User = API.LocalUser.Value;
+
+            if (isFailing) return;
+
+            WebRequest = CreateWebRequest();
+            WebRequest.Failed += Fail;
+            WebRequest.AllowRetryOnTimeout = false;
+
+            WebRequest.AddHeader(@&quot;Accept-Language&quot;, API.Language.ToCultureCode());
+            WebRequest.AddHeader(@&quot;x-api-version&quot;, API.APIVersion.ToString(CultureInfo.InvariantCulture));
+
+            if (!string.IsNullOrEmpty(API.AccessToken))
+                WebRequest.AddHeader(@&quot;Authorization&quot;, $@&quot;Bearer {API.AccessToken}&quot;);
+
+            if (isFailing) return;
+
+            try
+            {
+                Logger.Log($@&quot;Performing request {this}&quot;, LoggingTarget.Network);
+                WebRequest.Perform();
+            }
+            catch (OperationCanceledException)
+            {
+                // ignore this. internally Perform is running async and the fail state may have changed since
+                // the last check of `isFailing` above.
+            }
+
+            if (isFailing) return;
+
+            PostProcess();
+
+            if (isFailing) return;
+
+            TriggerSuccess();
+        }
+
+        /// &lt;summary&gt;
+        /// Perform any post-processing actions after a successful request.
+        /// &lt;/summary&gt;
+        protected virtual void PostProcess()
+        {
+        }
+
+        internal void TriggerSuccess()
+        {
+            Debug.Assert(API != null);
+
+            lock (completionStateLock)
+            {
+                if (CompletionState != APIRequestCompletionState.Waiting)
+                    return;
+
+                CompletionState = APIRequestCompletionState.Completed;
+            }
+
+            API.Schedule(() =&gt; Success?.Invoke());
+        }
+
+        internal void TriggerFailure(Exception e)
+        {
+            Debug.Assert(API != null);
+
+            lock (completionStateLock)
+            {
+                if (CompletionState != APIRequestCompletionState.Waiting)
+                    return;
+
+                CompletionState = APIRequestCompletionState.Failed;
+            }
+
+            API.Schedule(() =&gt; Failure?.Invoke(e));
+        }
+
+        public void Cancel() =&gt; Fail(new OperationCanceledException(@&quot;Request cancelled&quot;));
+
+        public void Fail(Exception e)
+        {
+            lock (completionStateLock)
+            {
+                if (CompletionState != APIRequestCompletionState.Waiting)
+                    return;
+
+                WebRequest?.Abort();
+
+                // in the case of a cancellation we don&#39;t care about whether there&#39;s an error in the response.
+                if (!(e is OperationCanceledException))
+                {
+                    string? responseString = WebRequest?.GetResponseString();
+
+                    // naive check whether there&#39;s an error in the response to avoid unnecessary JSON deserialisation.
+                    if (!string.IsNullOrEmpty(responseString) &amp;&amp; responseString.Contains(@&quot;&quot;&quot;error&quot;&quot;&quot;))
+                    {
+                        try
+                        {
+                            // attempt to decode a displayable error string.
+                            var error = JsonConvert.DeserializeObject&lt;DisplayableError&gt;(responseString);
+                            if (error != null)
+                                e = new APIException(error.ErrorMessage, e, WebRequest?.ResponseStatusCode);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                Logger.Log($@&quot;Failing request {this} ({e})&quot;, LoggingTarget.Network);
+                TriggerFailure(e);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Whether this request is in a failing or failed state.
+        /// &lt;/summary&gt;
+        private bool isFailing
+        {
+            get
+            {
+                lock (completionStateLock)
+                    return CompletionState == APIRequestCompletionState.Failed;
+            }
+        }
+
+        private class DisplayableError
+        {
+            [JsonProperty(&quot;error&quot;)]
+            public string ErrorMessage { get; set; } = string.Empty;
+        }
+    }
+
+    public delegate void APIFailureHandler(Exception e);
+
+    public delegate void APISuccessHandler();
+
+    public delegate void APIProgressHandler(long current, long total);
+
+    public delegate void APISuccessHandler&lt;in T&gt;(T content);
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,61,23,90,0],[28,30,28,34,0],[28,35,28,47,0],[36,9,36,31,0],[37,9,37,10,0],[38,13,38,35,0],[38,35,38,61,0],[38,61,38,62,0],[39,9,39,10,0],[42,9,42,10,0],[43,13,43,32,0],[45,13,45,36,0],[46,13,46,14,0],[47,17,47,78,0],[48,17,48,158,0],[49,13,49,14,0],[51,13,51,34,0],[52,17,52,77,0],[53,9,53,10,0],[56,9,56,10,0],[57,13,57,34,0],[58,17,58,100,0],[60,13,60,31,0],[62,13,62,30,0],[63,9,63,10,0],[73,60,73,82,0],[75,41,75,84,0],[84,35,84,39,0],[84,40,84,52,0],[98,9,98,64,0],[105,60,105,64,0],[105,65,105,77,0],[114,9,114,10,0],[115,13,115,49,0],[116,17,116,106,0],[118,13,118,29,0],[119,9,119,10,0],[122,9,122,10,0],[123,13,123,29,0],[124,13,124,14,0],[125,17,125,108,0],[126,17,126,24,0],[129,13,129,40,0],[131,13,131,27,0],[131,28,131,35,0],[133,13,133,45,0],[134,13,134,39,0],[135,13,135,52,0],[137,13,137,84,0],[138,13,138,107,0],[140,13,140,56,0],[141,17,141,86,0],[143,13,143,27,0],[143,28,143,35,0],[146,13,146,14,0],[147,17,147,82,0],[148,17,148,38,0],[149,13,149,14,0],[150,13,150,47,0],[151,13,151,14,0],[154,13,154,14,0],[156,13,156,27,0],[156,28,156,35,0],[158,13,158,27,0],[160,13,160,27,0],[160,28,160,35,0],[162,13,162,30,0],[163,9,163,10,0],[169,9,169,10,0],[170,9,170,10,0],[173,9,173,10,0],[174,13,174,39,0],[177,13,177,14,0],[178,17,178,74,0],[179,21,179,28,0],[181,17,181,71,0],[182,13,182,14,0],[184,13,184,32,0],[184,32,184,49,0],[184,49,184,51,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,39,0],[192,13,192,14,0],[193,17,193,74,0],[194,21,194,28,0],[196,17,196,68,0],[197,13,197,14,0],[199,13,199,32,0],[199,32,199,50,0],[199,50,199,52,0],[200,9,200,10,0],[202,33,202,91,0],[205,9,205,10,0],[207,13,207,14,0],[208,17,208,74,0],[209,21,209,28,0],[211,17,211,37,0],[214,17,214,56,0],[215,17,215,18,0],[216,21,216,78,0],[219,21,219,104,0],[220,21,220,22,0],[222,25,222,26,0],[224,29,224,105,0],[225,29,225,47,0],[226,33,226,109,0],[227,25,227,26,0],[228,25,228,30,0],[229,25,229,26,0],[230,25,230,26,0],[231,21,231,22,0],[232,17,232,18,0],[234,17,234,85,0],[235,17,235,35,0],[236,13,236,14,0],[237,9,237,10,0],[245,13,245,14,0],[247,21,247,80,0],[248,13,248,14,0],[254,42,254,46,0],[254,47,254,51,0],[254,56,254,68,0]]);
+    </script>
+  </body>
+</html>

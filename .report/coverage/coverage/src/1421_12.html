@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Storyboards/StoryboardSprite.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Graphics;
+using osu.Game.Storyboards.Commands;
+using osu.Game.Storyboards.Drawables;
+using osuTK;
+
+namespace osu.Game.Storyboards
+{
+    public class StoryboardSprite : IStoryboardElementWithDuration
+    {
+        public readonly List&lt;StoryboardLoopingGroup&gt; LoopingGroups = new List&lt;StoryboardLoopingGroup&gt;();
+        public readonly List&lt;StoryboardTriggerGroup&gt; TriggerGroups = new List&lt;StoryboardTriggerGroup&gt;();
+
+        public StoryboardElementSource Source { get; }
+        public string Path { get; }
+        public virtual bool IsDrawable =&gt; HasCommands;
+
+        public Anchor Origin;
+        public Vector2 InitialPosition;
+
+        public readonly StoryboardCommandGroup Commands = new StoryboardCommandGroup();
+
+        public virtual double StartTime
+        {
+            get
+            {
+                // Users that are crafting storyboards using raw osb scripting or external tools may create alpha events far before the actual display time
+                // of sprites.
+                //
+                // To make sure lifetime optimisations work as efficiently as they can, let&#39;s locally find the first time a sprite becomes visible.
+                var alphaCommands = new List&lt;StoryboardCommand&lt;float&gt;&gt;();
+
+                foreach (var command in Commands.Alpha)
+                {
+                    alphaCommands.Add(command);
+                    if (visibleAtStartOrEnd(command))
+                        break;
+                }
+
+                foreach (var loop in LoopingGroups)
+                {
+                    foreach (var command in loop.Alpha)
+                    {
+                        alphaCommands.Add(command);
+                        if (visibleAtStartOrEnd(command))
+                            break;
+                    }
+                }
+
+                if (alphaCommands.Count &gt; 0)
+                {
+                    // Special care is given to cases where there&#39;s one or more no-op transforms (ie transforming from alpha 0 to alpha 0).
+                    // - If a 0-&gt;0 transform exists, we still need to check it to ensure the absolute first start value is non-visible.
+                    // - After ascertaining this, we then check the first non-noop transform to get the true start lifetime.
+                    var firstAlpha = alphaCommands.MinBy(c =&gt; c.StartTime);
+                    var firstRealAlpha = alphaCommands.Where(visibleAtStartOrEnd).MinBy(c =&gt; c.StartTime);
+
+                    if (firstAlpha!.StartValue == 0 &amp;&amp; firstRealAlpha != null)
+                        return firstRealAlpha.StartTime;
+                }
+
+                return EarliestTransformTime;
+
+                bool visibleAtStartOrEnd(StoryboardCommand&lt;float&gt; command) =&gt; command.StartValue &gt; 0 || command.EndValue &gt; 0;
+            }
+        }
+
+        public double EarliestTransformTime
+        {
+            get
+            {
+                // If we got to this point, either no alpha commands were present, or the earliest had a non-zero start value.
+                // The sprite&#39;s StartTime will be determined by the earliest command, regardless of type.
+                double earliestStartTime = Commands.StartTime;
+                foreach (var l in LoopingGroups)
+                    earliestStartTime = Math.Min(earliestStartTime, l.StartTime);
+                return earliestStartTime;
+            }
+        }
+
+        public double EndTime
+        {
+            get
+            {
+                double latestEndTime = Commands.EndTime;
+
+                foreach (var l in LoopingGroups)
+                    latestEndTime = Math.Max(latestEndTime, l.EndTime);
+
+                return latestEndTime;
+            }
+        }
+
+        public double EndTimeForDisplay
+        {
+            get
+            {
+                double latestEndTime = Commands.EndTime;
+
+                foreach (var l in LoopingGroups)
+                    latestEndTime = Math.Max(latestEndTime, l.StartTime + l.Duration * l.TotalIterations);
+
+                return latestEndTime;
+            }
+        }
+
+        public bool HasCommands =&gt; Commands.HasCommands || LoopingGroups.Any(l =&gt; l.HasCommands);
+
+        public StoryboardSprite(StoryboardElementSource source, string path, Anchor origin, Vector2 initialPosition)
+        {
+            Source = source;
+            Path = path;
+            Origin = origin;
+            InitialPosition = initialPosition;
+        }
+
+        public virtual Drawable CreateDrawable() =&gt; new DrawableStoryboardSprite(this);
+
+        public StoryboardLoopingGroup AddLoopingGroup(double loopStartTime, int repeatCount)
+        {
+            var loop = new StoryboardLoopingGroup(loopStartTime, repeatCount);
+            LoopingGroups.Add(loop);
+            return loop;
+        }
+
+        public StoryboardTriggerGroup AddTriggerGroup(string triggerName, double startTime, double endTime, int groupNumber)
+        {
+            var trigger = new StoryboardTriggerGroup(triggerName, startTime, endTime, groupNumber);
+            TriggerGroups.Add(trigger);
+            return trigger;
+        }
+
+        public void ApplyTransforms&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerController triggerController)
+            where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            HashSet&lt;string&gt; appliedProperties = new HashSet&lt;string&gt;();
+
+            // For performance reasons, we need to apply the commands in chronological order.
+            // Not doing so will cause many functions to be interleaved, resulting in O(n^2) complexity.
+            IEnumerable&lt;IStoryboardCommand&gt; commands = Commands.AllCommands;
+            commands = commands.Concat(LoopingGroups.SelectMany(l =&gt; l.AllCommands));
+
+            foreach (var command in commands.OrderBy(c =&gt; c.StartTime))
+            {
+                if (appliedProperties.Add(command.PropertyName))
+                    command.ApplyInitialValue(drawable);
+
+                using (drawable.BeginAbsoluteSequence(command.StartTime))
+                    command.ApplyTransforms(drawable);
+            }
+
+            foreach (var triggerGroup in TriggerGroups)
+                triggerController.Bind(drawable, triggerGroup);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,105,0],[17,9,17,105,0],[19,49,19,53,0],[20,30,20,34,0],[21,43,21,54,0],[26,9,26,88,0],[31,13,31,14,0],[36,17,36,74,0],[38,17,38,24,0],[38,26,38,37,0],[38,38,38,40,0],[38,41,38,55,0],[39,17,39,18,0],[40,21,40,48,0],[41,21,41,54,0],[42,25,42,31,0],[43,17,43,18,0],[45,17,45,24,0],[45,26,45,34,0],[45,35,45,37,0],[45,38,45,51,0],[46,17,46,18,0],[47,21,47,28,0],[47,30,47,41,0],[47,42,47,44,0],[47,45,47,55,0],[48,21,48,22,0],[49,25,49,52,0],[50,25,50,58,0],[51,29,51,35,0],[52,21,52,22,0],[53,17,53,18,0],[55,17,55,45,0],[56,17,56,18,0],[60,21,60,63,0],[60,63,60,74,0],[60,74,60,76,0],[61,21,61,94,0],[61,94,61,105,0],[61,105,61,107,0],[63,21,63,79,0],[64,25,64,57,0],[65,17,65,18,0],[67,17,67,46,0],[69,79,69,125,0],[70,13,70,14,0],[76,13,76,14,0],[79,17,79,63,0],[80,17,80,24,0],[80,26,80,31,0],[80,32,80,34,0],[80,35,80,48,0],[81,21,81,82,0],[82,17,82,42,0],[83,13,83,14,0],[89,13,89,14,0],[90,17,90,57,0],[92,17,92,24,0],[92,26,92,31,0],[92,32,92,34,0],[92,35,92,48,0],[93,21,93,72,0],[95,17,95,38,0],[96,13,96,14,0],[102,13,102,14,0],[103,17,103,57,0],[105,17,105,24,0],[105,26,105,31,0],[105,32,105,34,0],[105,35,105,48,0],[106,21,106,107,0],[108,17,108,38,0],[109,13,109,14,0],[112,36,112,83,0],[112,83,112,96,0],[112,96,112,97,0],[114,9,114,117,0],[115,9,115,10,0],[116,13,116,29,0],[117,13,117,25,0],[118,13,118,29,0],[119,13,119,47,0],[120,9,120,10,0],[122,53,122,87,0],[125,9,125,10,0],[126,13,126,79,0],[127,13,127,37,0],[128,13,128,25,0],[129,9,129,10,0],[132,9,132,10,0],[133,13,133,100,0],[134,13,134,40,0],[135,13,135,28,0],[136,9,136,10,0],[140,9,140,10,0],[141,13,141,71,0],[145,13,145,77,0],[146,13,146,70,0],[146,70,146,83,0],[146,83,146,86,0],[148,13,148,20,0],[148,22,148,33,0],[148,34,148,36,0],[148,37,148,59,0],[148,59,148,70,0],[148,70,148,71,0],[149,13,149,14,0],[150,17,150,65,0],[151,21,151,57,0],[153,17,153,74,0],[154,21,154,55,0],[155,13,155,14,0],[157,13,157,20,0],[157,22,157,38,0],[157,39,157,41,0],[157,42,157,55,0],[158,17,158,64,0],[159,9,159,10,0]]);
+    </script>
+  </body>
+</html>

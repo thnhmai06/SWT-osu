@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Components/FormSampleSet.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Backgrounds;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Overlays;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Edit.Components
+{
+    public partial class FormSampleSet : CompositeDrawable, IHasCurrentValue&lt;EditorBeatmapSkin.SampleSet?&gt;
+    {
+        public Bindable&lt;EditorBeatmapSkin.SampleSet?&gt; Current
+        {
+            get =&gt; current.Current;
+            set =&gt; current.Current = value;
+        }
+
+        public Func&lt;FileInfo, string, string&gt;? SampleAddRequested { get; init; }
+        public Action&lt;string&gt;? SampleRemoveRequested { get; init; }
+
+        private readonly BindableWithCurrent&lt;EditorBeatmapSkin.SampleSet?&gt; current = new BindableWithCurrent&lt;EditorBeatmapSkin.SampleSet?&gt;();
+        private readonly Dictionary&lt;(string name, string bank), SampleButton&gt; buttons = new Dictionary&lt;(string, string), SampleButton&gt;();
+        private readonly Bindable&lt;DirectoryInfo?&gt; lastSelectedFileDirectory = new Bindable&lt;DirectoryInfo?&gt;();
+
+        private FormControlBackground background = null!;
+        private FormFieldCaption caption = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            Masking = true;
+            CornerRadius = 5;
+            CornerExponent = 2.5f;
+
+            InternalChildren = new Drawable[]
+            {
+                background = new FormControlBackground
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
+                new FillFlowContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Padding = new MarginPadding(9),
+                    Spacing = new Vector2(7),
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        caption = new FormFieldCaption(),
+                        new GridContainer
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            RowDimensions = Enumerable.Repeat(new Dimension(GridSizeMode.AutoSize), 4).ToArray(),
+                            ColumnDimensions = Enumerable.Repeat(new Dimension(GridSizeMode.AutoSize), 5).ToArray(),
+                            Content = createTableContent().ToArray(),
+                        }
+                    },
+                },
+            };
+        }
+
+        private IEnumerable&lt;Drawable[]&gt; createTableContent()
+        {
+            string[] columns = HitSampleInfo.ALL_ADDITIONS.Prepend(HitSampleInfo.HIT_NORMAL).ToArray();
+            string[] rows = HitSampleInfo.ALL_BANKS;
+
+            yield return columns.Select(makeTableHeading).Prepend(Empty()).ToArray();
+
+            foreach (string row in rows)
+            {
+                List&lt;Drawable&gt; drawables = [makeTableHeading(row)];
+
+                foreach (string col in columns)
+                    drawables.Add(buttons[(col, row)] = makeButton());
+
+                yield return drawables.ToArray();
+            }
+        }
+
+        private OsuSpriteText makeTableHeading(string text) =&gt; new OsuSpriteText
+        {
+            Text = text,
+            Font = OsuFont.Style.Caption1,
+            Anchor = Anchor.Centre,
+            Origin = Anchor.Centre,
+        };
+
+        private SampleButton makeButton() =&gt; new SampleButton
+        {
+            Width = 60,
+            Anchor = Anchor.Centre,
+            Origin = Anchor.Centre,
+            Margin = new MarginPadding(5),
+            SampleAddRequested = SampleAddRequested,
+            SampleRemoveRequested = SampleRemoveRequested,
+            LastSelectedFileDirectory = { BindTarget = lastSelectedFileDirectory },
+        };
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            updateState();
+            Current.BindValueChanged(setChanged, true);
+        }
+
+        private void setChanged(ValueChangedEvent&lt;EditorBeatmapSkin.SampleSet?&gt; valueChangedEvent)
+        {
+            var set = valueChangedEvent.NewValue;
+
+            caption.Caption = set?.Name ?? default(LocalisableString);
+            Alpha = set != null &amp;&amp; set.SampleSetIndex &gt; 0 ? 1 : 0;
+
+            if (set != null)
+            {
+                foreach (var (sample, button) in buttons)
+                {
+                    button.ExpectedFilename.Value = $@&quot;{sample.bank}-{sample.name}{(set.SampleSetIndex &gt; 1 ? set.SampleSetIndex : null)}&quot;;
+                    button.ActualFilename.Value = set.FindSampleIfExists(sample.name, sample.bank);
+                }
+            }
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            updateState();
+            return true;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            updateState();
+            base.OnHoverLost(e);
+        }
+
+        private void updateState()
+        {
+            caption.Colour = colourProvider.Content2;
+
+            background.VisualStyle = IsHovered ? VisualStyle.Hovered : VisualStyle.Normal;
+        }
+
+        public partial class SampleButton : OsuButton, IHasPopover, IHasContextMenu
+        {
+            /// &lt;summary&gt;
+            /// The expected filename for the sample that this button represents.
+            /// Does not contain extension.
+            /// &lt;/summary&gt;
+            public Bindable&lt;string&gt; ExpectedFilename { get; } = new Bindable&lt;string&gt;();
+
+            /// &lt;summary&gt;
+            /// The actual chosen filename for the sample that this button represent.
+            /// Can be &lt;see langword=&quot;null&quot;/&gt; if the sample is omitted / missing.
+            /// Does contain extension.
+            /// &lt;/summary&gt;
+            public Bindable&lt;string?&gt; ActualFilename { get; } = new Bindable&lt;string?&gt;();
+
+            /// &lt;summary&gt;
+            /// Invoked when a new sample is selected via this button.
+            /// &lt;/summary&gt;
+            public Func&lt;FileInfo, string, string&gt;? SampleAddRequested { get; init; }
+
+            /// &lt;summary&gt;
+            /// Invoked when a sample removal is selected via this button.
+            /// &lt;/summary&gt;
+            public Action&lt;string&gt;? SampleRemoveRequested { get; init; }
+
+            private Bindable&lt;FileInfo?&gt; selectedFile { get; } = new Bindable&lt;FileInfo?&gt;();
+            public Bindable&lt;DirectoryInfo?&gt; LastSelectedFileDirectory { get; } = new Bindable&lt;DirectoryInfo?&gt;();
+
+            private TrianglesV2? triangles { get; set; }
+
+            protected override float HoverLayerFinalAlpha =&gt; 0;
+
+            private Color4? triangleGradientSecondColour;
+            private SpriteIcon icon = null!;
+
+            [Resolved]
+            private OverlayColourProvider overlayColourProvider { get; set; } = null!;
+
+            [Resolved]
+            private EditorBeatmap? editorBeatmap { get; set; }
+
+            private HoverSounds? hoverSounds;
+
+            private ISample? sample;
+
+            public SampleButton()
+                : base(null)
+            {
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                Add(icon = new SpriteIcon
+                {
+                    Icon = FontAwesome.Solid.Plus,
+                    Size = new Vector2(16),
+                    Shadow = true,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                });
+
+                Action = () =&gt;
+                {
+                    if (ActualFilename.Value == null)
+                    {
+                        selectedFile.Value = null;
+                        this.ShowPopover();
+                    }
+                    else
+                        sample?.Play();
+                };
+
+                if (editorBeatmap?.BeatmapSkin != null)
+                    editorBeatmap.BeatmapSkin.BeatmapSkinChanged += recycleSamples;
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Content.CornerRadius = 4;
+
+                Add(triangles = new TrianglesV2
+                {
+                    Thickness = 0.02f,
+                    SpawnRatio = 0.6f,
+                    RelativeSizeAxes = Axes.Both,
+                    Depth = float.MaxValue,
+                });
+
+                ActualFilename.BindValueChanged(_ =&gt; updateState(), true);
+                selectedFile.BindValueChanged(_ =&gt; addSample());
+            }
+
+            private void updateState()
+            {
+                BackgroundColour = ActualFilename.Value == null ? overlayColourProvider.Background3 : overlayColourProvider.Colour3;
+                triangleGradientSecondColour = BackgroundColour.Lighten(0.2f);
+                icon.Icon = ActualFilename.Value == null ? FontAwesome.Solid.Plus : FontAwesome.Solid.Play;
+
+                recycleSamples();
+
+                triangles?.Colour = ColourInfo.GradientVertical(triangleGradientSecondColour.Value, BackgroundColour);
+            }
+
+            private void recycleSamples() =&gt; Schedule(() =&gt;
+            {
+                if (hoverSounds?.Parent == this)
+                {
+                    RemoveInternal(hoverSounds, true);
+                    hoverSounds = null;
+                }
+
+                AddInternal(hoverSounds = (ActualFilename.Value == null ? new HoverClickSounds(HoverSampleSet.Button) : new HoverSounds(HoverSampleSet.Button)));
+
+                sample = ActualFilename.Value != null ? editorBeatmap?.BeatmapSkin?.Skin.Samples?.Get(ActualFilename.Value) : null;
+            });
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                Debug.Assert(triangleGradientSecondColour != null);
+
+                Background.FadeColour(triangleGradientSecondColour.Value, 300, Easing.OutQuint);
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                Background.FadeColour(BackgroundColour, 300, Easing.OutQuint);
+                base.OnHoverLost(e);
+            }
+
+            private void addSample()
+            {
+                if (selectedFile.Value == null)
+                    return;
+
+                this.HidePopover();
+                ActualFilename.Value = SampleAddRequested?.Invoke(selectedFile.Value, ExpectedFilename.Value) ?? selectedFile.Value.ToString();
+                LastSelectedFileDirectory.Value = selectedFile.Value.Directory;
+            }
+
+            private void deleteSample()
+            {
+                if (ActualFilename.Value == null)
+                    return;
+
+                SampleRemoveRequested?.Invoke(ActualFilename.Value);
+                ActualFilename.Value = null;
+            }
+
+            public Popover? GetPopover() =&gt; ActualFilename.Value == null
+                ? new FormFileSelector.FileChooserPopover(SupportedExtensions.AUDIO_EXTENSIONS, selectedFile, LastSelectedFileDirectory.Value?.FullName, allowClear: false)
+                : null;
+
+            public MenuItem[]? ContextMenuItems =&gt;
+                ActualFilename.Value != null
+                    ? [new OsuMenuItem(CommonStrings.ButtonsDelete, MenuItemType.Destructive, deleteSample)]
+                    : null;
+
+            protected override void Dispose(bool isDisposing)
+            {
+                if (editorBeatmap?.BeatmapSkin != null)
+                    editorBeatmap.BeatmapSkin.BeatmapSkinChanged -= recycleSamples;
+                base.Dispose(isDisposing);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,20,40,35,0],[41,20,41,43,0],[44,69,44,73,0],[44,74,44,79,0],[45,56,45,60,0],[45,61,45,66,0],[47,9,47,142,0],[48,9,48,138,0],[49,9,49,110,0],[51,9,51,58,0],[52,9,52,50,0],[55,56,55,60,0],[55,61,55,65,0],[55,70,55,75,0],[59,9,59,10,0],[60,13,60,39,0],[61,13,61,35,0],[63,13,63,28,0],[64,13,64,30,0],[65,13,65,35,0],[67,13,92,15,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,104,0],[98,13,98,53,0],[100,13,100,86,0],[102,13,102,20,0],[102,22,102,32,0],[102,33,102,35,0],[102,36,102,40,0],[103,13,103,14,0],[104,17,104,68,0],[106,17,106,24,0],[106,26,106,36,0],[106,37,106,39,0],[106,40,106,47,0],[107,21,107,71,0],[109,17,109,50,0],[110,13,110,14,0],[111,9,111,10,0],[113,64,119,10,0],[121,46,130,10,0],[133,9,133,10,0],[134,13,134,33,0],[136,13,136,27,0],[137,13,137,56,0],[138,9,138,10,0],[141,9,141,10,0],[142,13,142,50,0],[144,13,144,71,0],[145,13,145,67,0],[147,13,147,29,0],[148,13,148,14,0],[149,17,149,24,0],[149,26,149,46,0],[149,47,149,49,0],[149,50,149,57,0],[150,17,150,18,0],[151,21,151,139,0],[152,21,152,100,0],[153,17,153,18,0],[154,13,154,14,0],[155,9,155,10,0],[158,9,158,10,0],[159,13,159,27,0],[160,13,160,25,0],[161,9,161,10,0],[164,9,164,10,0],[165,13,165,27,0],[166,13,166,33,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,54,0],[173,13,173,91,0],[174,9,174,10,0],[182,56,182,60,0],[182,65,182,87,0],[189,55,189,59,0],[189,64,189,87,0],[194,73,194,77,0],[194,78,194,83,0],[199,60,199,64,0],[199,65,199,70,0],[201,56,201,60,0],[201,65,201,90,0],[202,73,202,77,0],[202,82,202,112,0],[204,46,204,50,0],[204,51,204,55,0],[206,62,206,63,0],[209,13,209,45,0],[212,67,212,71,0],[212,72,212,76,0],[212,81,212,86,0],[215,52,215,56,0],[215,57,215,61,0],[222,19,222,29,0],[223,13,223,14,0],[224,13,224,14,0],[228,13,228,14,0],[229,17,236,20,0],[238,17,239,17,0],[239,17,239,18,0],[239,18,240,21,0],[240,21,240,54,0],[240,54,241,21,0],[241,21,241,22,0],[241,22,242,25,0],[242,25,242,51,0],[242,51,243,25,0],[243,25,243,44,0],[243,44,244,21,0],[244,21,244,22,0],[244,22,246,25,0],[246,25,246,40,0],[246,40,247,17,0],[247,17,247,18,0],[247,18,247,19,0],[249,17,249,56,0],[250,21,250,84,0],[251,13,251,14,0],[254,13,254,14,0],[255,17,255,37,0],[257,17,257,42,0],[259,17,265,20,0],[267,17,267,54,0],[267,54,267,67,0],[267,67,267,75,0],[268,17,268,52,0],[268,52,268,63,0],[268,63,268,65,0],[269,13,269,14,0],[272,13,272,14,0],[273,17,273,133,0],[274,17,274,79,0],[275,17,275,108,0],[277,17,277,34,0],[279,17,279,119,0],[280,13,280,14,0],[282,46,283,13,0],[283,13,283,14,0],[283,14,284,17,0],[284,17,284,49,0],[284,49,285,17,0],[285,17,285,18,0],[285,18,286,21,0],[286,21,286,55,0],[286,55,287,21,0],[287,21,287,40,0],[287,40,288,17,0],[288,17,288,18,0],[288,18,290,17,0],[290,17,290,162,0],[290,162,292,17,0],[292,17,292,132,0],[292,132,293,13,0],[293,13,293,14,0],[293,14,293,15,0],[296,13,296,14,0],[297,17,297,68,0],[299,17,299,97,0],[300,17,300,40,0],[301,13,301,14,0],[304,13,304,14,0],[305,17,305,79,0],[306,17,306,37,0],[307,13,307,14,0],[310,13,310,14,0],[311,17,311,48,0],[312,21,312,28,0],[314,17,314,36,0],[315,17,315,144,0],[316,17,316,80,0],[317,13,317,14,0],[320,13,320,14,0],[321,17,321,50,0],[322,21,322,28,0],[324,17,324,69,0],[325,17,325,45,0],[326,13,326,14,0],[328,45,330,23,0],[333,17,335,27,0],[338,13,338,14,0],[339,17,339,56,0],[340,21,340,84,0],[341,17,341,43,0],[342,13,342,14,0]]);
+    </script>
+  </body>
+</html>

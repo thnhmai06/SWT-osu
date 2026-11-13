@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Scoring/DrainingHealthProcessor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Utils;
+
+namespace osu.Game.Rulesets.Scoring
+{
+    /// &lt;summary&gt;
+    /// A &lt;see cref=&quot;HealthProcessor&quot;/&gt; which continuously drains health.&lt;br /&gt;
+    /// At HP=0, the minimum health reached for a perfect play is 95%.&lt;br /&gt;
+    /// At HP=5, the minimum health reached for a perfect play is 70%.&lt;br /&gt;
+    /// At HP=10, the minimum health reached for a perfect play is 30%.
+    /// &lt;/summary&gt;
+    public partial class DrainingHealthProcessor : HealthProcessor
+    {
+        /// &lt;summary&gt;
+        /// A reasonable allowable error for the minimum health offset from &lt;see cref=&quot;targetMinimumHealth&quot;/&gt;. A 1% error is unnoticeable.
+        /// &lt;/summary&gt;
+        private const double minimum_health_error = 0.01;
+
+        /// &lt;summary&gt;
+        /// The minimum health target at an HP drain rate of 0.
+        /// &lt;/summary&gt;
+        private const double min_health_target = 0.99;
+
+        /// &lt;summary&gt;
+        /// The minimum health target at an HP drain rate of 5.
+        /// &lt;/summary&gt;
+        private const double mid_health_target = 0.9;
+
+        /// &lt;summary&gt;
+        /// The minimum health target at an HP drain rate of 10.
+        /// &lt;/summary&gt;
+        private const double max_health_target = 0.4;
+
+        /// &lt;summary&gt;
+        /// The drain rate as a proportion of the total health drained per millisecond.
+        /// &lt;/summary&gt;
+        public double DrainRate { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The beatmap.
+        /// &lt;/summary&gt;
+        protected IBeatmap Beatmap { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The time at which health starts draining.
+        /// &lt;/summary&gt;
+        protected readonly double DrainStartTime;
+
+        /// &lt;summary&gt;
+        /// An amount of lenience to apply to the drain rate.
+        /// &lt;/summary&gt;
+        protected readonly double DrainLenience;
+
+        private readonly List&lt;HealthIncrease&gt; healthIncreases = new List&lt;HealthIncrease&gt;();
+
+        private double gameplayEndTime;
+        private double targetMinimumHealth;
+
+        private PeriodTracker noDrainPeriodTracker;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;DrainingHealthProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;drainStartTime&quot;&gt;The time after which draining should begin.&lt;/param&gt;
+        /// &lt;param name=&quot;drainLenience&quot;&gt;A lenience to apply to the default drain rate.&lt;br /&gt;
+        /// A value of 0 uses the default drain rate.&lt;br /&gt;
+        /// A value of 0.5 halves the drain rate.&lt;br /&gt;
+        /// A value of 1 completely removes drain.&lt;/param&gt;
+        public DrainingHealthProcessor(double drainStartTime, double drainLenience = 0)
+        {
+            DrainStartTime = drainStartTime;
+            DrainLenience = Math.Clamp(drainLenience, 0, 1);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (noDrainPeriodTracker?.IsInAny(Time.Current) == true)
+                return;
+
+            // When jumping in and out of gameplay time within a single frame, health should only be drained for the period within the gameplay time
+            double lastGameplayTime = Math.Clamp(Time.Current - Time.Elapsed, DrainStartTime, gameplayEndTime);
+            double currentGameplayTime = Math.Clamp(Time.Current, DrainStartTime, gameplayEndTime);
+
+            if (DrainLenience &lt; 1)
+                Health.Value -= DrainRate * (currentGameplayTime - lastGameplayTime);
+        }
+
+        public override void ApplyBeatmap(IBeatmap beatmap)
+        {
+            Beatmap = beatmap;
+
+            if (beatmap.HitObjects.Count &gt; 0)
+                gameplayEndTime = beatmap.HitObjects[^1].GetEndTime();
+
+            noDrainPeriodTracker = new PeriodTracker(
+                beatmap.Breaks.Select(breakPeriod =&gt;
+                    new Period(
+                        beatmap.HitObjects
+                               .Select(hitObject =&gt; hitObject.GetEndTime())
+                               .Where(endTime =&gt; endTime &lt;= breakPeriod.StartTime)
+                               .DefaultIfEmpty(double.MinValue)
+                               .Last(),
+                        beatmap.HitObjects
+                               .Select(hitObject =&gt; hitObject.StartTime)
+                               .Where(startTime =&gt; startTime &gt;= breakPeriod.EndTime)
+                               .DefaultIfEmpty(double.MaxValue)
+                               .First()
+                    )));
+
+            targetMinimumHealth = IBeatmapDifficultyInfo.DifficultyRange(beatmap.Difficulty.DrainRate, min_health_target, mid_health_target, max_health_target);
+
+            // Add back a portion of the amount of HP to be drained, depending on the lenience requested.
+            targetMinimumHealth += DrainLenience * (1 - targetMinimumHealth);
+
+            // Ensure the target HP is within an acceptable range.
+            targetMinimumHealth = Math.Clamp(targetMinimumHealth, 0, 1);
+
+            base.ApplyBeatmap(beatmap);
+        }
+
+        protected override void ApplyResultInternal(JudgementResult result)
+        {
+            base.ApplyResultInternal(result);
+
+            if (IsSimulating &amp;&amp; !result.Type.IsBonus())
+            {
+                healthIncreases.Add(new HealthIncrease(
+                    result.HitObject.GetEndTime() + result.TimeOffset,
+                    GetHealthIncreaseFor(result)));
+            }
+        }
+
+        protected override bool CheckDefaultFailCondition(JudgementResult result)
+        {
+            if (result.Judgement.MaxResult.IsBonus() || result.Type == HitResult.IgnoreHit)
+                return false;
+
+            return base.CheckDefaultFailCondition(result);
+        }
+
+        protected override void Reset(bool storeResults)
+        {
+            base.Reset(storeResults);
+
+            if (storeResults)
+                DrainRate = ComputeDrainRate();
+
+            healthIncreases.Clear();
+        }
+
+        protected virtual double ComputeDrainRate()
+        {
+            if (healthIncreases.Count &lt;= 1)
+                return 0;
+
+            int adjustment = 1;
+            double result = 1;
+
+            // Although we expect the following loop to converge within 30 iterations (health within 1/2^31 accuracy of the target),
+            // we&#39;ll still keep a safety measure to avoid infinite loops by detecting overflows.
+            while (adjustment &gt; 0)
+            {
+                double currentHealth = 1;
+                double lowestHealth = 1;
+                int currentBreak = 0;
+
+                for (int i = 0; i &lt; healthIncreases.Count; i++)
+                {
+                    double currentTime = healthIncreases[i].Time;
+                    double lastTime = i &gt; 0 ? healthIncreases[i - 1].Time : DrainStartTime;
+
+                    while (currentBreak &lt; Beatmap.Breaks.Count &amp;&amp; Beatmap.Breaks[currentBreak].EndTime &lt;= currentTime)
+                    {
+                        // If two hitobjects are separated by a break period, there is no drain for the full duration between the hitobjects.
+                        // This differs from legacy (version &lt; 8) beatmaps which continue draining until the break section is entered,
+                        // but this shouldn&#39;t have a noticeable impact in practice.
+                        lastTime = currentTime;
+                        currentBreak++;
+                    }
+
+                    // Apply health adjustments
+                    currentHealth -= (currentTime - lastTime) * result;
+                    lowestHealth = Math.Min(lowestHealth, currentHealth);
+                    currentHealth = Math.Min(1, currentHealth + healthIncreases[i].Amount);
+
+                    // Common scenario for when the drain rate is definitely too harsh
+                    if (lowestHealth &lt; 0)
+                        break;
+                }
+
+                // Stop if the resulting health is within a reasonable offset from the target
+                if (Math.Abs(lowestHealth - targetMinimumHealth) &lt;= minimum_health_error)
+                    break;
+
+                // This effectively works like a binary search - each iteration the search space moves closer to the target, but may exceed it.
+                adjustment *= 2;
+                result += 1.0 / adjustment * Math.Sign(lowestHealth - targetMinimumHealth);
+            }
+
+            return result;
+        }
+
+        private record struct HealthIncrease(double Time, double Amount);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[47,35,47,39,1],[47,40,47,52,1],[52,38,52,42,1],[52,43,52,55,1],[64,9,64,92,1],[79,9,79,88,1],[80,9,80,10,1],[81,13,81,45,1],[82,13,82,61,1],[83,9,83,10,1],[86,9,86,10,0],[87,13,87,27,0],[89,13,89,69,0],[90,17,90,24,0],[93,13,93,112,0],[94,13,94,100,0],[96,13,96,35,0],[97,17,97,86,0],[98,9,98,10,0],[101,9,101,10,1],[102,13,102,31,1],[104,13,104,46,1],[105,17,105,71,1],[107,13,109,21,1],[109,21,111,53,0],[111,53,111,75,0],[111,75,112,50,0],[112,50,112,82,0],[112,82,116,53,0],[116,53,116,72,0],[116,72,117,52,0],[117,52,117,84,0],[117,84,120,22,0],[120,22,120,25,1],[122,13,122,161,1],[125,13,125,78,1],[128,13,128,73,1],[130,13,130,40,1],[131,9,131,10,1],[134,9,134,10,1],[135,13,135,46,1],[137,13,137,56,1],[138,13,138,14,1],[139,17,141,52,1],[142,13,142,14,1],[143,9,143,10,1],[146,9,146,10,1],[147,13,147,92,1],[148,17,148,30,0],[150,13,150,59,1],[151,9,151,10,1],[154,9,154,10,1],[155,13,155,38,1],[157,13,157,30,1],[158,17,158,48,1],[160,13,160,37,1],[161,9,161,10,1],[164,9,164,10,1],[165,13,165,44,1],[166,17,166,26,1],[168,13,168,32,0],[169,13,169,31,0],[173,13,173,35,0],[174,13,174,14,0],[175,17,175,42,0],[176,17,176,41,0],[177,17,177,38,0],[179,22,179,31,0],[179,33,179,58,0],[179,60,179,63,0],[180,17,180,18,0],[181,21,181,66,0],[182,21,182,92,0],[184,21,184,119,0],[185,21,185,22,0],[189,25,189,48,0],[190,25,190,40,0],[191,21,191,22,0],[194,21,194,72,0],[195,21,195,74,0],[196,21,196,92,0],[199,21,199,42,0],[200,25,200,31,0],[201,17,201,18,0],[204,17,204,90,0],[205,21,205,27,0],[208,17,208,33,0],[209,17,209,92,0],[210,13,210,14,0],[212,13,212,27,0],[213,9,213,10,1],[215,46,215,57,0],[215,46,215,57,0],[215,59,215,72,0],[215,59,215,72,0]]);
+    </script>
+  </body>
+</html>

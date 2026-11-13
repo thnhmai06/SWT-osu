@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/UserTagControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays;
+using osuTK;
+
+namespace osu.Game.Screens.Ranking
+{
+    public partial class UserTagControl : CompositeDrawable
+    {
+        private readonly BeatmapInfo beatmapInfo;
+
+        public override bool HandlePositionalInput =&gt; true;
+
+        private readonly Cached layout = new Cached();
+
+        private FillFlowContainer&lt;DrawableUserTag&gt; tagFlow = null!;
+
+        private BindableList&lt;UserTag&gt; displayedTags { get; } = new BindableList&lt;UserTag&gt;();
+
+        private Bindable&lt;APITag[]?&gt; apiTags = null!;
+        private BindableDictionary&lt;long, UserTag&gt; relevantTagsById { get; } = new BindableDictionary&lt;long, UserTag&gt;();
+
+        private readonly Bindable&lt;APIBeatmap?&gt; apiBeatmap = new Bindable&lt;APIBeatmap?&gt;();
+
+        private AddNewTagUserTag? addNewTagUserTag;
+
+        /// &lt;summary&gt;
+        /// Determines whether the user can modify the contained tags
+        /// &lt;/summary&gt;
+        public bool Writable { private get; init; }
+
+        private InputManager inputManager = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        public UserTagControl(BeatmapInfo beatmapInfo)
+        {
+            this.beatmapInfo = beatmapInfo;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(SessionStatics sessionStatics)
+        {
+            AutoSizeAxes = Axes.Y;
+
+            InternalChildren = new Drawable[]
+            {
+                new OsuScrollContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Height = 48,
+                    Masking = false,
+                    Child = new FillFlowContainer
+                    {
+                        Direction = FillDirection.Vertical,
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Spacing = new Vector2(8),
+                        Children = new Drawable[]
+                        {
+                            tagFlow = new FillFlowContainer&lt;DrawableUserTag&gt;
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                AutoSizeAxes = Axes.Y,
+                                Direction = FillDirection.Full,
+                                Spacing = new Vector2(4),
+                            }
+                        },
+                    },
+                }
+            };
+
+            if (Writable)
+            {
+                tagFlow.Add(addNewTagUserTag = new AddNewTagUserTag
+                {
+                    AvailableTags = { BindTarget = relevantTagsById },
+                    OnTagSelected = toggleVote,
+                });
+            }
+
+            apiTags = sessionStatics.GetBindable&lt;APITag[]?&gt;(Static.AllBeatmapTags);
+
+            if (apiTags.Value == null)
+            {
+                var listTagsRequest = new ListTagsRequest();
+                listTagsRequest.Success += tags =&gt; apiTags.Value = tags.Tags.ToArray();
+                api.Queue(listTagsRequest);
+            }
+
+            var getBeatmapSetRequest = new GetBeatmapSetRequest(beatmapInfo.BeatmapSet!.OnlineID);
+            getBeatmapSetRequest.Success += set =&gt; apiBeatmap.Value = set.Beatmaps.SingleOrDefault(b =&gt; b.MatchesOnlineID(beatmapInfo));
+            api.Queue(getBeatmapSetRequest);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            apiTags.BindValueChanged(_ =&gt; updateTags());
+            apiBeatmap.BindValueChanged(_ =&gt; updateTags());
+            updateTags();
+
+            displayedTags.BindCollectionChanged(displayTags, true);
+
+            inputManager = GetContainingInputManager()!;
+        }
+
+        private void updateTags()
+        {
+            if (apiTags.Value == null || apiBeatmap.Value == null)
+                return;
+
+            relevantTagsById.Clear();
+            relevantTagsById.AddRange(apiTags.Value
+                                             .Where(t =&gt; t.RulesetId == null || t.RulesetId == beatmapInfo.Ruleset.OnlineID)
+                                             .Select(t =&gt; new KeyValuePair&lt;long, UserTag&gt;(t.Id, new UserTag(t))));
+
+            foreach (var topTag in apiBeatmap.Value.TopTags ?? [])
+            {
+                if (relevantTagsById.TryGetValue(topTag.TagId, out var tag))
+                {
+                    tag.VoteCount.Value = topTag.VoteCount;
+                    tag.Updating.Value = false;
+                    displayedTags.Add(tag);
+                }
+            }
+
+            foreach (long ownTagId in apiBeatmap.Value.OwnTagIds ?? [])
+            {
+                if (relevantTagsById.TryGetValue(ownTagId, out var tag))
+                {
+                    tag.Voted.Value = true;
+                    tag.Updating.Value = false;
+                }
+            }
+        }
+
+        private void displayTags(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            var oldItems = tagFlow.ToArray();
+
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                {
+                    for (int i = 0; i &lt; e.NewItems!.Count; i++)
+                    {
+                        var tag = (UserTag)e.NewItems[i]!;
+                        var drawableTag = new DrawableUserTag(tag) { OnSelected = toggleVote };
+                        tagFlow.Insert(tagFlow.Count, drawableTag);
+                        tag.VoteCount.BindValueChanged(voteCountChanged, true);
+                        layout.Invalidate();
+                    }
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Remove:
+                {
+                    for (int i = 0; i &lt; e.OldItems!.Count; i++)
+                    {
+                        var tag = (UserTag)e.OldItems[i]!;
+                        tag.VoteCount.ValueChanged -= voteCountChanged;
+                        tagFlow.Remove(oldItems[1 + e.OldStartingIndex + i], true);
+                    }
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Reset:
+                {
+                    tagFlow.Clear();
+                    if (Writable) tagFlow.Add(addNewTagUserTag!);
+                    break;
+                }
+            }
+        }
+
+        private void toggleVote(UserTag tag)
+        {
+            if (!Writable)
+                return;
+
+            if (tag.Updating.Value)
+                return;
+
+            tag.Updating.Value = true;
+
+            APIRequest request;
+
+            switch (tag.Voted.Value)
+            {
+                case true:
+                    var removeReq = new RemoveBeatmapTagRequest(beatmapInfo.OnlineID, tag.Id);
+                    removeReq.Success += () =&gt;
+                    {
+                        tag.VoteCount.Value -= 1;
+                        tag.Voted.Value = false;
+                    };
+                    request = removeReq;
+                    break;
+
+                case false:
+                    var addReq = new AddBeatmapTagRequest(beatmapInfo.OnlineID, tag.Id);
+                    addReq.Success += () =&gt;
+                    {
+                        tag.VoteCount.Value += 1;
+                        tag.Voted.Value = true;
+                        if (!displayedTags.Contains(tag))
+                            displayedTags.Add(tag);
+                    };
+                    request = addReq;
+                    break;
+            }
+
+            request.Success += () =&gt; tag.Updating.Value = false;
+            request.Failure += _ =&gt; tag.Updating.Value = false;
+
+            api.Queue(request);
+        }
+
+        private void voteCountChanged(ValueChangedEvent&lt;int&gt; _)
+        {
+            var tagsWithNoVotes = displayedTags.Where(t =&gt; t.VoteCount.Value == 0).ToArray();
+
+            foreach (var tag in tagsWithNoVotes)
+                displayedTags.Remove(tag);
+
+            layout.Invalidate();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!layout.IsValid &amp;&amp; !Contains(inputManager.CurrentState.Mouse.Position))
+            {
+                var sortedTags = new Dictionary&lt;UserTag, int&gt;(
+                    displayedTags.OrderByDescending(t =&gt; t.VoteCount.Value)
+                                 .ThenByDescending(t =&gt; t.Voted.Value)
+                                 .Select((tag, index) =&gt; new KeyValuePair&lt;UserTag, int&gt;(tag, index)));
+
+                foreach (var drawableTag in tagFlow)
+                {
+                    if (drawableTag == addNewTagUserTag)
+                        tagFlow.SetLayoutPosition(drawableTag, float.MinValue);
+                    else
+                        tagFlow.SetLayoutPosition(drawableTag, sortedTags[drawableTag.UserTag]);
+                }
+
+                layout.Validate();
+            }
+        }
+
+        protected override bool OnClick(ClickEvent e) =&gt; true;
+
+        private partial class AddNewTagUserTag : DrawableUserTag, IHasPopover
+        {
+            public BindableDictionary&lt;long, UserTag&gt; AvailableTags { get; } = new BindableDictionary&lt;long, UserTag&gt;();
+
+            public Action&lt;UserTag&gt;? OnTagSelected { get; set; }
+
+            [Resolved]
+            private OverlayColourProvider overlayColourProvider { get; set; } = null!;
+
+            public AddNewTagUserTag()
+                : base(new UserTag(new APITag { Name = &quot;+/add&quot; }), false)
+            {
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                AvailableTags.BindCollectionChanged((_, _) =&gt; Enabled.Value = AvailableTags.Count &gt; 0, true);
+                Action = this.ShowPopover;
+
+                MainBackground.FadeColour(overlayColourProvider.Background2);
+                TagCategoryText.FadeColour(overlayColourProvider.Colour0);
+                TagNameText.FadeColour(overlayColourProvider.Colour0);
+                FadeEdgeEffectTo(0);
+            }
+
+            public Popover GetPopover() =&gt; new AddTagsPopover
+            {
+                AvailableTags = { BindTarget = AvailableTags },
+                OnSelected = OnTagSelected,
+            };
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,55,34,59,0],[36,9,36,55,0],[38,9,38,68,0],[40,55,40,59,0],[40,64,40,91,0],[42,9,42,53,0],[43,70,43,74,0],[43,79,43,118,0],[45,9,45,89,0],[52,32,52,44,0],[52,45,52,50,0],[54,9,54,51,0],[57,36,57,40,0],[57,41,57,45,0],[57,50,57,55,0],[59,9,59,55,0],[60,9,60,10,0],[61,13,61,44,0],[62,9,62,10,0],[66,9,66,10,0],[67,13,67,35,0],[69,13,94,15,0],[96,13,96,26,0],[97,13,97,14,0],[98,17,102,20,0],[103,13,103,14,0],[105,13,105,84,0],[107,13,107,39,0],[108,13,108,14,0],[109,17,109,61,0],[110,17,110,52,0],[110,52,110,87,0],[110,87,110,88,0],[111,17,111,44,0],[112,13,112,14,0],[114,13,114,99,0],[115,13,115,52,0],[115,52,115,105,0],[115,105,115,135,0],[115,135,115,136,0],[115,136,115,137,0],[116,13,116,45,0],[117,9,117,10,0],[120,9,120,10,0],[121,13,121,33,0],[123,13,123,43,0],[123,43,123,55,0],[123,55,123,57,0],[124,13,124,46,0],[124,46,124,58,0],[124,58,124,60,0],[125,13,125,26,0],[127,13,127,68,0],[129,13,129,57,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,67,0],[135,17,135,24,0],[137,13,137,38,0],[138,13,139,58,0],[139,58,139,124,0],[139,124,140,59,0],[140,59,140,112,0],[140,112,140,115,0],[142,13,142,20,0],[142,22,142,32,0],[142,33,142,35,0],[142,36,142,66,0],[143,13,143,14,0],[144,17,144,77,0],[145,17,145,18,0],[146,21,146,60,0],[147,21,147,48,0],[148,21,148,44,0],[149,17,149,18,0],[150,13,150,14,0],[152,13,152,20,0],[152,22,152,35,0],[152,36,152,38,0],[152,39,152,71,0],[153,13,153,14,0],[154,17,154,73,0],[155,17,155,18,0],[156,21,156,44,0],[157,21,157,48,0],[158,17,158,18,0],[159,13,159,14,0],[160,9,160,10,0],[163,9,163,10,0],[164,13,164,46,0],[166,13,166,30,0],[169,17,169,18,0],[170,26,170,35,0],[170,37,170,58,0],[170,60,170,63,0],[171,21,171,22,0],[172,25,172,59,0],[173,25,173,96,0],[174,25,174,68,0],[175,25,175,80,0],[176,25,176,45,0],[177,21,177,22,0],[179,21,179,27,0],[183,17,183,18,0],[184,26,184,35,0],[184,37,184,58,0],[184,60,184,63,0],[185,21,185,22,0],[186,25,186,59,0],[187,25,187,72,0],[188,25,188,84,0],[189,21,189,22,0],[191,21,191,27,0],[195,17,195,18,0],[196,21,196,37,0],[197,21,197,34,0],[197,35,197,66,0],[198,21,198,27,0],[201,9,201,10,0],[204,9,204,10,0],[205,13,205,27,0],[206,17,206,24,0],[208,13,208,36,0],[209,17,209,24,0],[211,13,211,39,0],[215,13,215,37,0],[218,21,218,95,0],[219,21,220,21,0],[220,21,220,22,0],[220,22,221,25,0],[221,25,221,50,0],[221,50,222,25,0],[222,25,222,49,0],[222,49,223,21,0],[223,21,223,22,0],[223,22,223,23,0],[224,21,224,41,0],[225,21,225,27,0],[228,21,228,89,0],[229,21,230,21,0],[230,21,230,22,0],[230,22,231,25,0],[231,25,231,50,0],[231,50,232,25,0],[232,25,232,48,0],[232,48,233,25,0],[233,25,233,58,0],[233,58,234,29,0],[234,29,234,52,0],[234,52,235,21,0],[235,21,235,22,0],[235,22,235,23,0],[236,21,236,38,0],[237,21,237,27,0],[240,13,240,38,0],[240,38,240,64,0],[240,64,240,65,0],[241,13,241,37,0],[241,37,241,63,0],[241,63,241,64,0],[243,13,243,32,0],[244,9,244,10,0],[247,9,247,10,0],[248,13,248,60,0],[248,60,248,82,0],[248,82,248,94,0],[250,13,250,20,0],[250,22,250,29,0],[250,30,250,32,0],[250,33,250,48,0],[251,17,251,43,0],[253,13,253,33,0],[254,9,254,10,0],[257,9,257,10,0],[258,13,258,27,0],[260,13,260,88,0],[261,13,261,14,0],[262,17,263,58,0],[263,58,263,75,0],[263,75,264,57,0],[264,57,264,70,0],[264,70,265,58,0],[265,58,265,100,0],[265,100,265,103,0],[267,17,267,24,0],[267,26,267,41,0],[267,42,267,44,0],[267,45,267,52,0],[268,17,268,18,0],[269,21,269,57,0],[270,25,270,80,0],[272,25,272,97,0],[273,17,273,18,0],[275,17,275,35,0],[276,13,276,14,0],[277,9,277,10,0],[279,58,279,62,0],[283,70,283,74,0],[283,79,283,118,0],[285,53,285,57,0],[285,58,285,62,0],[288,67,288,71,0],[288,72,288,76,0],[288,81,288,86,0],[291,19,291,74,0],[292,13,292,14,0],[293,13,293,14,0],[296,13,296,14,0],[297,17,297,37,0],[299,17,299,63,0],[299,63,299,102,0],[299,102,299,110,0],[300,17,300,43,0],[302,17,302,78,0],[303,17,303,75,0],[304,17,304,71,0],[305,17,305,37,0],[306,13,306,14,0],[308,44,312,14,0]]);
+    </script>
+  </body>
+</html>

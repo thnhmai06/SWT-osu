@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/ArgonHealthDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Layout;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Configuration;
+using osu.Game.Localisation.SkinComponents;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public partial class ArgonHealthDisplay : HealthDisplay, ISerialisableDrawable
+    {
+        public bool UsesFixedAnchor { get; set; }
+
+        [SettingSource(&quot;Bar height&quot;)]
+        public BindableFloat BarHeight { get; } = new BindableFloat(20)
+        {
+            MinValue = 0,
+            MaxValue = 64,
+            Precision = 1
+        };
+
+        [SettingSource(typeof(SkinnableComponentStrings), nameof(SkinnableComponentStrings.UseRelativeSize))]
+        public BindableBool UseRelativeSize { get; } = new BindableBool(true);
+
+        private ArgonHealthDisplayBar mainBar = null!;
+
+        /// &lt;summary&gt;
+        /// Used to show a glow at the end of the main bar, or red &quot;damage&quot; area when missing.
+        /// &lt;/summary&gt;
+        private ArgonHealthDisplayBar glowBar = null!;
+
+        private Container content = null!;
+
+        private static readonly Colour4 main_bar_colour = Colour4.White;
+        private static readonly Colour4 main_bar_glow_colour = Color4Extensions.FromHex(&quot;#7ED7FD&quot;).Opacity(0.5f);
+
+        private ScheduledDelegate? resetMissBarDelegate;
+
+        private bool displayingMiss =&gt; resetMissBarDelegate != null;
+
+        private double glowBarValue;
+
+        private double healthBarValue;
+
+        public const float MAIN_PATH_RADIUS = 10f;
+        private const float padding = MAIN_PATH_RADIUS * 2;
+        private const float glow_path_radius = 40f;
+        private const float main_path_glow_portion = 0.6f;
+
+        private readonly LayoutValue drawSizeLayout = new LayoutValue(Invalidation.DrawSize);
+
+        public ArgonHealthDisplay()
+        {
+            AddLayout(drawSizeLayout);
+
+            // sane default width specification.
+            // this only matters if the health display isn&#39;t part of the default skin
+            // (in which case width will be set to 300 via `ArgonSkin.GetDrawableComponent()`),
+            // and if the user hasn&#39;t applied their own modifications
+            // (which are applied via `SerialisedDrawableInfo.ApplySerialisedInfo()`).
+            Width = 0.98f;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            AutoSizeAxes = Axes.Y;
+
+            InternalChild = content = new Container
+            {
+                Children = new Drawable[]
+                {
+                    new ArgonHealthDisplayBackground
+                    {
+                        RelativeSizeAxes = Axes.Both
+                    },
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        // since we are using bigger path radius we need to expand the draw area outwards to preserve the curve placement
+                        Padding = new MarginPadding(MAIN_PATH_RADIUS - glow_path_radius),
+                        Child = glowBar = new ArgonHealthDisplayBar
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            BarColour = Color4.White,
+                            GlowColour = main_bar_glow_colour,
+                            Blending = BlendingParameters.Additive,
+                            Colour = ColourInfo.GradientHorizontal(Color4.White.Opacity(0.8f), Color4.White),
+                            PathRadius = glow_path_radius,
+                            GlowPortion = (glow_path_radius - MAIN_PATH_RADIUS * (1f - main_path_glow_portion)) / glow_path_radius,
+                        }
+                    },
+                    mainBar = new ArgonHealthDisplayBar
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Blending = BlendingParameters.Additive,
+                        BarColour = main_bar_colour,
+                        GlowColour = main_bar_glow_colour,
+                        PathRadius = MAIN_PATH_RADIUS,
+                        GlowPortion = main_path_glow_portion
+                    }
+                }
+            };
+        }
+
+        private bool pendingMissAnimation;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            HealthProcessor.NewJudgement += onNewJudgement;
+
+            // we&#39;re about to set `RelativeSizeAxes` depending on the value of `UseRelativeSize`.
+            // setting `RelativeSizeAxes` internally transforms absolute sizing to relative and back to keep the size the same,
+            // but that is not what we want in this case, since the width at this point is valid in the *target* sizing mode.
+            // to counteract this, store the numerical value here, and restore it after setting the correct initial relative sizing axes.
+            float previousWidth = Width;
+            UseRelativeSize.BindValueChanged(v =&gt; RelativeSizeAxes = v.NewValue ? Axes.X : Axes.None, true);
+            Width = previousWidth;
+
+            BarHeight.BindValueChanged(_ =&gt; updateContentSize(), true);
+        }
+
+        private void onNewJudgement(JudgementResult result)
+        {
+            // Check the health increase because cases like osu!catch bananas fire `IgnoreMiss`,
+            // which counts as a miss but doesn&#39;t actually subtract any health.
+            pendingMissAnimation |= !result.IsHit &amp;&amp; result.HealthIncrease &lt; 0;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!drawSizeLayout.IsValid)
+            {
+                updateContentSize();
+                drawSizeLayout.Validate();
+            }
+
+            healthBarValue = Interpolation.DampContinuously(healthBarValue, Current.Value, 50, Time.Elapsed);
+            if (!displayingMiss)
+                glowBarValue = Interpolation.DampContinuously(glowBarValue, Current.Value, 50, Time.Elapsed);
+
+            mainBar.Alpha = (float)Interpolation.DampContinuously(mainBar.Alpha, Current.Value &gt; 0 ? 1 : 0, 40, Time.Elapsed);
+            glowBar.Alpha = (float)Interpolation.DampContinuously(glowBar.Alpha, glowBarValue &gt; 0 ? 1 : 0, 40, Time.Elapsed);
+
+            updatePathProgress();
+        }
+
+        protected override void HealthChanged(bool increase)
+        {
+            if (Current.Value &gt;= glowBarValue)
+                finishMissDisplay();
+
+            if (pendingMissAnimation)
+            {
+                triggerMissDisplay();
+                pendingMissAnimation = false;
+            }
+
+            base.HealthChanged(increase);
+        }
+
+        protected override void FinishInitialAnimation(double value)
+        {
+            base.FinishInitialAnimation(value);
+            this.TransformTo(nameof(healthBarValue), value, 500, Easing.OutQuint);
+            this.TransformTo(nameof(glowBarValue), value, 250, Easing.OutQuint);
+        }
+
+        protected override void Flash()
+        {
+            base.Flash();
+
+            if (!displayingMiss)
+            {
+                glowBar.TransformTo(nameof(ArgonHealthDisplayBar.GlowColour), Colour4.White, 30, Easing.OutQuint)
+                       .Then()
+                       .TransformTo(nameof(ArgonHealthDisplayBar.GlowColour), main_bar_glow_colour, 300, Easing.OutQuint);
+            }
+        }
+
+        private void triggerMissDisplay()
+        {
+            resetMissBarDelegate?.Cancel();
+            resetMissBarDelegate = null;
+
+            this.Delay(500).Schedule(() =&gt;
+            {
+                this.TransformTo(nameof(glowBarValue), Current.Value, 300, Easing.OutQuint);
+                finishMissDisplay();
+            }, out resetMissBarDelegate);
+
+            glowBar.TransformTo(nameof(ArgonHealthDisplayBar.BarColour), new Colour4(255, 147, 147, 255), 100, Easing.OutQuint).Then()
+                   .TransformTo(nameof(ArgonHealthDisplayBar.BarColour), new Colour4(255, 93, 93, 255), 800, Easing.OutQuint);
+
+            glowBar.TransformTo(nameof(ArgonHealthDisplayBar.GlowColour), new Colour4(253, 0, 0, 255).Lighten(0.2f))
+                   .TransformTo(nameof(ArgonHealthDisplayBar.GlowColour), new Colour4(253, 0, 0, 255), 800, Easing.OutQuint);
+        }
+
+        private void finishMissDisplay()
+        {
+            if (!displayingMiss)
+                return;
+
+            if (Current.Value &gt; 0)
+            {
+                glowBar.TransformTo(nameof(ArgonHealthDisplayBar.BarColour), main_bar_colour, 300, Easing.In);
+                glowBar.TransformTo(nameof(ArgonHealthDisplayBar.GlowColour), main_bar_glow_colour, 300, Easing.In);
+            }
+
+            resetMissBarDelegate?.Cancel();
+            resetMissBarDelegate = null;
+        }
+
+        private void updateContentSize()
+        {
+            float usableWidth = DrawWidth - padding;
+
+            if (usableWidth &lt; 0) enforceMinimumWidth();
+
+            content.Size = new Vector2(DrawWidth, BarHeight.Value + padding);
+            updatePathProgress();
+
+            void enforceMinimumWidth()
+            {
+                // Switch to absolute in order to be able to define a minimum width.
+                // Then switch back is required. Framework will handle the conversion for us.
+                Axes relativeAxes = RelativeSizeAxes;
+                RelativeSizeAxes = Axes.None;
+
+                Width = padding;
+
+                RelativeSizeAxes = relativeAxes;
+            }
+        }
+
+        private void updatePathProgress()
+        {
+            mainBar.ProgressRange = new Vector2(0f, (float)healthBarValue);
+            glowBar.ProgressRange = new Vector2((float)healthBarValue, (float)Math.Max(glowBarValue, healthBarValue));
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (HealthProcessor.IsNotNull())
+                HealthProcessor.NewJudgement -= onNewJudgement;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,39,27,43,0],[27,44,27,48,0],[30,42,30,46,0],[30,51,35,10,0],[38,47,38,51,0],[38,56,38,78,0],[40,9,40,55,0],[45,9,45,55,0],[47,9,47,43,0],[49,9,49,73,0],[50,9,50,114,0],[54,40,54,68,0],[65,9,65,94,0],[67,9,67,36,0],[68,9,68,10,0],[69,13,69,39,0],[76,13,76,27,0],[77,9,77,10,0],[81,9,81,10,0],[82,13,82,35,0],[84,13,118,15,0],[119,9,119,10,0],[124,9,124,10,0],[125,13,125,33,0],[127,13,127,60,0],[133,13,133,41,0],[134,13,134,51,0],[134,51,134,101,0],[134,101,134,109,0],[135,13,135,35,0],[137,13,137,45,0],[137,45,137,64,0],[137,64,137,72,0],[138,9,138,10,0],[141,9,141,10,0],[144,13,144,80,0],[145,9,145,10,0],[148,9,148,10,0],[149,13,149,27,0],[151,13,151,41,0],[152,13,152,14,0],[153,17,153,37,0],[154,17,154,43,0],[155,13,155,14,0],[157,13,157,110,0],[158,13,158,33,0],[159,17,159,110,0],[161,13,161,127,0],[162,13,162,126,0],[164,13,164,34,0],[165,9,165,10,0],[168,9,168,10,0],[169,13,169,47,0],[170,17,170,37,0],[172,13,172,38,0],[173,13,173,14,0],[174,17,174,38,0],[175,17,175,46,0],[176,13,176,14,0],[178,13,178,42,0],[179,9,179,10,0],[182,9,182,10,0],[183,13,183,48,0],[184,13,184,83,0],[185,13,185,81,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,26,0],[192,13,192,33,0],[193,13,193,14,0],[194,17,196,123,0],[197,13,197,14,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,44,0],[203,13,203,41,0],[205,13,206,13,0],[206,13,206,14,0],[206,14,207,17,0],[207,17,207,93,0],[207,93,208,17,0],[208,17,208,37,0],[208,37,209,13,0],[209,13,209,14,0],[209,14,209,42,0],[211,13,212,127,0],[214,13,215,126,0],[216,9,216,10,0],[219,9,219,10,0],[220,13,220,33,0],[221,17,221,24,0],[223,13,223,35,0],[224,13,224,14,0],[225,17,225,111,0],[226,17,226,117,0],[227,13,227,14,0],[229,13,229,44,0],[230,13,230,41,0],[231,9,231,10,0],[234,9,234,10,0],[235,13,235,53,0],[237,13,237,33,0],[237,34,237,56,0],[239,13,239,78,0],[240,13,240,34,0],[243,13,243,14,0],[246,17,246,54,0],[247,17,247,46,0],[249,17,249,33,0],[251,17,251,49,0],[252,13,252,14,0],[253,9,253,10,0],[256,9,256,10,0],[257,13,257,76,0],[258,13,258,119,0],[259,9,259,10,0],[262,9,262,10,0],[263,13,263,39,0],[265,13,265,45,0],[266,17,266,64,0],[267,9,267,10,0]]);
+    </script>
+  </body>
+</html>

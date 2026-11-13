@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Notifications/ProgressNotification.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.Notifications
+{
+    public partial class ProgressNotification : Notification, IHasCompletionTarget
+    {
+        private const float loading_spinner_size = 22;
+
+        public Func&lt;bool&gt;? CancelRequested { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether the operation represented by the &lt;see cref=&quot;ProgressNotification&quot;/&gt; is still ongoing.
+        /// &lt;/summary&gt;
+        public bool Ongoing =&gt; State != ProgressNotificationState.Completed &amp;&amp; State != ProgressNotificationState.Cancelled;
+
+        protected override bool AllowFlingDismiss =&gt; false;
+
+        public override string PopOutSampleName =&gt; State is ProgressNotificationState.Cancelled ? base.PopOutSampleName : &quot;&quot;;
+
+        /// &lt;summary&gt;
+        /// The function to post completion notifications back to.
+        ///
+        /// If not set, it will be assumed by &lt;see cref=&quot;NotificationOverlay&quot;/&gt; when posting.
+        /// If set, it will override &lt;see cref=&quot;NotificationOverlay&quot;/&gt;&#39;s handling.
+        /// &lt;/summary&gt;
+        public Action&lt;Notification&gt;? CompletionTarget { get; set; }
+
+        /// &lt;summary&gt;
+        /// An action to complete when the completion notification is clicked. Return true to close.
+        /// &lt;/summary&gt;
+        public Func&lt;bool&gt;? CompletionClickAction { get; set; }
+
+        private LocalisableString text;
+
+        public override LocalisableString Text
+        {
+            get =&gt; text;
+            set
+            {
+                text = value;
+                Scheduler.AddOnce(t =&gt; textDrawable.Text = t, text);
+            }
+        }
+
+        public LocalisableString CompletionText { get; set; } = &quot;Task has completed!&quot;;
+
+        private float progress;
+
+        public float Progress
+        {
+            get =&gt; progress;
+            set
+            {
+                progress = value;
+                Scheduler.AddOnce(p =&gt; progressBar.Progress = p, progress);
+            }
+        }
+
+        protected override IconUsage CloseButtonIcon =&gt; FontAwesome.Solid.Times;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // we may have received changes before we were displayed.
+            Scheduler.AddOnce(updateState);
+        }
+
+        private readonly CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+
+        public CancellationToken CancellationToken =&gt; cancellationTokenSource.Token;
+
+        public ProgressNotificationState State
+        {
+            get =&gt; state;
+            set
+            {
+                if (state == value) return;
+
+                state = value;
+
+                Scheduler.AddOnce(updateState);
+                attemptPostCompletion();
+            }
+        }
+
+        private void updateState()
+        {
+            const double colour_fade_duration = 200;
+
+            switch (state)
+            {
+                case ProgressNotificationState.Queued:
+                    Light.Colour = colourQueued;
+                    Light.Pulsate = false;
+                    progressBar.Active = false;
+
+                    IconContent.FadeColour(ColourInfo.GradientVertical(colourQueued, colourQueued.Lighten(0.5f)), colour_fade_duration);
+                    loadingSpinner.Show();
+                    break;
+
+                case ProgressNotificationState.Active:
+                    Light.Colour = colourActive;
+                    Light.Pulsate = true;
+                    progressBar.Active = true;
+
+                    IconContent.FadeColour(ColourInfo.GradientVertical(colourActive, colourActive.Lighten(0.5f)), colour_fade_duration);
+                    loadingSpinner.Show();
+                    break;
+
+                case ProgressNotificationState.Cancelled:
+                    cancellationTokenSource.Cancel();
+
+                    IconContent.FadeColour(ColourInfo.GradientVertical(Color4.Gray, Color4.Gray.Lighten(0.5f)), colour_fade_duration);
+                    cancelSample?.Play();
+                    loadingSpinner.Hide();
+
+                    var icon = new SpriteIcon
+                    {
+                        Icon = FontAwesome.Solid.Ban,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Size = new Vector2(loading_spinner_size),
+                    };
+
+                    IconContent.Add(icon);
+
+                    icon.FadeInFromZero(200, Easing.OutQuint);
+
+                    Light.Colour = colourCancelled;
+                    Light.Pulsate = false;
+                    progressBar.Active = false;
+                    break;
+
+                case ProgressNotificationState.Completed:
+                    loadingSpinner.Hide();
+                    attemptPostCompletion();
+                    break;
+            }
+        }
+
+        private int completionSent;
+
+        /// &lt;summary&gt;
+        /// Attempt to post a completion notification.
+        /// &lt;/summary&gt;
+        private void attemptPostCompletion()
+        {
+            if (state != ProgressNotificationState.Completed) return;
+
+            // This notification may not have been posted yet (and thus may not have a target to post the completion to).
+            // Completion posting will be re-attempted in a scheduled invocation.
+            if (CompletionTarget == null)
+                return;
+
+            // Thread-safe barrier, as this may be called by a web request and also scheduled to the update thread at the same time.
+            if (Interlocked.Exchange(ref completionSent, 1) == 1)
+                return;
+
+            CompletionTarget.Invoke(CreateCompletionNotification());
+
+            Close(false);
+        }
+
+        private ProgressNotificationState state;
+
+        protected virtual Notification CreateCompletionNotification() =&gt; new ProgressCompletionNotification
+        {
+            Activated = CompletionClickAction,
+            Text = CompletionText
+        };
+
+        public override bool DisplayOnTop =&gt; false;
+
+        private readonly ProgressBar progressBar;
+        private Color4 colourQueued;
+        private Color4 colourActive;
+        private Color4 colourCancelled;
+
+        private LoadingSpinner loadingSpinner = null!;
+
+        private Sample? cancelSample;
+
+        private readonly TextFlowContainer textDrawable;
+
+        public ProgressNotification()
+        {
+            IsImportant = false;
+
+            Content.Add(textDrawable = new OsuTextFlowContainer(t =&gt; t.Font = t.Font.With(size: 14, weight: FontWeight.Medium))
+            {
+                AutoSizeAxes = Axes.Y,
+                RelativeSizeAxes = Axes.X,
+            });
+
+            MainContent.Add(progressBar = new ProgressBar
+            {
+                Origin = Anchor.BottomLeft,
+                Anchor = Anchor.BottomLeft,
+                RelativeSizeAxes = Axes.X,
+            });
+
+            // make some extra space for the progress bar.
+            IconContent.Margin = new MarginPadding { Bottom = 5 };
+
+            State = ProgressNotificationState.Queued;
+
+            // don&#39;t close on click by default.
+            Activated = () =&gt; false;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, AudioManager audioManager)
+        {
+            colourQueued = colours.YellowDark;
+            colourActive = colours.Blue;
+            colourCancelled = colours.Red;
+
+            IconContent.AddRange(new Drawable[]
+            {
+                new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colourProvider.Background5,
+                    Depth = float.MaxValue,
+                },
+                loadingSpinner = new LoadingSpinner
+                {
+                    Size = new Vector2(loading_spinner_size),
+                }
+            });
+
+            cancelSample = audioManager.Samples.Get(@&quot;UI/notification-cancel&quot;);
+        }
+
+        public void CompleteSilently()
+        {
+            // This sequence allows the notification to be immediately dismissed without posting a continuation message.
+            CompletionTarget = _ =&gt; { };
+            State = ProgressNotificationState.Completed;
+            Close(false);
+        }
+
+        public override void Close(bool runFlingAnimation)
+        {
+            switch (State)
+            {
+                case ProgressNotificationState.Completed:
+                case ProgressNotificationState.Cancelled:
+                    base.Close(runFlingAnimation);
+                    break;
+
+                case ProgressNotificationState.Active:
+                case ProgressNotificationState.Queued:
+                    if (CancelRequested?.Invoke() != false)
+                        State = ProgressNotificationState.Cancelled;
+                    break;
+            }
+        }
+
+        private partial class ProgressBar : Container
+        {
+            private readonly Box box;
+
+            private Color4 colourActive;
+            private Color4 colourInactive;
+
+            private float progress;
+
+            public float Progress
+            {
+                get =&gt; progress;
+                set
+                {
+                    if (progress == value) return;
+
+                    progress = value;
+                    box.ResizeTo(new Vector2(progress, 1), 100, Easing.OutQuad);
+                }
+            }
+
+            private bool active;
+
+            public bool Active
+            {
+                get =&gt; active;
+                set
+                {
+                    active = value;
+                    this.FadeColour(active ? colourActive : colourInactive, 100);
+                }
+            }
+
+            public ProgressBar()
+            {
+                Children = new[]
+                {
+                    box = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Width = 0,
+                    }
+                };
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours)
+            {
+                colourActive = colours.Blue;
+                Colour = colourInactive = OsuColour.Gray(0.5f);
+                Height = 5;
+            }
+        }
+    }
+
+    public enum ProgressNotificationState
+    {
+        Queued,
+        Active,
+        Completed,
+        Cancelled
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,46,28,50,0],[28,51,28,55,0],[33,32,33,124,0],[35,54,35,59,0],[37,52,37,125,0],[45,57,45,61,0],[45,62,45,66,0],[50,52,50,56,0],[50,57,50,61,0],[56,20,56,24,0],[58,13,58,14,0],[59,17,59,30,0],[60,17,60,40,0],[60,40,60,61,0],[60,61,60,69,0],[61,13,61,14,0],[64,51,64,55,0],[64,56,64,60,0],[64,65,64,86,0],[70,20,70,28,0],[72,13,72,14,0],[73,17,73,34,0],[74,17,74,40,0],[74,40,74,64,0],[74,64,74,76,0],[75,13,75,14,0],[78,57,78,80,0],[81,56,81,60,0],[81,61,81,65,0],[81,70,81,75,0],[84,9,84,10,0],[85,13,85,33,0],[88,13,88,44,0],[89,9,89,10,0],[91,9,91,106,0],[93,55,93,84,0],[97,20,97,25,0],[99,13,99,14,0],[100,17,100,36,0],[100,37,100,44,0],[102,17,102,31,0],[104,17,104,48,0],[105,17,105,41,0],[106,13,106,14,0],[110,9,110,10,0],[113,13,113,27,0],[116,21,116,49,0],[117,21,117,43,0],[118,21,118,48,0],[120,21,120,137,0],[121,21,121,43,0],[122,21,122,27,0],[125,21,125,49,0],[126,21,126,42,0],[127,21,127,47,0],[129,21,129,137,0],[130,21,130,43,0],[131,21,131,27,0],[134,21,134,54,0],[136,21,136,135,0],[137,21,137,42,0],[138,21,138,43,0],[140,21,146,23,0],[148,21,148,43,0],[150,21,150,63,0],[152,21,152,52,0],[153,21,153,43,0],[154,21,154,48,0],[155,21,155,27,0],[158,21,158,43,0],[159,21,159,45,0],[160,21,160,27,0],[162,9,162,10,0],[170,9,170,10,0],[171,13,171,62,0],[171,63,171,70,0],[175,13,175,42,0],[176,17,176,24,0],[179,13,179,66,0],[180,17,180,24,0],[182,13,182,69,0],[184,13,184,26,0],[185,9,185,10,0],[189,74,193,10,0],[195,46,195,51,0],[202,9,202,55,0],[208,9,208,38,0],[209,9,209,10,0],[210,13,210,33,0],[212,13,212,70,0],[212,70,212,127,0],[212,127,216,16,0],[218,13,223,16,0],[226,13,226,67,0],[228,13,228,54,0],[231,13,231,31,0],[231,31,231,36,0],[231,36,231,37,0],[232,9,232,10,0],[236,9,236,10,0],[237,13,237,47,0],[238,13,238,41,0],[239,13,239,43,0],[241,13,253,16,0],[255,13,255,80,0],[256,9,256,10,0],[259,9,259,10,0],[261,13,261,37,0],[261,37,261,38,0],[261,38,261,39,0],[261,39,261,40,0],[261,40,261,41,0],[262,13,262,57,0],[263,13,263,26,0],[264,9,264,10,0],[267,9,267,10,0],[268,13,268,27,0],[272,21,272,51,0],[273,21,273,27,0],[277,21,277,60,0],[278,25,278,69,0],[279,21,279,27,0],[281,9,281,10,0],[294,24,294,32,0],[296,17,296,18,0],[297,21,297,43,0],[297,44,297,51,0],[299,21,299,38,0],[300,21,300,81,0],[301,17,301,18,0],[308,24,308,30,0],[310,17,310,18,0],[311,21,311,36,0],[312,21,312,82,0],[313,17,313,18,0],[316,13,316,33,0],[317,13,317,14,0],[318,17,325,19,0],[326,13,326,14,0],[330,13,330,14,0],[331,17,331,45,0],[332,17,332,64,0],[333,17,333,28,0],[334,13,334,14,0]]);
+    </script>
+  </body>
+</html>

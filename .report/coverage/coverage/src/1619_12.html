@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/Statistics/HitEventTimingDistributionGraph.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Layout;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Rulesets.Scoring;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Ranking.Statistics
+{
+    /// &lt;summary&gt;
+    /// A graph which displays the distribution of hit timing in a series of &lt;see cref=&quot;HitEvent&quot;/&gt;s.
+    /// &lt;/summary&gt;
+    public partial class HitEventTimingDistributionGraph : CompositeDrawable
+    {
+        /// &lt;summary&gt;
+        /// The number of bins on each side of the timing distribution.
+        /// &lt;/summary&gt;
+        private const int timing_distribution_bins = 50;
+
+        /// &lt;summary&gt;
+        /// The total number of bins in the timing distribution, including bins on both sides and the centre bin at 0.
+        /// &lt;/summary&gt;
+        private const int total_timing_distribution_bins = timing_distribution_bins * 2 + 1;
+
+        /// &lt;summary&gt;
+        /// The centre bin, with a timing distribution very close to/at 0.
+        /// &lt;/summary&gt;
+        private const int timing_distribution_centre_bin_index = timing_distribution_bins;
+
+        /// &lt;summary&gt;
+        /// The number of data points shown on each side of the axis below the graph.
+        /// &lt;/summary&gt;
+        private const float axis_points = 5;
+
+        /// &lt;summary&gt;
+        /// The currently displayed hit events.
+        /// &lt;/summary&gt;
+        private readonly IReadOnlyList&lt;HitEvent&gt; hitEvents;
+
+        private readonly IDictionary&lt;HitResult, int&gt;[] bins;
+        private double binSize;
+        private double hitOffset;
+
+        private Bar[]? barDrawables;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;HitEventTimingDistributionGraph&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitEvents&quot;&gt;The &lt;see cref=&quot;HitEvent&quot;/&gt;s to display the timing distribution of.&lt;/param&gt;
+        public HitEventTimingDistributionGraph(IReadOnlyList&lt;HitEvent&gt; hitEvents)
+        {
+            this.hitEvents = hitEvents.Where(e =&gt; e.HitObject.HitWindows != HitWindows.Empty &amp;&amp; e.Result.IsBasic() &amp;&amp; e.Result.IsHit()).ToList();
+            bins = Enumerable.Range(0, total_timing_distribution_bins).Select(_ =&gt; new Dictionary&lt;HitResult, int&gt;()).ToArray&lt;IDictionary&lt;HitResult, int&gt;&gt;();
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            if (hitEvents.Count == 0)
+                return;
+
+            binSize = Math.Ceiling(hitEvents.Max(e =&gt; Math.Abs(e.TimeOffset)) / timing_distribution_bins);
+
+            // Prevent div-by-0 by enforcing a minimum bin size
+            binSize = Math.Max(1, binSize);
+
+            Scheduler.AddOnce(updateDisplay);
+        }
+
+        public void UpdateOffset(double hitOffset)
+        {
+            this.hitOffset = hitOffset;
+            Scheduler.AddOnce(updateDisplay);
+        }
+
+        private void updateDisplay()
+        {
+            bool roundUp = true;
+
+            foreach (var bin in bins)
+                bin.Clear();
+
+            foreach (var e in hitEvents)
+            {
+                double time = e.TimeOffset + hitOffset;
+
+                double binOffset = time / binSize;
+
+                // .NET&#39;s round midpoint handling doesn&#39;t provide a behaviour that works amazingly for display
+                // purposes here. We want midpoint rounding to roughly distribute evenly to each adjacent bucket
+                // so the easiest way is to cycle between downwards and upwards rounding as we process events.
+                if (Math.Abs(binOffset - (int)binOffset) == 0.5)
+                {
+                    binOffset = (int)binOffset + Math.Sign(binOffset) * (roundUp ? 1 : 0);
+                    roundUp = !roundUp;
+                }
+
+                int index = timing_distribution_centre_bin_index + (int)Math.Round(binOffset, MidpointRounding.AwayFromZero);
+
+                // may be out of range when applying an offset. for such cases we can just drop the results.
+                if (index &gt;= 0 &amp;&amp; index &lt; bins.Length)
+                {
+                    bins[index].TryGetValue(e.Result, out int value);
+                    bins[index][e.Result] = ++value;
+                }
+            }
+
+            if (barDrawables == null)
+                createBarDrawables();
+            else
+            {
+                for (int i = 0; i &lt; barDrawables.Length; i++)
+                    barDrawables[i].UpdateOffset(bins[i].Sum(b =&gt; b.Value));
+            }
+        }
+
+        private void createBarDrawables()
+        {
+            int maxCount = bins.Max(b =&gt; b.Values.Sum());
+            barDrawables = bins.Select((_, i) =&gt; new Bar(bins[i], maxCount, i == timing_distribution_centre_bin_index)).ToArray();
+
+            Container axisFlow;
+
+            Padding = new MarginPadding { Horizontal = 5 };
+
+            InternalChild = new GridContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Content = new[]
+                {
+                    new Drawable[]
+                    {
+                        new GridContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Content = new[] { barDrawables }
+                        }
+                    },
+                    new Drawable[]
+                    {
+                        axisFlow = new Container
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            Height = StatisticItem.FONT_SIZE,
+                        }
+                    },
+                },
+                RowDimensions = new[]
+                {
+                    new Dimension(),
+                    new Dimension(GridSizeMode.AutoSize),
+                }
+            };
+
+            // Our axis will contain one centre element + 5 points on each side, each with a value depending on the number of bins * bin size.
+            double maxValue = timing_distribution_bins * binSize;
+            double axisValueStep = maxValue / axis_points;
+
+            axisFlow.Add(new OsuSpriteText
+            {
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Text = &quot;0&quot;,
+                Font = OsuFont.GetFont(size: StatisticItem.FONT_SIZE, weight: FontWeight.SemiBold)
+            });
+
+            for (int i = 1; i &lt;= axis_points; i++)
+            {
+                double axisValue = i * axisValueStep;
+                float position = maxValue == 0 ? 0 : (float)(axisValue / maxValue);
+                float alpha = 1f - position * 0.8f;
+
+                axisFlow.Add(new OsuSpriteText
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativePositionAxes = Axes.X,
+                    X = -position / 2,
+                    Alpha = alpha,
+                    Text = axisValue.ToString(&quot;-0&quot;),
+                    Font = OsuFont.GetFont(size: StatisticItem.FONT_SIZE, weight: FontWeight.SemiBold)
+                });
+
+                axisFlow.Add(new OsuSpriteText
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativePositionAxes = Axes.X,
+                    X = position / 2,
+                    Alpha = alpha,
+                    Text = axisValue.ToString(&quot;+0&quot;),
+                    Font = OsuFont.GetFont(size: StatisticItem.FONT_SIZE, weight: FontWeight.SemiBold)
+                });
+            }
+        }
+
+        private partial class Bar : CompositeDrawable
+        {
+            private readonly IReadOnlyList&lt;KeyValuePair&lt;HitResult, int&gt;&gt; values;
+            private readonly float maxValue;
+            private readonly bool isCentre;
+            private readonly float totalValue;
+
+            private const float minimum_height = 0.02f;
+
+            private float offsetAdjustment;
+
+            private Circle[] boxOriginals = null!;
+
+            private Circle? boxAdjustment;
+
+            private float? lastDrawHeight;
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            private const double duration = 300;
+
+            public Bar(IDictionary&lt;HitResult, int&gt; values, float maxValue, bool isCentre)
+            {
+                this.values = values.OrderBy(v =&gt; v.Key.GetIndexForOrderedDisplay()).ToList();
+                this.maxValue = maxValue;
+                this.isCentre = isCentre;
+                totalValue = values.Sum(v =&gt; v.Value);
+                offsetAdjustment = totalValue;
+
+                RelativeSizeAxes = Axes.Both;
+                Masking = true;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                if (values.Any())
+                {
+                    boxOriginals = values.Select((v, i) =&gt; new Circle
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.BottomCentre,
+                        Origin = Anchor.BottomCentre,
+                        Colour = isCentre &amp;&amp; i == 0 ? Color4.White : colours.ForHitResult(v.Key),
+                        Height = 0,
+                    }).ToArray();
+                    // The bars of the stacked bar graph will be processed (stacked) from the bottom, which is the base position,
+                    // to the top, and the bottom bar should be drawn more toward the front by design,
+                    // while the drawing order is from the back to the front, so the order passed to `InternalChildren` is the opposite.
+                    InternalChildren = boxOriginals.Reverse().ToArray();
+                }
+                else
+                {
+                    // A bin with no value draws a grey dot instead.
+                    InternalChildren = boxOriginals = new[]
+                    {
+                        new Circle
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Anchor = Anchor.BottomCentre,
+                            Origin = Anchor.BottomCentre,
+                            Colour = isCentre ? Color4.White : Color4.Gray,
+                            Height = 0,
+                        }
+                    };
+                }
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Scheduler.AddOnce(updateMetrics, true);
+            }
+
+            protected override bool OnInvalidate(Invalidation invalidation, InvalidationSource source)
+            {
+                if (invalidation.HasFlag(Invalidation.DrawSize))
+                {
+                    if (lastDrawHeight != null &amp;&amp; lastDrawHeight != DrawHeight)
+                        Scheduler.AddOnce(updateMetrics, false);
+                }
+
+                return base.OnInvalidate(invalidation, source);
+            }
+
+            public void UpdateOffset(float adjustment)
+            {
+                bool hasAdjustment = adjustment != totalValue;
+
+                if (boxAdjustment == null)
+                {
+                    if (!hasAdjustment)
+                        return;
+
+                    AddInternal(boxAdjustment = new Circle
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.BottomCentre,
+                        Origin = Anchor.BottomCentre,
+                        Colour = Color4.Yellow,
+                        Blending = BlendingParameters.Additive,
+                        Alpha = 0.6f,
+                        Height = 0,
+                    });
+                }
+
+                offsetAdjustment = adjustment;
+
+                Scheduler.AddOnce(updateMetrics, true);
+            }
+
+            private void updateMetrics(bool animate = true)
+            {
+                float offsetValue = 0;
+
+                for (int i = 0; i &lt; boxOriginals.Length; i++)
+                {
+                    int value = i &lt; values.Count ? values[i].Value : 0;
+
+                    var box = boxOriginals[i];
+
+                    box.MoveToY(offsetForValue(offsetValue) * BoundingBox.Height, duration, Easing.OutQuint);
+                    box.ResizeHeightTo(heightForValue(value), duration, Easing.OutQuint);
+                    offsetValue -= value;
+                }
+
+                if (boxAdjustment != null)
+                    drawAdjustmentBar();
+
+                if (!animate)
+                    FinishTransforms(true);
+
+                lastDrawHeight = DrawHeight;
+            }
+
+            private void drawAdjustmentBar()
+            {
+                bool hasAdjustment = offsetAdjustment != totalValue;
+
+                boxAdjustment.ResizeHeightTo(heightForValue(offsetAdjustment), duration, Easing.OutQuint);
+                boxAdjustment.FadeTo(!hasAdjustment ? 0 : 1, duration, Easing.OutQuint);
+            }
+
+            private float offsetForValue(float value) =&gt; maxValue == 0 ? 0 : (1 - minimum_height) * value / maxValue;
+
+            private float heightForValue(float value) =&gt; minimum_height + offsetForValue(value);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[59,9,59,82,0],[60,9,60,10,0],[61,13,61,51,0],[61,51,61,135,0],[61,135,61,146,0],[62,13,62,84,0],[62,84,62,116,0],[62,116,62,157,0],[63,9,63,10,0],[67,9,67,10,0],[68,13,68,38,0],[69,17,69,24,0],[71,13,71,55,0],[71,55,71,77,0],[71,77,71,107,0],[74,13,74,44,0],[76,13,76,46,0],[77,9,77,10,0],[80,9,80,10,0],[81,13,81,40,0],[82,13,82,46,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,33,0],[89,13,89,20,0],[89,22,89,29,0],[89,30,89,32,0],[89,33,89,37,0],[90,17,90,29,0],[92,13,92,20,0],[92,22,92,27,0],[92,28,92,30,0],[92,31,92,40,0],[93,13,93,14,0],[94,17,94,56,0],[96,17,96,51,0],[101,17,101,65,0],[102,17,102,18,0],[103,21,103,91,0],[104,21,104,40,0],[105,17,105,18,0],[107,17,107,126,0],[110,17,110,55,0],[111,17,111,18,0],[112,21,112,70,0],[113,21,113,53,0],[114,17,114,18,0],[115,13,115,14,0],[117,13,117,38,0],[118,17,118,38,0],[120,13,120,14,0],[121,22,121,31,0],[121,33,121,56,0],[121,58,121,61,0],[122,21,122,67,0],[122,67,122,74,0],[122,74,122,77,0],[123,13,123,14,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,42,0],[128,42,128,56,0],[128,56,128,58,0],[129,13,129,50,0],[129,50,129,119,0],[129,119,129,131,0],[133,13,133,60,0],[135,13,162,15,0],[165,13,165,66,0],[166,13,166,59,0],[168,13,174,16,0],[176,18,176,27,0],[176,29,176,45,0],[176,47,176,50,0],[177,13,177,14,0],[178,17,178,54,0],[179,17,179,84,0],[180,17,180,52,0],[182,17,191,20,0],[193,17,202,20,0],[203,13,203,14,0],[204,9,204,10,0],[217,13,217,51,0],[224,41,224,45,0],[224,46,224,50,0],[224,55,224,60,0],[228,13,228,90,0],[229,13,229,14,0],[230,17,230,51,0],[230,51,230,84,0],[230,84,230,95,0],[231,17,231,42,0],[232,17,232,42,0],[233,17,233,46,0],[233,46,233,53,0],[233,53,233,55,0],[234,17,234,47,0],[236,17,236,46,0],[237,17,237,32,0],[238,13,238,14,0],[242,13,242,14,0],[243,17,243,34,0],[244,17,244,18,0],[245,21,245,60,0],[245,60,252,22,0],[252,22,252,34,0],[256,21,256,73,0],[257,17,257,18,0],[259,17,259,18,0],[261,21,271,23,0],[272,17,272,18,0],[273,13,273,14,0],[276,13,276,14,0],[277,17,277,37,0],[279,17,279,56,0],[280,13,280,14,0],[283,13,283,14,0],[284,17,284,65,0],[285,17,285,18,0],[286,21,286,80,0],[287,25,287,65,0],[288,17,288,18,0],[290,17,290,64,0],[291,13,291,14,0],[294,13,294,14,0],[295,17,295,63,0],[297,17,297,43,0],[298,17,298,18,0],[299,21,299,40,0],[300,25,300,32,0],[302,21,311,24,0],[312,17,312,18,0],[314,17,314,47,0],[316,17,316,56,0],[317,13,317,14,0],[320,13,320,14,0],[321,17,321,39,0],[323,22,323,31,0],[323,33,323,56,0],[323,58,323,61,0],[324,17,324,18,0],[325,21,325,72,0],[327,21,327,47,0],[329,21,329,110,0],[330,21,330,90,0],[331,21,331,42,0],[332,17,332,18,0],[334,17,334,43,0],[335,21,335,41,0],[337,17,337,30,0],[338,21,338,44,0],[340,17,340,45,0],[341,13,341,14,0],[344,13,344,14,0],[345,17,345,69,0],[347,17,347,107,0],[348,17,348,89,0],[349,13,349,14,0],[351,58,351,117,0],[353,58,353,96,0]]);
+    </script>
+  </body>
+</html>

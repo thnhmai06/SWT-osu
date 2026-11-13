@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/RealmPopulatingOnlineLookupSource.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using Realms;
+
+namespace osu.Game.Screens.Select
+{
+    /// &lt;summary&gt;
+    /// This component is designed to perform lookups of online data
+    /// and store portions of it for later local use to the realm database.
+    /// &lt;/summary&gt;
+    /// &lt;example&gt;
+    /// This component is designed to locally persist potentially-volatile online information such as:
+    /// &lt;list type=&quot;bullet&quot;&gt;
+    /// &lt;item&gt;user tags assigned to difficulties of a beatmap,&lt;/item&gt;
+    /// &lt;item&gt;the beatmap&#39;s &lt;see cref=&quot;BeatmapInfo.Status&quot;/&gt;,&lt;/item&gt;
+    /// &lt;item&gt;guest mappers assigned to difficulties of a beatmap,&lt;/item&gt;
+    /// &lt;item&gt;the local user&#39;s best score on a given beatmap.&lt;/item&gt;
+    /// &lt;/list&gt;
+    /// &lt;/example&gt;
+    public partial class RealmPopulatingOnlineLookupSource : Component
+    {
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        public Task&lt;APIBeatmapSet?&gt; GetBeatmapSetAsync(int id, CancellationToken token = default)
+        {
+            var request = new GetBeatmapSetRequest(id);
+            var tcs = new TaskCompletionSource&lt;APIBeatmapSet?&gt;();
+
+            token.Register(request.Cancel);
+
+            // async request success callback is a bit of a dangerous game, but there&#39;s some reasoning for it.
+            // - don&#39;t really want to use `IAPIAccess.PerformAsync()` because we still want to respect request queueing &amp; online status checks
+            // - we want the realm write here to be async because it is known to be slow for some users with large beatmap collections
+            // - at the time of writing `RealmAccess.WriteAsync()` can only be safely called from update thread,
+            //   and API request completion callbacks are automatically marshaled onto update thread scheduler,
+            //   so calling `WriteAsync()` within the callback is a somewhat &quot;nice&quot; way of guaranteeing that the call is safe
+            //   (rather than having to enforce that `GetBeatmapSetAsync()` can only be called from update thread, or locally scheduling)
+            request.Success += async onlineBeatmapSet =&gt;
+            {
+                if (token.IsCancellationRequested)
+                {
+                    tcs.SetCanceled(token);
+                    return;
+                }
+
+                await realm.WriteAsync(r =&gt; updateRealmBeatmapSet(r, onlineBeatmapSet)).ConfigureAwait(true);
+                tcs.SetResult(onlineBeatmapSet);
+            };
+            request.Failure += tcs.SetException;
+            api.Queue(request);
+            return tcs.Task;
+        }
+
+        private static void updateRealmBeatmapSet(Realm r, APIBeatmapSet onlineBeatmapSet)
+        {
+            var onlineBeatmaps = onlineBeatmapSet.Beatmaps.ToDictionary(b =&gt; b.OnlineID);
+
+            var dbBeatmapSets = r.All&lt;BeatmapSetInfo&gt;().Where(b =&gt; b.OnlineID == onlineBeatmapSet.OnlineID);
+
+            foreach (var dbBeatmapSet in dbBeatmapSets)
+            {
+                // note that every single write to realm models is preceded by a guard, even if it technically would write the same value back.
+                // the reason this matters is that doing so avoids triggering realm subscription callbacks.
+                // unfortunately in terms of subscriptions realm treats *every* write to any realm object as a modification,
+                // even if the write was redundant and had no observable effect.
+
+                // notably, `LocallyModified` status is preserved on the set until the user performs an explicit action to get rid of it
+                // (be it updating the set or deciding to discard their changes, removing the set and re-downloading it, etc.)
+                if (dbBeatmapSet.Status != onlineBeatmapSet.Status &amp;&amp; dbBeatmapSet.Status != BeatmapOnlineStatus.LocallyModified)
+                    dbBeatmapSet.Status = onlineBeatmapSet.Status;
+
+                foreach (var dbBeatmap in dbBeatmapSet.Beatmaps)
+                {
+                    if (onlineBeatmaps.TryGetValue(dbBeatmap.OnlineID, out var onlineBeatmap))
+                    {
+                        // compare `BeatmapUpdaterMetadataLookup`
+                        if (dbBeatmap.OnlineMD5Hash != onlineBeatmap.MD5Hash)
+                            dbBeatmap.OnlineMD5Hash = onlineBeatmap.MD5Hash;
+
+                        if (dbBeatmap.LastOnlineUpdate != onlineBeatmap.LastUpdated)
+                            dbBeatmap.LastOnlineUpdate = onlineBeatmap.LastUpdated;
+
+                        if (dbBeatmap.MatchesOnlineVersion &amp;&amp; dbBeatmap.Status != onlineBeatmap.Status)
+                            dbBeatmap.Status = onlineBeatmap.Status;
+
+                        HashSet&lt;string&gt; userTags = onlineBeatmap.GetTopUserTags(confirmedOnly: true)
+                                                                .Select(t =&gt; t.Tag.Name)
+                                                                .ToHashSet();
+
+                        if (!userTags.SetEquals(dbBeatmap.Metadata.UserTags))
+                        {
+                            dbBeatmap.Metadata.UserTags.Clear();
+                            dbBeatmap.Metadata.UserTags.AddRange(userTags);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,36,36,40,0],[36,41,36,45,0],[36,50,36,55,0],[39,37,39,41,0],[39,42,39,46,0],[39,51,39,56,0],[42,9,42,10,0],[43,13,43,56,0],[44,13,44,66,0],[46,13,46,44,0],[55,13,56,13,0],[56,13,56,14,0],[56,14,57,17,0],[57,17,57,51,0],[57,51,58,17,0],[58,17,58,18,0],[58,18,59,21,0],[59,21,59,44,0],[59,44,60,21,0],[60,21,60,28,0],[60,28,63,17,0],[63,17,63,45,0],[63,45,63,87,0],[63,87,63,110,0],[63,110,64,17,0],[64,17,64,49,0],[64,49,65,13,0],[65,13,65,14,0],[65,14,65,15,0],[66,13,66,49,0],[67,13,67,32,0],[68,13,68,29,0],[69,9,69,10,0],[72,9,72,10,0],[73,13,73,78,0],[73,78,73,88,0],[73,88,73,90,0],[75,13,75,109,0],[77,13,77,20,0],[77,22,77,38,0],[77,39,77,41,0],[77,42,77,55,0],[78,13,78,14,0],[86,17,86,130,0],[87,21,87,67,0],[89,17,89,24,0],[89,26,89,39,0],[89,40,89,42,0],[89,43,89,64,0],[90,17,90,18,0],[91,21,91,95,0],[92,21,92,22,0],[94,25,94,78,0],[95,29,95,77,0],[97,25,97,85,0],[98,29,98,84,0],[100,25,100,104,0],[101,29,101,69,0],[103,25,104,78,0],[104,78,104,88,0],[104,88,105,78,0],[107,25,107,78,0],[108,25,108,26,0],[109,29,109,65,0],[110,29,110,76,0],[111,25,111,26,0],[112,21,112,22,0],[113,17,113,18,0],[114,13,114,14,0],[115,9,115,10,0]]);
+    </script>
+  </body>
+</html>

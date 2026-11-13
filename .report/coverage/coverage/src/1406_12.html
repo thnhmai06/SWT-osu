@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Beatmaps/BeatmapConversionTest.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+using NUnit.Framework;
+using NUnit.Framework.Legacy;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Textures;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.IO;
+using osu.Game.IO.Serialization;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Skinning;
+
+namespace osu.Game.Tests.Beatmaps
+{
+    [TestFixture]
+    public abstract class BeatmapConversionTest&lt;TConvertMapping, TConvertValue&gt;
+        where TConvertMapping : ConvertMapping&lt;TConvertValue&gt;, IEquatable&lt;TConvertMapping&gt;, new()
+        where TConvertValue : IEquatable&lt;TConvertValue&gt;
+    {
+        private const string resource_namespace = &quot;Testing.Beatmaps&quot;;
+        private const string expected_conversion_suffix = &quot;-expected-conversion&quot;;
+
+        protected abstract string ResourceAssembly { get; }
+
+        protected void Test(string name, params Type[] mods)
+        {
+            var ourResult = convert(name, mods.Select(m =&gt; (Mod)Activator.CreateInstance(m)).ToArray());
+            var expectedResult = read(name);
+
+            foreach (var m in ourResult.Mappings)
+                m.PostProcess();
+
+            foreach (var m in expectedResult.Mappings)
+                m.PostProcess();
+
+            Assert.Multiple(() =&gt;
+            {
+                int mappingCounter = 0;
+
+                while (true)
+                {
+                    if (mappingCounter &gt;= ourResult.Mappings.Count &amp;&amp; mappingCounter &gt;= expectedResult.Mappings.Count)
+                        break;
+
+                    if (mappingCounter &gt;= ourResult.Mappings.Count)
+                        Assert.Fail($&quot;A conversion did not generate any hitobjects, but should have, for hitobject at time: {expectedResult.Mappings[mappingCounter].StartTime}\n&quot;);
+                    else if (mappingCounter &gt;= expectedResult.Mappings.Count)
+                        Assert.Fail($&quot;A conversion generated hitobjects, but should not have, for hitobject at time: {ourResult.Mappings[mappingCounter].StartTime}\n&quot;);
+                    else if (!expectedResult.Mappings[mappingCounter].Equals(ourResult.Mappings[mappingCounter]))
+                    {
+                        var expectedMapping = expectedResult.Mappings[mappingCounter];
+                        var ourMapping = ourResult.Mappings[mappingCounter];
+
+                        Assert.Fail($&quot;The conversion mapping differed for object at time {expectedMapping.StartTime}:\n&quot;
+                                    + $&quot;Expected {JsonConvert.SerializeObject(expectedMapping)}\n&quot;
+                                    + $&quot;Received: {JsonConvert.SerializeObject(ourMapping)}\n&quot;);
+                    }
+                    else
+                    {
+                        var ourMapping = ourResult.Mappings[mappingCounter];
+                        var expectedMapping = expectedResult.Mappings[mappingCounter];
+
+                        Assert.Multiple(() =&gt;
+                        {
+                            int objectCounter = 0;
+
+                            while (true)
+                            {
+                                if (objectCounter &gt;= ourMapping.Objects.Count &amp;&amp; objectCounter &gt;= expectedMapping.Objects.Count)
+                                    break;
+
+                                if (objectCounter &gt;= ourMapping.Objects.Count)
+                                {
+                                    Assert.Fail($&quot;The conversion did not generate a hitobject, but should have, for hitobject at time: {expectedMapping.StartTime}:\n&quot;
+                                                + $&quot;Expected: {JsonConvert.SerializeObject(expectedMapping.Objects[objectCounter])}\n&quot;);
+                                }
+                                else if (objectCounter &gt;= expectedMapping.Objects.Count)
+                                {
+                                    Assert.Fail($&quot;The conversion generated a hitobject, but should not have, for hitobject at time: {ourMapping.StartTime}:\n&quot;
+                                                + $&quot;Received: {JsonConvert.SerializeObject(ourMapping.Objects[objectCounter])}\n&quot;);
+                                }
+                                else if (!expectedMapping.Objects[objectCounter].Equals(ourMapping.Objects[objectCounter]))
+                                {
+                                    Assert.Fail($&quot;The conversion generated differing hitobjects for object at time: {expectedMapping.StartTime}:\n&quot;
+                                                + $&quot;Expected: {JsonConvert.SerializeObject(expectedMapping.Objects[objectCounter])}\n&quot;
+                                                + $&quot;Received: {JsonConvert.SerializeObject(ourMapping.Objects[objectCounter])}\n&quot;);
+                                }
+
+                                objectCounter++;
+                            }
+                        });
+                    }
+
+                    mappingCounter++;
+                }
+            });
+        }
+
+        private ConvertResult convert(string name, Mod[] mods)
+        {
+            var conversionTask = Task.Factory.StartNew(() =&gt;
+            {
+                var beatmap = GetBeatmap(name);
+
+                string beforeConversion = beatmap.Serialize();
+
+                var converterResult = new Dictionary&lt;HitObject, IEnumerable&lt;HitObject&gt;&gt;();
+
+                var working = new ConversionWorkingBeatmap(beatmap)
+                {
+                    ConversionGenerated = (o, r, c) =&gt;
+                    {
+                        converterResult[o] = r;
+                        OnConversionGenerated(o, r, c);
+                    }
+                };
+
+                working.GetPlayableBeatmap(CreateRuleset().RulesetInfo, mods);
+
+                string afterConversion = beatmap.Serialize();
+
+                ClassicAssert.AreEqual(beforeConversion, afterConversion, &quot;Conversion altered original beatmap&quot;);
+
+                return new ConvertResult
+                {
+                    Mappings = converterResult.Select(r =&gt;
+                    {
+                        var mapping = CreateConvertMapping(r.Key);
+                        mapping.StartTime = r.Key.StartTime;
+                        mapping.Objects.AddRange(r.Value.SelectMany(CreateConvertValue));
+                        return mapping;
+                    }).ToList()
+                };
+            }, TaskCreationOptions.LongRunning);
+
+            if (!conversionTask.Wait(10000))
+                Assert.Fail(&quot;Conversion timed out&quot;);
+
+            return conversionTask.GetResultSafely();
+        }
+
+        protected virtual void OnConversionGenerated(HitObject original, IEnumerable&lt;HitObject&gt; result, IBeatmapConverter beatmapConverter)
+        {
+        }
+
+        private ConvertResult read(string name)
+        {
+            using (var resStream = openResource($&quot;{resource_namespace}.{name}{expected_conversion_suffix}.json&quot;))
+            using (var reader = new StreamReader(resStream))
+            {
+                string contents = reader.ReadToEnd();
+                return JsonConvert.DeserializeObject&lt;ConvertResult&gt;(contents);
+            }
+        }
+
+        public IBeatmap GetBeatmap(string name)
+        {
+            using (var resStream = openResource($&quot;{resource_namespace}.{name}.osu&quot;))
+            using (var stream = new LineBufferedReader(resStream))
+            {
+                var decoder = Decoder.GetDecoder&lt;Beatmap&gt;(stream);
+                ((LegacyBeatmapDecoder)decoder).ApplyOffsets = false;
+                var beatmap = decoder.Decode(stream);
+
+                var rulesetInstance = CreateRuleset();
+                beatmap.BeatmapInfo.Ruleset = beatmap.BeatmapInfo.Ruleset.OnlineID == rulesetInstance.RulesetInfo.OnlineID ? rulesetInstance.RulesetInfo : new RulesetInfo();
+
+                return beatmap;
+            }
+        }
+
+        private Stream openResource(string name)
+        {
+            string localPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location).AsNonNull();
+            return Assembly.LoadFrom(Path.Combine(localPath, $&quot;{ResourceAssembly}.dll&quot;)).GetManifestResourceStream($@&quot;{ResourceAssembly}.Resources.{name}&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the conversion mapping for a &lt;see cref=&quot;HitObject&quot;/&gt;. A conversion mapping stores important information about the conversion process.
+        /// This is generated _after_ the &lt;see cref=&quot;HitObject&quot;/&gt; has been converted.
+        /// &lt;para&gt;
+        /// This should be used to validate the integrity of the conversion process after a conversion has occurred.
+        /// &lt;/para&gt;
+        /// &lt;/summary&gt;
+        protected virtual TConvertMapping CreateConvertMapping(HitObject source) =&gt; new TConvertMapping();
+
+        /// &lt;summary&gt;
+        /// Creates the conversion value for a &lt;see cref=&quot;HitObject&quot;/&gt;. A conversion value stores information about the converted &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;para&gt;
+        /// This should be used to validate the integrity of the converted &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/para&gt;
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The converted &lt;see cref=&quot;HitObject&quot;/&gt;.&lt;/param&gt;
+        protected abstract IEnumerable&lt;TConvertValue&gt; CreateConvertValue(HitObject hitObject);
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;Ruleset&quot;/&gt; applicable to this &lt;see cref=&quot;BeatmapConversionTest{TConvertMapping,TConvertValue}&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected abstract Ruleset CreateRuleset();
+
+        private class ConvertResult
+        {
+            [JsonProperty]
+            public List&lt;TConvertMapping&gt; Mappings = new List&lt;TConvertMapping&gt;();
+        }
+
+        private class ConversionWorkingBeatmap : WorkingBeatmap
+        {
+            public Action&lt;HitObject, IEnumerable&lt;HitObject&gt;, IBeatmapConverter&gt; ConversionGenerated;
+
+            private readonly IBeatmap beatmap;
+
+            public ConversionWorkingBeatmap(IBeatmap beatmap)
+                : base(beatmap.BeatmapInfo, null)
+            {
+                this.beatmap = beatmap;
+            }
+
+            protected override IBeatmap GetBeatmap() =&gt; beatmap;
+
+            public override Texture GetBackground() =&gt; throw new NotImplementedException();
+
+            protected override Track GetBeatmapTrack() =&gt; throw new NotImplementedException();
+
+            protected internal override ISkin GetSkin() =&gt; throw new NotImplementedException();
+
+            public override Stream GetStream(string storagePath) =&gt; throw new NotImplementedException();
+
+            protected override IBeatmapConverter CreateBeatmapConverter(IBeatmap beatmap, Ruleset ruleset)
+            {
+                var converter = base.CreateBeatmapConverter(beatmap, ruleset);
+                converter.ObjectConverted += (orig, converted) =&gt; ConversionGenerated?.Invoke(orig, converted, converter);
+                return converter;
+            }
+        }
+    }
+
+    public abstract class BeatmapConversionTest&lt;TConvertValue&gt; : BeatmapConversionTest&lt;ConvertMapping&lt;TConvertValue&gt;, TConvertValue&gt;
+        where TConvertValue : IEquatable&lt;TConvertValue&gt;
+    {
+    }
+
+    public class ConvertMapping&lt;TConvertValue&gt; : IEquatable&lt;ConvertMapping&lt;TConvertValue&gt;&gt;
+        where TConvertValue : IEquatable&lt;TConvertValue&gt;
+    {
+        [JsonProperty]
+        public double StartTime;
+
+        [JsonIgnore]
+        public List&lt;TConvertValue&gt; Objects = new List&lt;TConvertValue&gt;();
+
+        [JsonProperty(&quot;Objects&quot;)]
+        private List&lt;TConvertValue&gt; setObjects
+        {
+            set =&gt; Objects = value;
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked after this &lt;see cref=&quot;ConvertMapping{TConvertValue}&quot;/&gt; is populated to post-process the contained data.
+        /// &lt;/summary&gt;
+        public virtual void PostProcess()
+        {
+        }
+
+        public virtual bool Equals(ConvertMapping&lt;TConvertValue&gt; other) =&gt; StartTime == other?.StartTime;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[41,9,41,10,0],[42,13,42,60,0],[42,60,42,92,0],[42,92,42,105,0],[43,13,43,45,0],[45,13,45,20,0],[45,22,45,27,0],[45,28,45,30,0],[45,31,45,49,0],[46,17,46,33,0],[48,13,48,20,0],[48,22,48,27,0],[48,28,48,30,0],[48,31,48,54,0],[49,17,49,33,0],[51,13,52,13,0],[52,13,52,14,0],[52,14,53,17,0],[53,17,53,40,0],[53,40,55,17,0],[55,17,55,29,0],[55,29,56,17,0],[56,17,56,18,0],[56,18,57,21,0],[57,21,57,119,0],[57,119,58,25,0],[58,25,58,31,0],[58,31,60,21,0],[60,21,60,68,0],[60,68,61,25,0],[61,25,61,181,0],[61,181,62,26,0],[62,26,62,78,0],[62,78,63,25,0],[63,25,63,169,0],[63,169,64,26,0],[64,26,64,114,0],[64,114,65,21,0],[65,21,65,22,0],[65,22,66,25,0],[66,25,66,87,0],[66,87,67,25,0],[67,25,67,77,0],[67,77,69,25,0],[69,25,71,97,0],[71,97,72,21,0],[72,21,72,22,0],[72,22,74,21,0],[74,21,74,22,0],[74,22,75,25,0],[75,25,75,77,0],[75,77,76,25,0],[76,25,76,87,0],[76,87,78,25,0],[78,25,79,25,0],[79,25,79,26,0],[79,26,80,29,0],[80,29,80,51,0],[80,51,82,29,0],[82,29,82,41,0],[82,41,83,29,0],[83,29,83,30,0],[83,30,84,33,0],[84,33,84,129,0],[84,129,85,37,0],[85,37,85,43,0],[85,43,87,33,0],[87,33,87,79,0],[87,79,88,33,0],[88,33,88,34,0],[88,34,89,37,0],[89,37,90,137,0],[90,137,91,33,0],[91,33,91,34,0],[91,34,92,38,0],[92,38,92,89,0],[92,89,93,33,0],[93,33,93,34,0],[93,34,94,37,0],[94,37,95,132,0],[95,132,96,33,0],[96,33,96,34,0],[96,34,97,38,0],[97,38,97,124,0],[97,124,98,33,0],[98,33,98,34,0],[98,34,99,37,0],[99,37,101,132,0],[101,132,102,33,0],[102,33,102,34,0],[102,34,104,33,0],[104,33,104,49,0],[104,49,105,29,0],[105,29,105,30,0],[105,30,106,25,0],[106,25,106,26,0],[106,26,106,28,0],[106,28,107,21,0],[107,21,107,22,0],[107,22,109,21,0],[109,21,109,38,0],[109,38,110,17,0],[110,17,110,18,0],[110,18,111,13,0],[111,13,111,14,0],[111,14,111,16,0],[112,9,112,10,0],[115,9,115,10,0],[116,13,117,13,0],[117,13,117,14,0],[117,14,118,17,0],[118,17,118,48,0],[118,48,120,17,0],[120,17,120,63,0],[120,63,122,17,0],[122,17,122,91,0],[122,91,124,17,0],[124,17,127,21,0],[127,21,127,22,0],[127,22,128,25,0],[128,25,128,48,0],[128,48,129,25,0],[129,25,129,56,0],[129,56,130,21,0],[130,21,130,22,0],[130,22,131,19,0],[131,19,133,17,0],[133,17,133,79,0],[133,79,135,17,0],[135,17,135,62,0],[135,62,137,17,0],[137,17,137,114,0],[137,114,139,17,0],[139,17,142,21,0],[142,21,142,22,0],[142,22,143,25,0],[143,25,143,67,0],[143,67,144,25,0],[144,25,144,61,0],[144,61,145,25,0],[145,25,145,90,0],[145,90,146,25,0],[146,25,146,40,0],[146,40,147,21,0],[147,21,147,22,0],[147,22,148,19,0],[148,19,149,13,0],[149,13,149,14,0],[149,14,149,49,0],[151,13,151,45,0],[152,17,152,53,0],[154,13,154,53,0],[155,9,155,10,0],[158,9,158,10,0],[159,9,159,10,0],[162,9,162,10,0],[163,20,163,113,0],[164,20,164,60,0],[165,13,165,14,0],[166,17,166,54,0],[167,17,167,79,0],[169,9,169,10,0],[172,9,172,10,0],[173,20,173,84,0],[174,20,174,66,0],[175,13,175,14,0],[176,17,176,67,0],[177,17,177,70,0],[178,17,178,54,0],[180,17,180,55,0],[181,17,181,174,0],[183,17,183,32,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,108,0],[190,13,190,157,0],[191,9,191,10,0],[200,85,200,106,0],[219,13,219,81,0],[229,19,229,50,0],[230,13,230,14,0],[231,17,231,40,0],[232,13,232,14,0],[234,57,234,64,0],[236,56,236,91,0],[238,59,238,94,0],[240,60,240,95,0],[242,69,242,104,0],[245,13,245,14,0],[246,17,246,79,0],[247,17,247,67,0],[247,67,247,122,0],[247,122,247,123,0],[248,17,248,34,0],[249,13,249,14,0],[265,9,265,72,0],[270,20,270,35,0],[277,9,277,10,0],[278,9,278,10,0],[280,76,280,105,0]]);
+    </script>
+  </body>
+</html>

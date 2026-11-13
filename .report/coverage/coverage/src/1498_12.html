@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/SkinManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.IO.Stores;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Database;
+using osu.Game.IO;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Utils;
+
+namespace osu.Game.Skinning
+{
+    /// &lt;summary&gt;
+    /// Handles the storage and retrieval of &lt;see cref=&quot;Skin&quot;/&gt;s.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// This is also exposed and cached as &lt;see cref=&quot;ISkinSource&quot;/&gt; to allow for any component to potentially have skinning support.
+    /// For gameplay components, see &lt;see cref=&quot;RulesetSkinProvidingContainer&quot;/&gt; which adds extra legacy and toggle logic that may affect the lookup process.
+    /// &lt;/remarks&gt;
+    public class SkinManager : ModelManager&lt;SkinInfo&gt;, ISkinSource, IStorageResourceProvider, IModelImporter&lt;SkinInfo&gt;
+    {
+        /// &lt;summary&gt;
+        /// The default &quot;classic&quot; skin.
+        /// &lt;/summary&gt;
+        public Skin DefaultClassicSkin { get; }
+
+        private readonly AudioManager audio;
+
+        private readonly Scheduler scheduler;
+
+        private readonly GameHost host;
+
+        private readonly IResourceStore&lt;byte[]&gt; resources;
+
+        public readonly Bindable&lt;Skin&gt; CurrentSkin = new Bindable&lt;Skin&gt;();
+
+        public readonly Bindable&lt;Live&lt;SkinInfo&gt;&gt; CurrentSkinInfo = new Bindable&lt;Live&lt;SkinInfo&gt;&gt;(ArgonSkin.CreateInfo().ToLiveUnmanaged());
+
+        private readonly SkinImporter skinImporter;
+
+        private readonly LegacySkinExporter skinExporter;
+
+        private readonly IResourceStore&lt;byte[]&gt; userFiles;
+
+        private Skin argonSkin { get; }
+
+        private Skin trianglesSkin { get; }
+
+        private Skin retroSkin { get; }
+
+        private static readonly Live&lt;SkinInfo&gt; random_skin_info = new SkinInfo
+        {
+            ID = SkinInfo.RANDOM_SKIN,
+            Name = &quot;&lt;Random Skin&gt;&quot;,
+        }.ToLiveUnmanaged();
+
+        public override bool PauseImports
+        {
+            get =&gt; base.PauseImports;
+            set
+            {
+                base.PauseImports = value;
+                skinImporter.PauseImports = value;
+            }
+        }
+
+        public SkinManager(Storage storage, RealmAccess realm, GameHost host, IResourceStore&lt;byte[]&gt; resources, AudioManager audio, Scheduler scheduler)
+            : base(storage, realm)
+        {
+            this.audio = audio;
+            this.scheduler = scheduler;
+            this.host = host;
+            this.resources = resources;
+
+            userFiles = new StorageBackedResourceStore(storage.GetStorageForDirectory(&quot;files&quot;));
+
+            skinImporter = new SkinImporter(storage, realm, this)
+            {
+                PostNotification = obj =&gt; PostNotification?.Invoke(obj),
+            };
+
+            var defaultSkins = new[]
+            {
+                retroSkin = new RetroSkin(this),
+                DefaultClassicSkin = new DefaultLegacySkin(this),
+                trianglesSkin = new TrianglesSkin(this),
+                argonSkin = new ArgonSkin(this),
+                new ArgonProSkin(this),
+            };
+
+            // Ensure the default entries are present.
+            realm.Write(r =&gt;
+            {
+                foreach (var skin in defaultSkins)
+                {
+                    if (r.Find&lt;SkinInfo&gt;(skin.SkinInfo.ID) == null)
+                        r.Add(skin.SkinInfo.Value);
+                }
+            });
+
+            CurrentSkinInfo.ValueChanged += skin =&gt;
+            {
+                CurrentSkin.Value = skin.NewValue.PerformRead(GetSkin);
+            };
+
+            CurrentSkin.Value = argonSkin;
+            CurrentSkin.ValueChanged += skin =&gt;
+            {
+                if (!skin.NewValue.SkinInfo.Equals(CurrentSkinInfo.Value))
+                    throw new InvalidOperationException($&quot;Setting {nameof(CurrentSkin)}&#39;s value directly is not supported. Use {nameof(CurrentSkinInfo)} instead.&quot;);
+
+                SourceChanged?.Invoke();
+            };
+
+            skinExporter = new LegacySkinExporter(storage)
+            {
+                PostNotification = obj =&gt; PostNotification?.Invoke(obj)
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the dropdown ordering for use mainly by the skin selection UI.
+        /// Inserts the defaults first, then &#39;random skin&#39;, then custom ones.
+        /// Returns a list of &lt;see cref=&quot;Live{SkinInfo}&quot;/&gt; items.
+        /// &lt;/summary&gt;
+        public IList&lt;Live&lt;SkinInfo&gt;&gt; GetAllUsableSkins()
+        {
+            var skins = new List&lt;Live&lt;SkinInfo&gt;&gt;();
+
+            Realm.Run(realm =&gt;
+            {
+                skins.Add(realm.Find&lt;SkinInfo&gt;(SkinInfo.ARGON_SKIN).ToLive(Realm));
+                skins.Add(realm.Find&lt;SkinInfo&gt;(SkinInfo.ARGON_PRO_SKIN).ToLive(Realm));
+                skins.Add(realm.Find&lt;SkinInfo&gt;(SkinInfo.TRIANGLES_SKIN).ToLive(Realm));
+                skins.Add(realm.Find&lt;SkinInfo&gt;(SkinInfo.CLASSIC_SKIN).ToLive(Realm));
+                skins.Add(realm.Find&lt;SkinInfo&gt;(SkinInfo.RETRO_SKIN).ToLive(Realm));
+
+                skins.Add(random_skin_info);
+
+                var userSkins = realm.All&lt;SkinInfo&gt;()
+                                     .Where(s =&gt; !s.DeletePending &amp;&amp; !s.Protected)
+                                     .AsEnumerable()
+                                     .OrderBy(s =&gt; s.Name, StringComparer.OrdinalIgnoreCase)
+                                     .Select(s =&gt; s.ToLive(Realm));
+
+                foreach (var s in userSkins)
+                    skins.Add(s);
+            });
+
+            return skins;
+        }
+
+        public void SelectRandomSkin()
+        {
+            Realm.Run(r =&gt;
+            {
+                // can be the case when the current skin is externally mounted for editing
+                if (CurrentSkinInfo.Disabled)
+                    return;
+
+                // Required local for iOS. Will cause runtime crash if inlined.
+                Guid currentSkinId = CurrentSkinInfo.Value.ID;
+
+                // choose from only user skins, removing the current selection to ensure a new one is chosen.
+                var randomChoices = r.All&lt;SkinInfo&gt;()
+                                     .Where(s =&gt; !s.DeletePending &amp;&amp; s.ID != currentSkinId)
+                                     .ToArray();
+
+                if (randomChoices.Length == 0)
+                {
+                    CurrentSkinInfo.Value = ArgonSkin.CreateInfo().ToLiveUnmanaged();
+                    return;
+                }
+
+                var chosen = randomChoices.ElementAt(RNG.Next(0, randomChoices.Length));
+
+                CurrentSkinInfo.Value = chosen.ToLive(Realm);
+            });
+        }
+
+        private void cycleSkins(int direction)
+        {
+            Debug.Assert(direction != 0);
+
+            // don&#39;t change selection if current skin is externally disabled/mounted for editing.
+            if (CurrentSkinInfo.Disabled)
+                return;
+
+            var skins = GetAllUsableSkins();
+
+            int i = skins.IndexOf(CurrentSkinInfo.Value);
+
+            // If the current skin isn&#39;t selectable anymore, start from the top.
+            if (i &lt; 0 &amp;&amp; direction &lt; 0)
+                i = 0;
+
+            do
+            {
+                i = (i + direction + skins.Count) % skins.Count;
+            } while (skins[i].ID == SkinInfo.RANDOM_SKIN);
+
+            CurrentSkinInfo.Value = skins[i];
+        }
+
+        /// &lt;summary&gt;
+        /// Cycle one skin backward.
+        /// &lt;/summary&gt;
+        public void SelectPreviousSkin() =&gt; cycleSkins(-1);
+
+        /// &lt;summary&gt;
+        /// Cycle one skin forward.
+        /// &lt;/summary&gt;
+        public void SelectNextSkin() =&gt; cycleSkins(1);
+
+        /// &lt;summary&gt;
+        /// Retrieve a &lt;see cref=&quot;Skin&quot;/&gt; instance for the provided &lt;see cref=&quot;SkinInfo&quot;/&gt;
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;skinInfo&quot;&gt;The skin to lookup.&lt;/param&gt;
+        /// &lt;returns&gt;A &lt;see cref=&quot;Skin&quot;/&gt; instance correlating to the provided &lt;see cref=&quot;SkinInfo&quot;/&gt;.&lt;/returns&gt;
+        public Skin GetSkin(SkinInfo skinInfo) =&gt; skinInfo.CreateInstance(this);
+
+        /// &lt;summary&gt;
+        /// Ensure that the current skin is in a state it can accept user modifications.
+        /// This will create a copy of any internal skin and being tracking in the database if not already.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;
+        /// Whether a new skin was created to allow for mutation.
+        /// &lt;/returns&gt;
+        public bool EnsureMutableSkin()
+        {
+            return CurrentSkinInfo.Value.PerformRead(s =&gt;
+            {
+                if (!s.Protected)
+                    return false;
+
+                string[] existingSkinNames = Realm.Run(r =&gt; r.All&lt;SkinInfo&gt;()
+                                                             .Where(skin =&gt; !skin.DeletePending)
+                                                             .AsEnumerable()
+                                                             .Select(skin =&gt; skin.Name).ToArray());
+
+                // if the user is attempting to save one of the default skin implementations, create a copy first.
+                var skinInfo = new SkinInfo
+                {
+                    Creator = s.Creator,
+                    InstantiationInfo = s.InstantiationInfo,
+                    Name = NamingUtils.GetNextBestName(existingSkinNames, $@&quot;{s.Name} (modified)&quot;)
+                };
+
+                var result = skinImporter.ImportModel(skinInfo, parameters: new ImportParameters
+                {
+                    ImportImmediately = true // to avoid possible deadlocks when editing skin during gameplay.
+                });
+
+                if (result != null)
+                {
+                    // save once to ensure the required json content is populated.
+                    // currently this only happens on save.
+                    result.PerformRead(skin =&gt; Save(skin.CreateInstance(this)));
+                    CurrentSkinInfo.Value = result;
+                    return true;
+                }
+
+                return false;
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Save a skin, serialising any changes to skin layouts to relevant JSON structures.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether any change actually occurred.&lt;/returns&gt;
+        public bool Save(Skin skin)
+        {
+            if (!skin.SkinInfo.IsManaged)
+                throw new InvalidOperationException($&quot;Attempting to save a skin which is not yet tracked. Call {nameof(EnsureMutableSkin)} first.&quot;);
+
+            return skinImporter.Save(skin);
+        }
+
+        /// &lt;summary&gt;
+        /// Perform a lookup query on available &lt;see cref=&quot;SkinInfo&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;query&quot;&gt;The query.&lt;/param&gt;
+        /// &lt;returns&gt;The first result for the provided query, or null if no results were found.&lt;/returns&gt;
+        public Live&lt;SkinInfo&gt; Query(Expression&lt;Func&lt;SkinInfo, bool&gt;&gt; query)
+        {
+            return Realm.Run(r =&gt; r.All&lt;SkinInfo&gt;().FirstOrDefault(query)?.ToLive(Realm));
+        }
+
+        public event Action SourceChanged;
+
+        public Drawable GetDrawableComponent(ISkinComponentLookup lookup) =&gt; lookupWithFallback(s =&gt; s.GetDrawableComponent(lookup));
+
+        public Texture GetTexture(string componentName, WrapMode wrapModeS, WrapMode wrapModeT) =&gt; lookupWithFallback(s =&gt; s.GetTexture(componentName, wrapModeS, wrapModeT));
+
+        public ISample GetSample(ISampleInfo sampleInfo) =&gt; lookupWithFallback(s =&gt; s.GetSample(sampleInfo));
+
+        public IBindable&lt;TValue&gt; GetConfig&lt;TLookup, TValue&gt;(TLookup lookup) =&gt; lookupWithFallback(s =&gt; s.GetConfig&lt;TLookup, TValue&gt;(lookup));
+
+        public ISkin FindProvider(Func&lt;ISkin, bool&gt; lookupFunction)
+        {
+            foreach (var source in AllSources)
+            {
+                if (lookupFunction(source))
+                    return source;
+            }
+
+            return null;
+        }
+
+        public IEnumerable&lt;ISkin&gt; AllSources
+        {
+            get
+            {
+                yield return CurrentSkin.Value;
+
+                // Skin manager provides default fallbacks.
+                // This handles cases where a user skin doesn&#39;t have the required resources for complete display of
+                // certain elements.
+
+                if (CurrentSkin.Value is LegacySkin &amp;&amp; CurrentSkin.Value != DefaultClassicSkin)
+                    yield return DefaultClassicSkin;
+
+                if (CurrentSkin.Value != trianglesSkin)
+                    yield return trianglesSkin;
+            }
+        }
+
+        private T lookupWithFallback&lt;T&gt;(Func&lt;ISkin, T&gt; lookupFunction)
+            where T : class
+        {
+            try
+            {
+                Skin.LogLookupDebug(this, lookupFunction, Skin.LookupDebugType.Enter);
+
+                foreach (var source in AllSources)
+                {
+                    if (lookupFunction(source) is T skinSourced)
+                        return skinSourced;
+                }
+
+                return null;
+            }
+            finally
+            {
+                Skin.LogLookupDebug(this, lookupFunction, Skin.LookupDebugType.Exit);
+            }
+        }
+
+        #region IResourceStorageProvider
+
+        IRenderer IStorageResourceProvider.Renderer =&gt; host.Renderer;
+        AudioManager IStorageResourceProvider.AudioManager =&gt; audio;
+        IResourceStore&lt;byte[]&gt; IStorageResourceProvider.Resources =&gt; resources;
+        IResourceStore&lt;byte[]&gt; IStorageResourceProvider.Files =&gt; userFiles;
+        RealmAccess IStorageResourceProvider.RealmAccess =&gt; Realm;
+        IResourceStore&lt;TextureUpload&gt; IStorageResourceProvider.CreateTextureLoaderStore(IResourceStore&lt;byte[]&gt; underlyingStore) =&gt; host.CreateTextureLoaderStore(underlyingStore);
+
+        #endregion
+
+        #region Implementation of IModelImporter&lt;SkinInfo&gt;
+
+        public Action&lt;IEnumerable&lt;Live&lt;SkinInfo&gt;&gt;&gt; PresentImport
+        {
+            set =&gt; skinImporter.PresentImport = value;
+        }
+
+        public Task Import(params string[] paths) =&gt; skinImporter.Import(paths);
+
+        public Task Import(ImportTask[] imports, ImportParameters parameters = default) =&gt; skinImporter.Import(imports, parameters);
+
+        public IEnumerable&lt;string&gt; HandledExtensions =&gt; skinImporter.HandledExtensions;
+
+        public Task&lt;IEnumerable&lt;Live&lt;SkinInfo&gt;&gt;&gt; Import(ProgressNotification notification, ImportTask[] tasks, ImportParameters parameters = default) =&gt;
+            skinImporter.Import(notification, tasks, parameters);
+
+        public Task&lt;Live&lt;SkinInfo&gt;&gt; ImportAsUpdate(ProgressNotification notification, ImportTask task, SkinInfo original) =&gt;
+            skinImporter.ImportAsUpdate(notification, task, original);
+
+        public Task&lt;ExternalEditOperation&lt;SkinInfo&gt;&gt; BeginExternalEditing(SkinInfo model) =&gt; skinImporter.BeginExternalEditing(model);
+
+        public Task&lt;Live&lt;SkinInfo&gt;&gt; Import(ImportTask task, ImportParameters parameters = default, CancellationToken cancellationToken = default) =&gt;
+            skinImporter.Import(task, parameters, cancellationToken);
+
+        public Task ExportCurrentSkin() =&gt; ExportSkin(CurrentSkinInfo.Value);
+
+        public Task ExportSkin(Live&lt;SkinInfo&gt; skin) =&gt; skinExporter.ExportAsync(skin);
+
+        #endregion
+
+        public void Delete([CanBeNull] Expression&lt;Func&lt;SkinInfo, bool&gt;&gt; filter = null, bool silent = false)
+        {
+            Realm.Run(r =&gt;
+            {
+                var items = r.All&lt;SkinInfo&gt;()
+                             .Where(s =&gt; !s.Protected &amp;&amp; !s.DeletePending);
+                if (filter != null)
+                    items = items.Where(filter);
+
+                // check the removed skin is not the current user choice. if it is, switch back to default.
+                Guid currentUserSkin = CurrentSkinInfo.Value.ID;
+
+                if (items.Any(s =&gt; s.ID == currentUserSkin))
+                    scheduler.Add(() =&gt; CurrentSkinInfo.Value = ArgonSkin.CreateInfo().ToLiveUnmanaged());
+
+                Delete(items.ToList(), silent);
+            });
+        }
+
+        public void Rename(Live&lt;SkinInfo&gt; skin, string newName)
+        {
+            skin.PerformWrite(s =&gt;
+            {
+                s.Name = newName;
+                skinImporter.UpdateSkinIniMetadata(s, s.Realm!);
+            });
+        }
+
+        public void SetSkinFromConfiguration(string guidString)
+        {
+            Live&lt;SkinInfo&gt; skinInfo = null;
+
+            if (Guid.TryParse(guidString, out var guid))
+                skinInfo = Query(s =&gt; s.ID == guid);
+
+            if (skinInfo == null)
+            {
+                if (guid == SkinInfo.CLASSIC_SKIN)
+                    skinInfo = DefaultClassicSkin.SkinInfo;
+
+                if (guid == SkinInfo.RETRO_SKIN)
+                    skinInfo = retroSkin.SkinInfo;
+            }
+
+            CurrentSkinInfo.Value = skinInfo ?? trianglesSkin.SkinInfo;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[44,42,44,46,0],[54,9,54,75,0],[56,9,56,139,0],[64,34,64,38,0],[66,38,66,42,0],[68,34,68,38,0],[70,9,74,29,0],[78,20,78,37,0],[80,13,80,14,0],[81,17,81,43,0],[82,17,82,51,0],[83,13,83,14,0],[87,15,87,35,0],[88,9,88,10,0],[89,13,89,32,0],[90,13,90,40,0],[91,13,91,30,0],[92,13,92,40,0],[94,13,94,97,0],[96,13,98,43,0],[98,43,98,72,0],[98,72,99,15,0],[101,13,108,15,0],[111,13,112,13,0],[112,13,112,14,0],[112,14,113,17,0],[113,17,113,24,0],[113,24,113,26,0],[113,26,113,34,0],[113,34,113,35,0],[113,35,113,37,0],[113,37,113,38,0],[113,38,113,50,0],[113,50,114,17,0],[114,17,114,18,0],[114,18,115,21,0],[115,21,115,68,0],[115,68,116,25,0],[116,25,116,52,0],[116,52,117,17,0],[117,17,117,18,0],[117,18,118,13,0],[118,13,118,14,0],[118,14,118,16,0],[120,13,121,13,0],[121,13,121,14,0],[121,14,122,17,0],[122,17,122,72,0],[122,72,123,13,0],[123,13,123,14,0],[123,14,123,15,0],[125,13,125,43,0],[126,13,127,13,0],[127,13,127,14,0],[127,14,128,17,0],[128,17,128,75,0],[128,75,129,21,0],[129,21,129,165,0],[129,165,131,17,0],[131,17,131,41,0],[131,41,132,13,0],[132,13,132,14,0],[132,14,132,15,0],[134,13,136,43,0],[136,43,136,72,0],[136,72,137,15,0],[138,9,138,10,0],[146,9,146,10,0],[147,13,147,52,0],[149,13,150,13,0],[150,13,150,14,0],[150,14,151,17,0],[151,17,151,84,0],[151,84,152,17,0],[152,17,152,88,0],[152,88,153,17,0],[153,17,153,88,0],[153,88,154,17,0],[154,17,154,86,0],[154,86,155,17,0],[155,17,155,84,0],[155,84,157,17,0],[157,17,157,45,0],[157,45,159,17,0],[159,17,162,52,0],[162,52,162,58,0],[162,58,163,51,0],[163,51,163,66,0],[163,66,163,68,0],[163,68,165,17,0],[165,17,165,24,0],[165,24,165,26,0],[165,26,165,31,0],[165,31,165,32,0],[165,32,165,34,0],[165,34,165,35,0],[165,35,165,44,0],[165,44,166,21,0],[166,21,166,34,0],[166,34,167,13,0],[167,13,167,14,0],[167,14,167,16,0],[169,13,169,26,0],[170,9,170,10,0],[173,9,173,10,0],[174,13,175,13,0],[175,13,175,14,0],[175,14,177,17,0],[177,17,177,46,0],[177,46,178,21,0],[178,21,178,28,0],[178,28,181,17,0],[181,17,181,63,0],[181,63,184,17,0],[184,17,186,49,0],[186,49,188,17,0],[188,17,188,47,0],[188,47,189,17,0],[189,17,189,18,0],[189,18,190,21,0],[190,21,190,86,0],[190,86,191,21,0],[191,21,191,28,0],[191,28,194,17,0],[194,17,194,89,0],[194,89,196,17,0],[196,17,196,62,0],[196,62,197,13,0],[197,13,197,14,0],[197,14,197,16,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,42,0],[205,13,205,42,0],[206,17,206,24,0],[208,13,208,45,0],[210,13,210,58,0],[213,13,213,40,0],[214,17,214,23,0],[217,13,217,14,0],[218,17,218,65,0],[219,13,219,14,0],[219,15,219,59,0],[221,13,221,46,0],[222,9,222,10,0],[227,45,227,59,0],[232,41,232,54,0],[239,51,239,80,0],[249,9,249,10,0],[250,13,251,13,0],[251,13,251,14,0],[251,14,252,17,0],[252,17,252,34,0],[252,34,253,21,0],[253,21,253,34,0],[253,34,255,17,0],[255,17,255,61,0],[255,61,258,78,0],[258,78,258,87,0],[258,87,258,98,0],[258,98,258,100,0],[258,100,261,17,0],[261,17,266,19,0],[266,19,268,17,0],[268,17,271,20,0],[271,20,273,17,0],[273,17,273,36,0],[273,36,274,17,0],[274,17,274,18,0],[274,18,277,21,0],[277,21,277,48,0],[277,48,277,79,0],[277,79,277,81,0],[277,81,278,21,0],[278,21,278,52,0],[278,52,279,21,0],[279,21,279,33,0],[279,33,282,17,0],[282,17,282,30,0],[282,30,283,13,0],[283,13,283,14,0],[283,14,283,16,0],[284,9,284,10,0],[291,9,291,10,0],[292,13,292,42,0],[293,17,293,149,0],[295,13,295,44,0],[296,9,296,10,0],[304,9,304,10,0],[305,13,305,35,0],[305,35,305,89,0],[305,89,305,91,0],[306,9,306,10,0],[310,78,310,102,0],[310,102,310,132,0],[310,132,310,133,0],[312,100,312,124,0],[312,124,312,173,0],[312,173,312,174,0],[314,61,314,85,0],[314,85,314,108,0],[314,108,314,109,0],[316,80,316,104,0],[316,104,316,140,0],[316,140,316,141,0],[319,9,319,10,0],[320,13,320,20,0],[320,22,320,32,0],[320,33,320,35,0],[320,36,320,46,0],[321,13,321,14,0],[322,17,322,44,0],[323,21,323,35,0],[324,13,324,14,0],[326,13,326,25,0],[327,9,327,10,0],[332,13,332,14,0],[333,17,333,48,0],[339,17,339,96,0],[340,21,340,53,0],[342,17,342,56,0],[343,21,343,48,0],[344,13,344,14,0],[349,9,349,10,0],[351,13,351,14,0],[354,17,354,24,0],[354,26,354,36,0],[354,37,354,39,0],[354,40,354,50,0],[355,17,355,18,0],[356,21,356,65,0],[357,25,357,44,0],[358,17,358,18,0],[360,17,360,29,0],[363,13,363,14,0],[365,13,365,14,0],[366,9,366,10,0],[370,56,370,69,0],[371,63,371,68,0],[372,70,372,79,0],[373,66,373,75,0],[374,61,374,66,0],[375,132,375,178,0],[383,20,383,54,0],[386,54,386,80,0],[388,92,388,132,0],[390,57,390,87,0],[393,13,393,65,0],[396,13,396,70,0],[398,94,398,134,0],[401,13,401,69,0],[403,44,403,77,0],[405,56,405,86,0],[410,9,410,10,0],[411,13,412,13,0],[412,13,412,14,0],[412,14,413,17,0],[413,17,414,76,0],[414,76,415,17,0],[415,17,415,36,0],[415,36,416,21,0],[416,21,416,49,0],[416,49,419,17,0],[419,17,419,65,0],[419,65,421,17,0],[421,17,421,61,0],[421,61,422,21,0],[422,21,422,41,0],[422,41,422,105,0],[422,105,422,107,0],[422,107,424,17,0],[424,17,424,48,0],[424,48,425,13,0],[425,13,425,14,0],[425,14,425,16,0],[426,9,426,10,0],[429,9,429,10,0],[430,13,431,13,0],[431,13,431,14,0],[431,14,432,17,0],[432,17,432,34,0],[432,34,433,17,0],[433,17,433,65,0],[433,65,434,13,0],[434,13,434,14,0],[434,14,434,16,0],[435,9,435,10,0],[438,9,438,10,0],[439,13,439,44,0],[441,13,441,57,0],[442,17,442,53,0],[444,13,444,34,0],[445,13,445,14,0],[446,17,446,51,0],[447,21,447,60,0],[449,17,449,49,0],[450,21,450,51,0],[451,13,451,14,0],[453,13,453,72,0],[454,9,454,10,0]]);
+    </script>
+  </body>
+</html>

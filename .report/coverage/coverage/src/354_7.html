@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Gameplay/GameplayScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Threading;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Overlays.Settings;
+using osu.Game.Tournament.Components;
+using osu.Game.Tournament.IPC;
+using osu.Game.Tournament.Models;
+using osu.Game.Tournament.Screens.Gameplay.Components;
+using osu.Game.Tournament.Screens.MapPool;
+using osu.Game.Tournament.Screens.TeamWin;
+using osuTK.Graphics;
+
+namespace osu.Game.Tournament.Screens.Gameplay
+{
+    public partial class GameplayScreen : BeatmapInfoScreen
+    {
+        private readonly BindableBool warmup = new BindableBool();
+
+        public readonly Bindable&lt;TourneyState&gt; State = new Bindable&lt;TourneyState&gt;();
+        private MatchIPCInfo ipc = null!;
+
+        [Resolved]
+        private TournamentSceneManager? sceneManager { get; set; }
+
+        [Resolved]
+        private TournamentMatchChatDisplay chat { get; set; } = null!;
+
+        private Drawable chroma = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(MatchIPCInfo ipc)
+        {
+            this.ipc = ipc;
+
+            LabelledSwitchButton chatToggle;
+
+            AddRangeInternal(new Drawable[]
+            {
+                new TourneyVideo(&quot;gameplay&quot;)
+                {
+                    Loop = true,
+                    RelativeSizeAxes = Axes.Both,
+                },
+                header = new MatchHeader
+                {
+                    ShowLogo = false,
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Y = 110,
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Children = new[]
+                    {
+                        chroma = new Container
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            Height = 512,
+                            Children = new Drawable[]
+                            {
+                                new ChromaArea
+                                {
+                                    Name = &quot;Left chroma&quot;,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Width = 0.5f,
+                                },
+                                new ChromaArea
+                                {
+                                    Name = &quot;Right chroma&quot;,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    Width = 0.5f,
+                                }
+                            }
+                        },
+                    }
+                },
+                scoreDisplay = new TournamentMatchScoreDisplay
+                {
+                    Y = -147,
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.TopCentre,
+                },
+                new ControlPanel
+                {
+                    Children = new Drawable[]
+                    {
+                        new LabelledSwitchButton
+                        {
+                            Label = &quot;Warmup&quot;,
+                            Current = warmup,
+                        },
+                        chatToggle = new LabelledSwitchButton
+                        {
+                            Label = &quot;Show chat&quot;,
+                        },
+                        new SettingsSlider&lt;int&gt;
+                        {
+                            LabelText = &quot;Chroma width&quot;,
+                            Current = LadderInfo.ChromaKeyWidth,
+                            KeyboardStep = 1,
+                        },
+                        new SettingsSlider&lt;int&gt;
+                        {
+                            LabelText = &quot;Players per team&quot;,
+                            Current = LadderInfo.PlayersPerTeam,
+                            KeyboardStep = 1,
+                        },
+                    }
+                }
+            });
+
+            State.BindValueChanged(state =&gt; chatToggle.Current.Value = State.Value == TourneyState.Idle, true);
+            chatToggle.Current.BindValueChanged(v =&gt; State.Value = v.NewValue ? TourneyState.Idle : TourneyState.Playing);
+
+            LadderInfo.ChromaKeyWidth.BindValueChanged(width =&gt; chroma.Width = width.NewValue, true);
+
+            warmup.BindValueChanged(w =&gt; header.ShowScores = !w.NewValue, true);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            State.BindTo(ipc.State);
+            State.BindValueChanged(_ =&gt; updateState(), true);
+        }
+
+        protected override void CurrentMatchChanged(ValueChangedEvent&lt;TournamentMatch?&gt; match)
+        {
+            base.CurrentMatchChanged(match);
+
+            if (match.NewValue == null)
+                return;
+
+            warmup.Value = match.NewValue.Team1Score.Value + match.NewValue.Team2Score.Value == 0;
+            scheduledScreenChange?.Cancel();
+        }
+
+        private ScheduledDelegate? scheduledScreenChange;
+        private ScheduledDelegate? scheduledContract;
+
+        private TournamentMatchScoreDisplay scoreDisplay = null!;
+
+        private TourneyState lastState;
+        private MatchHeader header = null!;
+
+        private void contract()
+        {
+            if (!IsLoaded)
+                return;
+
+            scheduledContract?.Cancel();
+
+            SongBar.Expanded = false;
+            scoreDisplay.FadeOut(100);
+            using (chat.BeginDelayedSequence(500))
+                chat.Expand();
+        }
+
+        private void expand()
+        {
+            if (!IsLoaded)
+                return;
+
+            scheduledContract?.Cancel();
+
+            chat.Contract();
+
+            using (BeginDelayedSequence(300))
+            {
+                scoreDisplay.FadeIn(100);
+                SongBar.Expanded = true;
+            }
+        }
+
+        private void updateState()
+        {
+            try
+            {
+                scheduledScreenChange?.Cancel();
+
+                if (State.Value == TourneyState.Ranking)
+                {
+                    if (warmup.Value || CurrentMatch.Value == null) return;
+
+                    if (ipc.Score1.Value &gt; ipc.Score2.Value)
+                        CurrentMatch.Value.Team1Score.Value++;
+                    else
+                        CurrentMatch.Value.Team2Score.Value++;
+                }
+
+                switch (State.Value)
+                {
+                    case TourneyState.Idle:
+                        contract();
+
+                        if (LadderInfo.AutoProgressScreens.Value)
+                        {
+                            const float delay_before_progression = 4000;
+
+                            // if we&#39;ve returned to idle and the last screen was ranking
+                            // we should automatically proceed after a short delay
+                            if (lastState == TourneyState.Ranking &amp;&amp; !warmup.Value)
+                            {
+                                if (CurrentMatch.Value?.Completed.Value == true)
+                                    scheduledScreenChange = Scheduler.AddDelayed(() =&gt; { sceneManager?.SetScreen(typeof(TeamWinScreen)); }, delay_before_progression);
+                                else if (CurrentMatch.Value?.Completed.Value == false)
+                                    scheduledScreenChange = Scheduler.AddDelayed(() =&gt; { sceneManager?.SetScreen(typeof(MapPoolScreen)); }, delay_before_progression);
+                            }
+                        }
+
+                        break;
+
+                    case TourneyState.Ranking:
+                        scheduledContract = Scheduler.AddDelayed(contract, 10000);
+                        break;
+
+                    default:
+                        expand();
+                        break;
+                }
+            }
+            finally
+            {
+                lastState = State.Value;
+            }
+        }
+
+        public override void Hide()
+        {
+            scheduledScreenChange?.Cancel();
+            base.Hide();
+        }
+
+        public override void Show()
+        {
+            updateState();
+            base.Show();
+        }
+
+        private partial class ChromaArea : CompositeDrawable
+        {
+            [Resolved]
+            private LadderInfo ladder { get; set; } = null!;
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                // chroma key area for stable gameplay
+                Colour = new Color4(0, 255, 0, 255);
+
+                ladder.PlayersPerTeam.BindValueChanged(performLayout, true);
+            }
+
+            private void performLayout(ValueChangedEvent&lt;int&gt; playerCount)
+            {
+                switch (playerCount.NewValue)
+                {
+                    case 3:
+                        InternalChildren = new Drawable[]
+                        {
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Width = 0.5f,
+                                Height = 0.5f,
+                                Anchor = Anchor.TopCentre,
+                                Origin = Anchor.TopCentre,
+                            },
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.BottomLeft,
+                                Origin = Anchor.BottomLeft,
+                                Height = 0.5f,
+                            },
+                        };
+                        break;
+
+                    default:
+                        InternalChild = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                        };
+                        break;
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,67,0],[26,9,26,85,0],[27,9,27,42,0],[30,56,30,60,0],[30,61,30,65,0],[33,51,33,55,0],[33,56,33,60,0],[33,65,33,70,0],[35,9,35,41,0],[39,9,39,10,0],[40,13,40,28,0],[44,13,122,16,0],[124,13,124,45,0],[124,45,124,104,0],[124,104,124,112,0],[125,13,125,54,0],[125,54,125,121,0],[125,121,125,123,0],[127,13,127,65,0],[127,65,127,94,0],[127,94,127,102,0],[129,13,129,42,0],[129,42,129,73,0],[129,73,129,81,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,33,0],[136,13,136,37,0],[137,13,137,41,0],[137,41,137,54,0],[137,54,137,62,0],[138,9,138,10,0],[141,9,141,10,0],[142,13,142,45,0],[144,13,144,40,0],[145,17,145,24,0],[147,13,147,99,0],[148,13,148,45,0],[149,9,149,10,0],[154,9,154,66,0],[157,9,157,44,0],[160,9,160,10,0],[161,13,161,27,0],[162,17,162,24,0],[164,13,164,41,0],[166,13,166,38,0],[167,13,167,39,0],[168,13,168,51,0],[169,17,169,31,0],[170,9,170,10,0],[173,9,173,10,0],[174,13,174,27,0],[175,17,175,24,0],[177,13,177,41,0],[179,13,179,29,0],[181,13,181,46,0],[182,13,182,14,0],[183,17,183,42,0],[184,17,184,41,0],[185,13,185,14,0],[186,9,186,10,0],[189,9,189,10,0],[191,13,191,14,0],[192,17,192,49,0],[194,17,194,57,0],[195,17,195,18,0],[196,21,196,68,0],[196,69,196,76,0],[198,21,198,61,0],[199,25,199,63,0],[201,25,201,63,0],[202,17,202,18,0],[204,17,204,37,0],[207,25,207,36,0],[209,25,209,66,0],[210,25,210,26,0],[215,29,215,84,0],[216,29,216,30,0],[217,33,217,81,0],[218,37,218,88,0],[218,88,218,89,0],[218,89,218,90,0],[218,90,218,137,0],[218,137,218,138,0],[218,138,218,139,0],[218,139,218,167,0],[219,38,219,87,0],[220,37,220,88,0],[220,88,220,89,0],[220,89,220,90,0],[220,90,220,137,0],[220,137,220,138,0],[220,138,220,139,0],[220,139,220,167,0],[221,29,221,30,0],[222,25,222,26,0],[224,25,224,31,0],[227,25,227,83,0],[228,25,228,31,0],[231,25,231,34,0],[232,25,232,31,0],[234,13,234,14,0],[236,13,236,14,0],[237,17,237,41,0],[238,13,238,14,0],[239,9,239,10,0],[242,9,242,10,0],[243,13,243,45,0],[244,13,244,25,0],[245,9,245,10,0],[248,9,248,10,0],[249,13,249,27,0],[250,13,250,25,0],[251,9,251,10,0],[256,41,256,45,0],[256,46,256,50,0],[256,55,256,60,0],[260,13,260,14,0],[262,17,262,53,0],[264,17,264,77,0],[265,13,265,14,0],[268,13,268,14,0],[269,17,269,46,0],[272,25,289,27,0],[290,25,290,31,0],[293,25,296,27,0],[297,25,297,31,0],[299,13,299,14,0]]);
+    </script>
+  </body>
+</html>

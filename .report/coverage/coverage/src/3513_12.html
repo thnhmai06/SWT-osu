@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/Containers/SectionsContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Layout;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+
+namespace osu.Game.Graphics.Containers
+{
+    /// &lt;summary&gt;
+    /// A container that can scroll to each section inside it.
+    /// &lt;/summary&gt;
+    [Cached]
+    public partial class SectionsContainer&lt;T&gt; : Container&lt;T&gt;
+        where T : Drawable
+    {
+        public Bindable&lt;T?&gt; SelectedSection { get; } = new Bindable&lt;T?&gt;();
+
+        private T? lastClickedSection;
+
+        protected override Container&lt;T&gt; Content =&gt; scrollContentContainer;
+
+        private readonly UserTrackingScrollContainer scrollContainer;
+        private readonly Container headerBackgroundContainer;
+        private readonly MarginPadding originalSectionsMargin;
+
+        private Drawable? fixedHeader;
+
+        private Drawable? footer;
+        private Drawable? headerBackground;
+
+        private FlowContainer&lt;T&gt; scrollContentContainer = null!;
+
+        private float? headerHeight, footerHeight;
+
+        private float? lastKnownScroll;
+
+        /// &lt;summary&gt;
+        /// The percentage of the container to consider the centre-point for deciding the active section (and scrolling to a requested section).
+        /// &lt;/summary&gt;
+        private const float scroll_y_centre = 0.1f;
+
+        private Drawable? expandableHeader;
+
+        public Drawable? ExpandableHeader
+        {
+            get =&gt; expandableHeader;
+            set
+            {
+                if (value == expandableHeader) return;
+
+                if (expandableHeader != null)
+                    RemoveInternal(expandableHeader, false);
+
+                expandableHeader = value;
+
+                if (value == null) return;
+
+                AddInternal(expandableHeader);
+
+                lastKnownScroll = null;
+            }
+        }
+
+        public Drawable? FixedHeader
+        {
+            get =&gt; fixedHeader;
+            set
+            {
+                if (value == fixedHeader) return;
+
+                fixedHeader?.Expire();
+                fixedHeader = value;
+
+                if (value == null) return;
+
+                AddInternal(fixedHeader);
+                lastKnownScroll = null;
+            }
+        }
+
+        public Drawable? Footer
+        {
+            get =&gt; footer;
+            set
+            {
+                if (value == footer) return;
+
+                if (footer != null)
+                    scrollContainer.Remove(footer, false);
+
+                footer = value;
+
+                if (footer == null) return;
+
+                footer.Anchor |= Anchor.y2;
+                footer.Origin |= Anchor.y2;
+
+                scrollContainer.Add(footer);
+                lastKnownScroll = null;
+            }
+        }
+
+        public Drawable? HeaderBackground
+        {
+            get =&gt; headerBackground;
+            set
+            {
+                if (value == headerBackground) return;
+
+                headerBackgroundContainer.Clear();
+                headerBackground = value;
+
+                if (headerBackground != null)
+                {
+                    headerBackgroundContainer.Add(headerBackground);
+                    lastKnownScroll = null;
+                }
+            }
+        }
+
+        public SectionsContainer()
+        {
+            AddRangeInternal(new Drawable[]
+            {
+                scrollContainer = CreateScrollContainer().With(s =&gt;
+                {
+                    s.RelativeSizeAxes = Axes.Both;
+                    s.Masking = true;
+                    s.ScrollbarVisible = false;
+                    s.Child = scrollContentContainer = CreateScrollContentContainer();
+                }),
+                headerBackgroundContainer = new Container
+                {
+                    RelativeSizeAxes = Axes.X
+                }
+            });
+
+            originalSectionsMargin = scrollContentContainer.Margin;
+        }
+
+        public override void Add(T drawable)
+        {
+            base.Add(drawable);
+
+            Debug.Assert(drawable != null);
+
+            lastKnownScroll = null;
+            headerHeight = null;
+            footerHeight = null;
+        }
+
+        private ScheduledDelegate? scrollToTargetDelegate;
+
+        public void ScrollTo(Drawable target)
+        {
+            Logger.Log($&quot;Scrolling to {target}..&quot;);
+
+            InvalidateScrollPosition();
+
+            float scrollTarget = getScrollTargetForDrawable(target);
+
+            if (scrollTarget &gt; scrollContainer.ScrollableExtent)
+                scrollContainer.ScrollToEnd();
+            else
+                scrollContainer.ScrollTo(scrollTarget);
+
+            if (target is T section)
+                lastClickedSection = section;
+
+            // Content may load in as a scroll occurs, changing the scroll target we need to aim for.
+            // This scheduled operation ensures that we keep trying until actually arriving at the target.
+            scrollToTargetDelegate?.Cancel();
+            scrollToTargetDelegate = Scheduler.AddDelayed(() =&gt;
+            {
+                if (scrollContainer.UserScrolling)
+                {
+                    Logger.Log(&quot;Scroll operation interrupted by user scroll&quot;);
+                    scrollToTargetDelegate?.Cancel();
+                    scrollToTargetDelegate = null;
+                    return;
+                }
+
+                if (Precision.AlmostEquals(scrollContainer.Current, scrollTarget, 1))
+                {
+                    Logger.Log($&quot;Finished scrolling to {target}!&quot;);
+                    scrollToTargetDelegate?.Cancel();
+                    scrollToTargetDelegate = null;
+                    return;
+                }
+
+                if (!Precision.AlmostEquals(getScrollTargetForDrawable(target), scrollTarget, 1))
+                {
+                    Logger.Log($&quot;Reattempting scroll to {target} due to change in position&quot;);
+                    ScrollTo(target);
+                }
+            }, 50, true);
+        }
+
+        private float getScrollTargetForDrawable(Drawable target)
+        {
+            // implementation similar to ScrollIntoView but a bit more nuanced.
+            return (float)(scrollContainer.GetChildPosInContent(target) - scrollContainer.DisplayableContent * scroll_y_centre);
+        }
+
+        public void ScrollToTop() =&gt; scrollContainer.ScrollTo(0);
+
+        protected virtual UserTrackingScrollContainer CreateScrollContainer() =&gt; new UserTrackingScrollContainer();
+
+        protected virtual FlowContainer&lt;T&gt; CreateScrollContentContainer() =&gt;
+            new FillFlowContainer&lt;T&gt;
+            {
+                Direction = FillDirection.Vertical,
+                AutoSizeAxes = Axes.Y,
+                RelativeSizeAxes = Axes.X,
+            };
+
+        protected override bool OnInvalidate(Invalidation invalidation, InvalidationSource source)
+        {
+            bool result = base.OnInvalidate(invalidation, source);
+
+            if (source == InvalidationSource.Child &amp;&amp; (invalidation &amp; Invalidation.DrawSize) != 0)
+            {
+                InvalidateScrollPosition();
+                result = true;
+            }
+
+            return result;
+        }
+
+        protected void InvalidateScrollPosition()
+        {
+            lastKnownScroll = null;
+            lastClickedSection = null;
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            float fixedHeaderSize = FixedHeader?.LayoutSize.Y ?? 0;
+            float expandableHeaderSize = ExpandableHeader?.LayoutSize.Y ?? 0;
+
+            float headerH = expandableHeaderSize + fixedHeaderSize;
+            float footerH = Footer?.LayoutSize.Y ?? 0;
+
+            if (headerH != headerHeight || footerH != footerHeight)
+            {
+                headerHeight = headerH;
+                footerHeight = footerH;
+                updateSectionsMargin();
+            }
+
+            float currentScroll = (float)scrollContainer.Current;
+
+            if (currentScroll != lastKnownScroll)
+            {
+                lastKnownScroll = currentScroll;
+
+                // reset last clicked section because user started scrolling themselves
+                if (scrollContainer.UserScrolling)
+                    lastClickedSection = null;
+
+                if (ExpandableHeader != null &amp;&amp; FixedHeader != null)
+                {
+                    float offset = Math.Min(expandableHeaderSize, currentScroll);
+
+                    ExpandableHeader.Y = -offset;
+                    FixedHeader.Y = -offset + expandableHeaderSize;
+                }
+
+                headerBackgroundContainer.Height = expandableHeaderSize + fixedHeaderSize;
+                headerBackgroundContainer.Y = ExpandableHeader?.Y ?? 0;
+
+                var flowChildren = scrollContentContainer.FlowingChildren.OfType&lt;T&gt;();
+
+                float smallestSectionHeight = flowChildren.Any() ? flowChildren.Min(d =&gt; d.Height) : 0;
+
+                // scroll offset is our fixed header height if we have it plus 10% of content height
+                // plus 5% to fix floating point errors and to not have a section instantly unselect when scrolling upwards
+                // but the 5% can&#39;t be bigger than our smallest section height, otherwise it won&#39;t get selected correctly
+                float selectionLenienceAboveSection = Math.Min(smallestSectionHeight / 2.0f, scrollContainer.DisplayableContent * 0.05f);
+
+                float scrollCentre = fixedHeaderSize + scrollContainer.DisplayableContent * scroll_y_centre + selectionLenienceAboveSection;
+
+                var presentChildren = flowChildren.Where(c =&gt; c.IsPresent);
+
+                if (lastClickedSection != null)
+                    SelectedSection.Value = lastClickedSection;
+                else if (Precision.AlmostBigger(0, scrollContainer.Current))
+                    SelectedSection.Value = presentChildren.FirstOrDefault();
+                else if (Precision.AlmostBigger(scrollContainer.Current, scrollContainer.ScrollableExtent))
+                    SelectedSection.Value = presentChildren.LastOrDefault();
+                else
+                {
+                    SelectedSection.Value = presentChildren
+                                            .TakeWhile(section =&gt; scrollContainer.GetChildPosInContent(section) - currentScroll - scrollCentre &lt;= 0)
+                                            .LastOrDefault() ?? presentChildren.FirstOrDefault();
+                }
+            }
+        }
+
+        private void updateSectionsMargin()
+        {
+            if (!Children.Any()) return;
+
+            // if a fixed header is present, apply top padding for it
+            // to make the scroll container aware of its displayable area.
+            // (i.e. for page up/down to work properly)
+            scrollContainer.Padding = new MarginPadding { Top = FixedHeader?.LayoutSize.Y ?? 0 };
+
+            var newMargin = originalSectionsMargin;
+            newMargin.Top += (ExpandableHeader?.LayoutSize.Y ?? 0);
+            newMargin.Bottom += (footerHeight ?? 0);
+
+            scrollContentContainer.Margin = newMargin;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,47,25,51,0],[25,56,25,74,0],[29,52,29,74,0],[40,9,40,65,0],[55,20,55,36,0],[57,13,57,14,0],[58,17,58,47,0],[58,48,58,55,0],[60,17,60,46,0],[61,21,61,61,0],[63,17,63,42,0],[65,17,65,35,0],[65,36,65,43,0],[67,17,67,47,0],[69,17,69,40,0],[70,13,70,14,0],[75,20,75,31,0],[77,13,77,14,0],[78,17,78,42,0],[78,43,78,50,0],[80,17,80,39,0],[81,17,81,37,0],[83,17,83,35,0],[83,36,83,43,0],[85,17,85,42,0],[86,17,86,40,0],[87,13,87,14,0],[92,20,92,26,0],[94,13,94,14,0],[95,17,95,37,0],[95,38,95,45,0],[97,17,97,36,0],[98,21,98,59,0],[100,17,100,32,0],[102,17,102,36,0],[102,37,102,44,0],[104,17,104,44,0],[105,17,105,44,0],[107,17,107,45,0],[108,17,108,40,0],[109,13,109,14,0],[114,20,114,36,0],[116,13,116,14,0],[117,17,117,47,0],[117,48,117,55,0],[119,17,119,51,0],[120,17,120,42,0],[122,17,122,46,0],[123,17,123,18,0],[124,21,124,69,0],[125,21,125,44,0],[126,17,126,18,0],[127,13,127,14,0],[130,9,130,35,0],[131,9,131,10,0],[132,13,135,17,0],[135,17,135,18,0],[135,18,136,21,0],[136,21,136,52,0],[136,52,137,21,0],[137,21,137,38,0],[137,38,138,21,0],[138,21,138,48,0],[138,48,139,21,0],[139,21,139,87,0],[139,87,140,17,0],[140,17,140,18,0],[140,18,145,16,0],[147,13,147,68,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,32,0],[154,13,154,44,0],[156,13,156,36,0],[157,13,157,33,0],[158,13,158,33,0],[159,9,159,10,0],[164,9,164,10,0],[165,13,165,52,0],[167,13,167,40,0],[169,13,169,69,0],[171,13,171,65,0],[172,17,172,47,0],[174,17,174,56,0],[176,13,176,37,0],[177,17,177,46,0],[181,13,181,46,0],[182,13,183,13,0],[183,13,183,14,0],[183,14,184,17,0],[184,17,184,51,0],[184,51,185,17,0],[185,17,185,18,0],[185,18,186,21,0],[186,21,186,79,0],[186,79,187,21,0],[187,21,187,54,0],[187,54,188,21,0],[188,21,188,51,0],[188,51,189,21,0],[189,21,189,28,0],[189,28,192,17,0],[192,17,192,86,0],[192,86,193,17,0],[193,17,193,18,0],[193,18,194,21,0],[194,21,194,68,0],[194,68,195,21,0],[195,21,195,54,0],[195,54,196,21,0],[196,21,196,51,0],[196,51,197,21,0],[197,21,197,28,0],[197,28,200,17,0],[200,17,200,98,0],[200,98,201,17,0],[201,17,201,18,0],[201,18,202,21,0],[202,21,202,94,0],[202,94,203,21,0],[203,21,203,38,0],[203,38,204,17,0],[204,17,204,18,0],[204,18,205,13,0],[205,13,205,14,0],[205,14,205,26,0],[206,9,206,10,0],[209,9,209,10,0],[211,13,211,129,0],[212,9,212,10,0],[214,38,214,65,0],[216,82,216,115,0],[219,13,224,14,0],[227,9,227,10,0],[228,13,228,67,0],[230,13,230,99,0],[231,13,231,14,0],[232,17,232,44,0],[233,17,233,31,0],[234,13,234,14,0],[236,13,236,27,0],[237,9,237,10,0],[240,9,240,10,0],[241,13,241,36,0],[242,13,242,39,0],[243,9,243,10,0],[246,9,246,10,0],[247,13,247,40,0],[249,13,249,68,0],[250,13,250,78,0],[252,13,252,68,0],[253,13,253,55,0],[255,13,255,68,0],[256,13,256,14,0],[257,17,257,40,0],[258,17,258,40,0],[259,17,259,40,0],[260,13,260,14,0],[262,13,262,66,0],[264,13,264,50,0],[265,13,265,14,0],[266,17,266,49,0],[269,17,269,51,0],[270,21,270,47,0],[272,17,272,69,0],[273,17,273,18,0],[274,21,274,82,0],[276,21,276,50,0],[277,21,277,68,0],[278,17,278,18,0],[280,17,280,91,0],[281,17,281,72,0],[283,17,283,87,0],[285,17,285,90,0],[285,90,285,98,0],[285,98,285,104,0],[290,17,290,138,0],[292,17,292,141,0],[294,17,294,63,0],[294,63,294,74,0],[294,74,294,76,0],[296,17,296,48,0],[297,21,297,64,0],[298,22,298,77,0],[299,21,299,78,0],[300,22,300,108,0],[301,21,301,77,0],[303,17,303,18,0],[304,21,305,67,0],[305,67,305,148,0],[305,148,306,98,0],[307,17,307,18,0],[308,13,308,14,0],[309,9,309,10,0],[312,9,312,10,0],[313,13,313,33,0],[313,34,313,41,0],[318,13,318,98,0],[320,13,320,52,0],[321,13,321,68,0],[322,13,322,53,0],[324,13,324,55,0],[325,9,325,10,0]]);
+    </script>
+  </body>
+</html>

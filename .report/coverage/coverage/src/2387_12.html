@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/Checks/CheckDelayedHitsounds.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using osu.Framework.Audio.Track;
+using osu.Game.Audio;
+using osu.Game.Extensions;
+using osu.Game.Rulesets.Edit.Checks.Components;
+
+namespace osu.Game.Rulesets.Edit.Checks
+{
+    public class CheckDelayedHitsounds : ICheck
+    {
+        /// &lt;summary&gt;
+        /// Threshold at which point the sample is considered silent.
+        /// &lt;/summary&gt;
+        private const float silence_threshold = 0.001f;
+
+        private const float falloff_factor = 0.95f;
+        private const int delay_threshold = 5;
+        private const int delay_threshold_negligible = 1;
+
+        public CheckMetadata Metadata =&gt; new CheckMetadata(CheckCategory.Audio, &quot;Delayed hit sounds.&quot;, CheckScope.BeatmapSet);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
+        {
+            new IssueTemplateConsequentDelay(this),
+            new IssueTemplateDelay(this),
+            new IssueTemplateDelayNoSilence(this),
+            new IssueTemplateMinorDelay(this),
+            new IssueTemplateMinorDelayNoSilence(this),
+        };
+
+        private float getAverageAmplitude(Waveform.Point point) =&gt; (point.AmplitudeLeft + point.AmplitudeRight) / 2;
+
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            var beatmapSet = context.CurrentDifficulty.Playable.BeatmapInfo.BeatmapSet;
+
+            if (beatmapSet == null)
+                yield break;
+
+            foreach (var file in beatmapSet.Files)
+            {
+                using (Stream? stream = context.CurrentDifficulty.Working.GetStream(file.File.GetStoragePath()))
+                {
+                    if (stream == null)
+                        continue;
+
+                    if (!isHitSound(file.Filename))
+                        continue;
+
+                    using Waveform waveform = new Waveform(stream);
+
+                    var points = waveform.GetPoints();
+
+                    // Skip muted samples
+                    if (points.Length == 0 || points.Sum(getAverageAmplitude) &lt;= silence_threshold)
+                        continue;
+
+                    float maxAmplitude = points.Select(getAverageAmplitude).Max();
+
+                    int consequentDelay = 0;
+                    int delay = 0;
+                    float amplitude = 0;
+
+                    while (delay + consequentDelay &lt; points.Length)
+                    {
+                        amplitude += getAverageAmplitude(points[delay]);
+
+                        // Reached peak amplitude/transient
+                        if (amplitude &gt;= maxAmplitude)
+                            break;
+
+                        amplitude *= falloff_factor;
+
+                        if (amplitude &lt; silence_threshold)
+                        {
+                            amplitude = 0;
+                            consequentDelay++;
+                        }
+
+                        delay++;
+                    }
+
+                    if (consequentDelay &gt;= delay_threshold)
+                        yield return new IssueTemplateConsequentDelay(this).Create(file.Filename, consequentDelay);
+                    else if (consequentDelay + delay &gt;= delay_threshold)
+                    {
+                        if (consequentDelay &gt; 0)
+                            yield return new IssueTemplateDelay(this).Create(file.Filename, consequentDelay, delay);
+                        else
+                            yield return new IssueTemplateDelayNoSilence(this).Create(file.Filename, delay);
+                    }
+                    else if (consequentDelay + delay &gt;= delay_threshold_negligible)
+                    {
+                        if (consequentDelay &gt; 0)
+                            yield return new IssueTemplateMinorDelay(this).Create(file.Filename, consequentDelay, delay);
+                        else
+                            yield return new IssueTemplateMinorDelayNoSilence(this).Create(file.Filename, delay);
+                    }
+                }
+            }
+        }
+
+        private bool isHitSound(string filename)
+        {
+            if (!AudioCheckUtils.HasAudioExtension(filename))
+                return false;
+
+            // &lt;bank&gt;-&lt;sampleset&gt;
+            string[] parts = filename.ToLowerInvariant().Split(&#39;-&#39;);
+
+            if (parts.Length != 2)
+                return false;
+
+            string bank = parts[0];
+            string sampleSet = parts[1];
+
+            return HitSampleInfo.ALL_BANKS.Contains(bank)
+                   &amp;&amp; HitSampleInfo.ALL_ADDITIONS.Append(HitSampleInfo.HIT_NORMAL).Any(sampleSet.StartsWith);
+        }
+
+        public class IssueTemplateConsequentDelay : IssueTemplate
+        {
+            public IssueTemplateConsequentDelay(ICheck check)
+                : base(check, IssueType.Problem,
+                    &quot;\&quot;{0}\&quot; has a {1:0.##} ms period of complete silence at the start.&quot;)
+            {
+            }
+
+            public Issue Create(string filename, int pureDelay) =&gt; new Issue(this, filename, pureDelay);
+        }
+
+        public class IssueTemplateDelay : IssueTemplate
+        {
+            public IssueTemplateDelay(ICheck check)
+                : base(check, IssueType.Warning,
+                    &quot;\&quot;{0}\&quot; has a transient delay of ~{1:0.##} ms, of which {2:0.##} ms is complete silence.&quot;)
+            {
+            }
+
+            public Issue Create(string filename, int consequentDelay, int delay) =&gt; new Issue(this, filename, delay, consequentDelay);
+        }
+
+        public class IssueTemplateDelayNoSilence : IssueTemplate
+        {
+            public IssueTemplateDelayNoSilence(ICheck check)
+                : base(check, IssueType.Warning,
+                    &quot;\&quot;{0}\&quot; has a transient delay of ~{1:0.##} ms.&quot;)
+            {
+            }
+
+            public Issue Create(string filename, int delay) =&gt; new Issue(this, filename, delay);
+        }
+
+        public class IssueTemplateMinorDelay : IssueTemplate
+        {
+            public IssueTemplateMinorDelay(ICheck check)
+                : base(check, IssueType.Negligible,
+                    &quot;\&quot;{0}\&quot; has a transient delay of ~{1:0.##} ms, of which {2:0.##} ms is complete silence.&quot;)
+            {
+            }
+
+            public Issue Create(string filename, int consequentDelay, int delay) =&gt; new Issue(this, filename, delay, consequentDelay);
+        }
+
+        public class IssueTemplateMinorDelayNoSilence : IssueTemplate
+        {
+            public IssueTemplateMinorDelayNoSilence(ICheck check)
+                : base(check, IssueType.Negligible,
+                    &quot;\&quot;{0}\&quot; has a transient delay of ~{1:0.##} ms.&quot;)
+            {
+            }
+
+            public Issue Create(string filename, int delay) =&gt; new Issue(this, filename, delay);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,42,25,126,0],[27,64,34,10,0],[36,68,36,116,0],[39,9,39,10,0],[40,13,40,88,0],[42,13,42,36,0],[43,17,43,29,0],[45,13,45,20,0],[45,22,45,30,0],[45,31,45,33,0],[45,34,45,50,0],[46,13,46,14,0],[47,24,47,112,0],[48,17,48,18,0],[49,21,49,40,0],[50,25,50,34,0],[52,21,52,52,0],[53,25,53,34,0],[55,21,55,68,0],[57,21,57,55,0],[60,21,60,100,0],[61,25,61,34,0],[63,21,63,83,0],[65,21,65,45,0],[66,21,66,35,0],[67,21,67,41,0],[69,21,69,68,0],[70,21,70,22,0],[71,25,71,73,0],[74,25,74,55,0],[75,29,75,35,0],[77,25,77,53,0],[79,25,79,59,0],[80,25,80,26,0],[81,29,81,43,0],[82,29,82,47,0],[83,25,83,26,0],[85,25,85,33,0],[86,21,86,22,0],[88,21,88,60,0],[89,25,89,116,0],[90,26,90,73,0],[91,21,91,22,0],[92,25,92,49,0],[93,29,93,117,0],[95,29,95,109,0],[96,21,96,22,0],[97,26,97,84,0],[98,21,98,22,0],[99,25,99,49,0],[100,29,100,122,0],[102,29,102,114,0],[103,21,103,22,0],[104,17,104,18,0],[105,13,105,14,0],[106,9,106,10,0],[109,9,109,10,0],[110,13,110,62,0],[111,17,111,30,0],[114,13,114,69,0],[116,13,116,35,0],[117,17,117,30,0],[119,13,119,36,0],[120,13,120,41,0],[122,13,123,110,0],[124,9,124,10,0],[129,19,130,90,0],[131,13,131,14,0],[132,13,132,14,0],[134,68,134,104,0],[140,19,141,112,0],[142,13,142,14,0],[143,13,143,14,0],[145,85,145,134,0],[151,19,152,70,0],[153,13,153,14,0],[154,13,154,14,0],[156,64,156,96,0],[162,19,163,112,0],[164,13,164,14,0],[165,13,165,14,0],[167,85,167,134,0],[173,19,174,70,0],[175,13,175,14,0],[176,13,176,14,0],[178,64,178,96,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1859 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/OsuGame.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Humanizer;
+using JetBrains.Annotations;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Configuration;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Input.Handlers.Mouse;
+using osu.Framework.Input.Handlers.Pen;
+using osu.Framework.Input.Handlers.Tablet;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.IO;
+using osu.Game.Localisation;
+using osu.Game.Online;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Leaderboards;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Overlays.BeatmapListing;
+using osu.Game.Overlays.Mods;
+using osu.Game.Overlays.Music;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Overlays.OSD;
+using osu.Game.Overlays.SkinEditor;
+using osu.Game.Overlays.Toolbar;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Screens;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Menu;
+using osu.Game.Screens.OnlinePlay.DailyChallenge;
+using osu.Game.Screens.OnlinePlay.Matchmaking.Queue;
+using osu.Game.Screens.OnlinePlay.Multiplayer;
+using osu.Game.Screens.OnlinePlay.Playlists;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Play.Leaderboards;
+using osu.Game.Screens.Ranking;
+using osu.Game.Screens.Select;
+using osu.Game.Seasonal;
+using osu.Game.Skinning;
+using osu.Game.Updater;
+using osu.Game.Users;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+using Sentry;
+using IntroScreen = osu.Game.Screens.Menu.IntroScreen;
+using MatchType = osu.Game.Online.Rooms.MatchType;
+
+namespace osu.Game
+{
+    /// &lt;summary&gt;
+    /// The full osu! experience. Builds on top of &lt;see cref=&quot;OsuGameBase&quot;/&gt; to add menus and binding logic
+    /// for initial components that are generally retrieved via DI.
+    /// &lt;/summary&gt;
+    [Cached(typeof(OsuGame))]
+    public partial class OsuGame : OsuGameBase, IKeyBindingHandler&lt;GlobalAction&gt;, ILocalUserPlayInfo, IPerformFromScreenRunner, IOverlayManager, ILinkHandler
+    {
+#if DEBUG
+        // Different port allows running release and debug builds alongside each other.
+        public const string IPC_PIPE_NAME = &quot;osu-lazer-debug&quot;;
+#else
+        public const string IPC_PIPE_NAME = &quot;osu-lazer&quot;;
+#endif
+
+        /// &lt;summary&gt;
+        /// The amount of global offset to apply when a left/right anchored overlay is displayed (ie. settings or notifications).
+        /// &lt;/summary&gt;
+        protected const float SIDE_OVERLAY_OFFSET_RATIO = 0.05f;
+
+        /// &lt;summary&gt;
+        /// A common shear factor applied to most components of the game.
+        /// &lt;/summary&gt;
+        public static readonly Vector2 SHEAR = new Vector2(0.2f, 0);
+
+        /// &lt;summary&gt;
+        /// For elements placed close to the screen edge, this is the margin to leave to the edge.
+        /// &lt;/summary&gt;
+        public const float SCREEN_EDGE_MARGIN = 12f;
+
+        private const double general_log_debounce = 60000;
+        private const string tablet_log_prefix = @&quot;[Tablet] &quot;;
+
+        public Toolbar Toolbar { get; private set; }
+
+        private ChatOverlay chatOverlay;
+
+        private ChannelManager channelManager;
+
+        [NotNull]
+        protected readonly NotificationOverlay Notifications = new NotificationOverlay();
+
+        private BeatmapListingOverlay beatmapListing;
+
+        private DashboardOverlay dashboard;
+
+        private NewsOverlay news;
+
+        private UserProfileOverlay userProfile;
+
+        private LoginOverlay loginOverlay;
+
+        private NowPlayingOverlay nowPlayingOverlay;
+
+        private BeatmapSetOverlay beatmapSetOverlay;
+
+        private WikiOverlay wikiOverlay;
+
+        private ChangelogOverlay changelogOverlay;
+
+        private SkinEditorOverlay skinEditor;
+
+        private Container overlayContent;
+
+        private Container rightFloatingOverlayContent;
+
+        private Container leftFloatingOverlayContent;
+
+        private Container topMostOverlayContent;
+
+        private Container footerBasedOverlayContent;
+
+        protected ScalingContainer ScreenContainer { get; private set; }
+
+        protected Container ScreenOffsetContainer { get; private set; }
+
+        private Container overlayOffsetContainer;
+
+        private OnScreenDisplay onScreenDisplay;
+
+        private DialogOverlay dialogOverlay;
+
+        [Resolved]
+        private FrameworkConfigManager frameworkConfig { get; set; }
+
+        private DifficultyRecommender difficultyRecommender;
+
+        [Cached]
+        private readonly LegacyImportManager legacyImportManager = new LegacyImportManager();
+
+        [Cached]
+        private readonly ScreenshotManager screenshotManager = new ScreenshotManager();
+
+        private SentryLogger sentryLogger;
+
+        public virtual StableStorage GetStorageForStableInstall() =&gt; null;
+
+        private float toolbarOffset =&gt; (Toolbar?.Position.Y ?? 0) + (Toolbar?.DrawHeight ?? 0);
+
+        private IdleTracker idleTracker;
+
+        /// &lt;summary&gt;
+        /// Whether the user is currently in an idle state.
+        /// &lt;/summary&gt;
+        public IBindable&lt;bool&gt; IsIdle =&gt; idleTracker.IsIdle;
+
+        /// &lt;summary&gt;
+        /// Whether overlays should be able to be opened game-wide. Value is sourced from the current active screen.
+        /// &lt;/summary&gt;
+        public readonly IBindable&lt;OverlayActivation&gt; OverlayActivationMode = new Bindable&lt;OverlayActivation&gt;();
+
+        IBindable&lt;LocalUserPlayingState&gt; ILocalUserPlayInfo.PlayingState =&gt; UserPlayingState;
+
+        protected readonly Bindable&lt;LocalUserPlayingState&gt; UserPlayingState = new Bindable&lt;LocalUserPlayingState&gt;();
+
+        public OsuScreenStack ScreenStack { get; private set; }
+
+        protected BackButton BackButton =&gt; screenStackFooter.BackButton;
+        protected ScreenFooter ScreenFooter =&gt; screenStackFooter.Footer;
+
+        protected SettingsOverlay Settings;
+
+        protected FirstRunSetupOverlay FirstRunOverlay { get; private set; }
+
+        private FPSCounter fpsCounter;
+
+        private VolumeOverlay volume;
+
+        private OsuLogo osuLogo;
+
+        private MainMenu menuScreen;
+
+        [CanBeNull]
+        private DevBuildBanner devBuildBanner;
+
+        [CanBeNull]
+        private IntroScreen introScreen;
+
+        private Bindable&lt;string&gt; configRuleset;
+
+        private Bindable&lt;bool&gt; applySafeAreaConsiderations;
+
+        private Bindable&lt;float&gt; uiScale;
+
+        private Bindable&lt;UserActivity&gt; configUserActivity;
+
+        private Bindable&lt;string&gt; configSkin;
+
+        private RealmDetachedBeatmapStore detachedBeatmapStore;
+
+        private ScreenStackFooter screenStackFooter;
+
+        private readonly string[] args;
+
+        private readonly List&lt;OsuFocusedOverlayContainer&gt; focusedOverlays = new List&lt;OsuFocusedOverlayContainer&gt;();
+        private readonly List&lt;OverlayContainer&gt; externalOverlays = new List&lt;OverlayContainer&gt;();
+
+        private readonly List&lt;OverlayContainer&gt; visibleBlockingOverlays = new List&lt;OverlayContainer&gt;();
+
+        /// &lt;summary&gt;
+        /// Whether the game should be limited to only display officially licensed content.
+        /// &lt;/summary&gt;
+        public virtual bool HideUnlicensedContent =&gt; false;
+
+        private bool tabletLogNotifyOnWarning = true;
+        private bool tabletLogNotifyOnError = true;
+        private int generalLogRecentCount;
+
+        public OsuGame(string[] args = null)
+        {
+            this.args = args;
+
+            Logger.NewEntry += forwardGeneralLogToNotifications;
+            Logger.NewEntry += forwardTabletLogToNotifications;
+
+            Schedule(() =&gt;
+            {
+                ITabletHandler tablet = Host.AvailableInputHandlers.OfType&lt;ITabletHandler&gt;().SingleOrDefault();
+                tablet?.Tablet.BindValueChanged(_ =&gt;
+                {
+                    tabletLogNotifyOnWarning = true;
+                    tabletLogNotifyOnError = true;
+                }, true);
+            });
+        }
+
+        #region IOverlayManager
+
+        IBindable&lt;OverlayActivation&gt; IOverlayManager.OverlayActivationMode =&gt; OverlayActivationMode;
+
+        private void updateBlockingOverlayFade() =&gt;
+            ScreenContainer.FadeColour(visibleBlockingOverlays.Any() ? OsuColour.Gray(0.5f) : Color4.White, 500, Easing.OutQuint);
+
+        IDisposable IOverlayManager.RegisterBlockingOverlay(OverlayContainer overlayContainer)
+        {
+            if (overlayContainer.Parent != null)
+                throw new ArgumentException($@&quot;Overlays registered via {nameof(IOverlayManager.RegisterBlockingOverlay)} should not be added to the scene graph.&quot;);
+
+            if (externalOverlays.Contains(overlayContainer))
+                throw new ArgumentException($@&quot;{overlayContainer} has already been registered via {nameof(IOverlayManager.RegisterBlockingOverlay)} once.&quot;);
+
+            externalOverlays.Add(overlayContainer);
+
+            if (overlayContainer is ShearedOverlayContainer)
+                footerBasedOverlayContent.Add(overlayContainer);
+            else
+                overlayContent.Add(overlayContainer);
+
+            if (overlayContainer is OsuFocusedOverlayContainer focusedOverlayContainer)
+                focusedOverlays.Add(focusedOverlayContainer);
+
+            return new InvokeOnDisposal(() =&gt; unregisterBlockingOverlay(overlayContainer));
+        }
+
+        void IOverlayManager.ShowBlockingOverlay(OverlayContainer overlay)
+        {
+            if (!visibleBlockingOverlays.Contains(overlay))
+                visibleBlockingOverlays.Add(overlay);
+            updateBlockingOverlayFade();
+        }
+
+        void IOverlayManager.HideBlockingOverlay(OverlayContainer overlay) =&gt; Schedule(() =&gt;
+        {
+            visibleBlockingOverlays.Remove(overlay);
+            updateBlockingOverlayFade();
+        });
+
+        /// &lt;summary&gt;
+        /// Unregisters a blocking &lt;see cref=&quot;OverlayContainer&quot;/&gt; that was not created by &lt;see cref=&quot;OsuGame&quot;/&gt; itself.
+        /// &lt;/summary&gt;
+        private void unregisterBlockingOverlay(OverlayContainer overlayContainer) =&gt; Schedule(() =&gt;
+        {
+            externalOverlays.Remove(overlayContainer);
+
+            if (overlayContainer is OsuFocusedOverlayContainer focusedOverlayContainer)
+                focusedOverlays.Remove(focusedOverlayContainer);
+
+            overlayContainer.Expire();
+        });
+
+        #endregion
+
+        /// &lt;summary&gt;
+        /// Close all game-wide overlays.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hideToolbar&quot;&gt;Whether the toolbar should also be hidden.&lt;/param&gt;
+        public void CloseAllOverlays(bool hideToolbar = true)
+        {
+            foreach (var overlay in focusedOverlays)
+                overlay.Hide();
+
+            ScreenFooter.ActiveOverlay?.Hide();
+
+            if (hideToolbar) Toolbar.Hide();
+        }
+
+        protected override UserInputManager CreateUserInputManager()
+        {
+            var userInputManager = base.CreateUserInputManager();
+            (userInputManager as OsuUserInputManager)?.PlayingState.BindTo(UserPlayingState);
+            return userInputManager;
+        }
+
+        private DependencyContainer dependencies;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) =&gt;
+            dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+        private readonly List&lt;string&gt; dragDropFiles = new List&lt;string&gt;();
+        private ScheduledDelegate dragDropImportSchedule;
+
+        public override void SetupLogging(Storage gameStorage, Storage cacheStorage)
+        {
+            base.SetupLogging(gameStorage, cacheStorage);
+            sentryLogger = new SentryLogger(this, cacheStorage);
+        }
+
+        public override void SetHost(GameHost host)
+        {
+            base.SetHost(host);
+
+            if (host.Window != null)
+            {
+                host.Window.CursorState |= CursorState.Hidden;
+                host.Window.DragDrop += onWindowDragDrop;
+            }
+        }
+
+        private void onWindowDragDrop(string path)
+        {
+            // on macOS/iOS, URL associations are handled via SDL_DROPFILE events.
+            if (path.StartsWith(OSU_PROTOCOL, StringComparison.Ordinal))
+            {
+                HandleLink(path);
+                return;
+            }
+
+            lock (dragDropFiles)
+            {
+                dragDropFiles.Add(path);
+
+                Logger.Log($@&quot;Adding &quot;&quot;{Path.GetFileName(path)}&quot;&quot; for import&quot;);
+
+                // File drag drop operations can potentially trigger hundreds or thousands of these calls on some platforms.
+                // In order to avoid spawning multiple import tasks for a single drop operation, debounce a touch.
+                dragDropImportSchedule?.Cancel();
+                dragDropImportSchedule = Scheduler.AddDelayed(handlePendingDragDropImports, 100);
+            }
+
+            void handlePendingDragDropImports()
+            {
+                lock (dragDropFiles)
+                {
+                    Logger.Log($&quot;Handling batch import of {dragDropFiles.Count} files&quot;);
+
+                    string[] paths = dragDropFiles.ToArray();
+                    dragDropFiles.Clear();
+
+                    Task.Factory.StartNew(() =&gt; Import(paths), TaskCreationOptions.LongRunning);
+                }
+            }
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            sentryLogger.AttachUser(API.LocalUser);
+
+            if (SeasonalUIConfig.ENABLED)
+                dependencies.CacheAs(osuLogo = new OsuLogoChristmas { Alpha = 0 });
+            else
+                dependencies.CacheAs(osuLogo = new OsuLogo { Alpha = 0 });
+
+            // bind config int to database RulesetInfo
+            configRuleset = LocalConfig.GetBindable&lt;string&gt;(OsuSetting.Ruleset);
+            uiScale = LocalConfig.GetBindable&lt;float&gt;(OsuSetting.UIScale);
+
+            var preferredRuleset = RulesetStore.GetRuleset(configRuleset.Value);
+
+            try
+            {
+                Ruleset.Value = preferredRuleset ?? RulesetStore.AvailableRulesets.First();
+            }
+            catch (Exception e)
+            {
+                // on startup, a ruleset may be selected which has compatibility issues.
+                Logger.Error(e, $@&quot;Failed to switch to preferred ruleset {preferredRuleset}.&quot;);
+                Ruleset.Value = RulesetStore.AvailableRulesets.First();
+            }
+
+            Ruleset.ValueChanged += r =&gt; configRuleset.Value = r.NewValue.ShortName;
+
+            configUserActivity = SessionStatics.GetBindable&lt;UserActivity&gt;(Static.UserOnlineActivity);
+
+            configSkin = LocalConfig.GetBindable&lt;string&gt;(OsuSetting.Skin);
+
+            // Transfer skin from config to realm instance once on startup.
+            SkinManager.SetSkinFromConfiguration(configSkin.Value);
+
+            // Transfer any runtime changes back to configuration file.
+            SkinManager.CurrentSkinInfo.ValueChanged += skin =&gt; configSkin.Value = skin.NewValue.ID.ToString();
+
+            UserPlayingState.BindValueChanged(p =&gt;
+            {
+                BeatmapManager.PauseImports = p.NewValue != LocalUserPlayingState.NotPlaying;
+                SkinManager.PauseImports = p.NewValue != LocalUserPlayingState.NotPlaying;
+                ScoreManager.PauseImports = p.NewValue != LocalUserPlayingState.NotPlaying;
+            }, true);
+
+            IsActive.BindValueChanged(active =&gt; updateActiveState(active.NewValue), true);
+
+            Audio.AddAdjustment(AdjustableProperty.Volume, inactiveVolumeFade);
+
+            SelectedMods.BindValueChanged(modsChanged);
+            Beatmap.BindValueChanged(beatmapChanged, true);
+            configUserActivity.BindValueChanged(_ =&gt; updateWindowTitle());
+
+            applySafeAreaConsiderations = LocalConfig.GetBindable&lt;bool&gt;(OsuSetting.SafeAreaConsiderations);
+            applySafeAreaConsiderations.BindValueChanged(apply =&gt; SafeAreaContainer.SafeAreaOverrideEdges = apply.NewValue ? SafeAreaOverrideEdges : Edges.All, true);
+        }
+
+        private ExternalLinkOpener externalLinkOpener;
+
+        /// &lt;summary&gt;
+        /// Handle an arbitrary URL. Displays via in-game overlays where possible.
+        /// This can be called from a non-thread-safe non-game-loaded state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;url&quot;&gt;The URL to load.&lt;/param&gt;
+        public void HandleLink(string url) =&gt; HandleLink(MessageFormatter.GetLinkDetails(url));
+
+        /// &lt;summary&gt;
+        /// Handle a specific &lt;see cref=&quot;LinkDetails&quot;/&gt;.
+        /// This can be called from a non-thread-safe non-game-loaded state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;link&quot;&gt;The link to load.&lt;/param&gt;
+        public void HandleLink(LinkDetails link) =&gt; Schedule(() =&gt;
+        {
+            string argString = link.Argument.ToString() ?? string.Empty;
+
+            switch (link.Action)
+            {
+                case LinkAction.OpenBeatmap:
+                    // TODO: proper query params handling
+                    if (int.TryParse(argString.Contains(&#39;?&#39;) ? argString.Split(&#39;?&#39;)[0] : argString, out int beatmapId))
+                        ShowBeatmap(beatmapId);
+                    break;
+
+                case LinkAction.OpenBeatmapSet:
+                    if (int.TryParse(argString, out int setId))
+                        ShowBeatmapSet(setId);
+                    break;
+
+                case LinkAction.OpenChannel:
+                    ShowChannel(argString);
+                    break;
+
+                case LinkAction.SearchBeatmapSet:
+                    if (link.Argument is LocalisableString localisable)
+                        SearchBeatmapSet(Localisation.GetLocalisedString(localisable));
+                    else
+                        SearchBeatmapSet(argString);
+
+                    break;
+
+                case LinkAction.FilterBeatmapSetGenre:
+                    FilterBeatmapSetGenre((SearchGenre)link.Argument);
+                    break;
+
+                case LinkAction.FilterBeatmapSetLanguage:
+                    FilterBeatmapSetLanguage((SearchLanguage)link.Argument);
+                    break;
+
+                case LinkAction.OpenEditorTimestamp:
+                    HandleTimestamp(argString);
+                    break;
+
+                case LinkAction.Spectate:
+                    waitForReady(() =&gt; Notifications, _ =&gt; Notifications.Post(new SimpleNotification
+                    {
+                        Text = NotificationsStrings.LinkTypeNotSupported,
+                        Icon = FontAwesome.Solid.LifeRing,
+                    }));
+                    break;
+
+                case LinkAction.External:
+                    OpenUrlExternally(argString);
+                    break;
+
+                case LinkAction.OpenUserProfile:
+                    ShowUser((IUser)link.Argument);
+                    break;
+
+                case LinkAction.OpenWiki:
+                    ShowWiki(argString);
+                    break;
+
+                case LinkAction.OpenChangelog:
+                    if (string.IsNullOrEmpty(argString))
+                        ShowChangelogListing();
+                    else
+                    {
+                        string[] changelogArgs = argString.Split(&quot;/&quot;);
+                        ShowChangelogBuild($&quot;{changelogArgs[1]}-{changelogArgs[0]}&quot;);
+                    }
+
+                    break;
+
+                case LinkAction.JoinRoom:
+                    if (long.TryParse(argString, out long roomId))
+                        JoinRoom(roomId);
+                    break;
+
+                default:
+                    throw new NotImplementedException($&quot;This {nameof(LinkAction)} ({link.Action.ToString()}) is missing an associated action.&quot;);
+            }
+        });
+
+        public void CopyToClipboard(string value) =&gt; waitForReady(() =&gt; onScreenDisplay, _ =&gt;
+        {
+            dependencies.Get&lt;Clipboard&gt;().SetText(value);
+            onScreenDisplay.Display(new CopiedToClipboardToast());
+        });
+
+        public void OpenUrlExternally(string url, LinkWarnMode warnMode = LinkWarnMode.Default) =&gt; waitForReady(() =&gt; externalLinkOpener, _ =&gt; externalLinkOpener.OpenUrlExternally(url, warnMode));
+
+        /// &lt;summary&gt;
+        /// Open a specific channel in chat.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel to display.&lt;/param&gt;
+        public void ShowChannel(string channel) =&gt; waitForReady(() =&gt; channelManager, _ =&gt;
+        {
+            try
+            {
+                channelManager.OpenChannel(channel);
+            }
+            catch (ChannelNotFoundException)
+            {
+                Logger.Log($&quot;The requested channel \&quot;{channel}\&quot; does not exist&quot;);
+            }
+        });
+
+        /// &lt;summary&gt;
+        /// Show a beatmap set as an overlay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;setId&quot;&gt;The set to display.&lt;/param&gt;
+        public void ShowBeatmapSet(int setId) =&gt; waitForReady(() =&gt; beatmapSetOverlay, _ =&gt; beatmapSetOverlay.FetchAndShowBeatmapSet(setId));
+
+        /// &lt;summary&gt;
+        /// Show a user&#39;s profile as an overlay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;user&quot;&gt;The user to display.&lt;/param&gt;
+        public void ShowUser(IUser user) =&gt; waitForReady(() =&gt; userProfile, _ =&gt; userProfile.ShowUser(user));
+
+        /// &lt;summary&gt;
+        /// Show a beatmap&#39;s set as an overlay, displaying the given beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmapId&quot;&gt;The beatmap to show.&lt;/param&gt;
+        public void ShowBeatmap(int beatmapId) =&gt; waitForReady(() =&gt; beatmapSetOverlay, _ =&gt; beatmapSetOverlay.FetchAndShowBeatmap(beatmapId));
+
+        /// &lt;summary&gt;
+        /// Shows the beatmap listing overlay, with the given &lt;paramref name=&quot;query&quot;/&gt; in the search box.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;query&quot;&gt;The query to search for.&lt;/param&gt;
+        public void SearchBeatmapSet(string query) =&gt; waitForReady(() =&gt; beatmapListing, _ =&gt; beatmapListing.ShowWithSearch(query));
+
+        public void FilterBeatmapSetGenre(SearchGenre genre) =&gt; waitForReady(() =&gt; beatmapListing, _ =&gt; beatmapListing.ShowWithGenreFilter(genre));
+
+        public void FilterBeatmapSetLanguage(SearchLanguage language) =&gt; waitForReady(() =&gt; beatmapListing, _ =&gt; beatmapListing.ShowWithLanguageFilter(language));
+
+        /// &lt;summary&gt;
+        /// Show a wiki&#39;s page as an overlay
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;path&quot;&gt;The wiki page to show&lt;/param&gt;
+        public void ShowWiki(string path) =&gt; waitForReady(() =&gt; wikiOverlay, _ =&gt; wikiOverlay.ShowPage(path));
+
+        /// &lt;summary&gt;
+        /// Show changelog listing overlay
+        /// &lt;/summary&gt;
+        public void ShowChangelogListing() =&gt; waitForReady(() =&gt; changelogOverlay, _ =&gt; changelogOverlay.ShowListing());
+
+        /// &lt;summary&gt;
+        /// Show changelog&#39;s build as an overlay
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;version&quot;&gt;The build version, including stream suffix.&lt;/param&gt;
+        public void ShowChangelogBuild(string version) =&gt; waitForReady(() =&gt; changelogOverlay, _ =&gt; changelogOverlay.ShowBuild(version));
+
+        /// &lt;summary&gt;
+        /// Joins a multiplayer or playlists room with the given &lt;paramref name=&quot;id&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void JoinRoom(long id)
+        {
+            var request = new GetRoomRequest(id);
+            request.Success += room =&gt;
+            {
+                switch (room.Type)
+                {
+                    case MatchType.Playlists:
+                        PresentPlaylist(room);
+                        break;
+
+                    default:
+                        PresentMultiplayerMatch(room, string.Empty);
+                        break;
+                }
+            };
+            API.Queue(request);
+        }
+
+        /// &lt;summary&gt;
+        /// Seeks to the provided &lt;paramref name=&quot;timestamp&quot;/&gt; if the editor is currently open.
+        /// Can also select objects as indicated by the &lt;paramref name=&quot;timestamp&quot;/&gt; (depends on ruleset implementation).
+        /// &lt;/summary&gt;
+        public void HandleTimestamp(string timestamp)
+        {
+            if (ScreenStack.CurrentScreen is not Editor editor)
+            {
+                Schedule(() =&gt; Notifications.Post(new SimpleErrorNotification
+                {
+                    Icon = FontAwesome.Solid.ExclamationTriangle,
+                    Text = EditorStrings.MustBeInEditorToHandleLinks
+                }));
+                return;
+            }
+
+            editor.HandleTimestamp(timestamp, notifyOnError: true);
+        }
+
+        /// &lt;summary&gt;
+        /// Present a skin select immediately.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;skin&quot;&gt;The skin to select.&lt;/param&gt;
+        public void PresentSkin(SkinInfo skin)
+        {
+            var databasedSkin = SkinManager.Query(s =&gt; s.ID == skin.ID);
+
+            if (databasedSkin == null)
+            {
+                Logger.Log(&quot;The requested skin could not be loaded.&quot;, LoggingTarget.Information);
+                return;
+            }
+
+            SkinManager.CurrentSkinInfo.Value = databasedSkin;
+        }
+
+        /// &lt;summary&gt;
+        /// Present a beatmap at song select immediately.
+        /// The user should have already requested this interactively.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap to select.&lt;/param&gt;
+        /// &lt;param name=&quot;difficultyCriteria&quot;&gt;Optional predicate used to narrow the set of difficulties to select from when presenting.&lt;/param&gt;
+        /// &lt;remarks&gt;
+        /// Among items satisfying the predicate, the order of preference is:
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;beatmap with recommended difficulty, as provided by &lt;see cref=&quot;DifficultyRecommender&quot;/&gt;,&lt;/item&gt;
+        /// &lt;item&gt;first beatmap from the current ruleset,&lt;/item&gt;
+        /// &lt;item&gt;first beatmap from any ruleset.&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// &lt;/remarks&gt;
+        public void PresentBeatmap(IBeatmapSetInfo beatmap, Predicate&lt;BeatmapInfo&gt; difficultyCriteria = null)
+        {
+            Logger.Log($&quot;Beginning {nameof(PresentBeatmap)} with beatmap {beatmap}&quot;);
+            Live&lt;BeatmapSetInfo&gt; databasedSet = null;
+
+            if (beatmap.OnlineID &gt; 0)
+                databasedSet = BeatmapManager.QueryBeatmapSet(s =&gt; s.OnlineID == beatmap.OnlineID &amp;&amp; !s.DeletePending);
+
+            if (beatmap is BeatmapSetInfo localBeatmap)
+                databasedSet ??= BeatmapManager.QueryBeatmapSet(s =&gt; s.Hash == localBeatmap.Hash &amp;&amp; !s.DeletePending);
+
+            if (databasedSet == null)
+            {
+                Logger.Log(&quot;The requested beatmap could not be loaded.&quot;, LoggingTarget.Information);
+                return;
+            }
+
+            var detachedSet = databasedSet.PerformRead(s =&gt; s.Detach());
+
+            if (detachedSet.DeletePending)
+            {
+                Logger.Log(&quot;The requested beatmap has since been deleted.&quot;, LoggingTarget.Information);
+                return;
+            }
+
+            PerformFromScreen(screen =&gt;
+            {
+                // Find beatmaps that match our predicate.
+                var beatmaps = detachedSet.Beatmaps.Where(b =&gt; difficultyCriteria?.Invoke(b) ?? true).ToList();
+
+                // Use all beatmaps if predicate matched nothing
+                if (beatmaps.Count == 0)
+                    beatmaps = detachedSet.Beatmaps.ToList();
+
+                // Prefer recommended beatmap if recommendations are available, else fallback to a sane selection.
+                var selection = difficultyRecommender.GetRecommendedBeatmap(beatmaps)
+                                ?? beatmaps.FirstOrDefault(b =&gt; b.Ruleset.Equals(Ruleset.Value))
+                                ?? beatmaps.First();
+
+                if (screen is IHandlePresentBeatmap presentableScreen)
+                {
+                    presentableScreen.PresentBeatmap(BeatmapManager.GetWorkingBeatmap(selection), selection.Ruleset);
+                }
+                else
+                {
+                    // Don&#39;t change the local ruleset if the user is on another ruleset and is showing converted beatmaps at song select.
+                    // Eventually we probably want to check whether conversion is actually possible for the current ruleset.
+                    bool requiresRulesetSwitch = !selection.Ruleset.Equals(Ruleset.Value)
+                                                 &amp;&amp; (selection.Ruleset.OnlineID &gt; 0 || !LocalConfig.Get&lt;bool&gt;(OsuSetting.ShowConvertedBeatmaps));
+
+                    if (requiresRulesetSwitch)
+                    {
+                        Ruleset.Value = selection.Ruleset;
+                        Beatmap.Value = BeatmapManager.GetWorkingBeatmap(selection);
+
+                        Logger.Log($&quot;Completing {nameof(PresentBeatmap)} with beatmap {beatmap} ruleset {selection.Ruleset}&quot;);
+                    }
+                    else
+                    {
+                        Beatmap.Value = BeatmapManager.GetWorkingBeatmap(selection);
+
+                        Logger.Log($&quot;Completing {nameof(PresentBeatmap)} with beatmap {beatmap} (maintaining ruleset)&quot;);
+                    }
+                }
+            }, validScreens: new[]
+            {
+                typeof(SongSelect), typeof(IHandlePresentBeatmap)
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Join a multiplayer match immediately.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The room to join.&lt;/param&gt;
+        /// &lt;param name=&quot;password&quot;&gt;The password to join the room, if any is given.&lt;/param&gt;
+        public void PresentMultiplayerMatch(Room room, string password)
+        {
+            if (room.HasEnded)
+            {
+                // TODO: Eventually it should be possible to display ended multiplayer rooms in game too,
+                // but it generally will require turning off the entirety of communication with spectator server which is currently embedded into multiplayer screens.
+                Notifications.Post(new SimpleNotification
+                {
+                    Text = NotificationsStrings.MultiplayerRoomEnded,
+                    Activated = () =&gt;
+                    {
+                        OpenUrlExternally($@&quot;/multiplayer/rooms/{room.RoomID}&quot;);
+                        return true;
+                    }
+                });
+                return;
+            }
+
+            PerformFromScreen(screen =&gt;
+            {
+                if (!(screen is Multiplayer multiplayer))
+                    screen.Push(multiplayer = new Multiplayer());
+
+                multiplayer.Join(room, password);
+            });
+            // TODO: We should really be able to use `validScreens: new[] { typeof(Multiplayer) }` here
+            // but `PerformFromScreen` doesn&#39;t understand nested stacks.
+        }
+
+        /// &lt;summary&gt;
+        /// Join a playlist immediately.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The playlist to join.&lt;/param&gt;
+        public void PresentPlaylist(Room room)
+        {
+            PerformFromScreen(screen =&gt;
+            {
+                if (!(screen is Playlists playlists))
+                    screen.Push(playlists = new Playlists());
+
+                playlists.Join(room);
+            });
+            // TODO: We should really be able to use `validScreens: new[] { typeof(Playlists) }` here
+            // but `PerformFromScreen` doesn&#39;t understand nested stacks.
+        }
+
+        /// &lt;summary&gt;
+        /// Present a score&#39;s replay immediately.
+        /// The user should have already requested this interactively.
+        /// &lt;/summary&gt;
+        public void PresentScore(IScoreInfo score, ScorePresentType presentType = ScorePresentType.Results)
+        {
+            Logger.Log($&quot;Beginning {nameof(PresentScore)} with score {score}&quot;);
+
+            Score databasedScore;
+
+            try
+            {
+                databasedScore = ScoreManager.GetScore(score);
+            }
+            catch (LegacyScoreDecoder.BeatmapNotFoundException notFound)
+            {
+                Logger.Log(&quot;The replay cannot be played because the beatmap is missing.&quot;, LoggingTarget.Information);
+
+                var req = new GetBeatmapRequest(new BeatmapInfo { MD5Hash = notFound.Hash });
+                req.Success += res =&gt; Notifications.Post(new MissingBeatmapNotification(res, notFound.Hash, null));
+                API.Queue(req);
+
+                return;
+            }
+
+            if (databasedScore == null) return;
+
+            if (databasedScore.Replay == null)
+            {
+                Logger.Log(&quot;The loaded score has no replay data.&quot;, LoggingTarget.Information, LogLevel.Important);
+                return;
+            }
+
+            var databasedBeatmap = databasedScore.ScoreInfo.BeatmapInfo;
+            Debug.Assert(databasedBeatmap != null);
+
+            // This should be able to be performed from song select always, but that is disabled for now
+            // due to the weird decoupled ruleset logic (which can cause a crash in certain filter scenarios).
+            //
+            // As a special case, if the beatmap and ruleset already match, allow immediately displaying the score from song select.
+            // This is guaranteed to not crash, and feels better from a user&#39;s perspective (ie. if they are clicking a score in the
+            // song select leaderboard).
+            // Similar exemptions are made here for daily challenge where it is guaranteed that beatmap and ruleset match.
+            // `OnlinePlayScreen` is excluded because when resuming back to it,
+            // `RoomSubScreen` changes the global beatmap to the next playlist item on resume,
+            // which may not match the score, and thus crash.
+            IEnumerable&lt;Type&gt; validScreens =
+                Beatmap.Value.BeatmapInfo.Equals(databasedBeatmap) &amp;&amp; Ruleset.Value.Equals(databasedScore.ScoreInfo.Ruleset)
+                    ? new[] { typeof(SongSelect), typeof(DailyChallenge) }
+                    : Array.Empty&lt;Type&gt;();
+
+            PerformFromScreen(screen =&gt;
+            {
+                Logger.Log($&quot;{nameof(PresentScore)} updating beatmap ({databasedBeatmap}) and ruleset ({databasedScore.ScoreInfo.Ruleset}) to match score&quot;);
+
+                // some screens (mostly online) disable the ruleset/beatmap bindable.
+                // attempting to set the ruleset/beatmap in that state will crash.
+                // however, the `validScreens` pre-check above should ensure that we actually never come from one of those screens
+                // while simultaneously having mismatched ruleset/beatmap.
+                // therefore this is just a safety against touching the possibly-disabled bindables if we don&#39;t actually have to touch them.
+                // if it ever fails, then this probably *should* crash anyhow (so that we can fix it).
+                if (!Ruleset.Value.Equals(databasedScore.ScoreInfo.Ruleset))
+                    Ruleset.Value = databasedScore.ScoreInfo.Ruleset;
+
+                if (!Beatmap.Value.BeatmapInfo.Equals(databasedBeatmap))
+                    Beatmap.Value = BeatmapManager.GetWorkingBeatmap(databasedBeatmap);
+
+                var currentLeaderboard = LeaderboardManager.CurrentCriteria;
+
+                bool leaderboardBeatmapMatches = currentLeaderboard != null &amp;&amp; databasedBeatmap.Equals(currentLeaderboard.Beatmap);
+                bool leaderboardRulesetMatches = currentLeaderboard != null &amp;&amp; databasedScore.ScoreInfo.Ruleset.Equals(currentLeaderboard.Ruleset);
+
+                if (!leaderboardBeatmapMatches || !leaderboardRulesetMatches)
+                {
+                    var newLeaderboard = currentLeaderboard != null
+                        ? currentLeaderboard with { Beatmap = databasedBeatmap, Ruleset = databasedScore.ScoreInfo.Ruleset }
+                        : new LeaderboardCriteria(databasedBeatmap, databasedScore.ScoreInfo.Ruleset, BeatmapLeaderboardScope.Global, null);
+                    LeaderboardManager.FetchWithCriteria(newLeaderboard);
+                }
+
+                switch (presentType)
+                {
+                    case ScorePresentType.Gameplay:
+                        screen.Push(new ReplayPlayerLoader(databasedScore));
+                        break;
+
+                    case ScorePresentType.Results:
+                        screen.Push(new SoloResultsScreen(databasedScore.ScoreInfo));
+                        break;
+                }
+            }, validScreens: validScreens);
+        }
+
+        public override Task Import(ImportTask[] imports, ImportParameters parameters = default)
+        {
+            // encapsulate task as we don&#39;t want to begin the import process until in a ready state.
+
+            // ReSharper disable once AsyncVoidLambda
+            // TODO: This is bad because `new Task` doesn&#39;t have a Func&lt;Task?&gt; override.
+            // Only used for android imports and a bit of a mess. Probably needs rethinking overall.
+            var importTask = new Task(async () =&gt; await base.Import(imports, parameters).ConfigureAwait(false));
+
+            waitForReady(() =&gt; this, _ =&gt; importTask.Start());
+
+            return importTask;
+        }
+
+        protected virtual Loader CreateLoader() =&gt; new Loader();
+
+        protected virtual UpdateManager CreateUpdateManager() =&gt; new UpdateManager();
+
+        /// &lt;summary&gt;
+        /// Adjust the globally applied &lt;see cref=&quot;DrawSizePreservingFillContainer.TargetDrawSize&quot;/&gt; in every &lt;see cref=&quot;ScalingContainer&quot;/&gt;.
+        /// Useful for changing how the game handles different aspect ratios.
+        /// &lt;/summary&gt;
+        public virtual Vector2 ScalingContainerTargetDrawSize { get; } = new Vector2(1024, 768);
+
+        protected override Container CreateScalingContainer() =&gt; new ScalingContainer(ScalingMode.Everything);
+
+        #region Beatmap progression
+
+        private void beatmapChanged(ValueChangedEvent&lt;WorkingBeatmap&gt; beatmap)
+        {
+            beatmap.OldValue?.CancelAsyncLoad();
+            beatmap.NewValue?.BeginAsyncLoad();
+            updateWindowTitle();
+        }
+
+        private void updateWindowTitle()
+        {
+            if (Host.Window == null)
+                return;
+
+            string newTitle;
+
+            switch (configUserActivity.Value)
+            {
+                default:
+                    newTitle = Name;
+                    break;
+
+                case UserActivity.InGame:
+                case UserActivity.TestingBeatmap:
+                case UserActivity.WatchingReplay:
+                    newTitle = $&quot;{Name} - {Beatmap.Value.BeatmapInfo.GetDisplayTitleRomanisable(true, false)}&quot;;
+                    break;
+
+                case UserActivity.EditingBeatmap:
+                    newTitle = $&quot;{Name} - {Beatmap.Value.BeatmapInfo.Path ?? &quot;new beatmap&quot;}&quot;;
+                    break;
+            }
+
+            if (newTitle != Host.Window.Title)
+                Host.Window.Title = newTitle;
+        }
+
+        private void modsChanged(ValueChangedEvent&lt;IReadOnlyList&lt;Mod&gt;&gt; mods)
+        {
+            // a lease may be taken on the mods bindable, at which point we can&#39;t really ensure valid mods.
+            if (SelectedMods.Disabled)
+                return;
+
+            if (!ModUtils.CheckValidForGameplay(mods.NewValue, out var invalid))
+            {
+                // ensure we always have a valid set of mods.
+                SelectedMods.Value = mods.NewValue.Except(invalid).ToArray();
+            }
+        }
+
+        #endregion
+
+        private PerformFromMenuRunner performFromMainMenuTask;
+
+        public void PerformFromScreen(Action&lt;IScreen&gt; action, IEnumerable&lt;Type&gt; validScreens = null)
+        {
+            performFromMainMenuTask?.Cancel();
+            Add(performFromMainMenuTask = new PerformFromMenuRunner(action, validScreens, () =&gt; ScreenStack.CurrentScreen));
+        }
+
+        public override void AttemptExit()
+        {
+            // The main menu exit implementation gives the user a chance to interrupt the exit process if needed.
+            PerformFromScreen(menu =&gt; menu.Exit(), new[] { typeof(MainMenu) });
+        }
+
+        /// &lt;summary&gt;
+        /// Wait for the game (and target component) to become loaded and then run an action.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;retrieveInstance&quot;&gt;A function to retrieve a (potentially not-yet-constructed) target instance.&lt;/param&gt;
+        /// &lt;param name=&quot;action&quot;&gt;The action to perform on the instance when load is confirmed.&lt;/param&gt;
+        /// &lt;typeparam name=&quot;T&quot;&gt;The type of the target instance.&lt;/typeparam&gt;
+        private void waitForReady&lt;T&gt;(Func&lt;T&gt; retrieveInstance, Action&lt;T&gt; action)
+            where T : Drawable
+        {
+            var instance = retrieveInstance();
+
+            if (ScreenStack == null || ScreenStack.CurrentScreen is StartupScreen || instance?.IsLoaded != true)
+                Schedule(() =&gt; waitForReady(retrieveInstance, action));
+            else
+                action(instance);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            // Without this, tests may deadlock due to cancellation token not becoming cancelled before disposal.
+            // To reproduce, run `TestSceneButtonSystemNavigation` ensuring `TestConstructor` runs before `TestFastShortcutKeys`.
+            detachedBeatmapStore?.Dispose();
+
+            base.Dispose(isDisposing);
+
+            sentryLogger.Dispose();
+
+            if (Host?.Window != null)
+                Host.Window.DragDrop -= onWindowDragDrop;
+
+            Logger.NewEntry -= forwardGeneralLogToNotifications;
+            Logger.NewEntry -= forwardTabletLogToNotifications;
+        }
+
+        protected override IDictionary&lt;FrameworkSetting, object&gt; GetFrameworkConfigDefaults()
+        {
+            return new Dictionary&lt;FrameworkSetting, object&gt;
+            {
+                // General expectation that osu! starts in fullscreen by default (also gives the most predictable performance).
+                // However, macOS is bound to have issues when using exclusive fullscreen as it takes full control away from OS, therefore borderless is default there.
+                { FrameworkSetting.WindowMode, RuntimeInfo.OS == RuntimeInfo.Platform.macOS ? WindowMode.Borderless : WindowMode.Fullscreen },
+                { FrameworkSetting.VolumeUniversal, 0.6 },
+                { FrameworkSetting.VolumeMusic, 0.6 },
+                { FrameworkSetting.VolumeEffect, 0.6 },
+                { FrameworkSetting.AudioUseExperimentalWasapi, true },
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // The next time this is updated is in UpdateAfterChildren, which occurs too late and results
+            // in the cursor being shown for a few frames during the intro.
+            // This prevents the cursor from showing until we have a screen with CursorVisible = true
+            GlobalCursorDisplay.ShowCursor = menuScreen?.CursorVisible ?? false;
+
+            // todo: all archive managers should be able to be looped here.
+            SkinManager.PostNotification = n =&gt; Notifications.Post(n);
+            SkinManager.PresentImport = items =&gt; PresentSkin(items.First().Value);
+
+            BeatmapManager.PostNotification = n =&gt; Notifications.Post(n);
+            BeatmapManager.PresentImport = items =&gt; PresentBeatmap(items.First().Value);
+
+            BeatmapDownloader.PostNotification = n =&gt; Notifications.Post(n);
+            ScoreDownloader.PostNotification = n =&gt; Notifications.Post(n);
+
+            ScoreManager.PostNotification = n =&gt; Notifications.Post(n);
+            ScoreManager.PresentImport = items =&gt; PresentScore(items.First().Value);
+
+            MultiplayerClient.PostNotification = n =&gt; Notifications.Post(n);
+            MultiplayerClient.PresentMatch = PresentMultiplayerMatch;
+
+            if (API is APIAccess api)
+                api.PostNotification = n =&gt; Notifications.Post(n);
+
+            ScreenFooter.BackReceptor backReceptor;
+
+            dependencies.CacheAs(idleTracker = new GameIdleTracker(6000));
+
+            var sessionIdleTracker = new GameIdleTracker(300000);
+            sessionIdleTracker.IsIdle.BindValueChanged(idle =&gt;
+            {
+                if (idle.NewValue)
+                    SessionStatics.ResetAfterInactivity();
+            });
+
+            Add(sessionIdleTracker);
+
+            Container logoContainer;
+
+            AddRange(new Drawable[]
+            {
+                ScreenOffsetContainer = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        ScreenContainer = new ScalingContainer(ScalingMode.ExcludeOverlays)
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Children = new Drawable[]
+                            {
+                                backReceptor = new ScreenFooter.BackReceptor(),
+                                ScreenStack = new OsuScreenStack { RelativeSizeAxes = Axes.Both },
+                                logoContainer = new Container { RelativeSizeAxes = Axes.Both },
+                                // TODO: what is this? why is this?
+                                // TODO: this is being screen scaled even though it&#39;s probably AN OVERLAY.
+                                footerBasedOverlayContent = new Container
+                                {
+                                    Depth = -1,
+                                    RelativeSizeAxes = Axes.Both,
+                                },
+                                new PopoverContainer
+                                {
+                                    // Ensure the footer is displayed above any content and/or overlays.
+                                    Depth = -1,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Child = screenStackFooter = new ScreenStackFooter(ScreenStack, backReceptor)
+                                    {
+                                        // TODO: this is really really weird and should not exist.
+                                        RequestLogoInFront = inFront =&gt; ScreenContainer.ChangeChildDepth(logoContainer, inFront ? float.MinValue : 0),
+                                        BackButtonPressed = handleBackButton
+                                    },
+                                },
+                            }
+                        },
+                    }
+                },
+                overlayOffsetContainer = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        overlayContent = new Container { RelativeSizeAxes = Axes.Both },
+                        leftFloatingOverlayContent = new Container { RelativeSizeAxes = Axes.Both },
+                        rightFloatingOverlayContent = new Container { RelativeSizeAxes = Axes.Both },
+                    }
+                },
+                topMostOverlayContent = new Container { RelativeSizeAxes = Axes.Both },
+                idleTracker,
+                new ConfineMouseTracker()
+            });
+
+            dependencies.Cache(ScreenFooter);
+
+            ScreenStack.ScreenPushed += screenPushed;
+            ScreenStack.ScreenExited += screenExited;
+
+            loadComponentSingleFile(fpsCounter = new FPSCounter
+            {
+                Anchor = Anchor.BottomRight,
+                Origin = Anchor.BottomRight,
+                Margin = new MarginPadding(5),
+            }, topMostOverlayContent.Add);
+
+            if (!IsDeployedBuild)
+                loadComponentSingleFile(devBuildBanner = new DevBuildBanner(), ScreenContainer.Add);
+
+            loadComponentSingleFile(osuLogo, _ =&gt;
+            {
+                osuLogo.SetupDefaultContainer(logoContainer);
+
+                // Loader has to be created after the logo has finished loading as Loader performs logo transformations on entering.
+                ScreenStack.Push(CreateLoader().With(l =&gt; l.RelativeSizeAxes = Axes.Both));
+            });
+
+            LocalUserStatisticsProvider statisticsProvider;
+
+            loadComponentSingleFile(statisticsProvider = new LocalUserStatisticsProvider(), Add, true);
+            loadComponentSingleFile(difficultyRecommender = new DifficultyRecommender(statisticsProvider), Add, true);
+            loadComponentSingleFile(new UserStatisticsWatcher(statisticsProvider), Add, true);
+            loadComponentSingleFile(Toolbar = new Toolbar
+            {
+                OnHome = delegate
+                {
+                    CloseAllOverlays(false);
+
+                    if (menuScreen?.GetChildScreen() != null)
+                        menuScreen.MakeCurrent();
+                },
+            }, topMostOverlayContent.Add);
+
+            loadComponentSingleFile(volume = new VolumeOverlay(), leftFloatingOverlayContent.Add, true);
+
+            onScreenDisplay = new OnScreenDisplay();
+
+            onScreenDisplay.BeginTracking(this, frameworkConfig);
+            onScreenDisplay.BeginTracking(this, LocalConfig);
+
+            loadComponentSingleFile(onScreenDisplay, Add, true);
+
+            loadComponentSingleFile&lt;INotificationOverlay&gt;(Notifications.With(d =&gt;
+            {
+                d.Anchor = Anchor.TopRight;
+                d.Origin = Anchor.TopRight;
+            }), rightFloatingOverlayContent.Add, true);
+
+            loadComponentSingleFile(legacyImportManager, Add);
+
+            loadComponentSingleFile(screenshotManager, Add);
+
+            // dependency on notification overlay, dependent by settings overlay
+            loadComponentSingleFile(CreateUpdateManager(), Add, true);
+
+            // overlay elements
+            loadComponentSingleFile(FirstRunOverlay = new FirstRunSetupOverlay(), footerBasedOverlayContent.Add, true);
+            loadComponentSingleFile(new ManageCollectionsDialog(), overlayContent.Add, true);
+            loadComponentSingleFile(beatmapListing = new BeatmapListingOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(dashboard = new DashboardOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(news = new NewsOverlay(), overlayContent.Add, true);
+            var rankingsOverlay = loadComponentSingleFile(new RankingsOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(channelManager = new ChannelManager(API), Add, true);
+            loadComponentSingleFile(chatOverlay = new ChatOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(new MessageNotifier(), Add, true);
+            loadComponentSingleFile(Settings = new SettingsOverlay(), leftFloatingOverlayContent.Add, true);
+            loadComponentSingleFile(changelogOverlay = new ChangelogOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(userProfile = new UserProfileOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(beatmapSetOverlay = new BeatmapSetOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(wikiOverlay = new WikiOverlay(), overlayContent.Add, true);
+            loadComponentSingleFile(skinEditor = new SkinEditorOverlay(ScreenContainer), overlayContent.Add, true);
+
+            loadComponentSingleFile(loginOverlay = new LoginOverlay
+            {
+                Anchor = Anchor.TopRight,
+                Origin = Anchor.TopRight,
+            }, rightFloatingOverlayContent.Add, true);
+
+            loadComponentSingleFile(nowPlayingOverlay = new NowPlayingOverlay
+            {
+                Anchor = Anchor.TopRight,
+                Origin = Anchor.TopRight,
+            }, rightFloatingOverlayContent.Add, true);
+
+            loadComponentSingleFile(new AccountCreationOverlay(), topMostOverlayContent.Add, true);
+            loadComponentSingleFile&lt;IDialogOverlay&gt;(dialogOverlay = new DialogOverlay(), topMostOverlayContent.Add, true);
+            loadComponentSingleFile(new MedalOverlay(), topMostOverlayContent.Add);
+
+            loadComponentSingleFile(new BackgroundDataStoreProcessor(), Add);
+            loadComponentSingleFile&lt;BeatmapStore&gt;(detachedBeatmapStore = new RealmDetachedBeatmapStore(), Add, true);
+            loadComponentSingleFile(new QueueController(), Add, true);
+
+            Add(externalLinkOpener = new ExternalLinkOpener());
+            Add(new MusicKeyBindingHandler());
+            Add(new OnlineStatusNotifier(() =&gt; ScreenStack.CurrentScreen));
+            Add(new FriendPresenceNotifier());
+
+            // side overlays which cancel each other.
+            var singleDisplaySideOverlays = new OverlayContainer[] { Settings, Notifications, FirstRunOverlay, loginOverlay, nowPlayingOverlay };
+
+            foreach (var overlay in singleDisplaySideOverlays)
+            {
+                overlay.State.ValueChanged += state =&gt;
+                {
+                    if (state.NewValue == Visibility.Hidden) return;
+
+                    singleDisplaySideOverlays.Where(o =&gt; o != overlay).ForEach(o =&gt; o.Hide());
+                };
+            }
+
+            // eventually informational overlays should be displayed in a stack, but for now let&#39;s only allow one to stay open at a time.
+            var informationalOverlays = new OverlayContainer[] { beatmapSetOverlay, userProfile };
+
+            foreach (var overlay in informationalOverlays)
+            {
+                overlay.State.ValueChanged += state =&gt;
+                {
+                    if (state.NewValue != Visibility.Hidden)
+                        showOverlayAboveOthers(overlay, informationalOverlays);
+                };
+            }
+
+            // ensure only one of these overlays are open at once.
+            var singleDisplayOverlays = new OverlayContainer[] { chatOverlay, news, dashboard, beatmapListing, changelogOverlay, rankingsOverlay, wikiOverlay };
+
+            foreach (var overlay in singleDisplayOverlays)
+            {
+                overlay.State.ValueChanged += state =&gt;
+                {
+                    // informational overlays should be dismissed on a show or hide of a full overlay.
+                    informationalOverlays.ForEach(o =&gt; o.Hide());
+
+                    if (state.NewValue != Visibility.Hidden)
+                        showOverlayAboveOthers(overlay, singleDisplayOverlays);
+                };
+            }
+
+            OverlayActivationMode.ValueChanged += mode =&gt;
+            {
+                if (mode.NewValue != OverlayActivation.All) CloseAllOverlays();
+            };
+
+            // Importantly, this should be run after binding PostNotification to the import handlers so they can present the import after game startup.
+            handleStartupImport();
+
+            applyConfigMigrations();
+
+            string lastVersion = LocalConfig.Get&lt;string&gt;(OsuSetting.Version);
+            string version = Version;
+
+            // only show a notification if we&#39;ve previously saved a version to the config file (ie. not the first run).
+            if (IsDeployedBuild &amp;&amp; !string.IsNullOrEmpty(lastVersion) &amp;&amp; version != lastVersion)
+                Notifications.Post(new UpdateCompleteNotification(version));
+
+            // finally, update the version stored to the configuration.
+            // this MUST happen after `applyConfigMigrations()` call, as it relies on comparing the previous version.
+            // debug / local compilations will reset to a non-release string.
+            LocalConfig.SetValue(OsuSetting.Version, version);
+        }
+
+        /// &lt;summary&gt;
+        /// Apply any migrations to configuration.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// For database migrations, see &lt;see cref=&quot;RealmAccess.applyMigrationsForVersion&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        private void applyConfigMigrations()
+        {
+            // arrives as 2020.123.0-lazer
+            string rawVersion = LocalConfig.Get&lt;string&gt;(OsuSetting.Version);
+
+            if (rawVersion.Length &lt; 6)
+                return;
+
+            string[] pieces = rawVersion.Split(&#39;.&#39;);
+
+            // on a fresh install or when coming from a non-release build, execution will end here.
+            // we don&#39;t want to run migrations in such cases.
+            if (!int.TryParse(pieces[0], out int year)) return;
+            if (!int.TryParse(pieces[1], out int monthDay)) return;
+
+            int combined = year * 10000 + monthDay;
+
+            if (combined &lt; 20250214)
+            {
+                // UI scaling on mobile platforms has been internally adjusted such that 1x UI scale looks correctly zoomed in than before.
+                if (RuntimeInfo.IsMobile)
+                    LocalConfig.GetBindable&lt;float&gt;(OsuSetting.UIScale).SetDefault();
+            }
+
+            if (combined &lt; 20260520)
+            {
+                // Pen tablet sensitivity is now separated from cursor sensitivity.
+                // Most users will want the default to be what they already had set on cursor sensitivity so let&#39;s transfer it.
+                var mouseHandler = Host?.AvailableInputHandlers.OfType&lt;MouseHandler&gt;().SingleOrDefault();
+                var penHandler = Host?.AvailableInputHandlers.OfType&lt;PenHandler&gt;().SingleOrDefault();
+
+                if (penHandler != null &amp;&amp; mouseHandler != null &amp;&amp; penHandler.Sensitivity.IsDefault)
+                    penHandler.Sensitivity.Value = mouseHandler.Sensitivity.Value;
+            }
+
+            if (combined &lt; 20260521 &amp;&amp; RuntimeInfo.OS == RuntimeInfo.Platform.Windows)
+            {
+                bool wasAlreadyUsing = Audio.UseExperimentalWasapi.Value;
+
+                // see application of FramedBeatmapClock.WINDOWS_EXPERIMENTAL_AUDIO_OFFSET in FramedBeatmapClock.
+                // this basically undoes this new offset assuming that users which have been using this setting for a while
+                // already have had things tuned.
+                if (wasAlreadyUsing)
+                    LocalConfig.SetValue(OsuSetting.AudioOffset, LocalConfig.Get&lt;double&gt;(OsuSetting.AudioOffset) - FramedBeatmapClock.WINDOWS_EXPERIMENTAL_AUDIO_OFFSET);
+
+                Audio.UseExperimentalWasapi.Value = true;
+
+                dialogOverlay.Push(new MigrateNewAudioDialog(wasAlreadyUsing));
+            }
+
+            if (combined &lt; 20260728)
+            {
+#pragma warning disable CS0612 // Type or member is obsolete (MenuParallax exists solely to make this migration work, it should not be used anywhere else)
+                LocalConfig.SetValue&lt;float&gt;(OsuSetting.MenuParallaxScale, LocalConfig.Get&lt;bool&gt;(OsuSetting.MenuParallax) ? 1 : 0);
+#pragma warning restore CS0612 // Type or member is obsolete
+            }
+        }
+
+        private void handleBackButton()
+        {
+            // TODO: this is SUPER SUPER bad.
+            // It can potentially exit the wrong screen if screens are not loaded yet.
+            // ScreenFooter / ScreenBackButton should be aware of which screen it is currently being handled by.
+            if (!(ScreenStack.CurrentScreen is IOsuScreen currentScreen)) return;
+
+            if (!((Drawable)currentScreen).IsLoaded || (currentScreen.AllowUserExit &amp;&amp; !currentScreen.OnBackButton())) ScreenStack.Exit();
+        }
+
+        private void handleStartupImport()
+        {
+            if (args?.Length &gt; 0)
+            {
+                string[] paths = args.Where(a =&gt; !a.StartsWith(&#39;-&#39;)).ToArray();
+
+                if (paths.Length &gt; 0)
+                {
+                    string firstPath = paths.First();
+
+                    if (firstPath.StartsWith(OSU_PROTOCOL, StringComparison.Ordinal))
+                    {
+                        HandleLink(firstPath);
+                    }
+                    else
+                    {
+                        Task.Run(() =&gt; Import(paths));
+                    }
+                }
+            }
+        }
+
+        private void showOverlayAboveOthers(OverlayContainer overlay, OverlayContainer[] otherOverlays)
+        {
+            otherOverlays.Where(o =&gt; o != overlay).ForEach(o =&gt; o.Hide());
+
+            Settings.Hide();
+            Notifications.Hide();
+
+            // Partially visible so leave it at the current depth.
+            if (overlay.IsPresent)
+                return;
+
+            // Show above all other overlays.
+            if (overlay.IsLoaded)
+                overlayContent.ChangeChildDepth(overlay, (float)-Clock.CurrentTime);
+            else
+                overlay.Depth = (float)-Clock.CurrentTime;
+        }
+
+        private void forwardGeneralLogToNotifications(LogEntry entry)
+        {
+            if (entry.Level &lt; LogLevel.Important || entry.Target &gt; LoggingTarget.Database || entry.Target == null) return;
+
+            if (entry.Exception is SentryOnlyDiagnosticsException)
+                return;
+
+            const int short_term_display_limit = 3;
+
+            if (generalLogRecentCount &lt; short_term_display_limit)
+            {
+                LocalisableString message;
+
+                if (entry.Exception != null &amp;&amp; IsDeployedBuild)
+                    message = LocalisableString.Interpolate($&quot;{entry.Message.Truncate(256)}\n\n{NotificationsStrings.ErrorAutomaticallyReported}&quot;);
+                else
+                    message = entry.Message.Truncate(256);
+
+                Schedule(() =&gt; Notifications.Post(new SimpleErrorNotification
+                {
+                    Icon = entry.Level == LogLevel.Important ? FontAwesome.Solid.ExclamationCircle : FontAwesome.Solid.Bomb,
+                    Text = message
+                }));
+            }
+            else if (generalLogRecentCount == short_term_display_limit)
+            {
+                string logFile = Logger.GetLogger(entry.Target.Value).Filename;
+
+                Schedule(() =&gt; Notifications.Post(new SimpleNotification
+                {
+                    Icon = FontAwesome.Solid.EllipsisH,
+                    Text = NotificationsStrings.SubsequentMessagesLogged,
+                    Activated = () =&gt;
+                    {
+                        Logger.Storage.PresentFileExternally(logFile);
+                        return true;
+                    }
+                }));
+            }
+
+            Interlocked.Increment(ref generalLogRecentCount);
+            Scheduler.AddDelayed(() =&gt; Interlocked.Decrement(ref generalLogRecentCount), general_log_debounce);
+        }
+
+        private void forwardTabletLogToNotifications(LogEntry entry)
+        {
+            if (entry.Level &lt; LogLevel.Important || entry.Target != LoggingTarget.Input || !entry.Message.StartsWith(tablet_log_prefix, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            string message = entry.Message.Replace(tablet_log_prefix, string.Empty);
+
+            if (entry.Level == LogLevel.Error)
+            {
+                if (!tabletLogNotifyOnError)
+                    return;
+
+                tabletLogNotifyOnError = false;
+
+                Schedule(() =&gt;
+                {
+                    Notifications.Post(new SimpleNotification
+                    {
+                        Text = NotificationsStrings.TabletSupportDisabledDueToError(message),
+                        Icon = FontAwesome.Solid.PenSquare,
+                        IconColour = Colours.RedDark,
+                    });
+
+                    // We only have one tablet handler currently.
+                    // The loop here is weakly guarding against a future where more than one is added.
+                    // If this is ever the case, this logic needs adjustment as it should probably only
+                    // disable the relevant tablet handler rather than all.
+                    foreach (var tabletHandler in Host.AvailableInputHandlers.OfType&lt;ITabletHandler&gt;())
+                        tabletHandler.Enabled.Value = false;
+                });
+            }
+            else if (tabletLogNotifyOnWarning)
+            {
+                Schedule(() =&gt; Notifications.Post(new SimpleNotification
+                {
+                    Text = NotificationsStrings.EncounteredTabletWarning,
+                    Icon = FontAwesome.Solid.PenSquare,
+                    IconColour = Colours.YellowDark,
+                    Activated = () =&gt;
+                    {
+                        OpenUrlExternally(&quot;https://opentabletdriver.net/Tablets&quot;, LinkWarnMode.NeverWarn);
+                        return true;
+                    }
+                }));
+
+                tabletLogNotifyOnWarning = false;
+            }
+        }
+
+        private Task asyncLoadStream;
+
+        /// &lt;summary&gt;
+        /// Queues loading the provided component in sequential fashion.
+        /// This operation is limited to a single thread to avoid saturating all cores.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;component&quot;&gt;The component to load.&lt;/param&gt;
+        /// &lt;param name=&quot;loadCompleteAction&quot;&gt;An action to invoke on load completion (generally to add the component to the hierarchy).&lt;/param&gt;
+        /// &lt;param name=&quot;cache&quot;&gt;Whether to cache the component as type &lt;typeparamref name=&quot;T&quot;/&gt; into the game dependencies before any scheduling.&lt;/param&gt;
+        private T loadComponentSingleFile&lt;T&gt;(T component, Action&lt;Drawable&gt; loadCompleteAction, bool cache = false)
+            where T : class
+        {
+            if (cache)
+                dependencies.CacheAs(component);
+
+            var drawableComponent = component as Drawable ?? throw new ArgumentException($&quot;Component must be a {nameof(Drawable)}&quot;, nameof(component));
+
+            if (component is OsuFocusedOverlayContainer overlay)
+                focusedOverlays.Add(overlay);
+
+            // schedule is here to ensure that all component loads are done after LoadComplete is run (and thus all dependencies are cached).
+            // with some better organisation of LoadComplete to do construction and dependency caching in one step, followed by calls to loadComponentSingleFile,
+            // we could avoid the need for scheduling altogether.
+            Schedule(() =&gt;
+            {
+                var previousLoadStream = asyncLoadStream;
+
+                // chain with existing load stream
+                asyncLoadStream = Task.Run(async () =&gt;
+                {
+                    if (previousLoadStream != null)
+                        await previousLoadStream.ConfigureAwait(false);
+
+                    try
+                    {
+                        Logger.Log($&quot;Loading {component}...&quot;);
+
+                        // Since this is running in a separate thread, it is possible for OsuGame to be disposed after LoadComponentAsync has been called
+                        // throwing an exception. To avoid this, the call is scheduled on the update thread, which does not run if IsDisposed = true
+                        Task task = null;
+                        var del = new ScheduledDelegate(() =&gt; task = LoadComponentAsync(drawableComponent, loadCompleteAction));
+                        Scheduler.Add(del);
+
+                        // The delegate won&#39;t complete if OsuGame has been disposed in the meantime
+                        while (!IsDisposed &amp;&amp; !del.Completed)
+                            await Task.Delay(10).ConfigureAwait(false);
+
+                        // Either we&#39;re disposed or the load process has started successfully
+                        if (IsDisposed)
+                            return;
+
+                        Debug.Assert(task != null);
+
+                        await task.ConfigureAwait(false);
+
+                        Logger.Log($&quot;Loaded {component}!&quot;);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                });
+            });
+
+            return component;
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.DecreaseVolume:
+                case GlobalAction.IncreaseVolume:
+                    return volume.Adjust(e.Action);
+            }
+
+            // All actions below this point don&#39;t allow key repeat.
+            if (e.Repeat)
+                return false;
+
+            // Wait until we&#39;re loaded at least to the intro before allowing various interactions.
+            if (introScreen == null) return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.ToggleMute:
+                case GlobalAction.NextVolumeMeter:
+                case GlobalAction.PreviousVolumeMeter:
+                    return volume.Adjust(e.Action);
+
+                case GlobalAction.ToggleFPSDisplay:
+                    fpsCounter.ToggleVisibility();
+                    return true;
+
+                case GlobalAction.ToggleSkinEditor:
+                    skinEditor.ToggleVisibility();
+                    return true;
+
+                case GlobalAction.ResetInputSettings:
+                    Host.ResetInputHandlers();
+                    frameworkConfig.GetBindable&lt;ConfineMouseMode&gt;(FrameworkSetting.ConfineMouseMode).SetDefault();
+                    return true;
+
+                case GlobalAction.ToggleGameplayMouseButtons:
+                    var mouseDisableButtons = LocalConfig.GetBindable&lt;bool&gt;(OsuSetting.MouseDisableButtons);
+                    mouseDisableButtons.Value = !mouseDisableButtons.Value;
+                    return true;
+
+                case GlobalAction.ToggleProfile:
+                    if (userProfile.State.Value == Visibility.Visible)
+                        userProfile.Hide();
+                    else
+                        ShowUser(API.LocalUser.Value);
+                    return true;
+
+                case GlobalAction.RandomSkin:
+                    // Don&#39;t allow random skin selection while in the skin editor.
+                    // This is mainly to stop many &quot;osu! default (modified)&quot; skins being created via the SkinManager.EnsureMutableSkin() path.
+                    // If people want this to work we can potentially avoid selecting default skins when the editor is open, or allow a maximum of one mutable skin somehow.
+                    if (skinEditor.State.Value == Visibility.Visible)
+                        return false;
+
+                    SkinManager.SelectRandomSkin();
+                    return true;
+
+                case GlobalAction.NextSkin:
+                    if (skinEditor.State.Value == Visibility.Visible)
+                        return false;
+
+                    SkinManager.SelectNextSkin();
+                    return true;
+
+                case GlobalAction.PreviousSkin:
+                    if (skinEditor.State.Value == Visibility.Visible)
+                        return false;
+
+                    SkinManager.SelectPreviousSkin();
+                    return true;
+            }
+
+            return false;
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;PlatformAction&gt; e)
+        {
+            const float adjustment_increment = 0.05f;
+
+            switch (e.Action)
+            {
+                case PlatformAction.ZoomIn:
+                    uiScale.Value += adjustment_increment;
+                    return true;
+
+                case PlatformAction.ZoomOut:
+                    uiScale.Value -= adjustment_increment;
+                    return true;
+
+                case PlatformAction.ZoomDefault:
+                    uiScale.SetDefault();
+                    return true;
+            }
+
+            return base.OnPressed(e);
+        }
+
+        #region Inactive audio dimming
+
+        private readonly BindableDouble inactiveVolumeFade = new BindableDouble();
+
+        private void updateActiveState(bool isActive)
+        {
+            if (isActive)
+                this.TransformBindableTo(inactiveVolumeFade, 1, 400, Easing.OutQuint);
+            else
+                this.TransformBindableTo(inactiveVolumeFade, LocalConfig.Get&lt;double&gt;(OsuSetting.VolumeInactive), 4000, Easing.OutQuint);
+        }
+
+        #endregion
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override bool OnExiting()
+        {
+            if (ScreenStack.CurrentScreen is Loader)
+                return false;
+
+            if (introScreen?.DidLoadMenu == true &amp;&amp; !(ScreenStack.CurrentScreen is IntroScreen))
+            {
+                Scheduler.Add(introScreen.MakeCurrent);
+                return true;
+            }
+
+            return base.OnExiting();
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            ScreenOffsetContainer.Padding = new MarginPadding { Top = toolbarOffset };
+            overlayOffsetContainer.Padding = new MarginPadding { Top = toolbarOffset };
+
+            adjustGlobalScreenOffset();
+
+            GlobalCursorDisplay.ShowCursor = (ScreenStack.CurrentScreen as IOsuScreen)?.CursorVisible ?? false;
+        }
+
+        private float horizontalOffsetAdjust;
+
+        /// &lt;summary&gt;
+        /// When a screen-edge overlay is present, we push the game content slightly in its direction to create a sense of depth.
+        /// &lt;/summary&gt;
+        private void adjustGlobalScreenOffset()
+        {
+            float adjust = 0f;
+
+            if (Settings.IsLoaded &amp;&amp; Settings.State.Value == Visibility.Visible)
+                adjust += SettingsPanel.WIDTH * SIDE_OVERLAY_OFFSET_RATIO;
+            if (Notifications.IsLoaded &amp;&amp; Notifications.State.Value == Visibility.Visible)
+                adjust -= NotificationOverlay.WIDTH * SIDE_OVERLAY_OFFSET_RATIO;
+
+            horizontalOffsetAdjust = (float)Interpolation.DampContinuously(horizontalOffsetAdjust, adjust, 100, Time.Elapsed);
+            // Avoid having everything on the screen moving by miniscule amounts (can create overhead on busy screens).
+            if (adjust == 0 &amp;&amp; Math.Abs(horizontalOffsetAdjust) &lt; 0.2f)
+                horizontalOffsetAdjust = 0;
+
+            ScreenOffsetContainer.X = horizontalOffsetAdjust;
+            overlayContent.X = horizontalOffsetAdjust * 1.2f;
+        }
+
+        protected virtual void ScreenChanged([CanBeNull] IOsuScreen current, [CanBeNull] IOsuScreen newScreen)
+        {
+            SentrySdk.ConfigureScope(scope =&gt;
+            {
+                scope.Contexts[@&quot;screen stack&quot;] = new
+                {
+                    Current = newScreen?.GetType().ReadableName(),
+                    Previous = current?.GetType().ReadableName(),
+                };
+
+                scope.SetTag(@&quot;screen&quot;, newScreen?.GetType().ReadableName() ?? @&quot;none&quot;);
+            });
+
+            switch (current)
+            {
+                case Player player:
+                    player.PlayingState.UnbindFrom(UserPlayingState);
+
+                    // reset for sanity.
+                    UserPlayingState.Value = LocalUserPlayingState.NotPlaying;
+                    break;
+            }
+
+            switch (newScreen)
+            {
+                case IntroScreen intro:
+                    introScreen = intro;
+                    devBuildBanner?.Show();
+                    break;
+
+                case MainMenu menu:
+                    menuScreen = menu;
+                    devBuildBanner?.Show();
+                    break;
+
+                case Player player:
+                    player.PlayingState.BindTo(UserPlayingState);
+                    break;
+
+                default:
+                    devBuildBanner?.Hide();
+                    break;
+            }
+
+            if (current != null)
+            {
+                OverlayActivationMode.UnbindFrom(current.OverlayActivationMode);
+                configUserActivity.UnbindFrom(current.Activity);
+            }
+
+            // Bind to new screen.
+            if (newScreen is OsuScreen newOsuScreen)
+            {
+                OverlayActivationMode.BindTo(newScreen.OverlayActivationMode);
+                configUserActivity.BindTo(newScreen.Activity);
+
+                // Handle various configuration updates based on new screen settings.
+                GlobalCursorDisplay.MenuCursor.HideCursorOnNonMouseInput = newScreen.HideMenuCursorOnNonMouseInput;
+
+                if (newScreen.HideOverlaysOnEnter)
+                    CloseAllOverlays();
+                else
+                    Toolbar.Show();
+
+                skinEditor.SetTarget(newOsuScreen);
+            }
+        }
+
+        private void screenPushed(IScreen lastScreen, IScreen newScreen) =&gt; ScreenChanged((OsuScreen)lastScreen, (OsuScreen)newScreen);
+
+        private void screenExited(IScreen lastScreen, IScreen newScreen)
+        {
+            ScreenChanged((OsuScreen)lastScreen, (OsuScreen)newScreen);
+
+            if (newScreen == null)
+                Exit();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[113,9,113,69,0],[123,34,123,38,0],[123,39,123,51,0],[130,9,130,90,0],[162,54,162,58,0],[162,59,162,71,0],[164,53,164,57,0],[164,58,164,70,0],[173,58,173,62,0],[173,63,173,67,0],[178,9,178,94,0],[181,9,181,88,0],[185,70,185,74,0],[187,40,187,95,0],[194,42,194,60,0],[199,9,199,112,0],[201,77,201,93,0],[203,9,203,117,0],[205,45,205,49,0],[205,50,205,62,0],[207,44,207,72,0],[208,48,208,72,0],[212,58,212,62,0],[212,63,212,75,0],[244,9,244,116,0],[245,9,245,97,0],[247,9,247,104,0],[252,54,252,59,0],[254,9,254,54,0],[255,9,255,52,0],[258,9,258,45,0],[259,9,259,10,0],[260,13,260,30,0],[262,13,262,65,0],[263,13,263,64,0],[265,13,266,13,0],[266,13,266,14,0],[266,14,267,17,0],[267,17,267,112,0],[267,112,268,17,0],[268,17,269,17,0],[269,17,269,18,0],[269,18,270,21,0],[270,21,270,53,0],[270,53,271,21,0],[271,21,271,51,0],[271,51,272,17,0],[272,17,272,18,0],[272,18,272,26,0],[272,26,273,13,0],[273,13,273,14,0],[273,14,273,16,0],[274,9,274,10,0],[278,79,278,100,0],[281,13,281,130,0],[284,9,284,10,0],[285,13,285,49,0],[286,17,286,164,0],[288,13,288,61,0],[289,17,289,157,0],[291,13,291,52,0],[293,13,293,61,0],[294,17,294,65,0],[296,17,296,54,0],[298,13,298,88,0],[299,17,299,62,0],[301,13,301,47,0],[301,47,301,90,0],[301,90,301,92,0],[302,9,302,10,0],[305,9,305,10,0],[306,13,306,60,0],[307,17,307,54,0],[308,13,308,41,0],[309,9,309,10,0],[311,79,312,9,0],[312,9,312,10,0],[312,10,313,13,0],[313,13,313,53,0],[313,53,314,13,0],[314,13,314,41,0],[314,41,315,9,0],[315,9,315,10,0],[315,10,315,11,0],[320,86,321,9,0],[321,9,321,10,0],[321,10,322,13,0],[322,13,322,55,0],[322,55,324,13,0],[324,13,324,88,0],[324,88,325,17,0],[325,17,325,65,0],[325,65,327,13,0],[327,13,327,39,0],[327,39,328,9,0],[328,9,328,10,0],[328,10,328,11,0],[337,9,337,10,0],[338,13,338,20,0],[338,22,338,33,0],[338,34,338,36,0],[338,37,338,52,0],[339,17,339,32,0],[341,13,341,48,0],[343,13,343,29,0],[343,30,343,45,0],[344,9,344,10,0],[347,9,347,10,0],[348,13,348,66,0],[349,13,349,94,0],[350,13,350,37,0],[351,9,351,10,0],[356,13,356,89,0],[358,9,358,74,0],[362,9,362,10,0],[363,13,363,58,0],[364,13,364,65,0],[365,9,365,10,0],[368,9,368,10,0],[369,13,369,32,0],[371,13,371,37,0],[372,13,372,14,0],[373,17,373,63,0],[374,17,374,58,0],[375,13,375,14,0],[376,9,376,10,0],[379,9,379,10,0],[381,13,381,73,0],[382,13,382,14,0],[383,17,383,34,0],[384,17,384,24,0],[387,13,387,33,0],[388,13,388,14,0],[389,17,389,41,0],[391,17,391,80,0],[395,17,395,50,0],[396,17,396,98,0],[397,13,397,14,0],[400,13,400,14,0],[401,17,401,37,0],[402,17,402,18,0],[403,21,403,89,0],[405,21,405,62,0],[406,21,406,43,0],[408,21,408,49,0],[408,49,408,62,0],[408,62,408,97,0],[409,17,409,18,0],[410,13,410,14,0],[411,9,411,10,0],[415,9,415,10,0],[416,13,416,52,0],[418,13,418,42,0],[419,17,419,84,0],[421,17,421,75,0],[424,13,424,81,0],[425,13,425,74,0],[427,13,427,81,0],[430,13,430,14,0],[431,17,431,92,0],[432,13,432,14,0],[433,13,433,32,0],[434,13,434,14,0],[436,17,436,96,0],[437,17,437,72,0],[438,13,438,14,0],[440,13,440,42,0],[440,42,440,84,0],[440,84,440,85,0],[442,13,442,102,0],[444,13,444,75,0],[447,13,447,68,0],[450,13,450,65,0],[450,65,450,111,0],[450,111,450,112,0],[452,13,453,13,0],[453,13,453,14,0],[453,14,454,17,0],[454,17,454,94,0],[454,94,455,17,0],[455,17,455,91,0],[455,91,456,17,0],[456,17,456,92,0],[456,92,457,13,0],[457,13,457,14,0],[457,14,457,22,0],[459,13,459,49,0],[459,49,459,83,0],[459,83,459,91,0],[461,13,461,80,0],[463,13,463,56,0],[464,13,464,60,0],[465,13,465,54,0],[465,54,465,73,0],[465,73,465,75,0],[467,13,467,108,0],[468,13,468,67,0],[468,67,468,159,0],[468,159,468,167,0],[469,9,469,10,0],[478,47,478,95,0],[485,53,486,9,0],[486,9,486,10,0],[486,10,487,13,0],[487,13,487,73,0],[487,73,489,13,0],[489,13,489,33,0],[489,33,493,21,0],[493,21,493,120,0],[493,120,494,25,0],[494,25,494,48,0],[494,48,495,21,0],[495,21,495,27,0],[495,27,498,21,0],[498,21,498,64,0],[498,64,499,25,0],[499,25,499,47,0],[499,47,500,21,0],[500,21,500,27,0],[500,27,503,21,0],[503,21,503,44,0],[503,44,504,21,0],[504,21,504,27,0],[504,27,507,21,0],[507,21,507,72,0],[507,72,508,25,0],[508,25,508,88,0],[508,88,510,25,0],[510,25,510,53,0],[510,53,512,21,0],[512,21,512,27,0],[512,27,515,21,0],[515,21,515,71,0],[515,71,516,21,0],[516,21,516,27,0],[516,27,519,21,0],[519,21,519,77,0],[519,77,520,21,0],[520,21,520,27,0],[520,27,523,21,0],[523,21,523,48,0],[523,48,524,21,0],[524,21,524,27,0],[524,27,527,21,0],[527,21,527,40,0],[527,40,527,53,0],[527,53,527,60,0],[527,60,531,23,0],[531,23,531,25,0],[531,25,532,21,0],[532,21,532,27,0],[532,27,535,21,0],[535,21,535,50,0],[535,50,536,21,0],[536,21,536,27,0],[536,27,539,21,0],[539,21,539,52,0],[539,52,540,21,0],[540,21,540,27,0],[540,27,543,21,0],[543,21,543,41,0],[543,41,544,21,0],[544,21,544,27,0],[544,27,547,21,0],[547,21,547,57,0],[547,57,548,25,0],[548,25,548,48,0],[548,48,550,21,0],[550,21,550,22,0],[550,22,551,25,0],[551,25,551,71,0],[551,71,552,25,0],[552,25,552,86,0],[552,86,553,21,0],[553,21,553,22,0],[553,22,555,21,0],[555,21,555,27,0],[555,27,558,21,0],[558,21,558,67,0],[558,67,559,25,0],[559,25,559,42,0],[559,42,560,21,0],[560,21,560,27,0],[560,27,563,21,0],[563,21,563,145,0],[563,145,565,9,0],[565,9,565,10,0],[565,10,565,11,0],[567,54,567,73,0],[567,73,567,88,0],[567,88,568,9,0],[568,9,568,10,0],[568,10,569,13,0],[569,13,569,58,0],[569,58,570,13,0],[570,13,570,67,0],[570,67,571,9,0],[571,9,571,10,0],[571,10,571,11,0],[573,100,573,119,0],[573,119,573,137,0],[573,137,573,144,0],[573,144,573,195,0],[573,195,573,196,0],[579,52,579,71,0],[579,71,579,85,0],[579,85,580,9,0],[580,9,580,10,0],[580,10,582,13,0],[582,13,582,14,0],[582,14,583,17,0],[583,17,583,53,0],[583,53,584,13,0],[584,13,584,14,0],[584,14,585,13,0],[585,13,585,45,0],[585,45,586,13,0],[586,13,586,14,0],[586,14,587,17,0],[587,17,587,83,0],[587,83,588,13,0],[588,13,588,14,0],[588,14,589,9,0],[589,9,589,10,0],[589,10,589,11,0],[595,50,595,69,0],[595,69,595,86,0],[595,86,595,93,0],[595,93,595,140,0],[595,140,595,141,0],[601,45,601,64,0],[601,64,601,75,0],[601,75,601,82,0],[601,82,601,108,0],[601,108,601,109,0],[607,51,607,70,0],[607,70,607,87,0],[607,87,607,94,0],[607,94,607,142,0],[607,142,607,143,0],[613,55,613,74,0],[613,74,613,88,0],[613,88,613,95,0],[613,95,613,131,0],[613,131,613,132,0],[615,65,615,84,0],[615,84,615,98,0],[615,98,615,105,0],[615,105,615,146,0],[615,146,615,147,0],[617,74,617,93,0],[617,93,617,107,0],[617,107,617,114,0],[617,114,617,161,0],[617,161,617,162,0],[623,46,623,65,0],[623,65,623,76,0],[623,76,623,83,0],[623,83,623,109,0],[623,109,623,110,0],[628,47,628,66,0],[628,66,628,82,0],[628,82,628,89,0],[628,89,628,119,0],[628,119,628,120,0],[634,59,634,78,0],[634,78,634,94,0],[634,94,634,101,0],[634,101,634,136,0],[634,136,634,137,0],[640,9,640,10,0],[641,13,641,50,0],[642,13,643,13,0],[643,13,643,14,0],[643,14,644,17,0],[644,17,644,35,0],[644,35,647,25,0],[647,25,647,47,0],[647,47,648,25,0],[648,25,648,31,0],[648,31,651,25,0],[651,25,651,69,0],[651,69,652,25,0],[652,25,652,31,0],[652,31,654,13,0],[654,13,654,14,0],[654,14,654,15,0],[655,13,655,32,0],[656,9,656,10,0],[663,9,663,10,0],[664,13,664,64,0],[665,13,665,14,0],[666,17,666,32,0],[666,32,670,19,0],[670,19,670,21,0],[671,17,671,24,0],[674,13,674,68,0],[675,9,675,10,0],[682,9,682,10,0],[683,13,683,73,0],[685,13,685,39,0],[686,13,686,14,0],[687,17,687,98,0],[688,17,688,24,0],[691,13,691,63,0],[692,9,692,10,0],[709,9,709,10,0],[710,13,710,86,0],[711,13,711,54,0],[713,13,713,38,0],[714,17,714,120,0],[716,13,716,56,0],[717,17,717,119,0],[719,13,719,38,0],[720,13,720,14,0],[721,17,721,101,0],[722,17,722,24,0],[725,13,725,61,0],[725,61,725,71,0],[725,71,725,73,0],[727,13,727,43,0],[728,13,728,14,0],[729,17,729,104,0],[730,17,730,24,0],[733,13,734,13,0],[734,13,734,14,0],[734,14,736,17,0],[736,17,736,64,0],[736,64,736,101,0],[736,101,736,112,0],[736,112,739,17,0],[739,17,739,41,0],[739,41,740,21,0],[740,21,740,62,0],[740,62,743,17,0],[743,17,744,65,0],[744,65,744,96,0],[744,96,745,53,0],[745,53,747,17,0],[747,17,747,71,0],[747,71,748,17,0],[748,17,748,18,0],[748,18,749,21,0],[749,21,749,118,0],[749,118,750,17,0],[750,17,750,18,0],[750,18,752,17,0],[752,17,752,18,0],[752,18,755,21,0],[755,21,756,146,0],[756,146,758,21,0],[758,21,758,47,0],[758,47,759,21,0],[759,21,759,22,0],[759,22,760,25,0],[760,25,760,59,0],[760,59,761,25,0],[761,25,761,85,0],[761,85,763,25,0],[763,25,763,127,0],[763,127,764,21,0],[764,21,764,22,0],[764,22,766,21,0],[766,21,766,22,0],[766,22,767,25,0],[767,25,767,85,0],[767,85,769,25,0],[769,25,769,121,0],[769,121,770,21,0],[770,21,770,22,0],[770,22,771,17,0],[771,17,771,18,0],[771,18,772,13,0],[772,13,772,14,0],[772,14,775,16,0],[776,9,776,10,0],[784,9,784,10,0],[785,13,785,31,0],[786,13,786,14,0],[789,17,793,21,0],[793,21,793,22,0],[793,22,794,25,0],[794,25,794,81,0],[794,81,795,25,0],[795,25,795,37,0],[795,37,796,21,0],[796,21,796,22,0],[796,22,797,20,0],[798,17,798,24,0],[801,13,802,13,0],[802,13,802,14,0],[802,14,803,17,0],[803,17,803,58,0],[803,58,804,21,0],[804,21,804,66,0],[804,66,806,17,0],[806,17,806,50,0],[806,50,807,13,0],[807,13,807,14,0],[807,14,807,16,0],[810,9,810,10,0],[817,9,817,10,0],[818,13,819,13,0],[819,13,819,14,0],[819,14,820,17,0],[820,17,820,54,0],[820,54,821,21,0],[821,21,821,62,0],[821,62,823,17,0],[823,17,823,38,0],[823,38,824,13,0],[824,13,824,14,0],[824,14,824,16,0],[827,9,827,10,0],[834,9,834,10,0],[835,13,835,80,0],[840,13,840,14,0],[841,17,841,63,0],[842,13,842,14,0],[843,13,843,73,0],[844,13,844,14,0],[845,17,845,118,0],[847,17,847,94,0],[848,17,848,39,0],[848,39,848,115,0],[848,115,848,116,0],[849,17,849,32,0],[851,17,851,24,0],[854,13,854,40,0],[854,41,854,48,0],[856,13,856,47,0],[857,13,857,14,0],[858,17,858,115,0],[859,17,859,24,0],[862,13,862,73,0],[863,13,863,52,0],[875,13,878,43,0],[880,13,881,13,0],[881,13,881,14,0],[881,14,882,17,0],[882,17,882,157,0],[882,157,890,17,0],[890,17,890,77,0],[890,77,891,21,0],[891,21,891,70,0],[891,70,893,17,0],[893,17,893,73,0],[893,73,894,21,0],[894,21,894,88,0],[894,88,896,17,0],[896,17,896,77,0],[896,77,898,17,0],[898,17,898,132,0],[898,132,899,17,0],[899,17,899,148,0],[899,148,901,17,0],[901,17,901,78,0],[901,78,902,17,0],[902,17,902,18,0],[902,18,903,21,0],[903,21,905,141,0],[905,141,906,21,0],[906,21,906,74,0],[906,74,907,17,0],[907,17,907,18,0],[907,18,909,17,0],[909,17,909,37,0],[909,37,912,25,0],[912,25,912,77,0],[912,77,913,25,0],[913,25,913,31,0],[913,31,916,25,0],[916,25,916,86,0],[916,86,917,25,0],[917,25,917,31,0],[917,31,919,13,0],[919,13,919,14,0],[919,14,919,44,0],[920,9,920,10,0],[923,9,923,10,0],[929,13,929,51,0],[929,51,929,111,0],[929,111,929,113,0],[931,13,931,32,0],[931,32,931,36,0],[931,36,931,43,0],[931,43,931,61,0],[931,61,931,63,0],[933,13,933,31,0],[934,9,934,10,0],[936,52,936,64,0],[938,66,938,85,0],[944,65,944,69,0],[944,74,944,96,0],[946,66,946,110,0],[951,9,951,10,0],[952,13,952,49,0],[953,13,953,48,0],[954,13,954,33,0],[955,9,955,10,0],[958,9,958,10,0],[959,13,959,37,0],[960,17,960,24,0],[964,13,964,46,0],[967,21,967,37,0],[968,21,968,27,0],[973,21,973,112,0],[974,21,974,27,0],[977,21,977,94,0],[978,21,978,27,0],[981,13,981,47,0],[982,17,982,46,0],[983,9,983,10,0],[986,9,986,10,0],[988,13,988,39,0],[989,17,989,24,0],[991,13,991,81,0],[992,13,992,14,0],[994,17,994,78,0],[995,13,995,14,0],[996,9,996,10,0],[1003,9,1003,10,0],[1004,13,1004,47,0],[1005,13,1005,97,0],[1005,97,1005,122,0],[1005,122,1005,125,0],[1006,9,1006,10,0],[1009,9,1009,10,0],[1011,13,1011,39,0],[1011,39,1011,50,0],[1011,50,1011,80,0],[1012,9,1012,10,0],[1022,9,1022,10,0],[1023,13,1023,47,0],[1025,13,1025,113,0],[1026,17,1026,32,0],[1026,32,1026,70,0],[1026,70,1026,72,0],[1028,17,1028,34,0],[1029,9,1029,10,0],[1032,9,1032,10,0],[1035,13,1035,45,0],[1037,13,1037,39,0],[1039,13,1039,36,0],[1041,13,1041,38,0],[1042,17,1042,58,0],[1044,13,1044,65,0],[1045,13,1045,64,0],[1046,9,1046,10,0],[1049,9,1049,10,0],[1050,13,1059,15,0],[1060,9,1060,10,0],[1063,9,1063,10,0],[1064,13,1064,33,0],[1069,13,1069,81,0],[1072,13,1072,49,0],[1072,49,1072,70,0],[1072,70,1072,71,0],[1073,13,1073,50,0],[1073,50,1073,82,0],[1073,82,1073,83,0],[1075,13,1075,52,0],[1075,52,1075,73,0],[1075,73,1075,74,0],[1076,13,1076,53,0],[1076,53,1076,88,0],[1076,88,1076,89,0],[1078,13,1078,55,0],[1078,55,1078,76,0],[1078,76,1078,77,0],[1079,13,1079,53,0],[1079,53,1079,74,0],[1079,74,1079,75,0],[1081,13,1081,50,0],[1081,50,1081,71,0],[1081,71,1081,72,0],[1082,13,1082,51,0],[1082,51,1082,84,0],[1082,84,1082,85,0],[1084,13,1084,55,0],[1084,55,1084,76,0],[1084,76,1084,77,0],[1085,13,1085,70,0],[1087,13,1087,38,0],[1088,17,1088,45,0],[1088,45,1088,66,0],[1088,66,1088,67,0],[1092,13,1092,75,0],[1094,13,1094,66,0],[1095,13,1096,13,0],[1096,13,1096,14,0],[1096,14,1097,17,0],[1097,17,1097,35,0],[1097,35,1098,21,0],[1098,21,1098,59,0],[1098,59,1099,13,0],[1099,13,1099,14,0],[1099,14,1099,16,0],[1101,13,1101,37,0],[1105,13,1137,73,0],[1137,73,1137,150,0],[1137,150,1158,16,0],[1160,13,1160,46,0],[1162,13,1162,54,0],[1163,13,1163,54,0],[1165,13,1170,43,0],[1172,13,1172,34,0],[1173,17,1173,101,0],[1175,13,1176,13,0],[1176,13,1176,14,0],[1176,14,1177,17,0],[1177,17,1177,62,0],[1177,62,1180,17,0],[1180,17,1180,59,0],[1180,59,1180,89,0],[1180,89,1180,92,0],[1180,92,1181,13,0],[1181,13,1181,14,0],[1181,14,1181,16,0],[1185,13,1185,104,0],[1186,13,1186,119,0],[1187,13,1187,95,0],[1188,13,1191,17,0],[1191,17,1191,18,0],[1191,18,1192,21,0],[1192,21,1192,45,0],[1192,45,1194,21,0],[1194,21,1194,62,0],[1194,62,1195,25,0],[1195,25,1195,50,0],[1195,50,1196,17,0],[1196,17,1196,18,0],[1196,18,1197,43,0],[1199,13,1199,105,0],[1201,13,1201,53,0],[1203,13,1203,66,0],[1204,13,1204,62,0],[1206,13,1206,65,0],[1208,13,1209,13,0],[1209,13,1209,14,0],[1209,14,1210,17,0],[1210,17,1210,44,0],[1210,44,1211,17,0],[1211,17,1211,44,0],[1211,44,1212,13,0],[1212,13,1212,14,0],[1212,14,1212,56,0],[1214,13,1214,63,0],[1216,13,1216,61,0],[1219,13,1219,71,0],[1222,13,1222,120,0],[1223,13,1223,94,0],[1224,13,1224,109,0],[1225,13,1225,99,0],[1226,13,1226,89,0],[1227,13,1227,108,0],[1228,13,1228,90,0],[1229,13,1229,96,0],[1230,13,1230,71,0],[1231,13,1231,109,0],[1232,13,1232,106,0],[1233,13,1233,103,0],[1234,13,1234,108,0],[1235,13,1235,96,0],[1236,13,1236,116,0],[1238,13,1242,55,0],[1244,13,1248,55,0],[1250,13,1250,100,0],[1251,13,1251,123,0],[1252,13,1252,84,0],[1254,13,1254,78,0],[1255,13,1255,118,0],[1256,13,1256,71,0],[1258,13,1258,64,0],[1259,13,1259,47,0],[1260,13,1260,48,0],[1260,48,1260,73,0],[1260,73,1260,76,0],[1261,13,1261,47,0],[1264,13,1264,146,0],[1266,13,1266,20,0],[1266,22,1266,33,0],[1266,34,1266,36,0],[1266,37,1266,62,0],[1267,13,1267,14,0],[1268,17,1269,17,0],[1269,17,1269,18,0],[1269,18,1270,21,0],[1270,21,1270,61,0],[1270,61,1270,62,0],[1270,62,1270,69,0],[1270,69,1272,21,0],[1272,21,1272,58,0],[1272,58,1272,70,0],[1272,70,1272,85,0],[1272,85,1272,93,0],[1272,93,1272,95,0],[1272,95,1273,17,0],[1273,17,1273,18,0],[1273,18,1273,19,0],[1274,13,1274,14,0],[1277,13,1277,99,0],[1279,13,1279,20,0],[1279,22,1279,33,0],[1279,34,1279,36,0],[1279,37,1279,58,0],[1280,13,1280,14,0],[1281,17,1282,17,0],[1282,17,1282,18,0],[1282,18,1283,21,0],[1283,21,1283,61,0],[1283,61,1284,25,0],[1284,25,1284,80,0],[1284,80,1285,17,0],[1285,17,1285,18,0],[1285,18,1285,19,0],[1286,13,1286,14,0],[1289,13,1289,161,0],[1291,13,1291,20,0],[1291,22,1291,33,0],[1291,34,1291,36,0],[1291,37,1291,58,0],[1292,13,1292,14,0],[1293,17,1294,17,0],[1294,17,1294,18,0],[1294,18,1296,21,0],[1296,21,1296,56,0],[1296,56,1296,64,0],[1296,64,1296,66,0],[1296,66,1298,21,0],[1298,21,1298,61,0],[1298,61,1299,25,0],[1299,25,1299,80,0],[1299,80,1300,17,0],[1300,17,1300,18,0],[1300,18,1300,19,0],[1301,13,1301,14,0],[1303,13,1304,13,0],[1304,13,1304,14,0],[1304,14,1305,17,0],[1305,17,1305,60,0],[1305,60,1305,61,0],[1305,61,1305,80,0],[1305,80,1306,13,0],[1306,13,1306,14,0],[1306,14,1306,15,0],[1309,13,1309,35,0],[1311,13,1311,37,0],[1313,13,1313,78,0],[1314,13,1314,38,0],[1317,13,1317,97,0],[1318,17,1318,77,0],[1323,13,1323,63,0],[1324,9,1324,10,0],[1333,9,1333,10,0],[1335,13,1335,77,0],[1337,13,1337,39,0],[1338,17,1338,24,0],[1340,13,1340,53,0],[1344,13,1344,56,0],[1344,57,1344,64,0],[1345,13,1345,60,0],[1345,61,1345,68,0],[1347,13,1347,52,0],[1349,13,1349,37,0],[1350,13,1350,14,0],[1352,17,1352,42,0],[1353,21,1353,85,0],[1354,13,1354,14,0],[1356,13,1356,37,0],[1357,13,1357,14,0],[1360,17,1360,106,0],[1361,17,1361,102,0],[1363,17,1363,100,0],[1364,21,1364,83,0],[1365,13,1365,14,0],[1367,13,1367,87,0],[1368,13,1368,14,0],[1369,17,1369,74,0],[1374,17,1374,37,0],[1375,21,1375,170,0],[1377,17,1377,58,0],[1379,17,1379,80,0],[1380,13,1380,14,0],[1382,13,1382,37,0],[1383,13,1383,14,0],[1385,17,1385,131,0],[1387,13,1387,14,0],[1388,9,1388,10,0],[1391,9,1391,10,0],[1395,13,1395,74,0],[1395,75,1395,82,0],[1397,13,1397,119,0],[1397,120,1397,139,0],[1398,9,1398,10,0],[1401,9,1401,10,0],[1402,13,1402,34,0],[1403,13,1403,14,0],[1404,17,1404,50,0],[1404,50,1404,68,0],[1404,68,1404,80,0],[1406,17,1406,38,0],[1407,17,1407,18,0],[1408,21,1408,54,0],[1410,21,1410,86,0],[1411,21,1411,22,0],[1412,25,1412,47,0],[1413,21,1413,22,0],[1415,21,1415,22,0],[1416,25,1416,40,0],[1416,40,1416,53,0],[1416,53,1416,55,0],[1417,21,1417,22,0],[1418,17,1418,18,0],[1419,13,1419,14,0],[1420,9,1420,10,0],[1423,9,1423,10,0],[1424,13,1424,38,0],[1424,38,1424,50,0],[1424,50,1424,65,0],[1424,65,1424,73,0],[1424,73,1424,75,0],[1426,13,1426,29,0],[1427,13,1427,34,0],[1430,13,1430,35,0],[1431,17,1431,24,0],[1434,13,1434,34,0],[1435,17,1435,85,0],[1437,17,1437,59,0],[1438,9,1438,10,0],[1441,9,1441,10,0],[1442,13,1442,115,0],[1442,116,1442,123,0],[1444,13,1444,67,0],[1445,17,1445,24,0],[1449,13,1449,66,0],[1450,13,1450,14,0],[1453,17,1453,64,0],[1454,21,1454,148,0],[1456,21,1456,59,0],[1458,17,1458,32,0],[1458,32,1462,19,0],[1462,19,1462,21,0],[1463,13,1463,14,0],[1464,18,1464,72,0],[1465,13,1465,14,0],[1466,17,1466,80,0],[1468,17,1468,32,0],[1468,32,1473,21,0],[1473,21,1473,22,0],[1473,22,1474,25,0],[1474,25,1474,71,0],[1474,71,1475,25,0],[1475,25,1475,37,0],[1475,37,1476,21,0],[1476,21,1476,22,0],[1476,22,1477,19,0],[1477,19,1477,21,0],[1478,13,1478,14,0],[1480,13,1480,62,0],[1481,13,1481,40,0],[1481,40,1481,88,0],[1481,88,1481,112,0],[1482,9,1482,10,0],[1485,9,1485,10,0],[1486,13,1486,173,0],[1487,17,1487,24,0],[1489,13,1489,85,0],[1491,13,1491,47,0],[1492,13,1492,14,0],[1493,17,1493,45,0],[1494,21,1494,28,0],[1496,17,1496,48,0],[1498,17,1499,17,0],[1499,17,1499,18,0],[1499,18,1500,21,0],[1500,21,1505,24,0],[1505,24,1511,21,0],[1511,21,1511,28,0],[1511,28,1511,30,0],[1511,30,1511,47,0],[1511,47,1511,48,0],[1511,48,1511,50,0],[1511,50,1511,51,0],[1511,51,1511,103,0],[1511,103,1512,25,0],[1512,25,1512,61,0],[1512,61,1513,17,0],[1513,17,1513,18,0],[1513,18,1513,20,0],[1514,13,1514,14,0],[1515,18,1515,47,0],[1516,13,1516,14,0],[1517,17,1517,32,0],[1517,32,1523,21,0],[1523,21,1523,22,0],[1523,22,1524,25,0],[1524,25,1524,107,0],[1524,107,1525,25,0],[1525,25,1525,37,0],[1525,37,1526,21,0],[1526,21,1526,22,0],[1526,22,1527,19,0],[1527,19,1527,21,0],[1529,17,1529,50,0],[1530,13,1530,14,0],[1531,9,1531,10,0],[1544,9,1544,10,0],[1545,13,1545,23,0],[1546,17,1546,49,0],[1548,13,1548,152,0],[1550,13,1550,65,0],[1551,17,1551,46,0],[1556,13,1557,13,0],[1557,13,1557,14,0],[1557,14,1558,17,0],[1558,17,1558,58,0],[1558,58,1561,17,0],[1561,17,1562,17,0],[1562,17,1562,18,0],[1562,18,1563,21,0],[1563,21,1563,52,0],[1563,52,1564,25,0],[1564,25,1564,72,0],[1564,72,1567,21,0],[1567,21,1567,22,0],[1567,22,1568,25,0],[1568,25,1568,63,0],[1568,63,1572,25,0],[1572,25,1572,42,0],[1572,42,1573,25,0],[1573,25,1573,63,0],[1573,63,1573,127,0],[1573,127,1573,129,0],[1573,129,1574,25,0],[1574,25,1574,44,0],[1574,44,1577,25,0],[1577,25,1577,62,0],[1577,62,1578,29,0],[1578,29,1578,72,0],[1578,72,1581,25,0],[1581,25,1581,40,0],[1581,40,1582,29,0],[1582,29,1582,36,0],[1582,36,1584,25,0],[1584,25,1584,52,0],[1584,52,1586,25,0],[1586,25,1586,58,0],[1586,58,1588,25,0],[1588,25,1588,60,0],[1588,60,1589,21,0],[1589,21,1589,22,0],[1589,22,1590,21,0],[1590,21,1590,55,0],[1590,55,1591,21,0],[1591,21,1591,22,0],[1591,22,1592,21,0],[1592,21,1592,22,0],[1592,22,1593,17,0],[1593,17,1593,18,0],[1593,18,1593,20,0],[1593,20,1594,13,0],[1594,13,1594,14,0],[1594,14,1594,16,0],[1596,13,1596,30,0],[1597,9,1597,10,0],[1600,9,1600,10,0],[1601,13,1601,30,0],[1605,21,1605,52,0],[1609,13,1609,26,0],[1610,17,1610,30,0],[1613,13,1613,37,0],[1613,38,1613,51,0],[1615,13,1615,30,0],[1620,21,1620,52,0],[1623,21,1623,51,0],[1624,21,1624,33,0],[1627,21,1627,51,0],[1628,21,1628,33,0],[1631,21,1631,47,0],[1632,21,1632,115,0],[1633,21,1633,33,0],[1636,21,1636,109,0],[1637,21,1637,76,0],[1638,21,1638,33,0],[1641,21,1641,71,0],[1642,25,1642,44,0],[1644,25,1644,55,0],[1645,21,1645,33,0],[1651,21,1651,70,0],[1652,25,1652,38,0],[1654,21,1654,52,0],[1655,21,1655,33,0],[1658,21,1658,70,0],[1659,25,1659,38,0],[1661,21,1661,50,0],[1662,21,1662,33,0],[1665,21,1665,70,0],[1666,25,1666,38,0],[1668,21,1668,54,0],[1669,21,1669,33,0],[1672,13,1672,26,0],[1673,9,1673,10,0],[1676,9,1676,10,0],[1679,13,1679,30,0],[1682,21,1682,59,0],[1683,21,1683,33,0],[1686,21,1686,59,0],[1687,21,1687,33,0],[1690,21,1690,42,0],[1691,21,1691,33,0],[1694,13,1694,38,0],[1695,9,1695,10,0],[1699,9,1699,83,0],[1702,9,1702,10,0],[1703,13,1703,26,0],[1704,17,1704,87,0],[1706,17,1706,137,0],[1707,9,1707,10,0],[1712,9,1712,10,0],[1713,9,1713,10,0],[1716,9,1716,10,0],[1717,13,1717,53,0],[1718,17,1718,30,0],[1720,13,1720,97,0],[1721,13,1721,14,0],[1722,17,1722,56,0],[1723,17,1723,29,0],[1726,13,1726,37,0],[1727,9,1727,10,0],[1730,9,1730,10,0],[1731,13,1731,40,0],[1733,13,1733,87,0],[1734,13,1734,88,0],[1736,13,1736,40,0],[1738,13,1738,112,0],[1739,9,1739,10,0],[1747,9,1747,10,0],[1748,13,1748,31,0],[1750,13,1750,81,0],[1751,17,1751,75,0],[1752,13,1752,91,0],[1753,17,1753,81,0],[1755,13,1755,127,0],[1757,13,1757,72,0],[1758,17,1758,44,0],[1760,13,1760,62,0],[1761,13,1761,62,0],[1762,9,1762,10,0],[1765,9,1765,10,0],[1766,13,1767,13,0],[1767,13,1767,14,0],[1767,14,1768,17,0],[1768,17,1772,19,0],[1772,19,1774,17,0],[1774,17,1774,89,0],[1774,89,1775,13,0],[1775,13,1775,14,0],[1775,14,1775,16,0],[1777,13,1777,29,0],[1780,21,1780,70,0],[1783,21,1783,79,0],[1784,21,1784,27,0],[1787,13,1787,31,0],[1790,21,1790,41,0],[1791,21,1791,44,0],[1792,21,1792,27,0],[1795,21,1795,39,0],[1796,21,1796,44,0],[1797,21,1797,27,0],[1800,21,1800,66,0],[1801,21,1801,27,0],[1804,21,1804,44,0],[1805,21,1805,27,0],[1808,13,1808,33,0],[1809,13,1809,14,0],[1810,17,1810,81,0],[1811,17,1811,65,0],[1812,13,1812,14,0],[1815,13,1815,53,0],[1816,13,1816,14,0],[1817,17,1817,79,0],[1818,17,1818,63,0],[1821,17,1821,116,0],[1823,17,1823,51,0],[1824,21,1824,40,0],[1826,21,1826,36,0],[1828,17,1828,52,0],[1829,13,1829,14,0],[1830,9,1830,10,0],[1832,77,1832,135,0],[1835,9,1835,10,0],[1836,13,1836,72,0],[1838,13,1838,35,0],[1839,17,1839,24,0],[1840,9,1840,10,0]]);
+    </script>
+  </body>
+</html>

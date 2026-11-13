@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Blueprints/Sliders/SliderPlacementBlueprint.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Configuration;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.Components;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Screens.Edit;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders
+{
+    public partial class SliderPlacementBlueprint : HitObjectPlacementBlueprint
+    {
+        public new Slider HitObject =&gt; (Slider)base.HitObject;
+
+        [Resolved]
+        private OsuHitObjectComposer? composer { get; set; }
+
+        private SliderBodyPiece bodyPiece = null!;
+        private HitCirclePiece headCirclePiece = null!;
+        private HitCirclePiece tailCirclePiece = null!;
+        private PathControlPointVisualiser&lt;Slider&gt; controlPointVisualiser = null!;
+
+        private InputManager inputManager = null!;
+
+        private PathControlPoint? cursor;
+
+        private SliderPlacementState state;
+        private PathControlPoint segmentStart;
+
+        private int currentSegmentLength;
+        private bool usingCustomSegmentType;
+
+        [Resolved]
+        private IDistanceSnapProvider? distanceSnapProvider { get; set; }
+
+        [Resolved]
+        private FreehandSliderToolboxGroup? freehandToolboxGroup { get; set; }
+
+        [Resolved]
+        private EditorClock? editorClock { get; set; }
+
+        [Resolved]
+        private OsuSliderVelocityToolboxGroup? sliderVelocityToolbox { get; set; }
+
+        private Bindable&lt;bool&gt; limitedDistanceSnap { get; set; } = null!;
+
+        private readonly IncrementalBSplineBuilder bSplineBuilder = new IncrementalBSplineBuilder { Degree = 4 };
+
+        protected override bool IsValidForPlacement =&gt; base.IsValidForPlacement &amp;&amp; (PlacementActive == PlacementState.Waiting || HitObject.Path.HasValidLengthForPlacement);
+
+        public SliderPlacementBlueprint()
+            : base(new Slider())
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            HitObject.Path.ControlPoints.Add(segmentStart = new PathControlPoint(Vector2.Zero, PathType.LINEAR));
+            currentSegmentLength = 1;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            Children = new Drawable[]
+            {
+                bodyPiece = new SliderBodyPiece(),
+                headCirclePiece = new HitCirclePiece(),
+                tailCirclePiece = new HitCirclePiece(),
+                controlPointVisualiser = new PathControlPointVisualiser&lt;Slider&gt;(HitObject, false)
+            };
+
+            state = SliderPlacementState.Initial;
+            limitedDistanceSnap = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            inputManager = GetContainingInputManager()!;
+
+            if (freehandToolboxGroup != null)
+            {
+                freehandToolboxGroup.Tolerance.BindValueChanged(e =&gt;
+                {
+                    bSplineBuilder.Tolerance = e.NewValue;
+                    Scheduler.AddOnce(updateSliderPathFromBSplineBuilder);
+                }, true);
+
+                freehandToolboxGroup.CornerThreshold.BindValueChanged(e =&gt;
+                {
+                    bSplineBuilder.CornerThreshold = e.NewValue;
+                    Scheduler.AddOnce(updateSliderPathFromBSplineBuilder);
+                }, true);
+
+                freehandToolboxGroup.CircleThreshold.BindValueChanged(e =&gt;
+                {
+                    Scheduler.AddOnce(updateSliderPathFromBSplineBuilder);
+                }, true);
+            }
+        }
+
+        public override SnapResult UpdateTimeAndPosition(Vector2 screenSpacePosition, double fallbackTime)
+        {
+            var result = composer?.TrySnapToNearbyObjects(screenSpacePosition, fallbackTime);
+            result ??= composer?.TrySnapToDistanceGrid(screenSpacePosition, limitedDistanceSnap.Value &amp;&amp; editorClock != null ? editorClock.CurrentTime : null);
+            if (composer?.TrySnapToPositionGrid(result?.ScreenSpacePosition ?? screenSpacePosition, result?.Time ?? fallbackTime) is SnapResult gridSnapResult)
+                result = gridSnapResult;
+            result ??= new SnapResult(screenSpacePosition, fallbackTime);
+
+            base.UpdateTimeAndPosition(result.ScreenSpacePosition, result.Time ?? fallbackTime);
+
+            switch (state)
+            {
+                case SliderPlacementState.Initial:
+                    BeginPlacement();
+
+                    HitObject.SliderVelocityMultiplier = sliderVelocityToolbox?.SliderVelocity.Value ?? 1;
+                    HitObject.Position = ToLocalSpace(result.ScreenSpacePosition);
+
+                    // Replacing the DifficultyControlPoint above doesn&#39;t trigger any kind of invalidation.
+                    // Without re-applying defaults, velocity won&#39;t be updated.
+                    ApplyDefaultsToHitObject();
+                    break;
+
+                case SliderPlacementState.ControlPoints:
+                    updateCursor();
+                    break;
+            }
+
+            return result;
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            if (e.Button != MouseButton.Left)
+                return base.OnMouseDown(e);
+
+            switch (state)
+            {
+                case SliderPlacementState.Initial:
+                    beginCurve();
+                    break;
+
+                case SliderPlacementState.ControlPoints:
+                    if (canPlaceNewControlPoint(out var lastPoint))
+                        placeNewControlPoint();
+                    else if (lastPoint != null)
+                        beginNewSegment(lastPoint);
+
+                    break;
+            }
+
+            return true;
+        }
+
+        // this allows sliders to be drawn outside compose area (after starting from a point within the compose area).
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; base.ReceivePositionalInputAt(screenSpacePos) || PlacementActive == PlacementState.Active;
+
+        // ReceivePositionalInputAtSubTree generally always returns true when masking is disabled, but we don&#39;t want that,
+        // otherwise a slider path tooltip will be displayed anywhere in the editor (outside compose area).
+        protected override bool ReceivePositionalInputAtSubTree(Vector2 screenSpacePos) =&gt; ReceivePositionalInputAt(screenSpacePos);
+
+        private void beginNewSegment(PathControlPoint lastPoint)
+        {
+            segmentStart = lastPoint;
+            segmentStart.Type = PathType.LINEAR;
+
+            currentSegmentLength = 1;
+            usingCustomSegmentType = false;
+        }
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (e.Button != MouseButton.Left)
+                return base.OnDragStart(e);
+
+            if (state != SliderPlacementState.ControlPoints)
+                return base.OnDragStart(e);
+
+            // Only enter drawing mode if no additional control points have been placed.
+            int controlPointCount = HitObject.Path.ControlPoints.Count;
+            if (controlPointCount &gt; 2 || (controlPointCount == 2 &amp;&amp; HitObject.Path.ControlPoints.Last() != cursor))
+                return base.OnDragStart(e);
+
+            bSplineBuilder.AddLinearPoint(Vector2.Zero);
+            bSplineBuilder.AddLinearPoint(ToLocalSpace(e.ScreenSpaceMouseDownPosition) - HitObject.Position);
+            state = SliderPlacementState.Drawing;
+            return true;
+        }
+
+        protected override void OnDrag(DragEvent e)
+        {
+            base.OnDrag(e);
+
+            if (state == SliderPlacementState.Drawing)
+            {
+                bSplineBuilder.AddLinearPoint(ToLocalSpace(e.ScreenSpaceMousePosition) - HitObject.Position);
+                Scheduler.AddOnce(updateSliderPathFromBSplineBuilder);
+            }
+        }
+
+        protected override void OnDragEnd(DragEndEvent e)
+        {
+            base.OnDragEnd(e);
+
+            if (state == SliderPlacementState.Drawing)
+            {
+                bSplineBuilder.Finish();
+                updateSliderPathFromBSplineBuilder();
+
+                // Change the state so it will snap the expected distance in endCurve.
+                state = SliderPlacementState.Finishing;
+                endCurve();
+            }
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            if (state == SliderPlacementState.ControlPoints &amp;&amp; e.Button == MouseButton.Right)
+                endCurve();
+            base.OnMouseUp(e);
+        }
+
+        private static readonly PathType[] path_types =
+        [
+            PathType.LINEAR,
+            PathType.BEZIER,
+            PathType.PERFECT_CURVE,
+            PathType.BSpline(4),
+        ];
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat)
+                return false;
+
+            if (state != SliderPlacementState.ControlPoints)
+                return false;
+
+            switch (e.Key)
+            {
+                case Key.S:
+                {
+                    if (!canPlaceNewControlPoint(out _))
+                        return false;
+
+                    placeNewControlPoint();
+                    var last = HitObject.Path.ControlPoints.Last(p =&gt; p != cursor);
+                    beginNewSegment(last);
+                    return true;
+                }
+
+                case Key.Number1:
+                case Key.Number2:
+                case Key.Number3:
+                case Key.Number4:
+                {
+                    if (!e.AltPressed)
+                        return false;
+
+                    usingCustomSegmentType = true;
+                    segmentStart.Type = path_types[e.Key - Key.Number1];
+                    controlPointVisualiser.EnsureValidPathTypes();
+                    return true;
+                }
+
+                case Key.Tab:
+                {
+                    usingCustomSegmentType = true;
+
+                    int currentTypeIndex = segmentStart.Type.HasValue ? Array.IndexOf(path_types, segmentStart.Type.Value) : -1;
+
+                    if (currentTypeIndex &lt; 0 &amp;&amp; e.ShiftPressed)
+                        currentTypeIndex = 0;
+
+                    do
+                    {
+                        currentTypeIndex = (path_types.Length + currentTypeIndex + (e.ShiftPressed ? -1 : 1)) % path_types.Length;
+                        segmentStart.Type = path_types[currentTypeIndex];
+                        controlPointVisualiser.EnsureValidPathTypes();
+                    } while (segmentStart.Type != path_types[currentTypeIndex]);
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+            updateSlider();
+
+            // Maintain the path type in case it got defaulted to bezier at some point during the drag.
+            updatePathType();
+        }
+
+        private void beginCurve()
+        {
+            BeginPlacement(commitStart: true);
+            state = SliderPlacementState.ControlPoints;
+        }
+
+        private void endCurve()
+        {
+            updateSlider();
+            EndPlacement(true);
+        }
+
+        private void updatePathType()
+        {
+            if (usingCustomSegmentType)
+            {
+                controlPointVisualiser.EnsureValidPathTypes();
+                return;
+            }
+
+            if (state == SliderPlacementState.Drawing)
+            {
+                segmentStart.Type = PathType.BSpline(4);
+                return;
+            }
+
+            switch (currentSegmentLength)
+            {
+                case 1:
+                case 2:
+                    segmentStart.Type = PathType.LINEAR;
+                    break;
+
+                case 3:
+                    segmentStart.Type = PathType.PERFECT_CURVE;
+                    break;
+
+                default:
+                    segmentStart.Type = PathType.BEZIER;
+                    break;
+            }
+
+            controlPointVisualiser.EnsureValidPathTypes();
+        }
+
+        private void updateCursor()
+        {
+            if (canPlaceNewControlPoint(out _))
+            {
+                // The cursor does not overlap a previous control point, so it can be added if not already existing.
+                if (cursor == null)
+                {
+                    HitObject.Path.ControlPoints.Add(cursor = new PathControlPoint { Position = Vector2.Zero });
+
+                    // The path type should be adjusted in the progression of updatePathType() (LINEAR -&gt; PC -&gt; BEZIER).
+                    currentSegmentLength++;
+                    updatePathType();
+                }
+
+                // Update the cursor position.
+                cursor.Position = getCursorPosition();
+            }
+            else if (cursor != null)
+            {
+                // The cursor overlaps a previous control point, so it&#39;s removed.
+                HitObject.Path.ControlPoints.Remove(cursor);
+                cursor = null;
+
+                // The path type should be adjusted in the reverse progression of updatePathType() (BEZIER -&gt; PC -&gt; LINEAR).
+                currentSegmentLength--;
+                updatePathType();
+            }
+        }
+
+        private Vector2 getCursorPosition()
+        {
+            SnapResult? result = null;
+            var mousePosition = inputManager.CurrentState.Mouse.Position;
+
+            if (state != SliderPlacementState.ControlPoints)
+            {
+                result ??= composer?.TrySnapToNearbyObjects(mousePosition);
+                result ??= composer?.TrySnapToDistanceGrid(mousePosition);
+            }
+
+            result ??= composer?.TrySnapToPositionGrid(mousePosition);
+
+            return ToLocalSpace(result?.ScreenSpacePosition ?? inputManager.CurrentState.Mouse.Position) - HitObject.Position;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether a new control point can be placed at the current mouse position.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;lastPoint&quot;&gt;The last-placed control point. May be null, but is not null if &lt;c&gt;false&lt;/c&gt; is returned.&lt;/param&gt;
+        /// &lt;returns&gt;Whether a new control point can be placed at the current position.&lt;/returns&gt;
+        private bool canPlaceNewControlPoint(out PathControlPoint? lastPoint)
+        {
+            // We cannot rely on the ordering of drawable pieces, so find the respective drawable piece by searching for the last non-cursor control point.
+            var last = HitObject.Path.ControlPoints.LastOrDefault(p =&gt; p != cursor);
+            var lastPiece = controlPointVisualiser.Pieces.Single(p =&gt; p.ControlPoint == last);
+
+            lastPoint = last;
+            // We may only place a new control point if the cursor is not overlapping with the last control point.
+            // If snapping is enabled, the cursor may not hover the last piece while still placing the control point at the same position.
+            return !lastPiece.IsHovered &amp;&amp; (last is null || Vector2.DistanceSquared(last.Position, getCursorPosition()) &gt; 1f);
+        }
+
+        private void placeNewControlPoint()
+        {
+            // Place a new point by detatching the current cursor.
+            updateCursor();
+            cursor = null;
+        }
+
+        private void updateSlider()
+        {
+            if (state == SliderPlacementState.Drawing)
+                HitObject.Path.ExpectedDistance.Value = (float)HitObject.Path.CalculatedDistance;
+            else
+                HitObject.Path.ExpectedDistance.Value = distanceSnapProvider?.FindSnappedDistance((float)HitObject.Path.CalculatedDistance, HitObject.StartTime, HitObject) ?? (float)HitObject.Path.CalculatedDistance;
+
+            bodyPiece.UpdateFrom(HitObject);
+            headCirclePiece.UpdateFrom(HitObject.HeadCircle);
+            tailCirclePiece.UpdateFrom(HitObject.TailCircle);
+        }
+
+        private void updateSliderPathFromBSplineBuilder()
+        {
+            IReadOnlyList&lt;List&lt;Vector2&gt;&gt; builderPoints = bSplineBuilder.ControlPoints;
+
+            if (builderPoints.Count == 0 || builderPoints[0].Count == 0)
+                return;
+
+            HitObject.Path.ControlPoints.Clear();
+
+            // Iterate through generated segments and adding non-inheriting path types where appropriate.
+            for (int i = 0; i &lt; builderPoints.Count; i++)
+            {
+                bool isLastSegment = i == builderPoints.Count - 1;
+                var segment = builderPoints[i];
+
+                if (segment.Count == 0)
+                    continue;
+
+                // Replace this segment with a circular arc if it is a reasonable substitute.
+                var circleArcSegment = tryCircleArc(segment);
+
+                if (circleArcSegment != null)
+                {
+                    HitObject.Path.ControlPoints.Add(new PathControlPoint(circleArcSegment[0], PathType.PERFECT_CURVE));
+                    HitObject.Path.ControlPoints.Add(new PathControlPoint(circleArcSegment[1]));
+                }
+                else
+                {
+                    HitObject.Path.ControlPoints.Add(new PathControlPoint(segment[0], PathType.BSpline(4)));
+                    for (int j = 1; j &lt; segment.Count - 1; j++)
+                        HitObject.Path.ControlPoints.Add(new PathControlPoint(segment[j]));
+                }
+
+                if (isLastSegment)
+                    HitObject.Path.ControlPoints.Add(new PathControlPoint(segment[^1]));
+            }
+        }
+
+        private Vector2[]? tryCircleArc(List&lt;Vector2&gt; segment)
+        {
+            if (segment.Count &lt; 3 || freehandToolboxGroup?.CircleThreshold.Value == 0) return null;
+
+            // Assume the segment creates a reasonable circular arc and then check if it reasonable
+            var points = PathApproximator.BSplineToPiecewiseLinear(segment.ToArray(), bSplineBuilder.Degree);
+            var circleArcControlPoints = new[] { points[0], points[points.Count / 2], points[^1] };
+            var circleArc = new CircularArcProperties(circleArcControlPoints);
+
+            if (!circleArc.IsValid) return null;
+
+            double length = circleArc.ThetaRange * circleArc.Radius;
+
+            if (length &gt; 1000) return null;
+
+            double loss = 0;
+            Vector2? lastPoint = null;
+            Vector2? lastVec = null;
+            Vector2? lastVec2 = null;
+            int? lastDir = null;
+            int? lastDir2 = null;
+            double totalWinding = 0;
+
+            // Loop through the points and check if they are not too far away from the circular arc.
+            // Also make sure it curves monotonically in one direction and at most one loop is done.
+            foreach (var point in points)
+            {
+                var vec = point - circleArc.Centre;
+                loss += Math.Pow((vec.Length - circleArc.Radius) / length, 2);
+
+                if (lastVec.HasValue)
+                {
+                    double det = lastVec.Value.X * vec.Y - lastVec.Value.Y * vec.X;
+                    int dir = Math.Sign(det);
+
+                    if (dir == 0)
+                        continue;
+
+                    if (lastDir.HasValue &amp;&amp; dir != lastDir)
+                        return null; // Circle center is not inside the polygon
+
+                    lastDir = dir;
+                }
+
+                lastVec = vec;
+
+                if (lastPoint.HasValue)
+                {
+                    var vec2 = point - lastPoint.Value;
+
+                    if (lastVec2.HasValue)
+                    {
+                        double dot = Vector2.Dot(vec2, lastVec2.Value);
+                        double det = lastVec2.Value.X * vec2.Y - lastVec2.Value.Y * vec2.X;
+                        double angle = Math.Atan2(det, dot);
+                        int dir2 = Math.Sign(angle);
+
+                        if (dir2 == 0)
+                            continue;
+
+                        if (lastDir2.HasValue &amp;&amp; dir2 != lastDir2)
+                            return null; // Curvature changed, like in an S-shape
+
+                        totalWinding += Math.Abs(angle);
+                        lastDir2 = dir2;
+                    }
+
+                    lastVec2 = vec2;
+                }
+
+                lastPoint = point;
+            }
+
+            loss /= points.Count;
+
+            return loss &gt; freehandToolboxGroup?.CircleThreshold.Value || totalWinding &gt; MathHelper.TwoPi ? null : circleArcControlPoints;
+        }
+
+        private enum SliderPlacementState
+        {
+            Initial,
+            ControlPoints,
+            Drawing,
+            Finishing
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,40,28,62,0],[31,50,31,54,0],[31,55,31,59,0],[33,9,33,51,0],[34,9,34,56,0],[35,9,35,56,0],[36,9,36,83,0],[38,9,38,51,0],[49,63,49,67,0],[49,68,49,72,0],[52,68,52,72,0],[52,73,52,77,0],[55,44,55,48,0],[55,49,55,53,0],[58,72,58,76,0],[58,77,58,81,0],[60,54,60,58,0],[60,59,60,63,0],[60,68,60,73,0],[62,9,62,114,0],[64,56,64,172,0],[67,15,67,33,0],[68,9,68,10,0],[69,13,69,42,0],[71,13,71,114,0],[72,13,72,38,0],[73,9,73,10,0],[77,9,77,10,0],[78,13,84,15,0],[86,13,86,50,0],[87,13,87,98,0],[88,9,88,10,0],[91,9,91,10,0],[92,13,92,33,0],[94,13,94,57,0],[96,13,96,46,0],[97,13,97,14,0],[98,17,99,17,0],[99,17,99,18,0],[99,18,100,21,0],[100,21,100,59,0],[100,59,101,21,0],[101,21,101,75,0],[101,75,102,17,0],[102,17,102,18,0],[102,18,102,26,0],[104,17,105,17,0],[105,17,105,18,0],[105,18,106,21,0],[106,21,106,65,0],[106,65,107,21,0],[107,21,107,75,0],[107,75,108,17,0],[108,17,108,18,0],[108,18,108,26,0],[110,17,111,17,0],[111,17,111,18,0],[111,18,112,21,0],[112,21,112,75,0],[112,75,113,17,0],[113,17,113,18,0],[113,18,113,26,0],[114,13,114,14,0],[115,9,115,10,0],[118,9,118,10,0],[119,13,119,94,0],[120,13,120,160,0],[121,13,121,160,0],[122,17,122,41,0],[123,13,123,74,0],[125,13,125,97,0],[127,13,127,27,0],[130,21,130,38,0],[132,21,132,107,0],[133,21,133,83,0],[137,21,137,48,0],[138,21,138,27,0],[141,21,141,36,0],[142,21,142,27,0],[145,13,145,27,0],[146,9,146,10,0],[149,9,149,10,0],[150,13,150,46,0],[151,17,151,44,0],[153,13,153,27,0],[156,21,156,34,0],[157,21,157,27,0],[160,21,160,68,0],[161,25,161,48,0],[162,26,162,48,0],[163,25,163,52,0],[165,21,165,27,0],[168,13,168,25,0],[169,9,169,10,0],[172,82,172,171,0],[176,92,176,132,0],[179,9,179,10,0],[180,13,180,38,0],[181,13,181,49,0],[183,13,183,38,0],[184,13,184,44,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,46,0],[190,17,190,44,0],[192,13,192,61,0],[193,17,193,44,0],[196,13,196,72,0],[197,13,197,116,0],[198,17,198,44,0],[200,13,200,57,0],[201,13,201,110,0],[202,13,202,50,0],[203,13,203,25,0],[204,9,204,10,0],[207,9,207,10,0],[208,13,208,28,0],[210,13,210,55,0],[211,13,211,14,0],[212,17,212,110,0],[213,17,213,71,0],[214,13,214,14,0],[215,9,215,10,0],[218,9,218,10,0],[219,13,219,31,0],[221,13,221,55,0],[222,13,222,14,0],[223,17,223,41,0],[224,17,224,54,0],[227,17,227,56,0],[228,17,228,28,0],[229,13,229,14,0],[230,9,230,10,0],[233,9,233,10,0],[234,13,234,94,0],[235,17,235,28,0],[236,13,236,31,0],[237,9,237,10,0],[239,9,245,11,0],[248,9,248,10,0],[249,13,249,26,0],[250,17,250,30,0],[252,13,252,61,0],[253,17,253,30,0],[255,13,255,27,0],[258,17,258,18,0],[259,21,259,57,0],[260,25,260,38,0],[262,21,262,44,0],[263,21,263,71,0],[263,71,263,82,0],[263,82,263,84,0],[264,21,264,43,0],[265,21,265,33,0],[272,17,272,18,0],[273,21,273,39,0],[274,25,274,38,0],[276,21,276,51,0],[277,21,277,73,0],[278,21,278,67,0],[279,21,279,33,0],[283,17,283,18,0],[284,21,284,51,0],[286,21,286,129,0],[288,21,288,64,0],[289,25,289,46,0],[292,21,292,22,0],[293,25,293,131,0],[294,25,294,74,0],[295,25,295,71,0],[296,21,296,22,0],[296,23,296,81,0],[298,21,298,33,0],[302,13,302,26,0],[303,9,303,10,0],[306,9,306,10,0],[307,13,307,27,0],[308,13,308,28,0],[311,13,311,30,0],[312,9,312,10,0],[315,9,315,10,0],[316,13,316,47,0],[317,13,317,56,0],[318,9,318,10,0],[321,9,321,10,0],[322,13,322,28,0],[323,13,323,32,0],[324,9,324,10,0],[327,9,327,10,0],[328,13,328,40,0],[329,13,329,14,0],[330,17,330,63,0],[331,17,331,24,0],[334,13,334,55,0],[335,13,335,14,0],[336,17,336,57,0],[337,17,337,24,0],[340,13,340,42,0],[344,21,344,57,0],[345,21,345,27,0],[348,21,348,64,0],[349,21,349,27,0],[352,21,352,57,0],[353,21,353,27,0],[356,13,356,59,0],[357,9,357,10,0],[360,9,360,10,0],[361,13,361,48,0],[362,13,362,14,0],[364,17,364,36,0],[365,17,365,18,0],[366,21,366,113,0],[369,21,369,44,0],[370,21,370,38,0],[371,17,371,18,0],[374,17,374,55,0],[375,13,375,14,0],[376,18,376,37,0],[377,13,377,14,0],[379,17,379,61,0],[380,17,380,31,0],[383,17,383,40,0],[384,17,384,34,0],[385,13,385,14,0],[386,9,386,10,0],[389,9,389,10,0],[390,13,390,39,0],[391,13,391,74,0],[393,13,393,61,0],[394,13,394,14,0],[395,17,395,76,0],[396,17,396,75,0],[397,13,397,14,0],[399,13,399,71,0],[401,13,401,127,0],[402,9,402,10,0],[410,9,410,10,0],[412,13,412,72,0],[412,72,412,83,0],[412,83,412,85,0],[413,13,413,71,0],[413,71,413,93,0],[413,93,413,95,0],[415,13,415,30,0],[418,13,418,127,0],[419,9,419,10,0],[422,9,422,10,0],[424,13,424,28,0],[425,13,425,27,0],[426,9,426,10,0],[429,9,429,10,0],[430,13,430,55,0],[431,17,431,98,0],[433,17,433,217,0],[435,13,435,45,0],[436,13,436,62,0],[437,13,437,62,0],[438,9,438,10,0],[441,9,441,10,0],[442,13,442,87,0],[444,13,444,73,0],[445,17,445,24,0],[447,13,447,50,0],[450,18,450,27,0],[450,29,450,52,0],[450,54,450,57,0],[451,13,451,14,0],[452,17,452,67,0],[453,17,453,48,0],[455,17,455,40,0],[456,21,456,30,0],[459,17,459,62,0],[461,17,461,46,0],[462,17,462,18,0],[463,21,463,121,0],[464,21,464,97,0],[465,17,465,18,0],[467,17,467,18,0],[468,21,468,109,0],[469,26,469,35,0],[469,37,469,58,0],[469,60,469,63,0],[470,25,470,92,0],[471,17,471,18,0],[473,17,473,35,0],[474,21,474,89,0],[475,13,475,14,0],[476,9,476,10,0],[479,9,479,10,0],[480,13,480,87,0],[480,88,480,100,0],[483,13,483,110,0],[484,13,484,100,0],[485,13,485,79,0],[487,13,487,36,0],[487,37,487,49,0],[489,13,489,69,0],[491,13,491,31,0],[491,32,491,44,0],[493,13,493,29,0],[494,13,494,39,0],[495,13,495,37,0],[496,13,496,38,0],[497,13,497,33,0],[498,13,498,34,0],[499,13,499,37,0],[503,13,503,20,0],[503,22,503,31,0],[503,32,503,34,0],[503,35,503,41,0],[504,13,504,14,0],[505,17,505,52,0],[506,17,506,79,0],[508,17,508,38,0],[509,17,509,18,0],[510,21,510,84,0],[511,21,511,46,0],[513,21,513,34,0],[514,25,514,34,0],[516,21,516,60,0],[517,25,517,37,0],[519,21,519,35,0],[520,17,520,18,0],[522,17,522,31,0],[524,17,524,40,0],[525,17,525,18,0],[526,21,526,56,0],[528,21,528,43,0],[529,21,529,22,0],[530,25,530,72,0],[531,25,531,92,0],[532,25,532,61,0],[533,25,533,53,0],[535,25,535,39,0],[536,29,536,38,0],[538,25,538,67,0],[539,29,539,41,0],[541,25,541,57,0],[542,25,542,41,0],[543,21,543,22,0],[545,21,545,37,0],[546,17,546,18,0],[548,17,548,35,0],[549,13,549,14,0],[551,13,551,34,0],[553,13,553,138,0],[554,9,554,10,0]]);
+    </script>
+  </body>
+</html>

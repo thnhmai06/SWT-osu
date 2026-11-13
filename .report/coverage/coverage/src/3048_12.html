@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Metadata/MetadataClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Users;
+
+namespace osu.Game.Online.Metadata
+{
+    public abstract partial class MetadataClient : Component, IMetadataClient, IMetadataServer
+    {
+        public abstract IBindable&lt;bool&gt; IsConnected { get; }
+
+        /// &lt;summary&gt;
+        /// A list of all watched multiplayer rooms (see &lt;see cref=&quot;BeginWatchingMultiplayerRoom&quot;/&gt;).
+        /// &lt;/summary&gt;
+        protected readonly HashSet&lt;long&gt; WatchedRooms = new HashSet&lt;long&gt;();
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private readonly IBindableList&lt;APIRelation&gt; localFriends = new BindableList&lt;APIRelation&gt;();
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            localFriends.BindTo(api.LocalUserState.Friends);
+            localFriends.BindCollectionChanged((_, _) =&gt; RefreshFriends().FireAndForget());
+        }
+
+        #region Beatmap metadata updates
+
+        public abstract Task&lt;BeatmapUpdates&gt; GetChangesSince(int queueId);
+
+        public abstract Task BeatmapSetsUpdated(BeatmapUpdates updates);
+
+        public event Action&lt;int[]&gt;? ChangedBeatmapSetsArrived;
+
+        protected Task ProcessChanges(int[] beatmapSetIDs)
+        {
+            ChangedBeatmapSetsArrived?.Invoke(beatmapSetIDs.Distinct().ToArray());
+            return Task.CompletedTask;
+        }
+
+        #endregion
+
+        #region User presence updates
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;UserPresence&quot;/&gt; information about the current user.
+        /// &lt;/summary&gt;
+        public abstract UserPresence LocalUserPresence { get; }
+
+        /// &lt;summary&gt;
+        /// Dictionary keyed by user ID containing all of the &lt;see cref=&quot;UserPresence&quot;/&gt; information about currently online users received from the server.
+        /// &lt;/summary&gt;
+        public abstract IBindableDictionary&lt;int, UserPresence&gt; UserPresences { get; }
+
+        /// &lt;summary&gt;
+        /// Dictionary keyed by user ID containing all of the &lt;see cref=&quot;UserPresence&quot;/&gt; information about currently online friends received from the server.
+        /// &lt;/summary&gt;
+        public abstract IBindableDictionary&lt;int, UserPresence&gt; FriendPresences { get; }
+
+        /// &lt;summary&gt;
+        /// Attempts to retrieve the presence of a user.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This will return data if the client is currently receiving presence data. See &lt;see cref=&quot;BeginWatchingUserPresence&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;userId&quot;&gt;The user ID.&lt;/param&gt;
+        /// &lt;returns&gt;The user presence, or null if not available or the user&#39;s offline.&lt;/returns&gt;
+        public UserPresence? GetPresence(int userId)
+        {
+            if (userId == api.LocalUser.Value.OnlineID)
+                return LocalUserPresence;
+
+            if (FriendPresences.TryGetValue(userId, out UserPresence presence))
+                return presence;
+
+            if (UserPresences.TryGetValue(userId, out presence))
+                return presence;
+
+            return null;
+        }
+
+        public abstract Task UpdateActivity(UserActivity? activity);
+
+        public abstract Task UpdateStatus(UserStatus? status);
+
+        private int userPresenceWatchCount;
+
+        protected bool IsWatchingUserPresence
+            =&gt; Interlocked.CompareExchange(ref userPresenceWatchCount, userPresenceWatchCount, userPresenceWatchCount) &gt; 0;
+
+        /// &lt;summary&gt;
+        /// Signals to the server that we want to begin receiving status updates for all users.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;An &lt;see cref=&quot;IDisposable&quot;/&gt; which will end the session when disposed.&lt;/returns&gt;
+        public IDisposable BeginWatchingUserPresence() =&gt; new UserPresenceWatchToken(this);
+
+        Task IMetadataServer.BeginWatchingUserPresence()
+        {
+            if (Interlocked.Increment(ref userPresenceWatchCount) == 1)
+                return BeginWatchingUserPresenceInternal();
+
+            return Task.CompletedTask;
+        }
+
+        Task IMetadataServer.EndWatchingUserPresence()
+        {
+            if (Interlocked.Decrement(ref userPresenceWatchCount) == 0)
+                return EndWatchingUserPresenceInternal();
+
+            return Task.CompletedTask;
+        }
+
+        protected abstract Task BeginWatchingUserPresenceInternal();
+
+        protected abstract Task EndWatchingUserPresenceInternal();
+
+        public abstract Task UserPresenceUpdated(int userId, UserPresence? presence);
+
+        public abstract Task FriendPresenceUpdated(int userId, UserPresence? presence);
+
+        private class UserPresenceWatchToken : IDisposable
+        {
+            private readonly IMetadataServer server;
+            private bool isDisposed;
+
+            public UserPresenceWatchToken(IMetadataServer server)
+            {
+                this.server = server;
+                server.BeginWatchingUserPresence().FireAndForget();
+            }
+
+            public void Dispose()
+            {
+                if (isDisposed)
+                    return;
+
+                server.EndWatchingUserPresence().FireAndForget();
+                isDisposed = true;
+            }
+        }
+
+        #endregion
+
+        #region Daily Challenge
+
+        public abstract IBindable&lt;DailyChallengeInfo?&gt; DailyChallengeInfo { get; }
+
+        public abstract Task DailyChallengeUpdated(DailyChallengeInfo? info);
+
+        #endregion
+
+        #region Multiplayer room watching
+
+        public abstract Task&lt;MultiplayerPlaylistItemStats[]&gt; BeginWatchingMultiplayerRoom(long id);
+
+        public abstract Task EndWatchingMultiplayerRoom(long id);
+
+        public abstract Task RefreshFriends();
+
+        public event Action&lt;MultiplayerRoomScoreSetEvent&gt;? MultiplayerRoomScoreSet;
+
+        Task IMetadataClient.MultiplayerRoomScoreSet(MultiplayerRoomScoreSetEvent roomScoreSetEvent)
+        {
+            if (MultiplayerRoomScoreSet != null)
+                Schedule(MultiplayerRoomScoreSet, roomScoreSetEvent);
+
+            return Task.CompletedTask;
+        }
+
+        #endregion
+
+        #region Disconnection handling
+
+        /// &lt;summary&gt;
+        /// Invoked just prior to disconnection.
+        /// &lt;/summary&gt;
+        public event Action? Disconnecting;
+
+        public abstract Task Reconnect();
+
+        protected abstract Task DisconnectInternal();
+
+        Task IStatefulUserHubClient.DisconnectRequested()
+        {
+            Schedule(() =&gt;
+            {
+                Disconnecting?.Invoke();
+                DisconnectInternal().FireAndForget();
+            });
+            return Task.CompletedTask;
+        }
+
+        Task IStatefulUserHubClient.ServerShuttingDown()
+        {
+            this.ReconnectWhenReady(IsConnected, () =&gt; WatchedRooms.Count == 0, Reconnect);
+            return Task.CompletedTask;
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,77,0],[29,36,29,40,0],[29,41,29,45,0],[29,50,29,55,0],[31,9,31,100,0],[34,9,34,10,0],[35,13,35,33,0],[37,13,37,61,0],[38,13,38,58,0],[38,58,38,90,0],[38,90,38,92,0],[39,9,39,10,0],[50,9,50,10,0],[51,13,51,83,0],[52,13,52,39,0],[53,9,53,10,0],[83,9,83,10,0],[84,13,84,56,0],[85,17,85,42,0],[87,13,87,80,0],[88,17,88,33,0],[90,13,90,65,0],[91,17,91,33,0],[93,13,93,25,0],[94,9,94,10,0],[103,16,103,123,0],[109,59,109,91,0],[112,9,112,10,0],[113,13,113,72,0],[114,17,114,60,0],[116,13,116,39,0],[117,9,117,10,0],[120,9,120,10,0],[121,13,121,72,0],[122,17,122,58,0],[124,13,124,39,0],[125,9,125,10,0],[140,13,140,66,0],[141,13,141,14,0],[142,17,142,38,0],[143,17,143,68,0],[144,13,144,14,0],[147,13,147,14,0],[148,17,148,32,0],[149,21,149,28,0],[151,17,151,66,0],[152,17,152,35,0],[153,13,153,14,0],[177,9,177,10,0],[178,13,178,49,0],[179,17,179,70,0],[181,13,181,39,0],[182,9,182,10,0],[198,9,198,10,0],[199,13,200,13,0],[200,13,200,14,0],[200,14,201,17,0],[201,17,201,41,0],[201,41,202,17,0],[202,17,202,54,0],[202,54,203,13,0],[203,13,203,14,0],[203,14,203,16,0],[204,13,204,39,0],[205,9,205,10,0],[208,9,208,10,0],[209,13,209,56,0],[209,56,209,79,0],[209,79,209,92,0],[210,13,210,39,0],[211,9,211,10,0]]);
+    </script>
+  </body>
+</html>

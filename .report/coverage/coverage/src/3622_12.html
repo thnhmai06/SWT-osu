@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/BeatmapConverter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Lists;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Objects;
+
+namespace osu.Game.Beatmaps
+{
+    /// &lt;summary&gt;
+    /// Converts a Beatmap for another mode.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;T&quot;&gt;The type of HitObject stored in the Beatmap.&lt;/typeparam&gt;
+    public abstract class BeatmapConverter&lt;T&gt; : IBeatmapConverter
+        where T : HitObject
+    {
+        private event Action&lt;HitObject, IEnumerable&lt;HitObject&gt;&gt; objectConverted;
+
+        event Action&lt;HitObject, IEnumerable&lt;HitObject&gt;&gt; IBeatmapConverter.ObjectConverted
+        {
+            add =&gt; objectConverted += value;
+            remove =&gt; objectConverted -= value;
+        }
+
+        public IBeatmap Beatmap { get; }
+
+        protected BeatmapConverter(IBeatmap beatmap, Ruleset ruleset)
+        {
+            Beatmap = beatmap;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;Beatmap&quot;/&gt; can be converted by this &lt;see cref=&quot;BeatmapConverter{T}&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public abstract bool CanConvert();
+
+        public IBeatmap Convert(CancellationToken cancellationToken = default)
+        {
+            // We always operate on a clone of the original beatmap, to not modify it game-wide
+            var original = Beatmap.Clone();
+
+            // Shallow clone isn&#39;t enough to ensure we don&#39;t mutate beatmap info unexpectedly.
+            // Can potentially be removed after `Beatmap.Difficulty` doesn&#39;t save back to `Beatmap.BeatmapInfo`.
+            original.BeatmapInfo = original.BeatmapInfo.Clone();
+            original.ControlPointInfo = original.ControlPointInfo.DeepClone();
+
+            // Used in osu!mania conversion.
+            original.Breaks = new SortedList&lt;BreakPeriod&gt;(Comparer&lt;BreakPeriod&gt;.Default);
+            original.Breaks.AddRange(Beatmap.Breaks);
+
+            return ConvertBeatmap(original, cancellationToken);
+        }
+
+        /// &lt;summary&gt;
+        /// Performs the conversion of a Beatmap using this Beatmap Converter.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;original&quot;&gt;The un-converted Beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The converted Beatmap.&lt;/returns&gt;
+        protected virtual Beatmap&lt;T&gt; ConvertBeatmap(IBeatmap original, CancellationToken cancellationToken)
+        {
+            var beatmap = CreateBeatmap();
+
+            beatmap.BeatmapInfo = original.BeatmapInfo;
+            beatmap.ControlPointInfo = original.ControlPointInfo;
+            beatmap.HitObjects = convertHitObjects(original.HitObjects, original, cancellationToken).OrderBy(s =&gt; s.StartTime).ToList();
+            beatmap.Breaks = original.Breaks;
+            beatmap.AudioLeadIn = original.AudioLeadIn;
+            beatmap.StackLeniency = original.StackLeniency;
+            beatmap.SpecialStyle = original.SpecialStyle;
+            beatmap.LetterboxInBreaks = original.LetterboxInBreaks;
+            beatmap.WidescreenStoryboard = original.WidescreenStoryboard;
+            beatmap.EpilepsyWarning = original.EpilepsyWarning;
+            beatmap.SamplesMatchPlaybackRate = original.SamplesMatchPlaybackRate;
+            beatmap.DistanceSpacing = original.DistanceSpacing;
+            beatmap.GridSize = original.GridSize;
+            beatmap.TimelineZoom = original.TimelineZoom;
+            beatmap.Countdown = original.Countdown;
+            beatmap.CountdownOffset = original.CountdownOffset;
+            beatmap.Bookmarks = original.Bookmarks;
+            beatmap.SliderVelocityPresets = original.SliderVelocityPresets;
+            beatmap.BeatmapVersion = original.BeatmapVersion;
+
+            return beatmap;
+        }
+
+        private List&lt;T&gt; convertHitObjects(IReadOnlyList&lt;HitObject&gt; hitObjects, IBeatmap beatmap, CancellationToken cancellationToken)
+        {
+            var result = new List&lt;T&gt;(hitObjects.Count);
+
+            foreach (var obj in hitObjects)
+            {
+                if (obj is T tObj)
+                {
+                    result.Add(tObj);
+                    continue;
+                }
+
+                var converted = ConvertHitObject(obj, beatmap, cancellationToken);
+
+                if (objectConverted != null)
+                {
+                    converted = converted.ToList();
+                    objectConverted.Invoke(obj, converted);
+                }
+
+                foreach (var c in converted)
+                {
+                    if (c != null)
+                        result.Add(c);
+                }
+            }
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;Beatmap{T}&quot;/&gt; that will be returned by this &lt;see cref=&quot;BeatmapProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected virtual Beatmap&lt;T&gt; CreateBeatmap() =&gt; new Beatmap&lt;T&gt;();
+
+        /// &lt;summary&gt;
+        /// Performs the conversion of a hit object.
+        /// This method is generally executed sequentially for all objects in a beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;original&quot;&gt;The hit object to convert.&lt;/param&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The un-converted Beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The converted hit object.&lt;/returns&gt;
+        protected virtual IEnumerable&lt;T&gt; ConvertHitObject(HitObject original, IBeatmap beatmap, CancellationToken cancellationToken) =&gt; Enumerable.Empty&lt;T&gt;();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,20,28,44,0],[29,23,29,47,0],[32,35,32,39,1],[34,9,34,70,1],[35,9,35,10,1],[36,13,36,31,1],[37,9,37,10,1],[45,9,45,10,1],[47,13,47,44,1],[51,13,51,65,1],[52,13,52,79,1],[55,13,55,90,1],[56,13,56,54,1],[58,13,58,64,1],[59,9,59,10,1],[68,9,68,10,1],[69,13,69,43,1],[71,13,71,56,1],[72,13,72,66,1],[73,13,73,115,1],[73,115,73,126,1],[73,126,73,137,1],[74,13,74,46,1],[75,13,75,56,1],[76,13,76,60,1],[77,13,77,58,1],[78,13,78,68,1],[79,13,79,74,1],[80,13,80,64,1],[81,13,81,82,1],[82,13,82,64,1],[83,13,83,50,1],[84,13,84,58,1],[85,13,85,52,1],[86,13,86,64,1],[87,13,87,52,1],[88,13,88,76,1],[89,13,89,62,1],[91,13,91,28,1],[92,9,92,10,1],[95,9,95,10,1],[96,13,96,56,1],[98,13,98,20,1],[98,22,98,29,1],[98,30,98,32,1],[98,33,98,43,1],[99,13,99,14,1],[100,17,100,35,1],[101,17,101,18,1],[102,21,102,38,1],[103,21,103,30,1],[106,17,106,83,1],[108,17,108,45,1],[109,17,109,18,0],[110,21,110,52,0],[111,21,111,60,0],[112,17,112,18,0],[114,17,114,24,1],[114,26,114,31,1],[114,32,114,34,1],[114,35,114,44,1],[115,17,115,18,1],[116,21,116,35,1],[117,25,117,39,1],[118,17,118,18,1],[119,13,119,14,1],[121,13,121,27,1],[122,9,122,10,1],[127,57,127,73,0],[137,137,137,158,0]]);
+    </script>
+  </body>
+</html>

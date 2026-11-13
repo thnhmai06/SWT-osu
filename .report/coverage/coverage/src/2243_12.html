@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/DrawableRuleset.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Input.Handlers;
+using osu.Game.Overlays;
+using osu.Game.Replays;
+using osu.Game.Rulesets.Configuration;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Screens.Play.HUD.ClicksPerSecond;
+using osuTK;
+
+namespace osu.Game.Rulesets.UI
+{
+    /// &lt;summary&gt;
+    /// Displays an interactive ruleset gameplay instance.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;TObject&quot;&gt;The type of HitObject contained by this DrawableRuleset.&lt;/typeparam&gt;
+    public abstract partial class DrawableRuleset&lt;TObject&gt; : DrawableRuleset, IProvideCursor, ICanAttachHUDPieces
+        where TObject : HitObject
+    {
+        public override event Action&lt;JudgementResult&gt; NewResult;
+        public override event Action&lt;JudgementResult&gt; RevertResult;
+
+        /// &lt;summary&gt;
+        /// The selected variant.
+        /// &lt;/summary&gt;
+        public virtual int Variant =&gt; 0;
+
+        /// &lt;summary&gt;
+        /// The key conversion input manager for this DrawableRuleset.
+        /// &lt;/summary&gt;
+        protected PassThroughInputManager KeyBindingInputManager { get; }
+
+        /// &lt;summary&gt;
+        /// This configuration for this DrawableRuleset.
+        /// &lt;/summary&gt;
+        protected IRulesetConfigManager Config { get; private set; }
+
+        public override double GameplayStartTime =&gt; Objects.FirstOrDefault()?.StartTime - 2000 ?? 0;
+
+        private readonly Lazy&lt;Playfield&gt; playfield;
+
+        /// &lt;summary&gt;
+        /// The playfield.
+        /// &lt;/summary&gt;
+        public override Playfield Playfield =&gt; playfield.Value;
+
+        public override PlayfieldAdjustmentContainer PlayfieldAdjustmentContainer =&gt; playfieldAdjustmentContainer;
+
+        public override Container Overlays { get; } = new Container { RelativeSizeAxes = Axes.Both };
+
+        public override IAdjustableAudioComponent Audio =&gt; audioContainer;
+
+        private readonly AudioContainer audioContainer = new AudioContainer { RelativeSizeAxes = Axes.Both };
+
+        public override Container FrameStableComponents { get; } = new Container { RelativeSizeAxes = Axes.Both };
+
+        public override IFrameStableClock FrameStableClock =&gt; frameStabilityContainer;
+
+        public override IEnumerable&lt;HitObject&gt; Objects =&gt; Beatmap.HitObjects;
+
+        /// &lt;summary&gt;
+        /// The beatmap.
+        /// &lt;/summary&gt;
+        [Cached(typeof(IBeatmap))]
+        public readonly Beatmap&lt;TObject&gt; Beatmap;
+
+        [Cached(typeof(IReadOnlyList&lt;Mod&gt;))]
+        public sealed override IReadOnlyList&lt;Mod&gt; Mods { get; }
+
+        [Resolved(CanBeNull = true)]
+        private OnScreenDisplay onScreenDisplay { get; set; }
+
+        private readonly PlayfieldAdjustmentContainer playfieldAdjustmentContainer;
+
+        private IDisposable configTracker;
+        private FrameStabilityContainer frameStabilityContainer;
+        private DrawableRulesetDependencies dependencies;
+
+        private bool frameStablePlayback = true;
+
+        internal override bool FrameStablePlayback
+        {
+            get =&gt; frameStablePlayback;
+            set
+            {
+                frameStablePlayback = value;
+                frameStabilityContainer?.FrameStablePlayback = value;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a ruleset visualisation for the provided ruleset and beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset being represented.&lt;/param&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap to create the hit renderer for.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to apply.&lt;/param&gt;
+        protected DrawableRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods = null)
+            : base(ruleset)
+        {
+            ArgumentNullException.ThrowIfNull(beatmap);
+
+            if (!(beatmap is Beatmap&lt;TObject&gt; tBeatmap))
+                throw new ArgumentException($&quot;{GetType()} expected the beatmap to contain hitobjects of type {typeof(TObject)}.&quot;, nameof(beatmap));
+
+            Beatmap = tBeatmap;
+            Mods = mods?.ToArray() ?? Array.Empty&lt;Mod&gt;();
+
+            RelativeSizeAxes = Axes.Both;
+
+            KeyBindingInputManager = CreateInputManager();
+            playfieldAdjustmentContainer = CreatePlayfieldAdjustmentContainer();
+            playfield = new Lazy&lt;Playfield&gt;(() =&gt; CreatePlayfield().With(p =&gt;
+            {
+                p.NewResult += (_, r) =&gt; NewResult?.Invoke(r);
+                p.RevertResult += r =&gt; RevertResult?.Invoke(r);
+            }));
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (Config != null)
+                configTracker = onScreenDisplay?.BeginTracking(this, Config);
+
+            IsPaused.ValueChanged += paused =&gt;
+            {
+                if (HasReplayLoaded.Value)
+                    return;
+
+                KeyBindingInputManager.UseParentInput = !paused.NewValue;
+            };
+        }
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        {
+            dependencies = new DrawableRulesetDependencies(Ruleset, base.CreateChildDependencies(parent));
+            Config = dependencies.RulesetConfigManager;
+            return dependencies;
+        }
+
+        public virtual PlayfieldAdjustmentContainer CreatePlayfieldAdjustmentContainer() =&gt; new PlayfieldAdjustmentContainer();
+
+        [Resolved]
+        private OsuConfigManager config { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(CancellationToken? cancellationToken)
+        {
+            InternalChild = frameStabilityContainer = new FrameStabilityContainer(GameplayStartTime)
+            {
+                FrameStablePlayback = FrameStablePlayback,
+                Children = new Drawable[]
+                {
+                    FrameStableComponents,
+                    audioContainer.WithChild(KeyBindingInputManager
+                        .WithChildren(new Drawable[]
+                        {
+                            playfieldAdjustmentContainer.WithChild(Playfield),
+                            Overlays
+                        })),
+                }
+            };
+
+            if ((ResumeOverlay = CreateResumeOverlay()) != null)
+            {
+                AddInternal(CreateInputManager()
+                    .WithChild(CreatePlayfieldAdjustmentContainer()
+                        .WithChild(ResumeOverlay)));
+            }
+
+            applyRulesetMods(Mods, config);
+
+            loadObjects(cancellationToken ?? CancellationToken.None);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates and adds drawable representations of hit objects to the play field.
+        /// &lt;/summary&gt;
+        private void loadObjects(CancellationToken cancellationToken)
+        {
+            foreach (TObject h in Beatmap.HitObjects)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                AddHitObject(h);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Playfield.PostProcess();
+
+            foreach (var mod in Mods.OfType&lt;IApplicableToDrawableHitObject&gt;())
+            {
+                foreach (var drawableHitObject in Playfield.AllHitObjects)
+                    mod.ApplyToDrawableHitObject(drawableHitObject);
+            }
+        }
+
+        public override void RequestResume(Action continueResume)
+        {
+            if (ResumeOverlay != null &amp;&amp; UseResumeOverlay)
+            {
+                ResumeOverlay.GameplayCursor = Cursor;
+                ResumeOverlay.ResumeAction = continueResume;
+                ResumeOverlay.Show();
+            }
+            else
+                continueResume();
+        }
+
+        public override void CancelResume()
+        {
+            // called if the user pauses while the resume overlay is open
+            ResumeOverlay?.Hide();
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a &lt;see cref=&quot;HitObject&quot;/&gt; to this &lt;see cref=&quot;DrawableRuleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This does not add the &lt;see cref=&quot;HitObject&quot;/&gt; to the beatmap.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to add.&lt;/param&gt;
+        public void AddHitObject(TObject hitObject)
+        {
+            var drawableRepresentation = CreateDrawableRepresentation(hitObject);
+
+            // If a drawable representation exists, use it, otherwise assume the hitobject is being pooled.
+            if (drawableRepresentation != null)
+                Playfield.Add(drawableRepresentation);
+            else
+                Playfield.Add(hitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a &lt;see cref=&quot;HitObject&quot;/&gt; from this &lt;see cref=&quot;DrawableRuleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This does not remove the &lt;see cref=&quot;HitObject&quot;/&gt; from the beatmap.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to remove.&lt;/param&gt;
+        public bool RemoveHitObject(TObject hitObject)
+        {
+            if (Playfield.Remove(hitObject))
+                return true;
+
+            // If the entry was not removed from the playfield, assume the hitobject is not being pooled and attempt a direct drawable removal.
+            var drawableObject = Playfield.AllHitObjects.SingleOrDefault(d =&gt; d.HitObject == hitObject);
+            if (drawableObject != null)
+                return Playfield.Remove(drawableObject);
+
+            return false;
+        }
+
+        public sealed override void SetRecordTarget(Score score)
+        {
+            if (!(KeyBindingInputManager is IHasRecordingHandler recordingInputManager))
+                throw new InvalidOperationException($&quot;A {nameof(KeyBindingInputManager)} which supports recording is not available&quot;);
+
+            if (score == null)
+            {
+                NewResult -= emitImportantFrame;
+                recordingInputManager.Recorder = null;
+                return;
+            }
+
+            var recorder = CreateReplayRecorder(score);
+
+            if (recorder == null)
+                return;
+
+            recorder.ScreenSpaceToGamefield = Playfield.ScreenSpaceToGamefield;
+
+            NewResult += emitImportantFrame;
+            recordingInputManager.Recorder = recorder;
+
+            void emitImportantFrame(JudgementResult judgementResult) =&gt; recordingInputManager.Recorder?.RecordFrame(true);
+        }
+
+        public override void SetReplayScore(Score replayScore)
+        {
+            if (!(KeyBindingInputManager is IHasReplayHandler replayInputManager))
+                throw new InvalidOperationException($&quot;A {nameof(KeyBindingInputManager)} which supports replay loading is not available&quot;);
+
+            var handler = (ReplayScore = replayScore) != null ? CreateReplayInputHandler(replayScore.Replay) : null;
+
+            replayInputManager.ReplayInputHandler = handler;
+            frameStabilityContainer.ReplayInputHandler = handler;
+
+            HasReplayLoaded.Value = replayInputManager.ReplayInputHandler != null;
+
+            replayInputManager.ReplayInputHandler?.GamefieldToScreenSpace = Playfield.GamefieldToScreenSpace;
+
+            if (!ProvidingUserCursor)
+            {
+                // The cursor is hidden by default (see Playfield.load()), but should be shown when there&#39;s a replay
+                Playfield.Cursor?.Show();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;DrawableHitObject{TObject}&quot;/&gt; to represent a &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If this method returns &lt;c&gt;null&lt;/c&gt;, then this &lt;see cref=&quot;DrawableRuleset&quot;/&gt; will assume the requested &lt;see cref=&quot;HitObject&quot;/&gt; type is being pooled inside the &lt;see cref=&quot;Playfield&quot;/&gt;,
+        /// and will instead attempt to retrieve the &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s at the point they should become alive via pools registered in the &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;h&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to represent.&lt;/param&gt;
+        /// &lt;returns&gt;The representing &lt;see cref=&quot;DrawableHitObject{TObject}&quot;/&gt;.&lt;/returns&gt;
+        public abstract DrawableHitObject&lt;TObject&gt; CreateDrawableRepresentation(TObject h);
+
+        public void Attach(InputCountController inputCountController) =&gt;
+            (KeyBindingInputManager as ICanAttachHUDPieces)?.Attach(inputCountController);
+
+        public void Attach(ClicksPerSecondController controller) =&gt;
+            (KeyBindingInputManager as ICanAttachHUDPieces)?.Attach(controller);
+
+        /// &lt;summary&gt;
+        /// Creates a key conversion input manager. An exception will be thrown if a valid &lt;see cref=&quot;RulesetInputManager{T}&quot;/&gt; is not returned.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The input manager.&lt;/returns&gt;
+        protected abstract PassThroughInputManager CreateInputManager();
+
+        protected virtual ReplayInputHandler CreateReplayInputHandler(Replay replay) =&gt; null;
+
+        protected virtual ReplayRecorder CreateReplayRecorder(Score score) =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Creates a Playfield.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The Playfield.&lt;/returns&gt;
+        protected abstract Playfield CreatePlayfield();
+
+        /// &lt;summary&gt;
+        /// Applies the active mods to this DrawableRuleset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to apply.&lt;/param&gt;
+        /// &lt;param name=&quot;config&quot;&gt;The &lt;see cref=&quot;OsuConfigManager&quot;/&gt; to apply.&lt;/param&gt;
+        private void applyRulesetMods(IReadOnlyList&lt;Mod&gt; mods, OsuConfigManager config)
+        {
+            if (mods == null)
+                return;
+
+            foreach (var mod in mods.OfType&lt;IApplicableToDrawableRuleset&lt;TObject&gt;&gt;())
+                mod.ApplyToDrawableRuleset(this);
+
+            foreach (var mod in mods.OfType&lt;IReadFromConfig&gt;())
+                mod.ReadFromConfig(config);
+        }
+
+        #region IProvideCursor
+
+        protected override bool OnHover(HoverEvent e) =&gt; true; // required for IProvideCursor
+
+        // only show the cursor when within the playfield, by default.
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; Playfield.ReceivePositionalInputAt(screenSpacePos);
+
+        CursorContainer IProvideCursor.Cursor =&gt; Playfield.Cursor;
+
+        public override GameplayCursorContainer Cursor =&gt; Playfield.Cursor;
+
+        public bool ProvidingUserCursor =&gt; Playfield.Cursor != null &amp;&amp; !HasReplayLoaded.Value;
+
+        #endregion
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            configTracker?.Dispose();
+
+            // Dispose the components created by this dependency container.
+            dependencies?.Dispose();
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Displays an interactive ruleset gameplay instance.
+    /// &lt;remarks&gt;
+    /// This type is required only for adding non-generic type to the draw hierarchy.
+    /// &lt;/remarks&gt;
+    /// &lt;/summary&gt;
+    [Cached(typeof(DrawableRuleset))]
+    public abstract partial class DrawableRuleset : CompositeDrawable
+    {
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;JudgementResult&quot;/&gt; has been applied by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public abstract event Action&lt;JudgementResult&gt; NewResult;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;JudgementResult&quot;/&gt; is being reverted by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public abstract event Action&lt;JudgementResult&gt; RevertResult;
+
+        /// &lt;summary&gt;
+        /// Whether a replay is currently loaded.
+        /// &lt;/summary&gt;
+        public readonly BindableBool HasReplayLoaded = new BindableBool();
+
+        /// &lt;summary&gt;
+        /// Whether the game is paused. Used to block user input.
+        /// &lt;/summary&gt;
+        public readonly BindableBool IsPaused = new BindableBool();
+
+        /// &lt;summary&gt;
+        /// Audio adjustments which are applied to the playfield.
+        /// &lt;/summary&gt;
+        public abstract IAdjustableAudioComponent Audio { get; }
+
+        /// &lt;summary&gt;
+        /// The playfield.
+        /// &lt;/summary&gt;
+        public abstract Playfield Playfield { get; }
+
+        /// &lt;summary&gt;
+        /// A container which encapsulates the &lt;see cref=&quot;Playfield&quot;/&gt; and provides any adjustments to
+        /// ensure correct scale and position.
+        /// &lt;/summary&gt;
+        public abstract PlayfieldAdjustmentContainer PlayfieldAdjustmentContainer { get; }
+
+        /// &lt;summary&gt;
+        /// Content to be placed above hitobjects. Will be affected by frame stability and adjustments applied to &lt;see cref=&quot;Audio&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public abstract Container Overlays { get; }
+
+        /// &lt;summary&gt;
+        /// Components to be run potentially multiple times in line with frame-stable gameplay.
+        /// &lt;/summary&gt;
+        public abstract Container FrameStableComponents { get; }
+
+        /// &lt;summary&gt;
+        /// The frame-stable clock which is being used for playfield display.
+        /// &lt;/summary&gt;
+        public abstract IFrameStableClock FrameStableClock { get; }
+
+        /// &lt;summary&gt;
+        /// Whether to enable frame-stable playback.
+        /// &lt;/summary&gt;
+        internal abstract bool FrameStablePlayback { get; set; }
+
+        /// &lt;summary&gt;
+        /// The mods which are to be applied.
+        /// &lt;/summary&gt;
+        public abstract IReadOnlyList&lt;Mod&gt; Mods { get; }
+
+        /// &lt;summary&gt;~
+        /// The associated ruleset.
+        /// &lt;/summary&gt;
+        public readonly Ruleset Ruleset;
+
+        /// &lt;summary&gt;
+        /// Creates a ruleset visualisation for the provided ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset.&lt;/param&gt;
+        internal DrawableRuleset(Ruleset ruleset)
+        {
+            Ruleset = ruleset;
+        }
+
+        /// &lt;summary&gt;
+        /// All the converted hit objects contained by this hit renderer.
+        /// &lt;/summary&gt;
+        public abstract IEnumerable&lt;HitObject&gt; Objects { get; }
+
+        /// &lt;summary&gt;
+        /// The point in time at which gameplay starts, including any required lead-in for display purposes.
+        /// Defaults to two seconds before the first &lt;see cref=&quot;HitObject&quot;/&gt;. Override as necessary.
+        /// &lt;/summary&gt;
+        public abstract double GameplayStartTime { get; }
+
+        /// &lt;summary&gt;
+        /// The currently loaded replay. Usually null in the case of a local player.
+        /// &lt;/summary&gt;
+        public Score ReplayScore { get; protected set; }
+
+        /// &lt;summary&gt;
+        /// The cursor being displayed by the &lt;see cref=&quot;Playfield&quot;/&gt;. May be null if no cursor is provided.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        public abstract GameplayCursorContainer Cursor { get; }
+
+        /// &lt;summary&gt;
+        /// An optional overlay used when resuming gameplay from a paused state.
+        /// &lt;/summary&gt;
+        public ResumeOverlay ResumeOverlay { get; protected set; }
+
+        /// &lt;summary&gt;
+        /// Whether a &lt;see cref=&quot;ResumeOverlay&quot;/&gt; should be displayed on resuming after a pause.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Defaults to &lt;c&gt;true&lt;/c&gt;.
+        /// Even if &lt;c&gt;true&lt;/c&gt;, will not have any effect if the ruleset does not have a resume overlay (see &lt;see cref=&quot;CreateResumeOverlay&quot;/&gt;).
+        /// &lt;/remarks&gt;
+        public bool UseResumeOverlay { get; set; } = true;
+
+        /// &lt;summary&gt;
+        /// Returns first available &lt;see cref=&quot;HitWindows&quot;/&gt; provided by a &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        public HitWindows FirstAvailableHitWindows
+        {
+            get
+            {
+                foreach (var hitObject in Objects)
+                {
+                    if (hitObject.HitWindows.WindowFor(HitResult.Miss) &gt; 0)
+                        return hitObject.HitWindows;
+
+                    foreach (var nested in hitObject.NestedHitObjects)
+                    {
+                        if (nested.HitWindows.WindowFor(HitResult.Miss) &gt; 0)
+                            return nested.HitWindows;
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Create an optional resume overlay, which is displayed when a player requests to resume gameplay during non-break time.
+        /// This can be used to force the player to return their hands / cursor to the position they left off, to avoid players
+        /// using pauses as a means of adjusting their inputs (aka &quot;pause buffering&quot;).
+        /// &lt;/summary&gt;
+        protected virtual ResumeOverlay CreateResumeOverlay() =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Whether to display gameplay overlays, such as &lt;see cref=&quot;HUDOverlay&quot;/&gt; and &lt;see cref=&quot;BreakOverlay&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual bool AllowGameplayOverlays =&gt; true;
+
+        /// &lt;summary&gt;
+        /// On mobile devices, this specifies whether this ruleset requires the device to be in portrait orientation.
+        /// &lt;/summary&gt;
+        public virtual bool RequiresPortraitOrientation =&gt; false;
+
+        /// &lt;summary&gt;
+        /// Sets a replay to be used, overriding local input.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;replayScore&quot;&gt;The replay, null for local input.&lt;/param&gt;
+        public abstract void SetReplayScore(Score replayScore);
+
+        /// &lt;summary&gt;
+        /// Sets a replay to be used to record gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The target to be recorded to.&lt;/param&gt;
+        public abstract void SetRecordTarget([CanBeNull] Score score);
+
+        /// &lt;summary&gt;
+        /// Invoked when the interactive user requests resuming from a paused state.
+        /// Allows potentially delaying the resume process until an interaction is performed.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;continueResume&quot;&gt;The action to run when resuming is to be completed.&lt;/param&gt;
+        public abstract void RequestResume(Action continueResume);
+
+        /// &lt;summary&gt;
+        /// Invoked when the user requests to pause while the resume overlay is active.
+        /// &lt;/summary&gt;
+        public abstract void CancelResume();
+    }
+
+    public class BeatmapInvalidForRulesetException : ArgumentException
+    {
+        public BeatmapInvalidForRulesetException(string text)
+            : base(text)
+        {
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[52,39,52,40,0],[57,68,57,72,0],[62,50,62,54,0],[62,55,62,67,0],[64,53,64,100,0],[71,48,71,63,0],[73,86,73,114,0],[75,46,75,50,0],[75,55,75,101,0],[77,60,77,74,0],[79,9,79,110,0],[81,59,81,63,0],[81,68,81,114,0],[83,63,83,86,0],[85,59,85,77,0],[94,58,94,62,0],[97,51,97,55,0],[97,56,97,60,0],[105,9,105,49,0],[109,20,109,39,0],[111,13,111,14,0],[112,17,112,45,0],[113,17,113,70,0],[114,13,114,14,0],[124,15,124,28,0],[125,9,125,10,0],[126,13,126,56,0],[128,13,128,57,0],[129,17,129,148,0],[131,13,131,32,0],[132,13,132,58,0],[134,13,134,42,0],[136,13,136,59,0],[137,13,137,81,0],[138,13,138,51,0],[138,51,139,13,0],[139,13,139,14,0],[139,14,140,17,0],[140,17,140,42,0],[140,42,140,62,0],[140,62,140,63,0],[140,63,141,17,0],[141,17,141,40,0],[141,40,141,63,0],[141,63,141,64,0],[141,64,142,13,0],[142,13,142,14,0],[142,14,142,15,0],[142,15,142,17,0],[143,9,143,10,0],[146,9,146,10,0],[147,13,147,33,0],[149,13,149,32,0],[150,17,150,78,0],[152,13,153,13,0],[153,13,153,14,0],[153,14,154,17,0],[154,17,154,43,0],[154,43,155,21,0],[155,21,155,28,0],[155,28,157,17,0],[157,17,157,74,0],[157,74,158,13,0],[158,13,158,14,0],[158,14,158,15,0],[159,9,159,10,0],[162,9,162,10,0],[163,13,163,107,0],[164,13,164,56,0],[165,13,165,33,0],[166,9,166,10,0],[168,93,168,127,0],[171,43,171,47,0],[171,48,171,52,0],[175,9,175,10,0],[176,13,189,15,0],[191,13,191,65,0],[192,13,192,14,0],[193,17,195,53,0],[196,13,196,14,0],[198,13,198,44,0],[200,13,200,70,0],[201,9,201,10,0],[207,9,207,10,0],[208,13,208,20,0],[208,22,208,31,0],[208,32,208,34,0],[208,35,208,53,0],[209,13,209,14,0],[210,17,210,66,0],[211,17,211,33,0],[212,13,212,14,0],[214,13,214,62,0],[216,13,216,37,0],[218,13,218,20,0],[218,22,218,29,0],[218,30,218,32,0],[218,33,218,78,0],[219,13,219,14,0],[220,17,220,24,0],[220,26,220,47,0],[220,48,220,50,0],[220,51,220,74,0],[221,21,221,69,0],[222,13,222,14,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,59,0],[228,13,228,14,0],[229,17,229,55,0],[230,17,230,61,0],[231,17,231,38,0],[232,13,232,14,0],[234,17,234,34,0],[235,9,235,10,0],[238,9,238,10,0],[240,13,240,35,0],[241,9,241,10,0],[251,9,251,10,0],[252,13,252,82,0],[255,13,255,48,0],[256,17,256,55,0],[258,17,258,42,0],[259,9,259,10,0],[269,9,269,10,0],[270,13,270,45,0],[271,17,271,29,0],[274,13,274,79,0],[274,79,274,103,0],[274,103,274,105,0],[275,13,275,40,0],[276,17,276,57,0],[278,13,278,26,0],[279,9,279,10,0],[282,9,282,10,0],[283,13,283,89,0],[284,17,284,134,0],[286,13,286,31,0],[287,13,287,14,0],[288,17,288,49,0],[289,17,289,55,0],[290,17,290,24,0],[293,13,293,56,0],[295,13,295,34,0],[296,17,296,24,0],[298,13,298,80,0],[300,13,300,45,0],[301,13,301,55,0],[303,73,303,122,0],[304,9,304,10,0],[307,9,307,10,0],[308,13,308,83,0],[309,17,309,139,0],[311,13,311,117,0],[313,13,313,61,0],[314,13,314,66,0],[316,13,316,83,0],[318,13,318,110,0],[320,13,320,38,0],[321,13,321,14,0],[323,17,323,42,0],[324,13,324,14,0],[325,9,325,10,0],[339,13,339,90,0],[342,13,342,80,0],[350,89,350,93,0],[352,79,352,83,0],[366,9,366,10,0],[367,13,367,30,0],[368,17,368,24,0],[370,13,370,20,0],[370,22,370,29,0],[370,30,370,32,0],[370,33,370,85,0],[371,17,371,50,0],[373,13,373,20,0],[373,22,373,29,0],[373,30,373,32,0],[373,33,373,63,0],[374,17,374,44,0],[375,9,375,10,0],[379,58,379,62,0],[382,82,382,132,0],[384,50,384,66,0],[386,59,386,75,0],[388,44,388,94,0],[393,9,393,10,0],[394,13,394,39,0],[396,13,396,38,0],[399,13,399,37,0],[400,9,400,10,0],[425,9,425,75,0],[430,9,430,68,0],[482,9,482,50,0],[483,9,483,10,0],[484,13,484,31,0],[485,9,485,10,0],[501,36,501,40,0],[501,41,501,55,0],[512,46,512,50,0],[512,51,512,65,0],[521,40,521,44,0],[521,45,521,49,0],[521,54,521,58,0],[530,13,530,14,0],[531,17,531,24,0],[531,26,531,39,0],[531,40,531,42,0],[531,43,531,50,0],[532,17,532,18,0],[533,21,533,76,0],[534,25,534,53,0],[536,21,536,28,0],[536,30,536,40,0],[536,41,536,43,0],[536,44,536,70,0],[537,21,537,22,0],[538,25,538,77,0],[539,29,539,54,0],[540,21,540,22,0],[541,17,541,18,0],[543,17,543,29,0],[544,13,544,14,0],[552,66,552,70,0],[557,54,557,58,0],[562,60,562,65,0],[592,15,592,25,0],[593,9,593,10,0],[594,9,594,10,0]]);
+    </script>
+  </body>
+</html>

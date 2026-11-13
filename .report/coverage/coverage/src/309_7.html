@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/IPC/FileBasedIPC.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.IO;
+using System.Linq;
+using Microsoft.Win32;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets;
+using osu.Game.Tournament.Models;
+
+namespace osu.Game.Tournament.IPC
+{
+    public partial class FileBasedIPC : MatchIPCInfo
+    {
+        public Storage? IPCStorage { get; private set; }
+
+        [Resolved]
+        protected IAPIProvider API { get; private set; } = null!;
+
+        [Resolved]
+        protected IRulesetStore Rulesets { get; private set; } = null!;
+
+        [Resolved]
+        private GameHost host { get; set; } = null!;
+
+        [Resolved]
+        private LadderInfo ladder { get; set; } = null!;
+
+        [Resolved]
+        private StableInfo stableInfo { get; set; } = null!;
+
+        private int lastBeatmapId;
+        private ScheduledDelegate? scheduled;
+        private GetBeatmapRequest? beatmapLookupRequest;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            string? stablePath = stableInfo.StablePath ?? findStablePath();
+            initialiseIPCStorage(stablePath);
+        }
+
+        private Storage? initialiseIPCStorage(string? path)
+        {
+            scheduled?.Cancel();
+
+            IPCStorage = null;
+
+            try
+            {
+                if (string.IsNullOrEmpty(path))
+                    return null;
+
+                IPCStorage = new DesktopStorage(path, host as DesktopGameHost);
+
+                const string file_ipc_filename = &quot;ipc.txt&quot;;
+                const string file_ipc_state_filename = &quot;ipc-state.txt&quot;;
+                const string file_ipc_scores_filename = &quot;ipc-scores.txt&quot;;
+                const string file_ipc_channel_filename = &quot;ipc-channel.txt&quot;;
+
+                if (IPCStorage.Exists(file_ipc_filename))
+                {
+                    scheduled = Scheduler.AddDelayed(delegate
+                    {
+                        try
+                        {
+                            using (var stream = IPCStorage.GetStream(file_ipc_filename))
+                            using (var sr = new StreamReader(stream))
+                            {
+                                int beatmapId = int.Parse(sr.ReadLine().AsNonNull());
+                                int mods = int.Parse(sr.ReadLine().AsNonNull());
+
+                                if (lastBeatmapId != beatmapId)
+                                {
+                                    beatmapLookupRequest?.Cancel();
+
+                                    lastBeatmapId = beatmapId;
+
+                                    var existing = ladder.CurrentMatch.Value?.Round.Value?.Beatmaps.FirstOrDefault(b =&gt; b.ID == beatmapId);
+
+                                    if (existing != null)
+                                        Beatmap.Value = existing.Beatmap;
+                                    else
+                                    {
+                                        beatmapLookupRequest = new GetBeatmapRequest(new APIBeatmap { OnlineID = beatmapId });
+                                        beatmapLookupRequest.Success += b =&gt;
+                                        {
+                                            if (lastBeatmapId == beatmapId)
+                                                Beatmap.Value = new TournamentBeatmap(b);
+                                        };
+                                        beatmapLookupRequest.Failure += _ =&gt;
+                                        {
+                                            if (lastBeatmapId == beatmapId)
+                                                Beatmap.Value = null;
+                                        };
+                                        API.Queue(beatmapLookupRequest);
+                                    }
+                                }
+
+                                Mods.Value = (LegacyMods)mods;
+                            }
+                        }
+                        catch
+                        {
+                            // file might be in use.
+                        }
+
+                        try
+                        {
+                            using (var stream = IPCStorage.GetStream(file_ipc_channel_filename))
+                            using (var sr = new StreamReader(stream))
+                            {
+                                ChatChannel.Value = sr.ReadLine().AsNonNull();
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // file might be in use.
+                        }
+
+                        try
+                        {
+                            using (var stream = IPCStorage.GetStream(file_ipc_state_filename))
+                            using (var sr = new StreamReader(stream))
+                            {
+                                State.Value = Enum.Parse&lt;TourneyState&gt;(sr.ReadLine().AsNonNull());
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // file might be in use.
+                        }
+
+                        try
+                        {
+                            using (var stream = IPCStorage.GetStream(file_ipc_scores_filename))
+                            using (var sr = new StreamReader(stream))
+                            {
+                                Score1.Value = int.Parse(sr.ReadLine().AsNonNull());
+                                Score2.Value = int.Parse(sr.ReadLine().AsNonNull());
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // file might be in use.
+                        }
+                    }, 250, true);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;Stable installation could not be found; disabling file based IPC&quot;);
+            }
+
+            return IPCStorage;
+        }
+
+        /// &lt;summary&gt;
+        /// Manually sets the path to the directory used for inter-process communication with a cutting-edge install.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;path&quot;&gt;Path to the IPC directory&lt;/param&gt;
+        /// &lt;returns&gt;Whether the supplied path was a valid IPC directory.&lt;/returns&gt;
+        public bool SetIPCLocation(string? path)
+        {
+            if (path == null || !ipcFileExistsInDirectory(path))
+                return false;
+
+            var newStorage = initialiseIPCStorage(stableInfo.StablePath = path);
+            if (newStorage == null)
+                return false;
+
+            stableInfo.SaveChanges();
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Tries to automatically detect the path to the directory used for inter-process communication
+        /// with a cutting-edge install.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether an IPC directory was successfully auto-detected.&lt;/returns&gt;
+        public bool AutoDetectIPCLocation() =&gt; SetIPCLocation(findStablePath());
+
+        private static bool ipcFileExistsInDirectory(string? p) =&gt; p != null &amp;&amp; File.Exists(Path.Combine(p, &quot;ipc.txt&quot;));
+
+        private string? findStablePath()
+        {
+            string? stableInstallPath = findFromEnvVar() ??
+                                        findFromRegistry() ??
+                                        findFromLocalAppData() ??
+                                        findFromDotFolder();
+
+            Logger.Log($&quot;Stable path for tourney usage: {stableInstallPath}&quot;);
+            return stableInstallPath;
+        }
+
+        private string? findFromEnvVar()
+        {
+            try
+            {
+                Logger.Log(&quot;Trying to find stable with environment variables&quot;);
+                string? stableInstallPath = Environment.GetEnvironmentVariable(&quot;OSU_STABLE_PATH&quot;);
+
+                if (ipcFileExistsInDirectory(stableInstallPath))
+                    return stableInstallPath!;
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private string? findFromLocalAppData()
+        {
+            Logger.Log(&quot;Trying to find stable in %LOCALAPPDATA%&quot;);
+            string stableInstallPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @&quot;osu!&quot;);
+
+            if (ipcFileExistsInDirectory(stableInstallPath))
+                return stableInstallPath;
+
+            return null;
+        }
+
+        private string? findFromDotFolder()
+        {
+            Logger.Log(&quot;Trying to find stable in dotfolders&quot;);
+            string stableInstallPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), &quot;.osu&quot;);
+
+            if (ipcFileExistsInDirectory(stableInstallPath))
+                return stableInstallPath;
+
+            return null;
+        }
+
+        private string? findFromRegistry()
+        {
+            Logger.Log(&quot;Trying to find stable in registry&quot;);
+
+            try
+            {
+                string? stableInstallPath;
+
+#pragma warning disable CA1416
+                using (RegistryKey? key = Registry.ClassesRoot.OpenSubKey(&quot;osu&quot;))
+                    stableInstallPath = key?.OpenSubKey(@&quot;shell\open\command&quot;)?.GetValue(string.Empty)?.ToString()?.Split(&#39;&quot;&#39;)[1].Replace(&quot;osu!.exe&quot;, &quot;&quot;);
+#pragma warning restore CA1416
+
+                if (ipcFileExistsInDirectory(stableInstallPath))
+                    return stableInstallPath;
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,38,24,42,0],[24,43,24,55,0],[27,38,27,42,0],[27,43,27,55,0],[27,60,27,65,0],[30,44,30,48,0],[30,49,30,61,0],[30,66,30,71,0],[33,33,33,37,0],[33,38,33,42,0],[33,47,33,52,0],[36,37,36,41,0],[36,42,36,46,0],[36,51,36,56,0],[39,41,39,45,0],[39,46,39,50,0],[39,55,39,60,0],[47,9,47,10,0],[48,13,48,76,0],[49,13,49,46,0],[50,9,50,10,0],[53,9,53,10,0],[54,13,54,33,0],[56,13,56,31,0],[59,13,59,14,0],[60,17,60,48,0],[61,21,61,33,0],[63,17,63,80,0],[70,17,70,58,0],[71,17,71,18,0],[72,21,73,21,0],[73,21,73,22,0],[73,22,75,25,0],[75,25,75,26,0],[75,26,76,36,0],[76,36,76,88,0],[76,88,77,36,0],[77,36,77,69,0],[77,69,78,29,0],[78,29,78,30,0],[78,30,79,33,0],[79,33,79,86,0],[79,86,80,33,0],[80,33,80,81,0],[80,81,82,33,0],[82,33,82,64,0],[82,64,83,33,0],[83,33,83,34,0],[83,34,84,37,0],[84,37,84,68,0],[84,68,86,37,0],[86,37,86,63,0],[86,63,88,37,0],[88,37,88,121,0],[88,121,88,138,0],[88,138,88,140,0],[88,140,90,37,0],[90,37,90,58,0],[90,58,91,41,0],[91,41,91,74,0],[91,74,93,37,0],[93,37,93,38,0],[93,38,94,41,0],[94,41,94,127,0],[94,127,95,41,0],[95,41,96,41,0],[96,41,96,42,0],[96,42,97,45,0],[97,45,97,76,0],[97,76,98,49,0],[98,49,98,90,0],[98,90,99,41,0],[99,41,99,42,0],[99,42,99,43,0],[99,43,100,41,0],[100,41,101,41,0],[101,41,101,42,0],[101,42,102,45,0],[102,45,102,76,0],[102,76,103,49,0],[103,49,103,70,0],[103,70,104,41,0],[104,41,104,42,0],[104,42,104,43,0],[104,43,105,41,0],[105,41,105,73,0],[105,73,106,37,0],[106,37,106,38,0],[106,38,107,33,0],[107,33,107,34,0],[107,34,109,33,0],[109,33,109,63,0],[109,63,110,29,0],[110,29,110,30,0],[110,30,111,25,0],[111,25,111,26,0],[111,26,112,25,0],[112,25,112,30,0],[112,30,113,25,0],[113,25,113,26,0],[113,26,115,25,0],[115,25,115,26,0],[115,26,118,25,0],[118,25,118,26,0],[118,26,119,36,0],[119,36,119,96,0],[119,96,120,36,0],[120,36,120,69,0],[120,69,121,29,0],[121,29,121,30,0],[121,30,122,33,0],[122,33,122,79,0],[122,79,123,29,0],[123,29,123,30,0],[123,30,124,25,0],[124,25,124,26,0],[124,26,125,25,0],[125,25,125,42,0],[125,42,126,25,0],[126,25,126,26,0],[126,26,128,25,0],[128,25,128,26,0],[128,26,131,25,0],[131,25,131,26,0],[131,26,132,36,0],[132,36,132,94,0],[132,94,133,36,0],[133,36,133,69,0],[133,69,134,29,0],[134,29,134,30,0],[134,30,135,33,0],[135,33,135,99,0],[135,99,136,29,0],[136,29,136,30,0],[136,30,137,25,0],[137,25,137,26,0],[137,26,138,25,0],[138,25,138,42,0],[138,42,139,25,0],[139,25,139,26,0],[139,26,141,25,0],[141,25,141,26,0],[141,26,144,25,0],[144,25,144,26,0],[144,26,145,36,0],[145,36,145,95,0],[145,95,146,36,0],[146,36,146,69,0],[146,69,147,29,0],[147,29,147,30,0],[147,30,148,33,0],[148,33,148,85,0],[148,85,149,33,0],[149,33,149,85,0],[149,85,150,29,0],[150,29,150,30,0],[150,30,151,25,0],[151,25,151,26,0],[151,26,152,25,0],[152,25,152,42,0],[152,42,153,25,0],[153,25,153,26,0],[153,26,155,25,0],[155,25,155,26,0],[155,26,156,21,0],[156,21,156,22,0],[156,22,156,35,0],[157,17,157,18,0],[158,13,158,14,0],[159,13,159,32,0],[160,13,160,14,0],[161,17,161,101,0],[162,13,162,14,0],[164,13,164,31,0],[165,9,165,10,0],[173,9,173,10,0],[174,13,174,65,0],[175,17,175,30,0],[177,13,177,81,0],[178,13,178,36,0],[179,17,179,30,0],[181,13,181,38,0],[182,13,182,25,0],[183,9,183,10,0],[190,48,190,80,0],[192,68,192,120,0],[195,9,195,10,0],[196,13,199,61,0],[201,13,201,79,0],[202,13,202,38,0],[203,9,203,10,0],[206,9,206,10,0],[208,13,208,14,0],[209,17,209,80,0],[210,17,210,99,0],[212,17,212,65,0],[213,21,213,47,0],[214,13,214,14,0],[215,13,215,18,0],[216,13,216,14,0],[217,13,217,14,0],[219,13,219,25,0],[220,9,220,10,0],[223,9,223,10,0],[224,13,224,67,0],[225,13,225,137,0],[227,13,227,61,0],[228,17,228,42,0],[230,13,230,25,0],[231,9,231,10,0],[234,9,234,10,0],[235,13,235,63,0],[236,13,236,127,0],[238,13,238,61,0],[239,17,239,42,0],[241,13,241,25,0],[242,9,242,10,0],[245,9,245,10,0],[246,13,246,61,0],[249,13,249,14,0],[253,24,253,81,0],[254,21,254,155,0],[257,17,257,65,0],[258,21,258,46,0],[259,13,259,14,0],[260,13,260,18,0],[261,13,261,14,0],[262,13,262,14,0],[264,13,264,25,0],[265,9,265,10,0]]);
+    </script>
+  </body>
+</html>

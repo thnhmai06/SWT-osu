@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Difficulty/DifficultyCalculator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using JetBrains.Annotations;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Lists;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Skills;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Utils;
+
+namespace osu.Game.Rulesets.Difficulty
+{
+    public abstract class DifficultyCalculator
+    {
+        /// &lt;summary&gt;
+        /// The beatmap for which difficulty will be calculated.
+        /// &lt;/summary&gt;
+        protected IBeatmap Beatmap { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The working beatmap for which difficulty will be calculated.
+        /// &lt;/summary&gt;
+        protected readonly IWorkingBeatmap WorkingBeatmap;
+
+        private Mod[] playableMods;
+
+        private readonly IRulesetInfo ruleset;
+
+        /// &lt;summary&gt;
+        /// A yymmdd version which is used to discern when reprocessing is required.
+        /// &lt;/summary&gt;
+        public virtual int Version =&gt; 0;
+
+        protected DifficultyCalculator(IRulesetInfo ruleset, IWorkingBeatmap beatmap)
+        {
+            this.ruleset = ruleset;
+            WorkingBeatmap = beatmap;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of the beatmap with no mods applied.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;A structure describing the difficulty of the beatmap.&lt;/returns&gt;
+        public DifficultyAttributes Calculate(CancellationToken cancellationToken = default)
+            =&gt; Calculate(Array.Empty&lt;Mod&gt;(), cancellationToken);
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of the beatmap using a specific mod combination.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods that should be applied to the beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;A structure describing the difficulty of the beatmap.&lt;/returns&gt;
+        public DifficultyAttributes Calculate([NotNull] IEnumerable&lt;Mod&gt; mods, CancellationToken cancellationToken = default)
+        {
+            using var timedCancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            if (!cancellationToken.CanBeCanceled)
+                cancellationToken = timedCancellationSource.Token;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            // ReSharper disable once PossiblyMistakenUseOfCancellationToken
+            preProcess(mods, cancellationToken);
+
+            var skills = CreateSkills(Beatmap, playableMods);
+
+            if (!Beatmap.HitObjects.Any())
+                return CreateDifficultyAttributes(Beatmap, playableMods, skills);
+
+            foreach (var hitObject in getDifficultyHitObjects())
+            {
+                foreach (var skill in skills)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    skill.Process(hitObject);
+                }
+            }
+
+            return CreateDifficultyAttributes(Beatmap, playableMods, skills);
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of the beatmap with no mods applied and returns a set of &lt;see cref=&quot;TimedDifficultyAttributes&quot;/&gt; representing the difficulty at every relevant time value in the beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The set of &lt;see cref=&quot;TimedDifficultyAttributes&quot;/&gt;.&lt;/returns&gt;
+        public List&lt;TimedDifficultyAttributes&gt; CalculateTimed(CancellationToken cancellationToken = default)
+            =&gt; CalculateTimed(Array.Empty&lt;Mod&gt;(), cancellationToken);
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of the beatmap using a specific mod combination and returns a set of &lt;see cref=&quot;TimedDifficultyAttributes&quot;/&gt; representing the difficulty at every relevant time value in the beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods that should be applied to the beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;The set of &lt;see cref=&quot;TimedDifficultyAttributes&quot;/&gt;.&lt;/returns&gt;
+        public List&lt;TimedDifficultyAttributes&gt; CalculateTimed([NotNull] IEnumerable&lt;Mod&gt; mods, CancellationToken cancellationToken = default)
+        {
+            using var timedCancellationSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            if (!cancellationToken.CanBeCanceled)
+                cancellationToken = timedCancellationSource.Token;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            // ReSharper disable once PossiblyMistakenUseOfCancellationToken
+            preProcess(mods, cancellationToken);
+
+            var attribs = new List&lt;TimedDifficultyAttributes&gt;();
+
+            if (!Beatmap.HitObjects.Any())
+                return attribs;
+
+            var skills = CreateSkills(Beatmap, playableMods);
+            var progressiveBeatmap = new ProgressiveCalculationBeatmap(Beatmap);
+            var difficultyObjects = getDifficultyHitObjects().ToArray();
+
+            int currentIndex = 0;
+
+            foreach (var obj in Beatmap.HitObjects)
+            {
+                progressiveBeatmap.HitObjects.Add(obj);
+
+                while (currentIndex &lt; difficultyObjects.Length &amp;&amp; difficultyObjects[currentIndex].BaseObject.GetEndTime() &lt;= obj.GetEndTime())
+                {
+                    foreach (var skill in skills)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        skill.Process(difficultyObjects[currentIndex]);
+                    }
+
+                    currentIndex++;
+                }
+
+                attribs.Add(new TimedDifficultyAttributes(obj.GetEndTime(), CreateDifficultyAttributes(progressiveBeatmap, playableMods, skills)));
+            }
+
+            return attribs;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the difficulty of the beatmap using all mod combinations applicable to the beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This can only be used to compute difficulties for legacy mod combinations.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;A collection of structures describing the difficulty of the beatmap for each mod combination.&lt;/returns&gt;
+        public IEnumerable&lt;DifficultyAttributes&gt; CalculateAllLegacyCombinations(CancellationToken cancellationToken = default)
+        {
+            var rulesetInstance = ruleset.CreateInstance();
+
+            foreach (var combination in CreateDifficultyAdjustmentModCombinations())
+            {
+                Mod classicMod = rulesetInstance.CreateMod&lt;ModClassic&gt;();
+
+                var finalCombination = ModUtils.FlattenMod(combination);
+                if (classicMod != null)
+                    finalCombination = finalCombination.Append(classicMod);
+
+                yield return Calculate(finalCombination.ToArray(), cancellationToken);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s to calculate against.
+        /// &lt;/summary&gt;
+        private IEnumerable&lt;DifficultyHitObject&gt; getDifficultyHitObjects() =&gt; SortObjects(CreateDifficultyHitObjects(Beatmap, playableMods));
+
+        /// &lt;summary&gt;
+        /// Performs required tasks before every calculation.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The original list of &lt;see cref=&quot;Mod&quot;/&gt;s.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        private void preProcess([NotNull] IEnumerable&lt;Mod&gt; mods, CancellationToken cancellationToken)
+        {
+            playableMods = mods.Select(m =&gt; m.DeepClone()).ToArray();
+            Beatmap = WorkingBeatmap.GetPlayableBeatmap(ruleset, playableMods, cancellationToken);
+        }
+
+        /// &lt;summary&gt;
+        /// Sorts a given set of &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;input&quot;&gt;The &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s to sort.&lt;/param&gt;
+        /// &lt;returns&gt;The sorted &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s.&lt;/returns&gt;
+        protected virtual IEnumerable&lt;DifficultyHitObject&gt; SortObjects(IEnumerable&lt;DifficultyHitObject&gt; input)
+            =&gt; input.OrderBy(h =&gt; h.BaseObject.StartTime);
+
+        /// &lt;summary&gt;
+        /// Creates all &lt;see cref=&quot;Mod&quot;/&gt; combinations which adjust the &lt;see cref=&quot;Beatmaps.Beatmap&quot;/&gt; difficulty.
+        /// &lt;/summary&gt;
+        public Mod[] CreateDifficultyAdjustmentModCombinations()
+        {
+            return createDifficultyAdjustmentModCombinations(DifficultyAdjustmentMods, Array.Empty&lt;Mod&gt;()).ToArray();
+
+            static IEnumerable&lt;Mod&gt; createDifficultyAdjustmentModCombinations(ReadOnlyMemory&lt;Mod&gt; remainingMods, IEnumerable&lt;Mod&gt; currentSet, int currentSetCount = 0)
+            {
+                // Return the current set.
+                switch (currentSetCount)
+                {
+                    case 0:
+                        // Initial-case: Empty current set
+                        yield return new ModNoMod();
+
+                        break;
+
+                    case 1:
+                        yield return currentSet.Single();
+
+                        break;
+
+                    default:
+                        yield return new MultiMod(currentSet.ToArray());
+
+                        break;
+                }
+
+                // Apply the rest of the remaining mods recursively.
+                for (int i = 0; i &lt; remainingMods.Length; i++)
+                {
+                    (var nextSet, int nextCount) = flatten(remainingMods.Span[i]);
+
+                    // Check if any mods in the next set are incompatible with any of the current set.
+                    if (currentSet.SelectMany(m =&gt; m.IncompatibleMods).Any(c =&gt; nextSet.Any(c.IsInstanceOfType)))
+                        continue;
+
+                    // Check if any mods in the next set are the same type as the current set. Mods of the exact same type are not incompatible with themselves.
+                    if (currentSet.Any(c =&gt; nextSet.Any(n =&gt; c.GetType() == n.GetType())))
+                        continue;
+
+                    // If all&#39;s good, attach the next set to the current set and recurse further.
+                    foreach (var combo in createDifficultyAdjustmentModCombinations(remainingMods.Slice(i + 1), currentSet.Concat(nextSet), currentSetCount + nextCount))
+                        yield return combo;
+                }
+            }
+
+            // Flattens a mod hierarchy (through MultiMod) as an IEnumerable&lt;Mod&gt;
+            static (IEnumerable&lt;Mod&gt; set, int count) flatten(Mod mod)
+            {
+                if (!(mod is MultiMod multi))
+                    return (mod.Yield(), 1);
+
+                IEnumerable&lt;Mod&gt; set = Enumerable.Empty&lt;Mod&gt;();
+                int count = 0;
+
+                foreach (var nested in multi.Mods)
+                {
+                    (var nestedSet, int nestedCount) = flatten(nested);
+                    set = set.Concat(nestedSet);
+                    count += nestedCount;
+                }
+
+                return (set, count);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves all &lt;see cref=&quot;Mod&quot;/&gt;s which adjust the &lt;see cref=&quot;Beatmaps.Beatmap&quot;/&gt; difficulty.
+        /// &lt;/summary&gt;
+        protected virtual Mod[] DifficultyAdjustmentMods =&gt; Array.Empty&lt;Mod&gt;();
+
+        /// &lt;summary&gt;
+        /// Creates &lt;see cref=&quot;DifficultyAttributes&quot;/&gt; to describe beatmap&#39;s calculated difficulty.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; whose difficulty was calculated.
+        /// This may differ from &lt;see cref=&quot;Beatmap&quot;/&gt; in the case of timed calculation.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s that difficulty was calculated with.&lt;/param&gt;
+        /// &lt;param name=&quot;skills&quot;&gt;The skills which processed the beatmap.&lt;/param&gt;
+        protected abstract DifficultyAttributes CreateDifficultyAttributes(IBeatmap beatmap, Mod[] mods, Skill[] skills);
+
+        /// &lt;summary&gt;
+        /// Enumerates &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s to be processed from &lt;see cref=&quot;HitObject&quot;/&gt;s in the &lt;see cref=&quot;IBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; providing the &lt;see cref=&quot;HitObject&quot;/&gt;s to enumerate.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;Mods to create difficulty objects with.&lt;/param&gt;
+        /// &lt;returns&gt;The enumerated &lt;see cref=&quot;DifficultyHitObject&quot;/&gt;s.&lt;/returns&gt;
+        protected abstract IEnumerable&lt;DifficultyHitObject&gt; CreateDifficultyHitObjects(IBeatmap beatmap, Mod[] mods);
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;Skill&quot;/&gt;s to calculate the difficulty of an &lt;see cref=&quot;IBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; whose difficulty will be calculated.
+        /// This may differ from &lt;see cref=&quot;Beatmap&quot;/&gt; in the case of timed calculation.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;Mods to calculate difficulty with.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Skill&quot;/&gt;s.&lt;/returns&gt;
+        protected abstract Skill[] CreateSkills(IBeatmap beatmap, Mod[] mods);
+
+        /// &lt;summary&gt;
+        /// Used to calculate timed difficulty attributes, where only a subset of hitobjects should be visible at any point in time.
+        /// &lt;/summary&gt;
+        private class ProgressiveCalculationBeatmap : IBeatmap
+        {
+            private readonly IBeatmap baseBeatmap;
+
+            public ProgressiveCalculationBeatmap(IBeatmap baseBeatmap)
+            {
+                this.baseBeatmap = baseBeatmap;
+            }
+
+            public readonly List&lt;HitObject&gt; HitObjects = new List&lt;HitObject&gt;();
+
+            IReadOnlyList&lt;HitObject&gt; IBeatmap.HitObjects =&gt; HitObjects;
+
+            #region Delegated IBeatmap implementation
+
+            public BeatmapInfo BeatmapInfo
+            {
+                get =&gt; baseBeatmap.BeatmapInfo;
+                set =&gt; baseBeatmap.BeatmapInfo = value;
+            }
+
+            public ControlPointInfo ControlPointInfo
+            {
+                get =&gt; baseBeatmap.ControlPointInfo;
+                set =&gt; baseBeatmap.ControlPointInfo = value;
+            }
+
+            public BeatmapMetadata Metadata =&gt; baseBeatmap.Metadata;
+
+            public BeatmapDifficulty Difficulty
+            {
+                get =&gt; baseBeatmap.Difficulty;
+                set =&gt; baseBeatmap.Difficulty = value;
+            }
+
+            public SortedList&lt;BreakPeriod&gt; Breaks
+            {
+                get =&gt; baseBeatmap.Breaks;
+                set =&gt; baseBeatmap.Breaks = value;
+            }
+
+            public double TotalBreakTime =&gt; baseBeatmap.TotalBreakTime;
+            public IEnumerable&lt;BeatmapStatistic&gt; GetStatistics() =&gt; baseBeatmap.GetStatistics();
+            public double GetMostCommonBeatLength() =&gt; baseBeatmap.GetMostCommonBeatLength();
+            public int BeatmapVersion =&gt; baseBeatmap.BeatmapVersion;
+            public IBeatmap Clone() =&gt; new ProgressiveCalculationBeatmap(baseBeatmap.Clone());
+
+            public double AudioLeadIn
+            {
+                get =&gt; baseBeatmap.AudioLeadIn;
+                set =&gt; baseBeatmap.AudioLeadIn = value;
+            }
+
+            public float StackLeniency
+            {
+                get =&gt; baseBeatmap.StackLeniency;
+                set =&gt; baseBeatmap.StackLeniency = value;
+            }
+
+            public bool SpecialStyle
+            {
+                get =&gt; baseBeatmap.SpecialStyle;
+                set =&gt; baseBeatmap.SpecialStyle = value;
+            }
+
+            public bool LetterboxInBreaks
+            {
+                get =&gt; baseBeatmap.LetterboxInBreaks;
+                set =&gt; baseBeatmap.LetterboxInBreaks = value;
+            }
+
+            public bool WidescreenStoryboard
+            {
+                get =&gt; baseBeatmap.WidescreenStoryboard;
+                set =&gt; baseBeatmap.WidescreenStoryboard = value;
+            }
+
+            public bool EpilepsyWarning
+            {
+                get =&gt; baseBeatmap.EpilepsyWarning;
+                set =&gt; baseBeatmap.EpilepsyWarning = value;
+            }
+
+            public bool SamplesMatchPlaybackRate
+            {
+                get =&gt; baseBeatmap.SamplesMatchPlaybackRate;
+                set =&gt; baseBeatmap.SamplesMatchPlaybackRate = value;
+            }
+
+            public double DistanceSpacing
+            {
+                get =&gt; baseBeatmap.DistanceSpacing;
+                set =&gt; baseBeatmap.DistanceSpacing = value;
+            }
+
+            public int GridSize
+            {
+                get =&gt; baseBeatmap.GridSize;
+                set =&gt; baseBeatmap.GridSize = value;
+            }
+
+            public double TimelineZoom
+            {
+                get =&gt; baseBeatmap.TimelineZoom;
+                set =&gt; baseBeatmap.TimelineZoom = value;
+            }
+
+            public CountdownType Countdown
+            {
+                get =&gt; baseBeatmap.Countdown;
+                set =&gt; baseBeatmap.Countdown = value;
+            }
+
+            public int CountdownOffset
+            {
+                get =&gt; baseBeatmap.CountdownOffset;
+                set =&gt; baseBeatmap.CountdownOffset = value;
+            }
+
+            public int[] Bookmarks
+            {
+                get =&gt; baseBeatmap.Bookmarks;
+                set =&gt; baseBeatmap.Bookmarks = value;
+            }
+
+            public double[] SliderVelocityPresets
+            {
+                get =&gt; baseBeatmap.SliderVelocityPresets;
+                set =&gt; baseBeatmap.SliderVelocityPresets = value;
+            }
+
+            #endregion
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,38,29,42,1],[29,43,29,55,1],[43,39,43,40,0],[45,9,45,86,1],[46,9,46,10,1],[47,13,47,36,1],[48,13,48,38,1],[49,9,49,10,1],[57,16,57,64,1],[66,9,66,10,1],[67,13,67,103,1],[69,13,69,50,1],[70,17,70,67,1],[72,13,72,62,1],[74,13,74,49,1],[76,13,76,62,1],[78,13,78,43,1],[79,17,79,82,1],[81,13,81,20,1],[81,22,81,35,1],[81,36,81,38,1],[81,39,81,64,1],[82,13,82,14,1],[83,17,83,24,1],[83,26,83,35,1],[83,36,83,38,1],[83,39,83,45,1],[84,17,84,18,1],[85,21,85,70,1],[86,21,86,46,1],[87,17,87,18,1],[88,13,88,14,1],[90,13,90,78,1],[91,9,91,10,1],[99,16,99,69,0],[108,9,108,10,0],[109,13,109,103,0],[111,13,111,50,0],[112,17,112,67,0],[114,13,114,62,0],[116,13,116,49,0],[118,13,118,65,0],[120,13,120,43,0],[121,17,121,32,0],[123,13,123,62,0],[124,13,124,81,0],[125,13,125,73,0],[127,13,127,34,0],[129,13,129,20,0],[129,22,129,29,0],[129,30,129,32,0],[129,33,129,51,0],[130,13,130,14,0],[131,17,131,56,0],[133,17,133,143,0],[134,17,134,18,0],[135,21,135,28,0],[135,30,135,39,0],[135,40,135,42,0],[135,43,135,49,0],[136,21,136,22,0],[137,25,137,74,0],[138,25,138,72,0],[139,21,139,22,0],[141,21,141,36,0],[142,17,142,18,0],[144,17,144,148,0],[145,13,145,14,0],[147,13,147,28,0],[148,9,148,10,0],[158,9,158,10,0],[159,13,159,60,0],[161,13,161,20,0],[161,22,161,37,0],[161,38,161,40,0],[161,41,161,84,0],[162,13,162,14,0],[163,17,163,74,0],[165,17,165,73,0],[166,17,166,40,0],[167,21,167,76,0],[169,17,169,87,0],[170,13,170,14,0],[171,9,171,10,0],[176,79,176,141,1],[184,9,184,10,1],[185,13,185,45,1],[185,45,185,58,1],[185,58,185,70,1],[186,13,186,99,1],[187,9,187,10,1],[195,16,195,35,1],[195,35,195,57,1],[195,57,195,58,1],[201,9,201,10,0],[202,13,202,118,0],[205,13,205,14,0],[207,17,207,41,0],[211,25,211,53,0],[213,25,213,31,0],[216,25,216,58,0],[218,25,218,31,0],[221,25,221,73,0],[223,25,223,31,0],[227,22,227,31,0],[227,33,227,57,0],[227,59,227,62,0],[228,17,228,18,0],[229,21,229,83,0],[232,21,232,52,0],[232,52,232,70,0],[232,70,232,81,0],[232,81,232,112,0],[232,112,232,114,0],[233,25,233,34,0],[236,21,236,45,0],[236,45,236,62,0],[236,62,236,88,0],[236,88,236,89,0],[236,89,236,91,0],[237,25,237,34,0],[240,21,240,28,0],[240,30,240,39,0],[240,40,240,42,0],[240,43,240,169,0],[241,25,241,44,0],[242,17,242,18,0],[243,13,243,14,0],[247,13,247,14,0],[248,17,248,46,0],[249,21,249,45,0],[251,17,251,64,0],[252,17,252,31,0],[254,17,254,24,0],[254,26,254,36,0],[254,37,254,39,0],[254,40,254,50,0],[255,17,255,18,0],[256,21,256,72,0],[257,21,257,49,0],[258,21,258,42,0],[259,17,259,18,0],[261,17,261,37,0],[262,13,262,14,0],[263,9,263,10,0],[268,61,268,79,0],[303,13,303,71,0],[304,13,304,14,0],[305,17,305,48,0],[306,13,306,14,0],[308,13,308,80,0],[310,61,310,71,0],[316,24,316,47,0],[317,24,317,55,0],[322,24,322,52,0],[323,24,323,60,0],[326,48,326,68,0],[330,24,330,46,0],[331,24,331,54,0],[336,24,336,42,0],[337,24,337,50,0],[340,45,340,71,0],[341,69,341,96,0],[342,56,342,93,0],[343,42,343,68,0],[344,40,344,94,0],[348,24,348,47,0],[349,24,349,55,0],[354,24,354,49,0],[355,24,355,57,0],[360,24,360,48,0],[361,24,361,56,0],[366,24,366,53,0],[367,24,367,61,0],[372,24,372,56,0],[373,24,373,64,0],[378,24,378,51,0],[379,24,379,59,0],[384,24,384,60,0],[385,24,385,68,0],[390,24,390,51,0],[391,24,391,59,0],[396,24,396,44,0],[397,24,397,52,0],[402,24,402,48,0],[403,24,403,56,0],[408,24,408,45,0],[409,24,409,53,0],[414,24,414,51,0],[415,24,415,59,0],[420,24,420,45,0],[421,24,421,53,0],[426,24,426,57,0],[427,24,427,65,0]]);
+    </script>
+  </body>
+</html>

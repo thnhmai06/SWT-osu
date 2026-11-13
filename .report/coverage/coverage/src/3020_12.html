@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Multiplayer/OnlineMultiplayerClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Matchmaking;
+using osu.Game.Online.Matchmaking.Requests;
+using osu.Game.Online.Matchmaking.Responses;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays.Notifications;
+
+namespace osu.Game.Online.Multiplayer
+{
+    /// &lt;summary&gt;
+    /// A &lt;see cref=&quot;MultiplayerClient&quot;/&gt; with online connectivity.
+    /// &lt;/summary&gt;
+    public partial class OnlineMultiplayerClient : MultiplayerClient
+    {
+        private readonly string endpoint;
+
+        private IHubClientConnector? connector;
+
+        public override IBindable&lt;bool&gt; IsConnected { get; } = new BindableBool();
+
+        private HubConnection? connection =&gt; connector?.CurrentConnection;
+
+        public OnlineMultiplayerClient(EndpointConfiguration endpoints)
+        {
+            endpoint = endpoints.MultiplayerUrl;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IAPIProvider api)
+        {
+            // Importantly, we are intentionally not using MessagePack here to correctly support derived class serialization.
+            // More information on the limitations / reasoning can be found in osu-server-spectator&#39;s initialisation code.
+            connector = api.GetHubConnector(nameof(OnlineMultiplayerClient), endpoint);
+
+            if (connector != null)
+            {
+                connector.ConfigureConnection = connection =&gt;
+                {
+                    // this is kind of SILLY
+                    // https://github.com/dotnet/aspnetcore/issues/15198
+                    connection.On&lt;MultiplayerRoomState&gt;(nameof(IMultiplayerClient.RoomStateChanged), ((IMultiplayerClient)this).RoomStateChanged);
+                    connection.On&lt;MultiplayerRoomUser&gt;(nameof(IMultiplayerClient.UserJoined), ((IMultiplayerClient)this).UserJoined);
+                    connection.On&lt;MultiplayerRoomUser&gt;(nameof(IMultiplayerClient.UserLeft), ((IMultiplayerClient)this).UserLeft);
+                    connection.On&lt;MultiplayerRoomUser&gt;(nameof(IMultiplayerClient.UserKicked), ((IMultiplayerClient)this).UserKicked);
+                    connection.On&lt;int, long, string&gt;(nameof(IMultiplayerClient.Invited), ((IMultiplayerClient)this).Invited);
+                    connection.On&lt;int&gt;(nameof(IMultiplayerClient.HostChanged), ((IMultiplayerClient)this).HostChanged);
+                    connection.On&lt;MultiplayerRoomSettings&gt;(nameof(IMultiplayerClient.SettingsChanged), ((IMultiplayerClient)this).SettingsChanged);
+                    connection.On&lt;int, MultiplayerUserState&gt;(nameof(IMultiplayerClient.UserStateChanged), ((IMultiplayerClient)this).UserStateChanged);
+                    connection.On(nameof(IMultiplayerClient.LoadRequested), ((IMultiplayerClient)this).LoadRequested);
+                    connection.On(nameof(IMultiplayerClient.GameplayStarted), ((IMultiplayerClient)this).GameplayStarted);
+                    connection.On&lt;GameplayAbortReason&gt;(nameof(IMultiplayerClient.GameplayAborted), ((IMultiplayerClient)this).GameplayAborted);
+                    connection.On(nameof(IMultiplayerClient.ResultsReady), ((IMultiplayerClient)this).ResultsReady);
+                    connection.On&lt;int, int?, int?&gt;(nameof(IMultiplayerClient.UserStyleChanged), ((IMultiplayerClient)this).UserStyleChanged);
+                    connection.On&lt;int, IEnumerable&lt;APIMod&gt;&gt;(nameof(IMultiplayerClient.UserModsChanged), ((IMultiplayerClient)this).UserModsChanged);
+                    connection.On&lt;int, BeatmapAvailability&gt;(nameof(IMultiplayerClient.UserBeatmapAvailabilityChanged), ((IMultiplayerClient)this).UserBeatmapAvailabilityChanged);
+                    connection.On&lt;MatchRoomState&gt;(nameof(IMultiplayerClient.MatchRoomStateChanged), ((IMultiplayerClient)this).MatchRoomStateChanged);
+                    connection.On&lt;int, MatchUserState&gt;(nameof(IMultiplayerClient.MatchUserStateChanged), ((IMultiplayerClient)this).MatchUserStateChanged);
+                    connection.On&lt;MatchServerEvent&gt;(nameof(IMultiplayerClient.MatchEvent), ((IMultiplayerClient)this).MatchEvent);
+                    connection.On&lt;MultiplayerPlaylistItem&gt;(nameof(IMultiplayerClient.PlaylistItemAdded), ((IMultiplayerClient)this).PlaylistItemAdded);
+                    connection.On&lt;long&gt;(nameof(IMultiplayerClient.PlaylistItemRemoved), ((IMultiplayerClient)this).PlaylistItemRemoved);
+                    connection.On&lt;MultiplayerPlaylistItem&gt;(nameof(IMultiplayerClient.PlaylistItemChanged), ((IMultiplayerClient)this).PlaylistItemChanged);
+                    connection.On&lt;int, bool&gt;(nameof(IMultiplayerClient.UserVotedToSkipIntro), ((IMultiplayerClient)this).UserVotedToSkipIntro);
+                    connection.On(nameof(IMultiplayerClient.VoteToSkipIntroPassed), ((IMultiplayerClient)this).VoteToSkipIntroPassed);
+
+                    connection.On(nameof(IMatchmakingClient.MatchmakingQueueJoined), ((IMatchmakingClient)this).MatchmakingQueueJoined);
+                    connection.On(nameof(IMatchmakingClient.MatchmakingQueueLeft), ((IMatchmakingClient)this).MatchmakingQueueLeft);
+                    connection.On&lt;MatchmakingRoomInvitationParams&gt;(nameof(IMatchmakingClient.MatchmakingRoomInvitedWithParams), ((IMatchmakingClient)this).MatchmakingRoomInvitedWithParams);
+                    connection.On&lt;MatchmakingDuelIssuedParams&gt;(nameof(IMatchmakingClient.MatchmakingDuelIssued), ((IMatchmakingClient)this).MatchmakingDuelIssued);
+                    connection.On&lt;long, string&gt;(nameof(IMatchmakingClient.MatchmakingRoomReady), ((IMatchmakingClient)this).MatchmakingRoomReady);
+                    connection.On&lt;MatchmakingLobbyStatus&gt;(nameof(IMatchmakingClient.MatchmakingLobbyStatusChanged), ((IMatchmakingClient)this).MatchmakingLobbyStatusChanged);
+                    connection.On&lt;MatchmakingQueueStatus&gt;(nameof(IMatchmakingClient.MatchmakingQueueStatusChanged), ((IMatchmakingClient)this).MatchmakingQueueStatusChanged);
+                    connection.On&lt;int, long&gt;(nameof(IMatchmakingClient.MatchmakingItemSelected), ((IMatchmakingClient)this).MatchmakingItemSelected);
+                    connection.On&lt;int, long&gt;(nameof(IMatchmakingClient.MatchmakingItemDeselected), ((IMatchmakingClient)this).MatchmakingItemDeselected);
+
+                    connection.On&lt;int, RankedPlayCardItem&gt;(nameof(IRankedPlayClient.RankedPlayCardAdded), ((IRankedPlayClient)this).RankedPlayCardAdded);
+                    connection.On&lt;int, RankedPlayCardItem&gt;(nameof(IRankedPlayClient.RankedPlayCardRemoved), ((IRankedPlayClient)this).RankedPlayCardRemoved);
+                    connection.On&lt;RankedPlayCardItem, MultiplayerPlaylistItem&gt;(nameof(IRankedPlayClient.RankedPlayCardRevealed), ((IRankedPlayClient)this).RankedPlayCardRevealed);
+                    connection.On&lt;RankedPlayCardItem&gt;(nameof(IRankedPlayClient.RankedPlayCardPlayed), ((IRankedPlayClient)this).RankedPlayCardPlayed);
+
+                    connection.On(nameof(IStatefulUserHubClient.DisconnectRequested), ((IStatefulUserHubClient)this).DisconnectRequested);
+                    connection.On(nameof(IStatefulUserHubClient.ServerShuttingDown), ((IStatefulUserHubClient)this).ServerShuttingDown);
+                };
+
+                IsConnected.BindTo(connector.IsConnected);
+            }
+        }
+
+        protected override async Task&lt;MultiplayerRoom&gt; CreateRoomInternal(MultiplayerRoom room)
+        {
+            if (!IsConnected.Value)
+                throw new OperationCanceledException();
+
+            Debug.Assert(connection != null);
+
+            try
+            {
+                return await connection.InvokeAsync&lt;MultiplayerRoom&gt;(nameof(IMultiplayerServer.CreateRoom), room).ConfigureAwait(false);
+            }
+            catch (HubException exception)
+            {
+                if (exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE)
+                {
+                    Debug.Assert(connector != null);
+
+                    await connector.Reconnect().ConfigureAwait(false);
+                    return await CreateRoomInternal(room).ConfigureAwait(false);
+                }
+
+                throw;
+            }
+        }
+
+        protected override async Task&lt;MultiplayerRoom&gt; JoinRoomInternal(long roomId, string? password = null)
+        {
+            if (!IsConnected.Value)
+                throw new OperationCanceledException();
+
+            Debug.Assert(connection != null);
+
+            try
+            {
+                return await connection.InvokeAsync&lt;MultiplayerRoom&gt;(nameof(IMultiplayerServer.JoinRoomWithPassword), roomId, password ?? string.Empty).ConfigureAwait(false);
+            }
+            catch (HubException exception)
+            {
+                if (exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE)
+                {
+                    Debug.Assert(connector != null);
+
+                    await connector.Reconnect().ConfigureAwait(false);
+                    return await JoinRoomInternal(roomId, password).ConfigureAwait(false);
+                }
+
+                throw;
+            }
+        }
+
+        protected override Task LeaveRoomInternal()
+        {
+            if (!IsConnected.Value)
+                return Task.FromCanceled(new CancellationToken(true));
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.LeaveRoom));
+        }
+
+        public override async Task InvitePlayer(int userId)
+        {
+            if (!IsConnected.Value)
+                return;
+
+            Debug.Assert(connection != null);
+
+            try
+            {
+                await connection.InvokeAsync(nameof(IMultiplayerServer.InvitePlayer), userId).ConfigureAwait(false);
+            }
+            catch (HubException exception)
+            {
+                switch (exception.GetHubExceptionMessage())
+                {
+                    case UserBlockedException.MESSAGE:
+                        PostNotification?.Invoke(new SimpleErrorNotification { Text = OnlinePlayStrings.InviteFailedUserBlocked });
+                        break;
+
+                    case UserBlocksPMsException.MESSAGE:
+                        PostNotification?.Invoke(new SimpleErrorNotification { Text = OnlinePlayStrings.InviteFailedUserOptOut });
+                        break;
+                }
+            }
+        }
+
+        public override Task TransferHost(int userId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.TransferHost), userId);
+        }
+
+        public override Task KickUser(int userId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.KickUser), userId);
+        }
+
+        public override Task ChangeSettings(MultiplayerRoomSettings settings)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeSettings), settings);
+        }
+
+        public override Task ChangeState(MultiplayerUserState newState)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeState), newState);
+        }
+
+        public override Task ChangeBeatmapAvailability(BeatmapAvailability newBeatmapAvailability)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeBeatmapAvailability), newBeatmapAvailability);
+        }
+
+        public override Task ChangeUserStyle(int? beatmapId, int? rulesetId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeUserStyle), beatmapId, rulesetId);
+        }
+
+        public override Task ChangeUserMods(IEnumerable&lt;APIMod&gt; newMods)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.ChangeUserMods), newMods);
+        }
+
+        public override Task SendMatchRequest(MatchUserRequest request)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.SendMatchRequest), request);
+        }
+
+        public override Task StartMatch()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.StartMatch));
+        }
+
+        public override Task AbortGameplay()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AbortGameplay));
+        }
+
+        public override Task AbortMatch()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AbortMatch));
+        }
+
+        public override Task AddPlaylistItem(MultiplayerPlaylistItem item)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.AddPlaylistItem), item);
+        }
+
+        public override Task EditPlaylistItem(MultiplayerPlaylistItem item)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.EditPlaylistItem), item);
+        }
+
+        public override Task RemovePlaylistItem(long playlistItemId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.RemovePlaylistItem), playlistItemId);
+        }
+
+        public override Task VoteToSkipIntro()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IMultiplayerServer.VoteToSkipIntro));
+        }
+
+        public override Task DiscardCards(RankedPlayCardItem[] cards)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IRankedPlayServer.DiscardCards), cards);
+        }
+
+        public override Task PlayCard(RankedPlayCardItem card)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(IRankedPlayServer.PlayCard), card);
+        }
+
+        public override Task&lt;MatchmakingPool[]&gt; GetMatchmakingPoolsOfType(MatchmakingPoolType type)
+        {
+            if (!IsConnected.Value)
+                return Task.FromResult(Array.Empty&lt;MatchmakingPool&gt;());
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync&lt;MatchmakingPool[]&gt;(nameof(IMatchmakingServer.GetMatchmakingPoolsOfType), type);
+        }
+
+        public override Task&lt;MatchmakingJoinLobbyResponse&gt; MatchmakingJoinLobbyWithParams(MatchmakingJoinLobbyRequest request)
+        {
+            if (!IsConnected.Value)
+                return Task.FromResult(new MatchmakingJoinLobbyResponse());
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync&lt;MatchmakingJoinLobbyResponse&gt;(nameof(IMatchmakingServer.MatchmakingJoinLobbyWithParams), request);
+        }
+
+        public override Task MatchmakingLeaveLobby()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingLeaveLobby));
+        }
+
+        public override Task MatchmakingJoinQueue(int poolId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingJoinQueue), poolId);
+        }
+
+        public override Task MatchmakingLeaveQueue()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingLeaveQueue));
+        }
+
+        public override Task MatchmakingAcceptInvitation()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingAcceptInvitation));
+        }
+
+        public override Task&lt;MatchmakingIssueDuelResponse&gt; MatchmakingIssueDuel(MatchmakingIssueDuelRequest request)
+        {
+            if (!IsConnected.Value)
+                return Task.FromResult(new MatchmakingIssueDuelResponse());
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync&lt;MatchmakingIssueDuelResponse&gt;(nameof(IMatchmakingServer.MatchmakingIssueDuel), request);
+        }
+
+        public override Task&lt;MatchmakingAcceptDuelResponse&gt; MatchmakingAcceptDuel(MatchmakingAcceptDuelRequest request)
+        {
+            if (!IsConnected.Value)
+                return Task.FromResult(new MatchmakingAcceptDuelResponse());
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync&lt;MatchmakingAcceptDuelResponse&gt;(nameof(IMatchmakingServer.MatchmakingAcceptDuel), request);
+        }
+
+        public override Task MatchmakingDeclineInvitation()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingDeclineInvitation));
+        }
+
+        public override Task MatchmakingToggleSelection(long playlistItemId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingToggleSelection), playlistItemId);
+        }
+
+        public override Task MatchmakingSkipToNextStage()
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+            return connection.InvokeAsync(nameof(IMatchmakingServer.MatchmakingSkipToNextStage));
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            connector?.Dispose();
+        }
+
+        public override async Task Reconnect()
+        {
+            if (connector != null)
+                await connector.Reconnect().ConfigureAwait(false);
+        }
+
+        protected override async Task DisconnectInternal()
+        {
+            if (connector != null)
+                await connector.Disconnect().ConfigureAwait(false);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,55,34,59,0],[34,64,34,82,0],[36,46,36,74,0],[38,9,38,72,0],[39,9,39,10,0],[40,13,40,49,0],[41,9,41,10,0],[45,9,45,10,0],[48,13,48,88,0],[50,13,50,35,0],[51,13,51,14,0],[52,17,53,17,0],[53,17,53,18,0],[53,18,56,21,0],[56,21,56,147,0],[56,147,57,21,0],[57,21,57,134,0],[57,134,58,21,0],[58,21,58,130,0],[58,130,59,21,0],[59,21,59,134,0],[59,134,60,21,0],[60,21,60,126,0],[60,126,61,21,0],[61,21,61,120,0],[61,120,62,21,0],[62,21,62,148,0],[62,148,63,21,0],[63,21,63,152,0],[63,152,64,21,0],[64,21,64,119,0],[64,119,65,21,0],[65,21,65,123,0],[65,123,66,21,0],[66,21,66,144,0],[66,144,67,21,0],[67,21,67,117,0],[67,117,68,21,0],[68,21,68,142,0],[68,142,69,21,0],[69,21,69,149,0],[69,149,70,21,0],[70,21,70,179,0],[70,179,71,21,0],[71,21,71,151,0],[71,151,72,21,0],[72,21,72,156,0],[72,156,73,21,0],[73,21,73,131,0],[73,131,74,21,0],[74,21,74,152,0],[74,152,75,21,0],[75,21,75,137,0],[75,137,76,21,0],[76,21,76,156,0],[76,156,77,21,0],[77,21,77,144,0],[77,144,78,21,0],[78,21,78,135,0],[78,135,80,21,0],[80,21,80,137,0],[80,137,81,21,0],[81,21,81,133,0],[81,133,82,21,0],[82,21,82,190,0],[82,190,83,21,0],[83,21,83,164,0],[83,164,84,21,0],[84,21,84,147,0],[84,147,85,21,0],[85,21,85,175,0],[85,175,86,21,0],[86,21,86,175,0],[86,175,87,21,0],[87,21,87,150,0],[87,150,88,21,0],[88,21,88,154,0],[88,154,90,21,0],[90,21,90,154,0],[90,154,91,21,0],[91,21,91,158,0],[91,158,92,21,0],[92,21,92,180,0],[92,180,93,21,0],[93,21,93,151,0],[93,151,95,21,0],[95,21,95,139,0],[95,139,96,21,0],[96,21,96,137,0],[96,137,97,17,0],[97,17,97,18,0],[97,18,97,19,0],[99,17,99,59,0],[100,13,100,14,0],[101,9,101,10,0],[104,9,104,10,0],[105,13,105,36,0],[106,17,106,56,0],[108,13,108,46,0],[111,13,111,14,0],[112,17,112,137,0],[114,13,114,43,0],[115,13,115,14,0],[116,17,116,102,0],[117,17,117,18,0],[118,21,118,53,0],[120,21,120,71,0],[121,21,121,81,0],[124,17,124,23,0],[125,13,125,14,0],[126,9,126,10,0],[129,9,129,10,0],[130,13,130,36,0],[131,17,131,56,0],[133,13,133,46,0],[136,13,136,14,0],[137,17,137,175,0],[139,13,139,43,0],[140,13,140,14,0],[141,17,141,102,0],[142,17,142,18,0],[143,21,143,53,0],[145,21,145,71,0],[146,21,146,91,0],[149,17,149,23,0],[150,13,150,14,0],[151,9,151,10,0],[154,9,154,10,0],[155,13,155,36,0],[156,17,156,71,0],[158,13,158,46,0],[160,13,160,81,0],[161,9,161,10,0],[164,9,164,10,0],[165,13,165,36,0],[166,17,166,24,0],[168,13,168,46,0],[171,13,171,14,0],[172,17,172,117,0],[173,13,173,14,0],[174,13,174,43,0],[175,13,175,14,0],[176,17,176,60,0],[179,25,179,132,0],[180,25,180,31,0],[183,25,183,131,0],[184,25,184,31,0],[186,13,186,14,0],[187,9,187,10,0],[190,9,190,10,0],[191,13,191,36,0],[192,17,192,43,0],[194,13,194,46,0],[196,13,196,92,0],[197,9,197,10,0],[200,9,200,10,0],[201,13,201,36,0],[202,17,202,43,0],[204,13,204,46,0],[206,13,206,88,0],[207,9,207,10,0],[210,9,210,10,0],[211,13,211,36,0],[212,17,212,43,0],[214,13,214,46,0],[216,13,216,96,0],[217,9,217,10,0],[220,9,220,10,0],[221,13,221,36,0],[222,17,222,43,0],[224,13,224,46,0],[226,13,226,93,0],[227,9,227,10,0],[230,9,230,10,0],[231,13,231,36,0],[232,17,232,43,0],[234,13,234,46,0],[236,13,236,121,0],[237,9,237,10,0],[240,9,240,10,0],[241,13,241,36,0],[242,17,242,43,0],[244,13,244,46,0],[246,13,246,109,0],[247,9,247,10,0],[250,9,250,10,0],[251,13,251,36,0],[252,17,252,43,0],[254,13,254,46,0],[256,13,256,95,0],[257,9,257,10,0],[260,9,260,10,0],[261,13,261,36,0],[262,17,262,43,0],[264,13,264,46,0],[266,13,266,97,0],[267,9,267,10,0],[270,9,270,10,0],[271,13,271,36,0],[272,17,272,43,0],[274,13,274,46,0],[276,13,276,82,0],[277,9,277,10,0],[280,9,280,10,0],[281,13,281,36,0],[282,17,282,43,0],[284,13,284,46,0],[286,13,286,85,0],[287,9,287,10,0],[290,9,290,10,0],[291,13,291,36,0],[292,17,292,43,0],[294,13,294,46,0],[296,13,296,82,0],[297,9,297,10,0],[300,9,300,10,0],[301,13,301,36,0],[302,17,302,43,0],[304,13,304,46,0],[306,13,306,93,0],[307,9,307,10,0],[310,9,310,10,0],[311,13,311,36,0],[312,17,312,43,0],[314,13,314,46,0],[316,13,316,94,0],[317,9,317,10,0],[320,9,320,10,0],[321,13,321,36,0],[322,17,322,43,0],[324,13,324,46,0],[326,13,326,106,0],[327,9,327,10,0],[330,9,330,10,0],[331,13,331,36,0],[332,17,332,43,0],[334,13,334,46,0],[336,13,336,87,0],[337,9,337,10,0],[340,9,340,10,0],[341,13,341,36,0],[342,17,342,43,0],[344,13,344,46,0],[346,13,346,90,0],[347,9,347,10,0],[350,9,350,10,0],[351,13,351,36,0],[352,17,352,43,0],[354,13,354,46,0],[356,13,356,85,0],[357,9,357,10,0],[360,9,360,10,0],[361,13,361,36,0],[362,17,362,72,0],[364,13,364,46,0],[365,13,365,122,0],[366,9,366,10,0],[369,9,369,10,0],[370,13,370,36,0],[371,17,371,76,0],[373,13,373,46,0],[374,13,374,141,0],[375,9,375,10,0],[378,9,378,10,0],[379,13,379,36,0],[380,17,380,43,0],[382,13,382,46,0],[383,13,383,93,0],[384,9,384,10,0],[387,9,387,10,0],[388,13,388,36,0],[389,17,389,43,0],[391,13,391,46,0],[392,13,392,100,0],[393,9,393,10,0],[396,9,396,10,0],[397,13,397,36,0],[398,17,398,43,0],[400,13,400,46,0],[401,13,401,93,0],[402,9,402,10,0],[405,9,405,10,0],[406,13,406,36,0],[407,17,407,43,0],[409,13,409,46,0],[410,13,410,99,0],[411,9,411,10,0],[414,9,414,10,0],[415,13,415,36,0],[416,17,416,76,0],[418,13,418,46,0],[419,13,419,131,0],[420,9,420,10,0],[423,9,423,10,0],[424,13,424,36,0],[425,17,425,77,0],[427,13,427,46,0],[428,13,428,133,0],[429,9,429,10,0],[432,9,432,10,0],[433,13,433,36,0],[434,17,434,43,0],[436,13,436,46,0],[437,13,437,100,0],[438,9,438,10,0],[441,9,441,10,0],[442,13,442,36,0],[443,17,443,43,0],[445,13,445,46,0],[446,13,446,114,0],[447,9,447,10,0],[450,9,450,10,0],[451,13,451,36,0],[452,17,452,43,0],[454,13,454,46,0],[455,13,455,98,0],[456,9,456,10,0],[459,9,459,10,0],[460,13,460,39,0],[461,13,461,34,0],[462,9,462,10,0],[465,9,465,10,0],[466,13,466,35,0],[467,17,467,67,0],[468,9,468,10,0],[471,9,471,10,0],[472,13,472,35,0],[473,17,473,68,0],[474,9,474,10,0]]);
+    </script>
+  </body>
+</html>

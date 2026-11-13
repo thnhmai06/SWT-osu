@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Spectator/SpectatorScoreProcessor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Timing;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Scoring.Legacy;
+
+namespace osu.Game.Online.Spectator
+{
+    /// &lt;summary&gt;
+    /// A wrapper over a &lt;see cref=&quot;ScoreProcessor&quot;/&gt; for spectated users.
+    /// This should be used when a local &quot;playable&quot; beatmap is unavailable or expensive to generate for the spectated user.
+    /// &lt;/summary&gt;
+    public partial class SpectatorScoreProcessor : Component
+    {
+        /// &lt;summary&gt;
+        /// The current total score.
+        /// &lt;/summary&gt;
+        public readonly BindableLong TotalScore = new BindableLong { MinValue = 0 };
+
+        /// &lt;summary&gt;
+        /// The current accuracy.
+        /// &lt;/summary&gt;
+        public readonly BindableDouble Accuracy = new BindableDouble(1) { MinValue = 0, MaxValue = 1 };
+
+        /// &lt;summary&gt;
+        /// The current combo.
+        /// &lt;/summary&gt;
+        public readonly BindableInt Combo = new BindableInt();
+
+        /// &lt;summary&gt;
+        /// The highest combo achieved in the score thus far.
+        /// &lt;/summary&gt;
+        public readonly BindableInt HighestCombo = new BindableInt();
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;ScoringMode&quot;/&gt; used to calculate scores.
+        /// &lt;/summary&gt;
+        public readonly Bindable&lt;ScoringMode&gt; Mode = new Bindable&lt;ScoringMode&gt;();
+
+        /// &lt;summary&gt;
+        /// The applied &lt;see cref=&quot;Mod&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        public IReadOnlyList&lt;Mod&gt; Mods =&gt; scoreInfo?.Mods ?? Array.Empty&lt;Mod&gt;();
+
+        public Func&lt;ScoringMode, long&gt; GetDisplayScore =&gt; mode =&gt; scoreInfo?.GetDisplayScore(mode) ?? 0;
+
+        private IClock? referenceClock;
+
+        /// &lt;summary&gt;
+        /// The clock used to determine the current score.
+        /// &lt;/summary&gt;
+        public IClock ReferenceClock
+        {
+            get =&gt; referenceClock ?? Clock;
+            set =&gt; referenceClock = value;
+        }
+
+        [Resolved]
+        private SpectatorClient spectatorClient { get; set; } = null!;
+
+        [Resolved]
+        private RulesetStore rulesetStore { get; set; } = null!;
+
+        private readonly IBindableDictionary&lt;int, SpectatorState&gt; spectatorStates = new BindableDictionary&lt;int, SpectatorState&gt;();
+        private readonly List&lt;TimedFrame&gt; replayFrames = new List&lt;TimedFrame&gt;();
+        private readonly int userId;
+
+        private SpectatorState? spectatorState;
+        private ScoreInfo? scoreInfo;
+
+        public SpectatorScoreProcessor(int userId)
+        {
+            this.userId = userId;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Mode.BindValueChanged(_ =&gt; UpdateScore());
+
+            spectatorStates.BindTo(spectatorClient.WatchedUserStates);
+            spectatorStates.BindCollectionChanged(onSpectatorStatesChanged, true);
+
+            spectatorClient.OnNewFrames += onNewFrames;
+        }
+
+        private void onSpectatorStatesChanged(object? sender, NotifyDictionaryChangedEventArgs&lt;int, SpectatorState&gt; e)
+        {
+            if (!spectatorStates.TryGetValue(userId, out var userState) || userState.BeatmapID == null || userState.RulesetID == null)
+            {
+                scoreInfo = null;
+                spectatorState = null;
+                replayFrames.Clear();
+                return;
+            }
+
+            if (scoreInfo != null)
+                return;
+
+            RulesetInfo? rulesetInfo = rulesetStore.GetRuleset(userState.RulesetID.Value);
+            if (rulesetInfo == null)
+                return;
+
+            Ruleset ruleset = rulesetInfo.CreateInstance();
+
+            spectatorState = userState;
+            scoreInfo = new ScoreInfo
+            {
+                Ruleset = rulesetInfo,
+                Mods = userState.Mods.Select(m =&gt; m.ToMod(ruleset)).ToArray()
+            };
+        }
+
+        private void onNewFrames(int incomingUserId, FrameDataBundle bundle)
+        {
+            if (incomingUserId != userId)
+                return;
+
+            Schedule(() =&gt;
+            {
+                if (scoreInfo == null)
+                    return;
+
+                replayFrames.Add(new TimedFrame(bundle.Frames.First().Time, bundle.Header));
+                UpdateScore();
+            });
+        }
+
+        public void UpdateScore()
+        {
+            if (scoreInfo == null || replayFrames.Count == 0)
+                return;
+
+            Debug.Assert(spectatorState != null);
+
+            int frameIndex = replayFrames.BinarySearch(new TimedFrame(ReferenceClock.CurrentTime));
+            if (frameIndex &lt; 0)
+                frameIndex = ~frameIndex;
+            frameIndex = Math.Clamp(frameIndex - 1, 0, replayFrames.Count - 1);
+
+            TimedFrame frame = replayFrames[frameIndex];
+            Debug.Assert(frame.Header != null);
+
+            scoreInfo.Accuracy = frame.Header.Accuracy;
+            scoreInfo.MaxCombo = frame.Header.MaxCombo;
+            scoreInfo.Statistics = frame.Header.Statistics;
+            scoreInfo.MaximumStatistics = spectatorState.MaximumStatistics;
+            scoreInfo.TotalScore = frame.Header.TotalScore;
+
+            Accuracy.Value = frame.Header.Accuracy;
+            Combo.Value = frame.Header.Combo;
+            HighestCombo.Value = frame.Header.MaxCombo;
+            TotalScore.Value = frame.Header.TotalScore;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (spectatorClient.IsNotNull())
+                spectatorClient.OnNewFrames -= onNewFrames;
+        }
+
+        private class TimedFrame : IComparable&lt;TimedFrame&gt;
+        {
+            public readonly double Time;
+            public readonly FrameHeader? Header;
+
+            public TimedFrame(double time)
+            {
+                Time = time;
+            }
+
+            public TimedFrame(double time, FrameHeader header)
+            {
+                Time = time;
+                Header = header;
+            }
+
+            public int CompareTo(TimedFrame? other) =&gt; Time.CompareTo(other?.Time);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,9,30,85,0],[35,9,35,104,0],[40,9,40,63,0],[45,9,45,70,0],[50,9,50,82,0],[55,43,55,80,0],[57,59,57,67,0],[57,67,57,104,0],[66,20,66,43,0],[67,20,67,42,0],[71,51,71,55,0],[71,56,71,60,0],[71,65,71,70,0],[74,45,74,49,0],[74,50,74,54,0],[74,59,74,64,0],[76,9,76,131,0],[77,9,77,81,0],[83,9,83,51,0],[84,9,84,10,0],[85,13,85,34,0],[86,9,86,10,0],[89,9,89,10,0],[90,13,90,33,0],[92,13,92,40,0],[92,40,92,53,0],[92,53,92,55,0],[94,13,94,71,0],[95,13,95,83,0],[97,13,97,56,0],[98,9,98,10,0],[101,9,101,10,0],[102,13,102,135,0],[103,13,103,14,0],[104,17,104,34,0],[105,17,105,39,0],[106,17,106,38,0],[107,17,107,24,0],[110,13,110,35,0],[111,17,111,24,0],[113,13,113,91,0],[114,13,114,37,0],[115,17,115,24,0],[117,13,117,60,0],[119,13,119,40,0],[120,13,123,51,0],[123,51,123,67,0],[123,67,124,15,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,42,0],[130,17,130,24,0],[132,13,133,13,0],[133,13,133,14,0],[133,14,134,17,0],[134,17,134,39,0],[134,39,135,21,0],[135,21,135,28,0],[135,28,137,17,0],[137,17,137,93,0],[137,93,138,17,0],[138,17,138,31,0],[138,31,139,13,0],[139,13,139,14,0],[139,14,139,16,0],[140,9,140,10,0],[143,9,143,10,0],[144,13,144,62,0],[145,17,145,24,0],[147,13,147,50,0],[149,13,149,100,0],[150,13,150,32,0],[151,17,151,42,0],[152,13,152,80,0],[154,13,154,57,0],[155,13,155,48,0],[157,13,157,56,0],[158,13,158,56,0],[159,13,159,60,0],[160,13,160,76,0],[161,13,161,60,0],[163,13,163,52,0],[164,13,164,46,0],[165,13,165,56,0],[166,13,166,56,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,39,0],[173,13,173,45,0],[174,17,174,60,0],[175,9,175,10,0],[182,13,182,43,0],[183,13,183,14,0],[184,17,184,29,0],[185,13,185,14,0],[187,13,187,63,0],[188,13,188,14,0],[189,17,189,29,0],[190,17,190,33,0],[191,13,191,14,0],[193,56,193,83,0]]);
+    </script>
+  </body>
+</html>

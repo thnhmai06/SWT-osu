@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/Expanded/Accuracy/AccuracyCircle.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Ranking.Expanded.Accuracy
+{
+    /// &lt;summary&gt;
+    /// The component that displays the player&#39;s accuracy on the results screen.
+    /// &lt;/summary&gt;
+    public partial class AccuracyCircle : CompositeDrawable
+    {
+        /// &lt;summary&gt;
+        /// The total duration of the animation.
+        /// &lt;/summary&gt;
+        public const double TOTAL_DURATION = APPEAR_DURATION + ACCURACY_TRANSFORM_DELAY + ACCURACY_TRANSFORM_DURATION;
+
+        /// &lt;summary&gt;
+        /// Duration for the transforms causing this component to appear.
+        /// &lt;/summary&gt;
+        public const double APPEAR_DURATION = 200;
+
+        /// &lt;summary&gt;
+        /// Delay before the accuracy circle starts filling.
+        /// &lt;/summary&gt;
+        public const double ACCURACY_TRANSFORM_DELAY = 450;
+
+        /// &lt;summary&gt;
+        /// Duration for the accuracy circle fill.
+        /// &lt;/summary&gt;
+        public const double ACCURACY_TRANSFORM_DURATION = 3000;
+
+        /// &lt;summary&gt;
+        /// Delay after &lt;see cref=&quot;ACCURACY_TRANSFORM_DURATION&quot;/&gt; for the rank text (A/B/C/D/S/SS) to appear.
+        /// &lt;/summary&gt;
+        public const double TEXT_APPEAR_DELAY = ACCURACY_TRANSFORM_DURATION / 2;
+
+        /// &lt;summary&gt;
+        /// Delay before the rank circles start filling.
+        /// &lt;/summary&gt;
+        public const double RANK_CIRCLE_TRANSFORM_DELAY = 150;
+
+        /// &lt;summary&gt;
+        /// Duration for the rank circle fills.
+        /// &lt;/summary&gt;
+        public const double RANK_CIRCLE_TRANSFORM_DURATION = 800;
+
+        /// &lt;summary&gt;
+        /// Relative width of the rank circles.
+        /// &lt;/summary&gt;
+        public const float RANK_CIRCLE_RADIUS = 0.05f;
+
+        /// &lt;summary&gt;
+        /// Relative width of the circle showing the accuracy.
+        /// &lt;/summary&gt;
+        private const float accuracy_circle_radius = 0.2f;
+
+        /// &lt;summary&gt;
+        /// SS is displayed as a 1% region, otherwise it would be invisible.
+        /// &lt;/summary&gt;
+        public const double VIRTUAL_SS_PERCENTAGE = 0.01;
+
+        /// &lt;summary&gt;
+        /// The width of spacing in terms of accuracy between the grade circles.
+        /// &lt;/summary&gt;
+        public const double GRADE_SPACING_PERCENTAGE = 2.0 / 360;
+
+        /// &lt;summary&gt;
+        /// The easing for the circle filling transforms.
+        /// &lt;/summary&gt;
+        public static readonly Easing ACCURACY_TRANSFORM_EASING = Easing.OutPow10;
+
+        private readonly ScoreInfo score;
+
+        [Resolved]
+        private ResultsScreen? resultsScreen { get; set; }
+
+        private CircularProgress accuracyCircle = null!;
+        private GradedCircles gradedCircles = null!;
+        private Container&lt;RankBadge&gt; badges = null!;
+        private RankText rankText = null!;
+
+        private PoolableSkinnableSample? scoreTickSound;
+        private PoolableSkinnableSample? badgeTickSound;
+        private PoolableSkinnableSample? badgeMaxSound;
+        private PoolableSkinnableSample? swooshUpSound;
+        private PoolableSkinnableSample? rankImpactSound;
+
+        private readonly Bindable&lt;double&gt; tickPlaybackRate = new Bindable&lt;double&gt;();
+
+        private double lastTickPlaybackTime;
+        private bool isTicking;
+
+        private readonly double accuracyX;
+        private readonly double accuracyS;
+        private readonly double accuracyA;
+        private readonly double accuracyB;
+        private readonly double accuracyC;
+        private readonly double accuracyD;
+        private readonly bool withFlair;
+
+        private readonly bool isFailedSDueToMisses;
+        private RankText failedSRankText = null!;
+
+        public AccuracyCircle(ScoreInfo score, bool withFlair = false)
+        {
+            this.score = score;
+            this.withFlair = withFlair;
+
+            ScoreProcessor scoreProcessor = score.Ruleset.CreateInstance().CreateScoreProcessor();
+            accuracyX = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.X);
+            accuracyS = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.S);
+
+            accuracyA = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.A);
+            accuracyB = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.B);
+            accuracyC = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.C);
+            accuracyD = scoreProcessor.AccuracyCutoffFromRank(ScoreRank.D);
+
+            isFailedSDueToMisses = score.Accuracy &gt;= accuracyS &amp;&amp; score.Rank == ScoreRank.A;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChildren = new Drawable[]
+            {
+                new CircularProgress
+                {
+                    Name = &quot;Background circle&quot;,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = OsuColour.Gray(47),
+                    Alpha = 0.5f,
+                    InnerRadius = accuracy_circle_radius + 0.01f, // Extends a little bit into the circle
+                    Progress = 1,
+                },
+                accuracyCircle = new CircularProgress
+                {
+                    Name = &quot;Accuracy circle&quot;,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = ColourInfo.GradientVertical(Color4Extensions.FromHex(&quot;#7CF6FF&quot;), Color4Extensions.FromHex(&quot;#BAFFA9&quot;)),
+                    InnerRadius = accuracy_circle_radius,
+                },
+                new Container
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                    Size = new Vector2(0.8f),
+                    Padding = new MarginPadding(2.5f),
+                    Child = gradedCircles = new GradedCircles(accuracyC, accuracyB, accuracyA, accuracyS, accuracyX)
+                    {
+                        RelativeSizeAxes = Axes.Both
+                    }
+                },
+                badges = new Container&lt;RankBadge&gt;
+                {
+                    Name = &quot;Rank badges&quot;,
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding { Vertical = -15, Horizontal = -20 },
+                    Children = new[]
+                    {
+                        new RankBadge(accuracyD, Interpolation.Lerp(accuracyD, accuracyC, 0.5), getRank(ScoreRank.D)),
+                        new RankBadge(accuracyC, Interpolation.Lerp(accuracyC, accuracyB, 0.5), getRank(ScoreRank.C)),
+                        new RankBadge(accuracyB, Interpolation.Lerp(accuracyB, accuracyA, 0.5), getRank(ScoreRank.B)),
+                        // The S and A badges are moved down slightly to prevent collision with the SS badge.
+                        new RankBadge(accuracyA, Interpolation.Lerp(accuracyA, accuracyS, 0.25), getRank(ScoreRank.A)),
+                        new RankBadge(accuracyS, Interpolation.Lerp(accuracyS, (accuracyX - VIRTUAL_SS_PERCENTAGE), 0.25), getRank(ScoreRank.S)),
+                        new RankBadge(accuracyX, accuracyX, getRank(ScoreRank.X)),
+                    }
+                },
+                rankText = new RankText(score.Rank)
+            };
+
+            if (isFailedSDueToMisses)
+                AddInternal(failedSRankText = new RankText(ScoreRank.S));
+
+            if (withFlair)
+            {
+                AddRangeInternal(new Drawable[]
+                {
+                    rankImpactSound = new PoolableSkinnableSample(new SampleInfo(impactSampleName)),
+                    scoreTickSound = new PoolableSkinnableSample(new SampleInfo(@&quot;Results/score-tick&quot;)),
+                    badgeTickSound = new PoolableSkinnableSample(new SampleInfo(@&quot;Results/badge-dink&quot;)),
+                    badgeMaxSound = new PoolableSkinnableSample(new SampleInfo(@&quot;Results/badge-dink-max&quot;)),
+                    swooshUpSound = new PoolableSkinnableSample(new SampleInfo(@&quot;Results/swoosh-up&quot;)),
+                });
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            this.ScaleTo(0).Then().ScaleTo(1, APPEAR_DURATION, Easing.OutQuint);
+
+            if (withFlair)
+            {
+                const double swoosh_pre_delay = 443f;
+                const double swoosh_volume = 0.4f;
+
+                this.Delay(swoosh_pre_delay).Schedule(() =&gt;
+                {
+                    swooshUpSound!.VolumeTo(swoosh_volume);
+                    swooshUpSound!.Play();
+                });
+            }
+
+            using (BeginDelayedSequence(RANK_CIRCLE_TRANSFORM_DELAY))
+                gradedCircles.TransformTo(nameof(GradedCircles.Progress), 1.0, RANK_CIRCLE_TRANSFORM_DURATION, ACCURACY_TRANSFORM_EASING);
+
+            using (BeginDelayedSequence(ACCURACY_TRANSFORM_DELAY))
+            {
+                double targetAccuracy = score.Accuracy;
+                double[] notchPercentages =
+                {
+                    accuracyS,
+                    accuracyA,
+                    accuracyB,
+                    accuracyC,
+                };
+
+                // Ensure the gauge overshoots or undershoots a bit so it doesn&#39;t land in the gaps of the inner graded circle (caused by `RankNotch`es),
+                // to prevent ambiguity on what grade it&#39;s pointing at.
+                foreach (double p in notchPercentages)
+                {
+                    if (Precision.AlmostEquals(p, targetAccuracy, GRADE_SPACING_PERCENTAGE / 2))
+                    {
+                        int tippingDirection = targetAccuracy - p &gt;= 0 ? 1 : -1; // We &quot;round up&quot; here to match rank criteria
+                        targetAccuracy = p + tippingDirection * (GRADE_SPACING_PERCENTAGE / 2);
+                        break;
+                    }
+                }
+
+                // The final gap between 99.999...% (S) and 100% (SS) is exaggerated by `virtual_ss_percentage`. We don&#39;t want to land there either.
+                if (score.Rank == ScoreRank.X || score.Rank == ScoreRank.XH)
+                    targetAccuracy = 1;
+                else
+                    targetAccuracy = Math.Min(accuracyX - VIRTUAL_SS_PERCENTAGE - GRADE_SPACING_PERCENTAGE / 2, targetAccuracy);
+
+                // The accuracy circle gauge visually fills up a bit too much.
+                // This wouldn&#39;t normally matter but we want it to align properly with the inner graded circle in the above cases.
+                const double visual_alignment_offset = 0.001;
+
+                if (targetAccuracy &lt; 1 &amp;&amp; targetAccuracy &gt;= visual_alignment_offset)
+                    targetAccuracy -= visual_alignment_offset;
+
+                accuracyCircle.ProgressTo(targetAccuracy, ACCURACY_TRANSFORM_DURATION, ACCURACY_TRANSFORM_EASING);
+
+                if (withFlair)
+                {
+                    Schedule(() =&gt;
+                    {
+                        const double score_tick_debounce_rate_start = 18f;
+                        const double score_tick_debounce_rate_end = 300f;
+                        const double score_tick_volume_start = 0.6f;
+                        const double score_tick_volume_end = 1.0f;
+
+                        this.TransformBindableTo(tickPlaybackRate, score_tick_debounce_rate_start);
+                        this.TransformBindableTo(tickPlaybackRate, score_tick_debounce_rate_end, ACCURACY_TRANSFORM_DURATION, Easing.OutSine);
+
+                        scoreTickSound!.FrequencyTo(1 + targetAccuracy, ACCURACY_TRANSFORM_DURATION, Easing.OutSine);
+                        scoreTickSound!.VolumeTo(score_tick_volume_start).Then().VolumeTo(score_tick_volume_end, ACCURACY_TRANSFORM_DURATION, Easing.OutSine);
+
+                        isTicking = true;
+                    });
+                }
+
+                int badgeNum = 0;
+
+                if (score.Rank != ScoreRank.F)
+                {
+                    foreach (var badge in badges)
+                    {
+                        if (badge.Rank &gt; score.Rank)
+                            continue;
+
+                        using (BeginDelayedSequence(
+                                   inverseEasing(ACCURACY_TRANSFORM_EASING, Math.Min(accuracyX - VIRTUAL_SS_PERCENTAGE, badge.Accuracy) / targetAccuracy) * ACCURACY_TRANSFORM_DURATION))
+                        {
+                            badge.Appear();
+
+                            if (withFlair)
+                            {
+                                Schedule(() =&gt;
+                                {
+                                    var dink = badgeNum &lt; badges.Count - 1 ? badgeTickSound : badgeMaxSound;
+
+                                    dink!.FrequencyTo(1 + badgeNum++ * 0.05);
+                                    dink!.Play();
+                                });
+                            }
+                        }
+                    }
+                }
+
+                using (BeginDelayedSequence(TEXT_APPEAR_DELAY))
+                {
+                    rankText.Appear();
+
+                    if (withFlair)
+                    {
+                        Schedule(() =&gt;
+                        {
+                            isTicking = false;
+                            rankImpactSound!.Play();
+                        });
+
+                        const double applause_pre_delay = 545f;
+
+                        using (BeginDelayedSequence(applause_pre_delay))
+                            Schedule(() =&gt; resultsScreen?.PlayApplause(score.Rank));
+                    }
+                }
+
+                if (isFailedSDueToMisses)
+                {
+                    const double adjust_duration = 200;
+
+                    using (BeginDelayedSequence(TEXT_APPEAR_DELAY - adjust_duration))
+                    {
+                        failedSRankText.FadeIn(adjust_duration);
+
+                        using (BeginDelayedSequence(adjust_duration))
+                        {
+                            failedSRankText
+                                .FadeColour(Color4.Red, 800, Easing.Out)
+                                .RotateTo(10, 1000, Easing.Out)
+                                .MoveToY(100, 1000, Easing.In)
+                                .FadeOut(800, Easing.Out);
+
+                            accuracyCircle
+                                .ProgressTo(accuracyS - GRADE_SPACING_PERCENTAGE / 2 - visual_alignment_offset, 70, Easing.OutQuint);
+
+                            badges.Single(b =&gt; b.Rank == getRank(ScoreRank.S))
+                                  .FadeOut(70, Easing.OutQuint);
+                        }
+                    }
+                }
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (isTicking &amp;&amp; Clock.CurrentTime - lastTickPlaybackTime &gt;= tickPlaybackRate.Value)
+            {
+                scoreTickSound?.Play();
+                lastTickPlaybackTime = Clock.CurrentTime;
+            }
+        }
+
+        private string impactSampleName
+        {
+            get
+            {
+                switch (score.Rank)
+                {
+                    default:
+                    case ScoreRank.D:
+                        return @&quot;Results/rank-impact-fail-d&quot;;
+
+                    case ScoreRank.C:
+                    case ScoreRank.B:
+                        return @&quot;Results/rank-impact-fail&quot;;
+
+                    case ScoreRank.A:
+                    case ScoreRank.S:
+                    case ScoreRank.SH:
+                        return @&quot;Results/rank-impact-pass&quot;;
+
+                    case ScoreRank.X:
+                    case ScoreRank.XH:
+                        return @&quot;Results/rank-impact-pass-ss&quot;;
+                }
+            }
+        }
+
+        private ScoreRank getRank(ScoreRank rank)
+        {
+            foreach (var mod in score.Mods.OfType&lt;IApplicableToScoreProcessor&gt;())
+                rank = mod.AdjustRank(rank, score.Accuracy);
+
+            return rank;
+        }
+
+        private double inverseEasing(Easing easing, double targetValue)
+        {
+            double test = 0;
+            double result = 0;
+            int count = 2;
+
+            while (Math.Abs(result - targetValue) &gt; 0.005)
+            {
+                int dir = Math.Sign(targetValue - result);
+
+                test += dir * 1.0 / count;
+                result = Interpolation.ApplyEasing(easing, test);
+
+                count++;
+            }
+
+            return test;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[89,9,89,83,0],[94,48,94,52,0],[94,53,94,57,0],[96,9,96,57,0],[97,9,97,53,0],[98,9,98,53,0],[99,9,99,43,0],[107,9,107,85,0],[121,9,121,50,0],[123,9,123,71,0],[124,9,124,10,0],[125,13,125,32,0],[126,13,126,40,0],[128,13,128,99,0],[129,13,129,76,0],[130,13,130,76,0],[132,13,132,76,0],[133,13,133,76,0],[134,13,134,76,0],[135,13,135,76,0],[137,13,137,93,0],[138,9,138,10,0],[142,9,142,10,0],[143,13,194,15,0],[196,13,196,38,0],[197,17,197,74,0],[199,13,199,27,0],[200,13,200,14,0],[201,17,208,20,0],[209,13,209,14,0],[210,9,210,10,0],[213,9,213,10,0],[214,13,214,33,0],[216,13,216,81,0],[218,13,218,27,0],[219,13,219,14,0],[223,17,224,17,0],[224,17,224,18,0],[224,18,225,21,0],[225,21,225,60,0],[225,60,226,21,0],[226,21,226,43,0],[226,43,227,17,0],[227,17,227,18,0],[227,18,227,20,0],[228,13,228,14,0],[230,13,230,70,0],[231,17,231,139,0],[233,13,233,67,0],[234,13,234,14,0],[235,17,235,56,0],[236,17,242,19,0],[246,17,246,24,0],[246,26,246,34,0],[246,35,246,37,0],[246,38,246,54,0],[247,17,247,18,0],[248,21,248,97,0],[249,21,249,22,0],[250,25,250,81,0],[251,25,251,96,0],[252,25,252,31,0],[254,17,254,18,0],[257,17,257,77,0],[258,21,258,40,0],[260,21,260,129,0],[266,17,266,85,0],[267,21,267,63,0],[269,17,269,115,0],[271,17,271,31,0],[272,17,272,18,0],[273,21,274,21,0],[274,21,274,22,0],[274,22,280,25,0],[280,25,280,100,0],[280,100,281,25,0],[281,25,281,143,0],[281,143,283,25,0],[283,25,283,118,0],[283,118,284,25,0],[284,25,284,159,0],[284,159,286,25,0],[286,25,286,42,0],[286,42,287,21,0],[287,21,287,22,0],[287,22,287,24,0],[288,17,288,18,0],[290,17,290,34,0],[292,17,292,47,0],[293,17,293,18,0],[294,21,294,28,0],[294,30,294,39,0],[294,40,294,42,0],[294,43,294,49,0],[295,21,295,22,0],[296,25,296,53,0],[297,29,297,38,0],[299,25,300,186,0],[301,25,301,26,0],[302,29,302,44,0],[304,29,304,43,0],[305,29,305,30,0],[306,33,307,33,0],[307,33,307,34,0],[307,34,308,37,0],[308,37,308,109,0],[308,109,310,37,0],[310,37,310,78,0],[310,78,311,37,0],[311,37,311,50,0],[311,50,312,33,0],[312,33,312,34,0],[312,34,312,36,0],[313,29,313,30,0],[314,25,314,26,0],[315,21,315,22,0],[316,17,316,18,0],[318,17,318,64,0],[319,17,319,18,0],[320,21,320,39,0],[322,21,322,35,0],[323,21,323,22,0],[324,25,325,25,0],[325,25,325,26,0],[325,26,326,29,0],[326,29,326,47,0],[326,47,327,29,0],[327,29,327,53,0],[327,53,328,25,0],[328,25,328,26,0],[328,26,328,28,0],[332,25,332,73,0],[333,29,333,44,0],[333,44,333,83,0],[333,83,333,85,0],[334,21,334,22,0],[335,17,335,18,0],[337,17,337,42,0],[338,17,338,18,0],[341,21,341,86,0],[342,21,342,22,0],[343,25,343,65,0],[345,25,345,70,0],[346,25,346,26,0],[347,29,351,59,0],[353,29,354,134,0],[356,29,356,48,0],[356,48,356,78,0],[356,78,357,65,0],[358,25,358,26,0],[359,21,359,22,0],[360,17,360,18,0],[361,13,361,14,0],[362,9,362,10,0],[365,9,365,10,0],[366,13,366,27,0],[368,13,368,97,0],[369,13,369,14,0],[370,17,370,40,0],[371,17,371,58,0],[372,13,372,14,0],[373,9,373,10,0],[378,13,378,14,0],[379,17,379,36,0],[383,25,383,62,0],[387,25,387,60,0],[392,25,392,60,0],[396,25,396,63,0],[398,13,398,14,0],[402,9,402,10,0],[403,13,403,20,0],[403,22,403,29,0],[403,30,403,32,0],[403,33,403,81,0],[404,17,404,61,0],[406,13,406,25,0],[407,9,407,10,0],[410,9,410,10,0],[411,13,411,29,0],[412,13,412,31,0],[413,13,413,27,0],[415,13,415,59,0],[416,13,416,14,0],[417,17,417,59,0],[419,17,419,43,0],[420,17,420,66,0],[422,17,422,25,0],[423,13,423,14,0],[425,13,425,25,0],[426,9,426,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/UserInterface/OsuTextBox.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Audio.Track;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Game.Graphics.Sprites;
+using osuTK.Graphics;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Graphics.Containers;
+using osu.Game.Overlays;
+using osuTK;
+
+namespace osu.Game.Graphics.UserInterface
+{
+    public partial class OsuTextBox : BasicTextBox
+    {
+        /// &lt;summary&gt;
+        /// Whether to allow playing a different samples based on the type of character.
+        /// If set to false, the same sample will be used for all characters.
+        /// &lt;/summary&gt;
+        protected virtual bool AllowUniqueCharacterSamples =&gt; true;
+
+        protected override float LeftRightPadding =&gt; 10;
+
+        protected override float CaretWidth =&gt; 3;
+
+        protected override SpriteText CreatePlaceholder() =&gt; new OsuSpriteText
+        {
+            Font = OsuFont.GetFont(italics: true),
+            Margin = new MarginPadding { Left = 2 },
+        };
+
+        protected bool DrawBorder { get; init; } = true;
+
+        private OsuCaret? caret;
+
+        private bool selectionStarted;
+        private double sampleLastPlaybackTime;
+
+        protected enum FeedbackSampleType
+        {
+            TextAdd,
+            TextAddCaps,
+            TextRemove,
+            TextConfirm,
+            TextInvalid,
+            CaretMove,
+            SelectCharacter,
+            SelectWord,
+            SelectAll,
+            Deselect
+        }
+
+        private Dictionary&lt;FeedbackSampleType, Sample?[]&gt; sampleMap = new Dictionary&lt;FeedbackSampleType, Sample?[]&gt;();
+
+        /// &lt;summary&gt;
+        /// Whether all text should be selected when the &lt;see cref=&quot;OsuTextBox&quot;/&gt; gains focus.
+        /// &lt;/summary&gt;
+        public bool SelectAllOnFocus { get; set; }
+
+        public OsuTextBox()
+        {
+            Height = 40;
+            TextContainer.Height = 0.5f;
+            CornerRadius = 5;
+            LengthLimit = 1000;
+
+            Current.DisabledChanged += disabled =&gt; { Alpha = disabled ? 0.3f : 1; };
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OverlayColourProvider? colourProvider, OsuColour colour, AudioManager audio)
+        {
+            BackgroundUnfocused = colourProvider?.Background5 ?? Color4.Black.Opacity(0.5f);
+            BackgroundFocused = colourProvider?.Background4 ?? OsuColour.Gray(0.3f).Opacity(0.8f);
+            BackgroundCommit = BorderColour = colourProvider?.Highlight1 ?? colour.Yellow;
+            selectionColour = colourProvider?.Background1 ?? new Color4(249, 90, 255, 255);
+
+            caret?.SelectionColour = selectionColour;
+
+            Placeholder.Colour = colourProvider?.Foreground1 ?? new Color4(180, 180, 180, 255);
+
+            // Note that `KeyBindingRow` uses similar logic for input feedback, so remember to update there if changing here.
+            var textAddedSamples = new Sample?[4];
+            for (int i = 0; i &lt; textAddedSamples.Length; i++)
+                textAddedSamples[i] = audio.Samples.Get($@&quot;Keyboard/key-press-{1 + i}&quot;);
+
+            sampleMap = new Dictionary&lt;FeedbackSampleType, Sample?[]&gt;
+            {
+                { FeedbackSampleType.TextAdd, textAddedSamples },
+                { FeedbackSampleType.TextAddCaps, new[] { audio.Samples.Get(@&quot;Keyboard/key-caps&quot;) } },
+                { FeedbackSampleType.TextRemove, new[] { audio.Samples.Get(@&quot;Keyboard/key-delete&quot;) } },
+                { FeedbackSampleType.TextConfirm, new[] { audio.Samples.Get(@&quot;Keyboard/key-confirm&quot;) } },
+                { FeedbackSampleType.TextInvalid, new[] { audio.Samples.Get(@&quot;Keyboard/key-invalid&quot;) } },
+                { FeedbackSampleType.CaretMove, new[] { audio.Samples.Get(@&quot;Keyboard/key-movement&quot;) } },
+                { FeedbackSampleType.SelectCharacter, new[] { audio.Samples.Get(@&quot;Keyboard/select-char&quot;) } },
+                { FeedbackSampleType.SelectWord, new[] { audio.Samples.Get(@&quot;Keyboard/select-word&quot;) } },
+                { FeedbackSampleType.SelectAll, new[] { audio.Samples.Get(@&quot;Keyboard/select-all&quot;) } },
+                { FeedbackSampleType.Deselect, new[] { audio.Samples.Get(@&quot;Keyboard/deselect&quot;) } }
+            };
+        }
+
+        private Color4 selectionColour;
+
+        protected override Color4 SelectionColour =&gt; selectionColour;
+
+        protected override void OnUserTextAdded(string added)
+        {
+            base.OnUserTextAdded(added);
+
+            if (!added.Any(CanAddCharacter))
+                return;
+
+            if (added.Any(char.IsUpper) &amp;&amp; AllowUniqueCharacterSamples)
+                PlayFeedbackSample(FeedbackSampleType.TextAddCaps);
+            else
+                PlayFeedbackSample(FeedbackSampleType.TextAdd);
+        }
+
+        protected override void OnUserTextRemoved(string removed)
+        {
+            base.OnUserTextRemoved(removed);
+
+            PlayFeedbackSample(FeedbackSampleType.TextRemove);
+        }
+
+        protected override void NotifyInputError()
+        {
+            base.NotifyInputError();
+
+            PlayFeedbackSample(FeedbackSampleType.TextInvalid);
+        }
+
+        protected override void OnTextCommitted(bool textChanged)
+        {
+            base.OnTextCommitted(textChanged);
+
+            PlayFeedbackSample(FeedbackSampleType.TextConfirm);
+        }
+
+        protected override void OnCaretMoved(bool selecting)
+        {
+            base.OnCaretMoved(selecting);
+
+            if (!selecting)
+                PlayFeedbackSample(FeedbackSampleType.CaretMove);
+        }
+
+        protected override void OnTextSelectionChanged(TextSelectionType selectionType)
+        {
+            base.OnTextSelectionChanged(selectionType);
+
+            switch (selectionType)
+            {
+                case TextSelectionType.Character:
+                    PlayFeedbackSample(FeedbackSampleType.SelectCharacter);
+                    break;
+
+                case TextSelectionType.Word:
+                    PlayFeedbackSample(selectionStarted ? FeedbackSampleType.SelectCharacter : FeedbackSampleType.SelectWord);
+                    break;
+
+                case TextSelectionType.All:
+                    PlayFeedbackSample(FeedbackSampleType.SelectAll);
+                    break;
+            }
+
+            selectionStarted = true;
+        }
+
+        protected override void OnTextDeselected()
+        {
+            base.OnTextDeselected();
+
+            if (!selectionStarted) return;
+
+            PlayFeedbackSample(FeedbackSampleType.Deselect);
+
+            selectionStarted = false;
+        }
+
+        protected override void OnImeComposition(string newComposition, int removedTextLength, int addedTextLength, bool caretMoved)
+        {
+            base.OnImeComposition(newComposition, removedTextLength, addedTextLength, caretMoved);
+
+            if (string.IsNullOrEmpty(newComposition))
+            {
+                switch (removedTextLength)
+                {
+                    case 0:
+                        // empty composition event, composition wasn&#39;t changed, don&#39;t play anything.
+                        return;
+
+                    case 1:
+                        // composition probably ended by pressing backspace, or was cancelled.
+                        PlayFeedbackSample(FeedbackSampleType.TextRemove);
+                        return;
+
+                    default:
+                        // longer text removed, composition ended because it was cancelled.
+                        // could be a different sample if desired.
+                        PlayFeedbackSample(FeedbackSampleType.TextRemove);
+                        return;
+                }
+            }
+
+            if (addedTextLength &gt; 0)
+            {
+                // some text was added, probably due to typing new text or by changing the candidate.
+                PlayFeedbackSample(FeedbackSampleType.TextAdd);
+                return;
+            }
+
+            if (removedTextLength &gt; 0)
+            {
+                // text was probably removed by backspacing.
+                // it&#39;s also possible that a candidate that only removed text was changed to.
+                PlayFeedbackSample(FeedbackSampleType.TextRemove);
+                return;
+            }
+
+            if (caretMoved)
+            {
+                // only the caret/selection was moved.
+                PlayFeedbackSample(FeedbackSampleType.CaretMove);
+            }
+        }
+
+        protected override void OnImeResult(string result, bool successful)
+        {
+            base.OnImeResult(result, successful);
+
+            if (successful)
+            {
+                // composition was successfully completed, usually by pressing the enter key.
+                PlayFeedbackSample(FeedbackSampleType.TextConfirm);
+            }
+            else
+            {
+                // composition was prematurely ended, eg. by clicking inside the textbox.
+                // could be a different sample if desired.
+                PlayFeedbackSample(FeedbackSampleType.TextConfirm);
+            }
+        }
+
+        protected override void OnFocus(FocusEvent e)
+        {
+            if (DrawBorder)
+                BorderThickness = 3;
+
+            base.OnFocus(e);
+
+            // we may become focused from an ongoing drag operation, we don&#39;t want to overwrite selection in that case.
+            if (SelectAllOnFocus &amp;&amp; string.IsNullOrEmpty(SelectedText))
+                SelectAll();
+        }
+
+        protected override void OnFocusLost(FocusLostEvent e)
+        {
+            if (DrawBorder)
+                BorderThickness = 0;
+
+            base.OnFocusLost(e);
+        }
+
+        protected override Drawable GetDrawableCharacter(char c) =&gt; new FallingDownContainer
+        {
+            AutoSizeAxes = Axes.Both,
+            Child = new OsuSpriteText { Text = c.ToString(), Font = Font },
+        };
+
+        protected virtual FontUsage Font =&gt; OsuFont.GetFont(size: FontSize);
+
+        protected override Caret CreateCaret() =&gt; caret = new OsuCaret
+        {
+            CaretWidth = CaretWidth,
+            SelectionColour = SelectionColour,
+        };
+
+        private SampleChannel? getSampleChannel(FeedbackSampleType feedbackSampleType)
+        {
+            var samples = sampleMap[feedbackSampleType];
+
+            if (samples.Length == 0)
+                return null;
+
+            return samples[RNG.Next(0, samples.Length)]?.GetChannel();
+        }
+
+        protected void PlayFeedbackSample(FeedbackSampleType feedbackSample) =&gt; Schedule(() =&gt;
+        {
+            if (Time.Current &lt; sampleLastPlaybackTime + 15) return;
+
+            SampleChannel? channel = getSampleChannel(feedbackSample);
+
+            if (channel == null) return;
+
+            double pitch = 0.98 + RNG.NextDouble(0.04);
+
+            if (feedbackSample == FeedbackSampleType.SelectCharacter)
+                pitch += ((double)SelectedText.Length / Math.Max(1, Text.Length)) * 0.15f;
+
+            channel.Frequency.Value = pitch;
+            channel.Play();
+
+            sampleLastPlaybackTime = Time.Current;
+        });
+
+        private partial class OsuCaret : Caret
+        {
+            private const float caret_move_time = 60;
+
+            private readonly CaretBeatSyncedContainer beatSync;
+
+            public OsuCaret()
+            {
+                Colour = Color4.Transparent;
+
+                InternalChild = beatSync = new CaretBeatSyncedContainer
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Masking = true,
+                    CornerRadius = 1f,
+                    RelativeSizeAxes = Axes.Both,
+                    Height = 0.9f,
+                };
+            }
+
+            public override void Hide() =&gt; this.FadeOut(200);
+
+            public float CaretWidth { get; set; }
+
+            public Color4 SelectionColour { get; set; }
+
+            public override void DisplayAt(Vector2 position, float? selectionWidth)
+            {
+                beatSync.HasSelection = selectionWidth != null;
+
+                if (selectionWidth != null)
+                {
+                    this.MoveTo(new Vector2(position.X, position.Y), 60, Easing.Out);
+                    this.ResizeWidthTo(selectionWidth.Value + CaretWidth / 2, caret_move_time, Easing.Out);
+                    this.FadeColour(SelectionColour, 200, Easing.Out);
+                }
+                else
+                {
+                    this.MoveTo(new Vector2(position.X - CaretWidth / 2, position.Y), 60, Easing.Out);
+                    this.ResizeWidthTo(CaretWidth, caret_move_time, Easing.Out);
+                    this.FadeColour(Color4.White, 200, Easing.Out);
+                }
+            }
+
+            private partial class CaretBeatSyncedContainer : BeatSyncedContainer
+            {
+                private bool hasSelection;
+
+                public bool HasSelection
+                {
+                    set
+                    {
+                        hasSelection = value;
+                        if (value)
+
+                            this.FadeTo(0.5f, 200, Easing.Out);
+                    }
+                }
+
+                public CaretBeatSyncedContainer()
+                {
+                    MinimumBeatLength = 300;
+                    InternalChild = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = Color4.White,
+                    };
+                }
+
+                protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, ChannelAmplitudes amplitudes)
+                {
+                    if (!hasSelection)
+                        this.FadeTo(0.7f).FadeTo(0.4f, timingPoint.BeatLength, Easing.InOutSine);
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,63,33,67,0],[35,54,35,56,0],[37,48,37,49,0],[39,62,43,10,0],[45,37,45,41,0],[45,42,45,47,0],[45,52,45,56,0],[66,9,66,119,0],[71,40,71,44,0],[71,45,71,49,0],[73,9,73,28,0],[74,9,74,10,0],[75,13,75,25,0],[76,13,76,41,0],[77,13,77,30,0],[78,13,78,32,0],[80,13,80,52,0],[80,52,80,53,0],[80,53,80,54,0],[80,54,80,82,0],[80,82,80,83,0],[80,83,80,84,0],[80,84,80,85,0],[81,9,81,10,0],[85,9,85,10,0],[86,13,86,93,0],[87,13,87,99,0],[88,13,88,91,0],[89,13,89,92,0],[91,13,91,54,0],[93,13,93,96,0],[96,13,96,51,0],[97,18,97,27,0],[97,29,97,56,0],[97,58,97,61,0],[98,17,98,89,0],[100,13,112,15,0],[113,9,113,10,0],[117,54,117,69,0],[120,9,120,10,0],[121,13,121,41,0],[123,13,123,45,0],[124,17,124,24,0],[126,13,126,72,0],[127,17,127,68,0],[129,17,129,64,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,45,0],[136,13,136,63,0],[137,9,137,10,0],[140,9,140,10,0],[141,13,141,37,0],[143,13,143,64,0],[144,9,144,10,0],[147,9,147,10,0],[148,13,148,47,0],[150,13,150,64,0],[151,9,151,10,0],[154,9,154,10,0],[155,13,155,42,0],[157,13,157,28,0],[158,17,158,66,0],[159,9,159,10,0],[162,9,162,10,0],[163,13,163,56,0],[165,13,165,35,0],[168,21,168,76,0],[169,21,169,27,0],[172,21,172,127,0],[173,21,173,27,0],[176,21,176,70,0],[177,21,177,27,0],[180,13,180,37,0],[181,9,181,10,0],[184,9,184,10,0],[185,13,185,37,0],[187,13,187,35,0],[187,36,187,43,0],[189,13,189,61,0],[191,13,191,38,0],[192,9,192,10,0],[195,9,195,10,0],[196,13,196,99,0],[198,13,198,54,0],[199,13,199,14,0],[200,17,200,43,0],[204,25,204,32,0],[208,25,208,75,0],[209,25,209,32,0],[214,25,214,75,0],[215,25,215,32,0],[219,13,219,37,0],[220,13,220,14,0],[222,17,222,64,0],[223,17,223,24,0],[226,13,226,39,0],[227,13,227,14,0],[230,17,230,67,0],[231,17,231,24,0],[234,13,234,28,0],[235,13,235,14,0],[237,17,237,66,0],[238,13,238,14,0],[239,9,239,10,0],[242,9,242,10,0],[243,13,243,50,0],[245,13,245,28,0],[246,13,246,14,0],[248,17,248,68,0],[249,13,249,14,0],[251,13,251,14,0],[254,17,254,68,0],[255,13,255,14,0],[256,9,256,10,0],[259,9,259,10,0],[260,13,260,28,0],[261,17,261,37,0],[263,13,263,29,0],[266,13,266,72,0],[267,17,267,29,0],[268,9,268,10,0],[271,9,271,10,0],[272,13,272,28,0],[273,17,273,37,0],[275,13,275,33,0],[276,9,276,10,0],[278,69,282,10,0],[284,45,284,76,0],[286,51,290,10,0],[293,9,293,10,0],[294,13,294,57,0],[296,13,296,37,0],[297,17,297,29,0],[299,13,299,71,0],[300,9,300,10,0],[302,81,303,9,0],[303,9,303,10,0],[303,10,304,13,0],[304,13,304,60,0],[304,60,304,61,0],[304,61,304,68,0],[304,68,306,13,0],[306,13,306,71,0],[306,71,308,13,0],[308,13,308,33,0],[308,33,308,34,0],[308,34,308,41,0],[308,41,310,13,0],[310,13,310,56,0],[310,56,312,13,0],[312,13,312,70,0],[312,70,313,17,0],[313,17,313,91,0],[313,91,315,13,0],[315,13,315,45,0],[315,45,316,13,0],[316,13,316,28,0],[316,28,318,13,0],[318,13,318,51,0],[318,51,319,9,0],[319,9,319,10,0],[319,10,319,11,0],[327,13,327,30,0],[328,13,328,14,0],[329,17,329,45,0],[331,17,339,19,0],[340,13,340,14,0],[342,44,342,61,0],[344,39,344,43,0],[344,44,344,48,0],[346,45,346,49,0],[346,50,346,54,0],[349,13,349,14,0],[350,17,350,64,0],[352,17,352,44,0],[353,17,353,18,0],[354,21,354,86,0],[355,21,355,108,0],[356,21,356,71,0],[357,17,357,18,0],[359,17,359,18,0],[360,21,360,103,0],[361,21,361,81,0],[362,21,362,68,0],[363,17,363,18,0],[364,13,364,14,0],[373,21,373,22,0],[374,25,374,46,0],[375,25,375,35,0],[377,29,377,64,0],[378,21,378,22,0],[381,17,381,50,0],[382,17,382,18,0],[383,21,383,45,0],[384,21,388,23,0],[389,17,389,18,0],[392,17,392,18,0],[393,21,393,39,0],[394,25,394,98,0],[395,17,395,18,0]]);
+    </script>
+  </body>
+</html>

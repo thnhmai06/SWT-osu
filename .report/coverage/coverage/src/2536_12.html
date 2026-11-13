@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/SkinEditor/SkinSelectionScaleHandler.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Utils;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Compose.Components;
+using osu.Game.Skinning;
+using osu.Game.Utils;
+using osuTK;
+
+namespace osu.Game.Overlays.SkinEditor
+{
+    public partial class SkinSelectionScaleHandler : SelectionScaleHandler
+    {
+        public Action&lt;Drawable, Vector2&gt; UpdatePosition { get; init; } = null!;
+
+        public event Action&lt;Axes&gt;? PerformFlipFromScaleHandles;
+
+        [Resolved]
+        private IEditorChangeHandler? changeHandler { get; set; }
+
+        private BindableList&lt;ISerialisableDrawable&gt; selectedItems { get; } = new BindableList&lt;ISerialisableDrawable&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load(SkinEditor skinEditor)
+        {
+            selectedItems.BindTo(skinEditor.SelectedComponents);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            selectedItems.CollectionChanged += (_, __) =&gt; updateState();
+            updateState();
+        }
+
+        private void updateState()
+        {
+            CanScaleX.Value = allSelectedSupportManualSizing(Axes.X);
+            CanScaleY.Value = allSelectedSupportManualSizing(Axes.Y);
+            CanScaleDiagonally.Value = true;
+        }
+
+        private bool allSelectedSupportManualSizing(Axes axis) =&gt; selectedItems.All(b =&gt; (b as CompositeDrawable)?.AutoSizeAxes.HasFlag(axis) == false);
+
+        private Dictionary&lt;Drawable, OriginalDrawableState&gt;? objectsInScale;
+        private Vector2? defaultOrigin;
+
+        private bool isFlippedX;
+        private bool isFlippedY;
+
+        public override void Begin()
+        {
+            if (objectsInScale != null)
+                throw new InvalidOperationException($&quot;Cannot {nameof(Begin)} a scale operation while another is in progress!&quot;);
+
+            changeHandler?.BeginChange();
+
+            objectsInScale = selectedItems.Cast&lt;Drawable&gt;().ToDictionary(d =&gt; d, d =&gt; new OriginalDrawableState(d));
+            OriginalSurroundingQuad = ToLocalSpace(GeometryUtils.GetSurroundingQuad(objectsInScale.SelectMany(d =&gt; d.Key.ScreenSpaceDrawQuad.GetVertices().ToArray())));
+            defaultOrigin = ToLocalSpace(GeometryUtils.MinimumEnclosingCircle(objectsInScale.SelectMany(d =&gt; d.Key.ScreenSpaceDrawQuad.GetVertices().ToArray())).Item1);
+
+            isFlippedX = false;
+            isFlippedY = false;
+        }
+
+        public override void Update(Vector2 scale, Vector2? origin = null, Axes adjustAxis = Axes.Both, float axisRotation = 0)
+        {
+            if (objectsInScale == null)
+                throw new InvalidOperationException($&quot;Cannot {nameof(Update)} a scale operation without calling {nameof(Begin)} first!&quot;);
+
+            Debug.Assert(defaultOrigin != null &amp;&amp; OriginalSurroundingQuad != null);
+
+            var actualOrigin = ToScreenSpace(origin ?? defaultOrigin.Value);
+
+            if ((adjustAxis == Axes.Y &amp;&amp; !allSelectedSupportManualSizing(Axes.Y)) ||
+                (adjustAxis == Axes.X &amp;&amp; !allSelectedSupportManualSizing(Axes.X)))
+                return;
+
+            // If the selection has no area we cannot scale it
+            if (OriginalSurroundingQuad.Value.Width == 0 || OriginalSurroundingQuad.Value.Height == 0)
+                return;
+
+            // for now aspect lock scale adjustments that occur at corners.
+            if (adjustAxis == Axes.Both)
+            {
+                // project scale vector along diagonal
+                scale = new Vector2((scale.X + scale.Y) * 0.5f);
+            }
+            // If any of the selection have been rotated and the adjust axis is not both,
+            // we would require skew logic to achieve a correct image editor-like scale.
+            // For now we just ignore, because it would likely not be the user&#39;s expected transform anyway.
+
+            bool flippedX = scale.X &lt; 0;
+            bool flippedY = scale.Y &lt; 0;
+            Axes toFlip = Axes.None;
+
+            if (flippedX != isFlippedX)
+            {
+                isFlippedX = flippedX;
+                toFlip |= Axes.X;
+            }
+
+            if (flippedY != isFlippedY)
+            {
+                isFlippedY = flippedY;
+                toFlip |= Axes.Y;
+            }
+
+            if (toFlip != Axes.None)
+            {
+                PerformFlipFromScaleHandles?.Invoke(toFlip);
+                return;
+            }
+
+            foreach (var (b, originalState) in objectsInScale)
+            {
+                UpdatePosition(b, GeometryUtils.GetScaledPosition(scale, actualOrigin, originalState.ScreenSpaceOriginPosition));
+
+                var currentScale = scale;
+                if (Precision.AlmostEquals(MathF.Abs(b.Rotation) % 180, 90))
+                    currentScale = new Vector2(scale.Y, scale.X);
+
+                switch (adjustAxis)
+                {
+                    case Axes.X:
+                        b.Width = MathF.Abs(originalState.Width * currentScale.X);
+                        break;
+
+                    case Axes.Y:
+                        b.Height = MathF.Abs(originalState.Height * currentScale.Y);
+                        break;
+
+                    case Axes.Both:
+                        b.Scale = originalState.Scale * currentScale;
+                        break;
+                }
+            }
+        }
+
+        public override void Commit()
+        {
+            if (objectsInScale == null)
+                throw new InvalidOperationException($&quot;Cannot {nameof(Commit)} a scale operation without calling {nameof(Begin)} first!&quot;);
+
+            changeHandler?.EndChange();
+
+            objectsInScale = null;
+            defaultOrigin = null;
+        }
+
+        private struct OriginalDrawableState
+        {
+            public float Width { get; }
+            public float Height { get; }
+            public Vector2 Scale { get; }
+            public Vector2 ScreenSpaceOriginPosition { get; }
+
+            public OriginalDrawableState(Drawable drawable)
+            {
+                Width = drawable.Width;
+                Height = drawable.Height;
+                Scale = drawable.Scale;
+                ScreenSpaceOriginPosition = drawable.ToScreenSpace(drawable.OriginPosition);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,59,23,63,0],[23,64,23,69,0],[23,74,23,79,0],[28,55,28,59,0],[28,60,28,64,0],[30,69,30,73,0],[30,78,30,119,0],[34,9,34,10,0],[35,13,35,65,0],[36,9,36,10,0],[39,9,39,10,0],[40,13,40,33,0],[42,13,42,59,0],[42,59,42,72,0],[42,72,42,73,0],[43,13,43,27,0],[44,9,44,10,0],[47,9,47,10,0],[48,13,48,70,0],[49,13,49,70,0],[50,13,50,45,0],[51,9,51,10,0],[53,67,53,90,0],[53,90,53,151,0],[53,151,53,152,0],[62,9,62,10,0],[63,13,63,40,0],[64,17,64,128,0],[66,13,66,42,0],[68,13,68,79,0],[68,79,68,80,0],[68,80,68,87,0],[68,87,68,115,0],[68,115,68,117,0],[69,13,69,116,0],[69,116,69,165,0],[69,165,69,169,0],[70,13,70,110,0],[70,110,70,159,0],[70,159,70,169,0],[72,13,72,32,0],[73,13,73,32,0],[74,9,74,10,0],[77,9,77,10,0],[78,13,78,40,0],[79,17,79,138,0],[81,13,81,84,0],[83,13,83,77,0],[85,13,86,83,0],[87,17,87,24,0],[90,13,90,103,0],[91,17,91,24,0],[94,13,94,41,0],[95,13,95,14,0],[97,17,97,65,0],[98,13,98,14,0],[103,13,103,41,0],[104,13,104,41,0],[105,13,105,37,0],[107,13,107,40,0],[108,13,108,14,0],[109,17,109,39,0],[110,17,110,34,0],[111,13,111,14,0],[113,13,113,40,0],[114,13,114,14,0],[115,17,115,39,0],[116,17,116,34,0],[117,13,117,14,0],[119,13,119,37,0],[120,13,120,14,0],[121,17,121,61,0],[122,17,122,24,0],[125,13,125,20,0],[125,22,125,44,0],[125,45,125,47,0],[125,48,125,62,0],[126,13,126,14,0],[127,17,127,130,0],[129,17,129,42,0],[130,17,130,77,0],[131,21,131,66,0],[133,17,133,36,0],[136,25,136,83,0],[137,25,137,31,0],[140,25,140,85,0],[141,25,141,31,0],[144,25,144,70,0],[145,25,145,31,0],[147,13,147,14,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,40,0],[153,17,153,138,0],[155,13,155,40,0],[157,13,157,35,0],[158,13,158,34,0],[159,9,159,10,0],[163,34,163,38,0],[164,35,164,39,0],[165,36,165,40,0],[166,56,166,60,0],[169,13,169,14,0],[170,17,170,40,0],[171,17,171,42,0],[172,17,172,40,0],[173,17,173,93,0],[174,13,174,14,0]]);
+    </script>
+  </body>
+</html>

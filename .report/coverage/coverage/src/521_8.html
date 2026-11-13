@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Mania/Skinning/Default/DefaultBodyPiece.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Layout;
+using osu.Game.Rulesets.Mania.Objects.Drawables;
+using osu.Game.Rulesets.Objects.Drawables;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Mania.Skinning.Default
+{
+    /// &lt;summary&gt;
+    /// Represents length-wise portion of a hold note.
+    /// &lt;/summary&gt;
+    public partial class DefaultBodyPiece : CompositeDrawable, IHoldNoteBody
+    {
+        protected readonly Bindable&lt;Color4&gt; AccentColour = new Bindable&lt;Color4&gt;();
+        protected readonly IBindable&lt;bool&gt; IsHitting = new Bindable&lt;bool&gt;();
+
+        protected Drawable Background { get; private set; } = null!;
+        private Container foregroundContainer = null!;
+
+        public DefaultBodyPiece()
+        {
+            Blending = BlendingParameters.Additive;
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(DrawableHitObject? drawableObject)
+        {
+            InternalChildren = new[]
+            {
+                Background = new Box { RelativeSizeAxes = Axes.Both },
+                foregroundContainer = new Container { RelativeSizeAxes = Axes.Both }
+            };
+
+            if (drawableObject != null)
+            {
+                var holdNote = (DrawableHoldNote)drawableObject;
+
+                AccentColour.BindTo(drawableObject.AccentColour);
+                IsHitting.BindTo(holdNote.IsHolding);
+            }
+
+            AccentColour.BindValueChanged(onAccentChanged, true);
+
+            Recycle();
+        }
+
+        public void Recycle() =&gt; foregroundContainer.Child = CreateForeground();
+
+        protected virtual Drawable CreateForeground() =&gt; new ForegroundPiece
+        {
+            AccentColour = { BindTarget = AccentColour },
+            IsHitting = { BindTarget = IsHitting }
+        };
+
+        private void onAccentChanged(ValueChangedEvent&lt;Color4&gt; accent) =&gt; Background.Colour = accent.NewValue.Opacity(0.7f);
+
+        private partial class ForegroundPiece : CompositeDrawable
+        {
+            public readonly Bindable&lt;Color4&gt; AccentColour = new Bindable&lt;Color4&gt;();
+            public readonly IBindable&lt;bool&gt; IsHitting = new Bindable&lt;bool&gt;();
+
+            private readonly LayoutValue subtractionCache = new LayoutValue(Invalidation.DrawSize);
+
+            private BufferedContainer foregroundBuffer = null!;
+            private BufferedContainer subtractionBuffer = null!;
+            private Container subtractionLayer = null!;
+
+            public ForegroundPiece()
+            {
+                RelativeSizeAxes = Axes.Both;
+
+                AddLayout(subtractionCache);
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                InternalChild = foregroundBuffer = new BufferedContainer(cachedFrameBuffer: true)
+                {
+                    Blending = BlendingParameters.Additive,
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        new Box { RelativeSizeAxes = Axes.Both },
+                        subtractionBuffer = new BufferedContainer(cachedFrameBuffer: true)
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            // This is needed because we&#39;re blending with another object
+                            BackgroundColour = Color4.White.Opacity(0),
+                            // The &#39;hole&#39; is achieved by subtracting the result of this container with the parent
+                            Blending = new BlendingParameters { AlphaEquation = BlendingEquation.ReverseSubtract },
+                            Child = subtractionLayer = new CircularContainer
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                // Height computed in Update
+                                Width = 1,
+                                Masking = true,
+                                Child = new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Alpha = 0,
+                                    AlwaysPresent = true
+                                }
+                            }
+                        }
+                    }
+                };
+
+                AccentColour.BindValueChanged(onAccentChanged, true);
+                IsHitting.BindValueChanged(_ =&gt; onAccentChanged(new ValueChangedEvent&lt;Color4&gt;(AccentColour.Value, AccentColour.Value)), true);
+            }
+
+            private void onAccentChanged(ValueChangedEvent&lt;Color4&gt; accent)
+            {
+                foregroundBuffer.Colour = accent.NewValue.Opacity(0.5f);
+
+                const float animation_length = 50;
+
+                foregroundBuffer.ClearTransforms(false, nameof(foregroundBuffer.Colour));
+
+                if (IsHitting.Value)
+                {
+                    // wait for the next sync point
+                    double synchronisedOffset = animation_length * 2 - Time.Current % (animation_length * 2);
+                    using (foregroundBuffer.BeginDelayedSequence(synchronisedOffset))
+                        foregroundBuffer.FadeColour(accent.NewValue.Lighten(0.2f), animation_length).Then().FadeColour(foregroundBuffer.Colour, animation_length).Loop();
+                }
+
+                subtractionCache.Invalidate();
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                if (!subtractionCache.IsValid)
+                {
+                    subtractionLayer.Width = 5;
+                    subtractionLayer.Height = Math.Max(0, DrawHeight - DrawWidth);
+                    subtractionLayer.EdgeEffect = new EdgeEffectParameters
+                    {
+                        Colour = Color4.White,
+                        Type = EdgeEffectType.Glow,
+                        Radius = DrawWidth
+                    };
+
+                    foregroundBuffer.ForceRedraw();
+                    subtractionBuffer.ForceRedraw();
+
+                    subtractionCache.Validate();
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,83,0],[25,9,25,77,0],[27,41,27,45,0],[27,46,27,58,0],[27,63,27,68,0],[28,9,28,55,0],[30,9,30,34,0],[31,9,31,10,0],[32,13,32,52,0],[33,9,33,10,0],[37,9,37,10,0],[38,13,42,15,0],[44,13,44,40,0],[45,13,45,14,0],[46,17,46,65,0],[48,17,48,66,0],[49,17,49,54,0],[50,13,50,14,0],[52,13,52,66,0],[54,13,54,23,0],[55,9,55,10,0],[57,34,57,80,0],[59,58,63,10,0],[65,75,65,124,0],[69,13,69,84,0],[70,13,70,78,0],[72,13,72,100,0],[74,13,74,64,0],[75,13,75,65,0],[76,13,76,56,0],[78,13,78,37,0],[79,13,79,14,0],[80,17,80,46,0],[82,17,82,45,0],[83,13,83,14,0],[87,13,87,14,0],[88,17,118,19,0],[120,17,120,70,0],[121,17,121,49,0],[121,49,121,135,0],[121,135,121,143,0],[122,13,122,14,0],[125,13,125,14,0],[126,17,126,73,0],[130,17,130,90,0],[132,17,132,37,0],[133,17,133,18,0],[135,21,135,110,0],[136,21,136,86,0],[137,25,137,170,0],[138,17,138,18,0],[140,17,140,47,0],[141,13,141,14,0],[144,13,144,14,0],[145,17,145,31,0],[147,17,147,47,0],[148,17,148,18,0],[149,21,149,48,0],[150,21,150,83,0],[151,21,156,23,0],[158,21,158,52,0],[159,21,159,53,0],[161,21,161,49,0],[162,17,162,18,0],[163,13,163,14,0]]);
+    </script>
+  </body>
+</html>

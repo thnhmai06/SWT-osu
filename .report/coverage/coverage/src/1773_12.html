@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/HitErrorMeters/ColourHitErrorMeter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Localisation.HUD;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Scoring;
+using osuTK;
+
+namespace osu.Game.Screens.Play.HUD.HitErrorMeters
+{
+    [Cached]
+    public partial class ColourHitErrorMeter : HitErrorMeter
+    {
+        private const int animation_duration = 200;
+        private const int drawable_judgement_size = 8;
+
+        [SettingSource(typeof(ColourHitErrorMeterStrings), nameof(ColourHitErrorMeterStrings.JudgementCount), nameof(ColourHitErrorMeterStrings.JudgementCountDescription))]
+        public BindableNumber&lt;int&gt; JudgementCount { get; } = new BindableNumber&lt;int&gt;(20)
+        {
+            MinValue = 1,
+            MaxValue = 50,
+        };
+
+        [SettingSource(typeof(ColourHitErrorMeterStrings), nameof(ColourHitErrorMeterStrings.JudgementSpacing), nameof(ColourHitErrorMeterStrings.JudgementSpacingDescription))]
+        public BindableNumber&lt;float&gt; JudgementSpacing { get; } = new BindableNumber&lt;float&gt;(2)
+        {
+            MinValue = 0,
+            MaxValue = 10,
+        };
+
+        [SettingSource(typeof(ColourHitErrorMeterStrings), nameof(ColourHitErrorMeterStrings.JudgementShape), nameof(ColourHitErrorMeterStrings.JudgementShapeDescription))]
+        public Bindable&lt;ShapeStyle&gt; JudgementShape { get; } = new Bindable&lt;ShapeStyle&gt;();
+
+        private readonly DrawablePool&lt;HitErrorShape&gt; judgementShapePool;
+        private readonly JudgementFlow judgementsFlow;
+
+        public ColourHitErrorMeter()
+        {
+            AutoSizeAxes = Axes.Both;
+            InternalChildren = new Drawable[]
+            {
+                judgementShapePool = new DrawablePool&lt;HitErrorShape&gt;(50),
+                judgementsFlow = new JudgementFlow
+                {
+                    JudgementShape = { BindTarget = JudgementShape },
+                    JudgementSpacing = { BindTarget = JudgementSpacing },
+                    JudgementCount = { BindTarget = JudgementCount }
+                }
+            };
+        }
+
+        protected override void OnNewJudgement(JudgementResult judgement)
+        {
+            if (!judgement.Type.IsScorable() || judgement.Type.IsBonus())
+                return;
+
+            judgementsFlow.Push(judgementShapePool.Get(shape =&gt; shape.Colour = GetColourForHitResult(judgement.Type)));
+        }
+
+        public override void Clear()
+        {
+            foreach (var j in judgementsFlow)
+            {
+                j.ClearTransforms();
+                j.Expire();
+            }
+        }
+
+        private partial class JudgementFlow : FillFlowContainer&lt;HitErrorShape&gt;
+        {
+            public override IEnumerable&lt;Drawable&gt; FlowingChildren =&gt; base.FlowingChildren.Reverse();
+
+            public readonly Bindable&lt;ShapeStyle&gt; JudgementShape = new Bindable&lt;ShapeStyle&gt;();
+
+            public readonly Bindable&lt;float&gt; JudgementSpacing = new Bindable&lt;float&gt;();
+
+            public readonly Bindable&lt;int&gt; JudgementCount = new Bindable&lt;int&gt;();
+
+            public JudgementFlow()
+            {
+                Width = drawable_judgement_size;
+                Direction = FillDirection.Vertical;
+                LayoutDuration = animation_duration;
+                LayoutEasing = Easing.OutQuint;
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                JudgementCount.BindValueChanged(_ =&gt;
+                {
+                    removeExtraJudgements();
+                    updateMetrics();
+                });
+
+                JudgementSpacing.BindValueChanged(_ =&gt; updateMetrics(), true);
+            }
+
+            public void Push(HitErrorShape shape)
+            {
+                Add(shape);
+                removeExtraJudgements();
+            }
+
+            private void removeExtraJudgements()
+            {
+                var remainingChildren = Children.Where(c =&gt; !c.IsRemoved);
+
+                while (remainingChildren.Count() &gt; JudgementCount.Value)
+                    remainingChildren.First().Remove();
+            }
+
+            private void updateMetrics()
+            {
+                Height = JudgementCount.Value * (drawable_judgement_size + JudgementSpacing.Value) - JudgementSpacing.Value;
+                Spacing = new Vector2(0, JudgementSpacing.Value);
+            }
+        }
+
+        public partial class HitErrorShape : PoolableDrawable
+        {
+            public bool IsRemoved { get; private set; }
+
+            public readonly Bindable&lt;ShapeStyle&gt; Shape = new Bindable&lt;ShapeStyle&gt;();
+
+            [Resolved]
+            private ColourHitErrorMeter hitErrorMeter { get; set; } = null!;
+
+            private Container content = null!;
+
+            public HitErrorShape()
+            {
+                Size = new Vector2(drawable_judgement_size);
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                InternalChild = content = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                };
+
+                Shape.BindTo(hitErrorMeter.JudgementShape);
+                Shape.BindValueChanged(shape =&gt;
+                {
+                    switch (shape.NewValue)
+                    {
+                        case ShapeStyle.Circle:
+                            content.Child = new Circle { RelativeSizeAxes = Axes.Both };
+                            break;
+
+                        case ShapeStyle.Square:
+                            content.Child = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                // somewhat improves the appearance of uneven spacing on certain `JudgementSpacing` specifications
+                                EdgeSmoothness = new Vector2(0.5f),
+                            };
+                            break;
+                    }
+                }, true);
+            }
+
+            protected override void PrepareForUse()
+            {
+                base.PrepareForUse();
+
+                this.FadeInFromZero(animation_duration, Easing.OutQuint)
+                    // On pool re-use, start flow animation from (0,0).
+                    .MoveTo(Vector2.Zero);
+
+                content.MoveToY(-DrawSize.Y)
+                       .MoveToY(0, animation_duration, Easing.OutQuint);
+            }
+
+            protected override void FreeAfterUse()
+            {
+                base.FreeAfterUse();
+                IsRemoved = false;
+            }
+
+            public void Remove()
+            {
+                IsRemoved = true;
+
+                this.FadeOut(animation_duration, Easing.OutQuint)
+                    .Expire();
+            }
+        }
+
+        public enum ShapeStyle
+        {
+            [LocalisableDescription(typeof(ColourHitErrorMeterStrings), nameof(ColourHitErrorMeterStrings.ShapeStyleCircle))]
+            Circle,
+
+            [LocalisableDescription(typeof(ColourHitErrorMeterStrings), nameof(ColourHitErrorMeterStrings.ShapeStyleSquare))]
+            Square
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,53,28,57,0],[28,62,32,10,0],[35,57,35,61,0],[35,66,39,10,0],[42,54,42,58,0],[42,63,42,89,0],[47,9,47,37,0],[48,9,48,10,0],[49,13,49,38,0],[50,13,59,15,0],[60,9,60,10,0],[63,9,63,10,0],[64,13,64,74,0],[65,17,65,24,0],[67,13,67,65,0],[67,65,67,117,0],[67,117,67,120,0],[68,9,68,10,0],[71,9,71,10,0],[72,13,72,20,0],[72,22,72,27,0],[72,28,72,30,0],[72,31,72,45,0],[73,13,73,14,0],[74,17,74,37,0],[75,17,75,28,0],[76,13,76,14,0],[77,9,77,10,0],[81,70,81,100,0],[83,13,83,94,0],[85,13,85,86,0],[87,13,87,80,0],[89,13,89,35,0],[90,13,90,14,0],[91,17,91,49,0],[92,17,92,52,0],[93,17,93,53,0],[94,17,94,48,0],[95,13,95,14,0],[98,13,98,14,0],[99,17,99,37,0],[101,17,102,17,0],[102,17,102,18,0],[102,18,103,21,0],[103,21,103,45,0],[103,45,104,21,0],[104,21,104,37,0],[104,37,105,17,0],[105,17,105,18,0],[105,18,105,20,0],[107,17,107,56,0],[107,56,107,71,0],[107,71,107,79,0],[108,13,108,14,0],[111,13,111,14,0],[112,17,112,28,0],[113,17,113,41,0],[114,13,114,14,0],[117,13,117,14,0],[118,17,118,61,0],[118,61,118,73,0],[118,73,118,75,0],[120,17,120,73,0],[121,21,121,56,0],[122,13,122,14,0],[125,13,125,14,0],[126,17,126,125,0],[127,17,127,66,0],[128,13,128,14,0],[133,37,133,41,0],[133,42,133,54,0],[135,13,135,85,0],[138,57,138,61,0],[138,62,138,66,0],[138,71,138,76,0],[140,13,140,47,0],[142,13,142,35,0],[143,13,143,14,0],[144,17,144,61,0],[145,13,145,14,0],[148,13,148,14,0],[149,17,149,37,0],[151,17,154,19,0],[156,17,156,60,0],[157,17,158,17,0],[158,17,158,18,0],[158,18,159,21,0],[159,21,159,44,0],[159,44,162,29,0],[162,29,162,89,0],[162,89,163,29,0],[163,29,163,35,0],[163,35,166,29,0],[166,29,171,31,0],[171,31,172,29,0],[172,29,172,35,0],[172,35,174,17,0],[174,17,174,18,0],[174,18,174,26,0],[175,13,175,14,0],[178,13,178,14,0],[179,17,179,38,0],[181,17,183,43,0],[185,17,186,73,0],[187,13,187,14,0],[190,13,190,14,0],[191,17,191,37,0],[192,17,192,35,0],[193,13,193,14,0],[196,13,196,14,0],[197,17,197,34,0],[199,17,200,31,0],[201,13,201,14,0]]);
+    </script>
+  </body>
+</html>

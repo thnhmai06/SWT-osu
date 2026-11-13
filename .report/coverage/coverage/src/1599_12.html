@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/SongSelect.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Input.StateChanges;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Mods;
+using osu.Game.Overlays.Volume;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Menu;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Ranking;
+using osu.Game.Skinning;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Select
+{
+    public abstract partial class SongSelect : ScreenWithBeatmapBackground, IKeyBindingHandler&lt;GlobalAction&gt;, ISongSelect, IHandlePresentBeatmap, IProvideCursor
+    {
+        /// &lt;summary&gt;
+        /// A debounce that governs how long after a panel is selected before the rest of song select (and the game at large)
+        /// updates to show that selection.
+        ///
+        /// This is intentionally slightly higher than key repeat, but low enough to not impede user experience.
+        /// &lt;/summary&gt;
+        public const int SELECTION_DEBOUNCE = 150;
+
+        /// &lt;summary&gt;
+        /// A general &quot;global&quot; debounce to be applied to anything aggressive difficulty calculation at song select,
+        /// either after selection or after a panel comes on screen. Value should be low enough that users don&#39;t complain,
+        /// but otherwise as high as possible to reduce overheads.
+        /// &lt;/summary&gt;
+        public const int DIFFICULTY_CALCULATION_DEBOUNCE = 150;
+
+        private const float logo_scale = 0.4f;
+        private const double fade_duration = 300;
+
+        public const float WEDGE_CONTENT_MARGIN = CORNER_RADIUS_HIDE_OFFSET + OsuGame.SCREEN_EDGE_MARGIN;
+        public const float CORNER_RADIUS_HIDE_OFFSET = 20f;
+        public const float ENTER_DURATION = 600;
+
+        /// &lt;summary&gt;
+        /// Whether this song select instance should take control of the global track,
+        /// applying looping and preview offsets.
+        /// &lt;/summary&gt;
+        protected bool ControlGlobalMusic { get; init; } = true;
+
+        /// &lt;summary&gt;
+        /// Whether this song select instance should allow scoping down to a specific beatmap set,
+        /// exposing other difficulties that are otherwise hidden by filter criteria.
+        /// &lt;/summary&gt;
+        protected bool SupportScoping { init =&gt; scopedBeatmapSet.Disabled = !value; }
+
+        /// &lt;summary&gt;
+        /// Whether the osu! logo should be shown at the bottom-right of the screen.
+        /// &lt;/summary&gt;
+        protected bool ShowOsuLogo { get; init; } = true;
+
+        /// &lt;summary&gt;
+        /// Additional padding to be added to the title wedge.
+        /// Generally set to show external content in this space.
+        /// &lt;/summary&gt;
+        public float TopPadding { get; init; }
+
+        private ModSelectOverlay modSelectOverlay = null!;
+        private ModSpeedHotkeyHandler modSpeedHotkeyHandler = null!;
+
+        // Blue is the most neutral choice, so I&#39;m using that for now.
+        // Purple makes the most sense to match the &quot;gameplay&quot; flow, but it&#39;s a bit too strong for the current design.
+        // TODO: Colour scheme choice should probably be customisable by the user.
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Blue);
+
+        private BeatmapCarousel carousel = null!;
+
+        protected FilterControl FilterControl { get; private set; } = null!;
+
+        private BeatmapTitleWedge titleWedge = null!;
+        private BeatmapDetailsArea detailsArea = null!;
+        private FillFlowContainer wedgesContainer = null!;
+        private Box rightGradientBackground = null!;
+        private Container mainContent = null!;
+        private SkinnableContainer skinnableContent = null!;
+
+        private GridContainer mainGridContainer = null!;
+
+        private NoResultsPlaceholder noResultsPlaceholder = null!;
+
+        public override bool? ApplyModTrackAdjustments =&gt; true;
+
+        public override bool ShowFooter =&gt; true;
+
+        private Sample? errorSample;
+
+        [Resolved]
+        private OsuGameBase? game { get; set; }
+
+        [Resolved]
+        private OsuLogo? logo { get; set; }
+
+        [Resolved]
+        private BeatmapSetOverlay? beatmapOverlay { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private ManageCollectionsDialog? collectionsDialog { get; set; }
+
+        [Resolved]
+        private DifficultyRecommender? difficultyRecommender { get; set; }
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private IOverlayManager? overlayManager { get; set; }
+
+        private InputManager inputManager = null!;
+
+        private readonly RealmPopulatingOnlineLookupSource onlineLookupSource = new RealmPopulatingOnlineLookupSource();
+
+        private Bindable&lt;bool&gt; configBackgroundBlur = null!;
+        private Bindable&lt;bool&gt; showConvertedBeatmaps = null!;
+
+        private IDisposable? modSelectOverlayRegistration;
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio, OsuConfigManager config)
+        {
+            errorSample = audio.Samples.Get(@&quot;UI/generic-error&quot;);
+
+            AddRangeInternal(new Drawable[]
+            {
+                new GlobalScrollAdjustsVolume(),
+                onlineLookupSource,
+                mainContent = new Container
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding { Bottom = ScreenFooter.HEIGHT },
+                    Child = new OsuContextMenuContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Child = new PopoverContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Width = 0.6f,
+                                    Colour = ColourInfo.GradientHorizontal(Color4.Black.Opacity(0.3f), Color4.Black.Opacity(0f)),
+                                },
+                                mainGridContainer = new GridContainer // used for max width implementation
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Content = new[]
+                                    {
+                                        new[]
+                                        {
+                                            new Container
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                // Ensure the left components are on top of the carousel both visually (although they should never overlay)
+                                                // but more importantly, for input purposes to allow the scroll-to-selection logic to override carousel&#39;s
+                                                // screen-wide scroll handling.
+                                                Depth = float.MinValue,
+                                                Shear = OsuGame.SHEAR,
+                                                Padding = new MarginPadding
+                                                {
+                                                    Top = -CORNER_RADIUS_HIDE_OFFSET,
+                                                    Left = -CORNER_RADIUS_HIDE_OFFSET,
+                                                },
+                                                Children = new Drawable[]
+                                                {
+                                                    new Container
+                                                    {
+                                                        // Pad enough to only reset scroll when well into the left wedge areas.
+                                                        Padding = new MarginPadding { Right = 40 },
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        Child = new LeftSideInteractionContainer(() =&gt; carousel.ScrollToSelection())
+                                                        {
+                                                            RelativeSizeAxes = Axes.Both,
+                                                        },
+                                                    },
+                                                    wedgesContainer = new FillFlowContainer
+                                                    {
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        Spacing = new Vector2(0f, 4f),
+                                                        Direction = FillDirection.Vertical,
+                                                        Children = new Drawable[]
+                                                        {
+                                                            new ShearAligningWrapper(titleWedge = new BeatmapTitleWedge
+                                                            {
+                                                                TopPadding = TopPadding,
+                                                            }),
+                                                            new ShearAligningWrapper(detailsArea = new BeatmapDetailsArea()),
+                                                        },
+                                                    },
+                                                }
+                                            },
+                                            Empty(),
+                                            new Container
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Children = new Drawable[]
+                                                {
+                                                    rightGradientBackground = new Box
+                                                    {
+                                                        Anchor = Anchor.TopRight,
+                                                        Origin = Anchor.TopRight,
+                                                        Colour = ColourInfo.GradientHorizontal(Color4.Black.Opacity(0.0f), Color4.Black.Opacity(0.5f)),
+                                                        RelativeSizeAxes = Axes.Both,
+                                                    },
+                                                    new Container
+                                                    {
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        Padding = new MarginPadding
+                                                        {
+                                                            Top = FilterControl.HEIGHT_FROM_SCREEN_TOP + 5,
+                                                            Bottom = 5,
+                                                        },
+                                                        Children = new Drawable[]
+                                                        {
+                                                            carousel = new BeatmapCarousel
+                                                            {
+                                                                BleedTop = FilterControl.HEIGHT_FROM_SCREEN_TOP + 5,
+                                                                BleedBottom = ScreenFooter.HEIGHT + 5,
+                                                                RelativeSizeAxes = Axes.Both,
+                                                                RequestPresentBeatmap = b =&gt; SelectAndRun(b, OnStart),
+                                                                RequestSelection = queueBeatmapSelection,
+                                                                RequestRecommendedSelection = requestRecommendedSelection,
+                                                                NewItemsPresented = newItemsPresented,
+                                                            },
+                                                            noResultsPlaceholder = new NoResultsPlaceholder
+                                                            {
+                                                                RequestClearFilterText = () =&gt; FilterControl.Search(string.Empty)
+                                                            }
+                                                        }
+                                                    },
+                                                    FilterControl = new FilterControl
+                                                    {
+                                                        Anchor = Anchor.TopRight,
+                                                        Origin = Anchor.TopRight,
+                                                        RelativeSizeAxes = Axes.X,
+                                                        ScopedBeatmapSet = { BindTarget = ScopedBeatmapSet },
+                                                    },
+                                                }
+                                            },
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+                skinnableContent = new SkinnableContainer(new GlobalSkinnableContainerLookup(GlobalSkinnableContainers.SongSelect))
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                },
+                modSpeedHotkeyHandler = new ModSpeedHotkeyHandler()
+            });
+
+            LoadComponent(modSelectOverlay = CreateModSelectOverlay());
+
+            configBackgroundBlur = config.GetBindable&lt;bool&gt;(OsuSetting.SongSelectBackgroundBlur);
+            configBackgroundBlur.BindValueChanged(e =&gt;
+            {
+                if (!this.IsCurrentScreen())
+                    return;
+
+                updateBackgroundDim();
+            });
+
+            showConvertedBeatmaps = config.GetBindable&lt;bool&gt;(OsuSetting.ShowConvertedBeatmaps);
+        }
+
+        // Colour scheme for mod overlay is left as default (green) to match mods button.
+        // Not sure about this, but we&#39;ll iterate based on feedback.
+        protected virtual ModSelectOverlay CreateModSelectOverlay() =&gt; new UserModSelectOverlay
+        {
+            ShowPresets = true,
+        };
+
+        private void requestRecommendedSelection(IEnumerable&lt;GroupedBeatmap&gt; groupedBeatmaps)
+        {
+            var recommendedBeatmap = difficultyRecommender?.GetRecommendedBeatmap(groupedBeatmaps.Select(gb =&gt; gb.Beatmap)) ?? groupedBeatmaps.First().Beatmap;
+            queueBeatmapSelection(groupedBeatmaps.First(bug =&gt; bug.Beatmap.Equals(recommendedBeatmap)));
+        }
+
+        /// &lt;summary&gt;
+        /// Called when a selection is made to progress away from the song select screen.
+        ///
+        /// This is the default action which should be provided to &lt;see cref=&quot;SelectAndRun&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected abstract void OnStart();
+
+        public override IReadOnlyList&lt;ScreenFooterButton&gt; CreateFooterButtons() =&gt; new ScreenFooterButton[]
+        {
+            new FooterButtonMods(modSelectOverlay)
+            {
+                Hotkey = GlobalAction.ToggleModSelection,
+                Mods = Mods,
+                Ruleset = Ruleset,
+                RequestDeselectAllMods = () =&gt;
+                {
+                    if (modSelectOverlay.State.Value == Visibility.Visible)
+                        modSelectOverlay.DeselectAll();
+                    else
+                        Mods.Value = Array.Empty&lt;Mod&gt;();
+                }
+            },
+            new FooterButtonRandom
+            {
+                NextRandom = () =&gt;
+                {
+                    if (!carousel.NextRandom())
+                        errorSample?.Play();
+                },
+                PreviousRandom = () =&gt;
+                {
+                    if (!carousel.PreviousRandom())
+                        errorSample?.Play();
+                }
+            },
+            new FooterButtonOptions
+            {
+                Hotkey = GlobalAction.ToggleBeatmapOptions,
+            }
+        };
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            modSelectOverlayRegistration = overlayManager?.RegisterBlockingOverlay(modSelectOverlay);
+
+            inputManager = GetContainingInputManager()!;
+
+            FilterControl.CriteriaChanged += criteriaChanged;
+
+            modSelectOverlay.State.BindValueChanged(v =&gt;
+            {
+                if (!this.IsCurrentScreen())
+                    return;
+
+                if (ShowOsuLogo)
+                    logo?.FadeTo(v.NewValue == Visibility.Visible ? 0f : 1f, 200, Easing.OutQuint);
+            });
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            detailsArea.Height = wedgesContainer.ChildSize.Y - titleWedge.LayoutSize.Y - 4;
+
+            float widescreenBonusWidth = Math.Max(0, DrawWidth / DrawHeight - 2f);
+
+            mainGridContainer.ColumnDimensions = new[]
+            {
+                new Dimension(GridSizeMode.Relative, 0.5f, maxSize: 700 + widescreenBonusWidth * 100),
+                new Dimension(),
+                new Dimension(GridSizeMode.Relative, 0.5f, minSize: 500, maxSize: 700 + widescreenBonusWidth * 300),
+            };
+
+            if (this.IsCurrentScreen())
+                updateDebounce();
+        }
+
+        #region Selection debounce
+
+        private BeatmapInfo? debounceQueuedSelection;
+        private double debounceElapsedTime;
+
+        private void debounceQueueSelection(BeatmapInfo beatmap)
+        {
+            debounceQueuedSelection = beatmap;
+            debounceElapsedTime = 0;
+        }
+
+        private void updateDebounce()
+        {
+            if (debounceQueuedSelection == null) return;
+
+            double elapsed = Clock.ElapsedFrameTime;
+
+            // When a key is being held, assume the user is traversing the carousel using key repeat.
+            // We want to change panels less often in this state (basically making debounce longer than initial key repeat, at least).
+            double debounceInterval = inputManager.CurrentState.Keyboard.Keys.HasAnyButtonPressed ? SELECTION_DEBOUNCE * 2 : SELECTION_DEBOUNCE;
+
+            // avoid debounce running early if there&#39;s a single long frame.
+            if (!DebugUtils.IsNUnitRunning &amp;&amp; Clock.FramesPerSecond &gt; 0)
+                elapsed = Math.Min(1000 / Clock.FramesPerSecond, elapsed);
+
+            debounceElapsedTime += elapsed;
+
+            if (debounceElapsedTime &gt;= debounceInterval)
+                performDebounceSelection();
+        }
+
+        private void performDebounceSelection()
+        {
+            if (debounceQueuedSelection == null) return;
+
+            try
+            {
+                if (Beatmap.Value.BeatmapInfo.Equals(debounceQueuedSelection))
+                    return;
+
+                var workingBeatmap = beatmaps.GetWorkingBeatmap(debounceQueuedSelection);
+                if (!checkBeatmapValidForSelection(workingBeatmap.BeatmapInfo))
+                    return;
+
+                Beatmap.Value = workingBeatmap;
+            }
+            finally
+            {
+                cancelDebounceSelection();
+            }
+        }
+
+        private void cancelDebounceSelection()
+        {
+            debounceQueuedSelection = null;
+            debounceElapsedTime = 0;
+        }
+
+        #endregion
+
+        #region Audio
+
+        [Resolved]
+        private MusicController music { get; set; } = null!;
+
+        private readonly WeakReference&lt;ITrack?&gt; lastTrack = new WeakReference&lt;ITrack?&gt;(null);
+
+        /// &lt;summary&gt;
+        /// Ensures some music is playing for the current track.
+        /// Will resume playback from a manual user pause if the track has changed.
+        /// &lt;/summary&gt;
+        private void ensurePlayingSelected()
+        {
+            if (!ControlGlobalMusic)
+                return;
+
+            ITrack track = music.CurrentTrack;
+
+            bool isNewTrack = !lastTrack.TryGetTarget(out var last) || last != track;
+
+            if (!track.IsRunning &amp;&amp; (music.UserPauseRequested != true || isNewTrack))
+            {
+                Logger.Log($&quot;Song select decided to {nameof(ensurePlayingSelected)}&quot;);
+
+                // Only restart playback if a new track.
+                // This is important so that when exiting gameplay, the track is not restarted back to the preview point.
+                music.Play(isNewTrack);
+            }
+
+            lastTrack.SetTarget(track);
+        }
+
+        private bool isHandlingLooping;
+
+        private void beginLooping()
+        {
+            Debug.Assert(!isHandlingLooping);
+
+            isHandlingLooping = true;
+
+            ensureTrackLooping(Beatmap.Value, TrackChangeDirection.None);
+
+            music.TrackChanged += ensureTrackLooping;
+        }
+
+        private void endLooping()
+        {
+            // may be called multiple times during screen exit process.
+            if (!isHandlingLooping)
+                return;
+
+            music.CurrentTrack.Looping = isHandlingLooping = false;
+
+            music.TrackChanged -= ensureTrackLooping;
+        }
+
+        private void ensureTrackLooping(IWorkingBeatmap beatmap, TrackChangeDirection changeDirection)
+            =&gt; beatmap.PrepareTrackForPreview(true);
+
+        #endregion
+
+        #region Selection handling
+
+        /// &lt;summary&gt;
+        /// Finalises selection on the given &lt;see cref=&quot;BeatmapInfo&quot;/&gt; and runs the provided action if possible.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap which should be selected. If not provided, the current globally selected beatmap will be used.&lt;/param&gt;
+        /// &lt;param name=&quot;startAction&quot;&gt;The action to perform if conditions are met to be able to proceed. May not be invoked if in an invalid state.&lt;/param&gt;
+        protected void SelectAndRun(BeatmapInfo beatmap, Action startAction)
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            if (!checkBeatmapValidForSelection(beatmap))
+                return;
+
+            // To ensure sanity, cancel any pending selection as we are about to force a selection.
+            // Carousel selection will update to the forced selection via a call of `ensureGlobalBeatmapValid` below, or when song select becomes current again.
+            cancelDebounceSelection();
+
+            // Forced refetch is important here to guarantee correct invalidation across all difficulties (editor specific).
+            Beatmap.Value = beatmaps.GetWorkingBeatmap(beatmap, true);
+
+            if (Beatmap.IsDefault)
+                return;
+
+            startAction();
+        }
+
+        /// &lt;summary&gt;
+        /// Prepares the proposed beatmap for global selection based on a carousel user-performed action.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Calling this method will:
+        /// - Immediately update the selection the carousel.
+        /// - After &lt;see cref=&quot;SELECTION_DEBOUNCE&quot;/&gt;, update the global beatmap. This in turn causes song select visuals (title, details, leaderboard) to update.
+        ///   This debounce is intended to avoid high overheads from churning lookups while a user is changing selection via rapid keyboard operations.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;groupedBeatmap&quot;&gt;The beatmap to be selected.&lt;/param&gt;
+        private void queueBeatmapSelection(GroupedBeatmap groupedBeatmap)
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            carousel.CurrentGroupedBeatmap = groupedBeatmap;
+
+            // Debounce consideration is to avoid beatmap churn on key repeat selection.
+            debounceQueueSelection(groupedBeatmap.Beatmap);
+        }
+
+        private bool ensureGlobalBeatmapValid()
+        {
+            if (!this.IsCurrentScreen())
+                return false;
+
+            performDebounceSelection();
+
+            // While filtering, let&#39;s not ever attempt to change selection.
+            // This will be resolved after the filter completes, see `newItemsPresented`.
+            if (IsFiltering)
+                return false;
+
+            // Refetch to be confident that the current selection is still valid. It may have been deleted or hidden.
+            var currentBeatmap = beatmaps.GetWorkingBeatmap(Beatmap.Value.BeatmapInfo, true);
+            bool validSelection = checkBeatmapValidForSelection(currentBeatmap.BeatmapInfo);
+
+            if (validSelection)
+            {
+                carousel.CurrentBeatmap = currentBeatmap.BeatmapInfo;
+                return true;
+            }
+
+            // If there was no beatmap selected, pick a random one.
+            if (Beatmap.IsDefault)
+            {
+                validSelection = carousel.NextRandom();
+                performDebounceSelection();
+                return validSelection;
+            }
+
+            // If a previous non-default selection became non-valid, it was likely hidden or deleted.
+            if (!validSelection)
+            {
+                // In the case a difficulty was hidden or removed, prefer selecting another difficulty from the same set.
+                var activeSet = currentBeatmap.BeatmapSetInfo;
+
+                var validBeatmaps = activeSet.Beatmaps.Where(checkBeatmapValidForSelection).ToArray();
+
+                if (validBeatmaps.Any())
+                {
+                    var beatmap = difficultyRecommender?.GetRecommendedBeatmap(validBeatmaps) ?? validBeatmaps.First();
+                    carousel.CurrentBeatmap = beatmap;
+                    debounceQueueSelection(beatmap);
+                    return true;
+                }
+            }
+
+            // If all else fails, use the default beatmap.
+            Beatmap.SetDefault();
+            performDebounceSelection();
+
+            return validSelection;
+        }
+
+        private bool checkBeatmapValidForSelection(BeatmapInfo beatmap)
+        {
+            if (!beatmap.AllowGameplayWithRuleset(Ruleset.Value, showConvertedBeatmaps.Value))
+                return false;
+
+            if (beatmap.Hidden)
+                return false;
+
+            if (beatmap.BeatmapSet == null)
+                return false;
+
+            if (beatmap.BeatmapSet.Protected || beatmap.BeatmapSet.DeletePending)
+                return false;
+
+            return true;
+        }
+
+        #endregion
+
+        #region Transitions
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            this.FadeIn();
+            onArrivingAtScreen();
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            this.FadeIn(fade_duration, Easing.OutQuint);
+            onArrivingAtScreen();
+
+            ensureGlobalBeatmapValid();
+
+            detailsArea.Refresh();
+
+            if (ControlGlobalMusic)
+            {
+                // restart playback on returning to song select, regardless.
+                // not sure this should be a permanent thing (we may want to leave a user pause paused even on returning)
+                music.ResetTrackAdjustments();
+                music.Play(requestedByUser: true);
+            }
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            carousel.VisuallyFocusSelected = true;
+
+            this.FadeOut(fade_duration, Easing.OutQuint);
+            onLeavingScreen();
+
+            base.OnSuspending(e);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            this.FadeOut(fade_duration, Easing.OutQuint);
+            onLeavingScreen();
+
+            return base.OnExiting(e);
+        }
+
+        private void onArrivingAtScreen()
+        {
+            modSelectOverlay.Beatmap.BindTo(Beatmap);
+            modSelectOverlay.Ruleset.BindTo(Ruleset);
+            // required due to https://github.com/ppy/osu-framework/issues/3218
+            modSelectOverlay.SelectedMods.Disabled = false;
+            modSelectOverlay.SelectedMods.BindTo(Mods);
+
+            carousel.VisuallyFocusSelected = false;
+
+            if (ControlGlobalMusic)
+            {
+                // Avoid abruptly starting playback at preview point.
+                // Importantly, this should be done before looping is setup to ensure we get the correct imminent `IsPlaying` state.
+                if (!music.IsPlaying)
+                {
+                    music.DuckMomentarily(0, new DuckParameters
+                    {
+                        DuckDuration = 0,
+                        DuckVolumeTo = 0,
+                        RestoreDuration = 800,
+                        RestoreEasing = Easing.OutQuint
+                    });
+                }
+
+                beginLooping();
+            }
+
+            Beatmap.BindValueChanged(updateVariousState, true);
+        }
+
+        private void updateVariousState(ValueChangedEvent&lt;WorkingBeatmap&gt; e)
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            ensureGlobalBeatmapValid();
+
+            ensurePlayingSelected();
+            updateBackgroundDim();
+            updateWedgeVisibility();
+            fetchOnlineInfo(force: ReferenceEquals(e.OldValue, e.NewValue));
+        }
+
+        private void onLeavingScreen()
+        {
+            restoreBackground();
+
+            Beatmap.ValueChanged -= updateVariousState;
+
+            modSelectOverlay.SelectedMods.UnbindFrom(Mods);
+            modSelectOverlay.Ruleset.UnbindFrom(Ruleset);
+            modSelectOverlay.Beatmap.UnbindFrom(Beatmap);
+
+            updateWedgeVisibility();
+
+            endLooping();
+        }
+
+        protected override void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            base.LogoArriving(logo, resuming);
+
+            if (!ShowOsuLogo)
+                return;
+
+            if (logo.Alpha &gt; 0.8f &amp;&amp; resuming)
+                Footer?.StartTrackingLogo(logo, 400, Easing.OutQuint);
+            else
+            {
+                logo.Hide();
+                logo.ScaleTo(0.2f);
+                Footer?.StartTrackingLogo(logo);
+            }
+
+            logo.FadeIn(240, Easing.OutQuint);
+            logo.ScaleTo(logo_scale, 240, Easing.OutQuint);
+
+            logo.Action = () =&gt;
+            {
+                ensureGlobalBeatmapValid();
+                SelectAndRun(Beatmap.Value.BeatmapInfo, OnStart);
+                return false;
+            };
+        }
+
+        protected override void LogoSuspending(OsuLogo logo)
+        {
+            base.LogoSuspending(logo);
+
+            if (!ShowOsuLogo)
+                return;
+
+            Footer?.StopTrackingLogo();
+        }
+
+        protected override void LogoExiting(OsuLogo logo)
+        {
+            base.LogoExiting(logo);
+
+            if (!ShowOsuLogo)
+                return;
+
+            Footer?.StopTrackingLogo();
+
+            logo.ScaleTo(0.2f, 120, Easing.Out);
+            logo.FadeOut(120, Easing.Out);
+        }
+
+        private void updateWedgeVisibility()
+        {
+            // Ensure we don&#39;t show an invalid selection before the carousel has finished initially filtering.
+            // This avoids a flicker of a placeholder or invalid beatmap before a proper selection.
+            //
+            // After the carousel finishes filtering, it will attempt a selection then call this method again.
+            if (!CarouselItemsPresented &amp;&amp; !checkBeatmapValidForSelection(Beatmap.Value.BeatmapInfo))
+                return;
+
+            if (carousel.VisuallyFocusSelected)
+            {
+                titleWedge.Hide();
+                detailsArea.Hide();
+                FilterControl.Hide();
+            }
+            else
+            {
+                titleWedge.Show();
+                detailsArea.Show();
+                FilterControl.Show();
+            }
+        }
+
+        private void updateBackgroundDim() =&gt; ApplyToBackground(backgroundModeBeatmap =&gt;
+        {
+            backgroundModeBeatmap.Beatmap = Beatmap.Value;
+            backgroundModeBeatmap.IgnoreUserSettings.Value = true;
+
+            backgroundModeBeatmap.DimWhenUserSettingsIgnored.Value = 0.1f;
+
+            // Required to undo results screen dimming the background.
+            // Probably needs more thought because this needs to be in every `ApplyToBackground` currently to restore sane defaults.
+            backgroundModeBeatmap.FadeColour(Color4.White, 250);
+
+            bool backgroundRevealActive = revealBackgroundDelegate?.State == ScheduledDelegate.RunState.Running || revealBackgroundDelegate?.State == ScheduledDelegate.RunState.Complete;
+            backgroundModeBeatmap.BlurAmount.Value = configBackgroundBlur.Value &amp;&amp; !backgroundRevealActive ? 20 : 0f;
+        });
+
+        #endregion
+
+        #region Filtering
+
+        /// &lt;summary&gt;
+        /// Whether the carousel has finished initial presentation of beatmap panels.
+        /// &lt;/summary&gt;
+        public bool CarouselItemsPresented { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether the carousel is or will be undergoing a filter operation.
+        /// &lt;/summary&gt;
+        public bool IsFiltering =&gt; carousel.IsFiltering || filterDebounce?.State == ScheduledDelegate.RunState.Waiting;
+
+        private const double filter_delay = 250;
+
+        private ScheduledDelegate? filterDebounce;
+
+        private void criteriaChanged(FilterCriteria criteria)
+        {
+            filterDebounce?.Cancel();
+
+            // The first filter needs to be applied immediately as this triggers the initial carousel load.
+            bool isFirstFilter = filterDebounce == null;
+
+            // Criteria change may have included a ruleset change which made the current selection invalid.
+            bool isSelectionValid = checkBeatmapValidForSelection(Beatmap.Value.BeatmapInfo);
+
+            filterDebounce = Scheduler.AddDelayed(() =&gt; carousel.Filter(criteria, !isSelectionValid), isFirstFilter || !isSelectionValid ? 0 : filter_delay);
+        }
+
+        private void newItemsPresented(IEnumerable&lt;CarouselItem&gt; carouselItems)
+        {
+            if (carousel.Criteria == null)
+                return;
+
+            CarouselItemsPresented = true;
+
+            updateNoResultsPlaceholder();
+
+            FilterControl.StatusText = SongSelectStrings.MatchesCount(carousel.MatchedBeatmapsCount);
+
+            // If there&#39;s already a selection update in progress, let&#39;s not interrupt it.
+            // Interrupting could cause the debounce interval to be reduced.
+            //
+            // `ensureGlobalBeatmapValid` is run post-selection which will resolve any pending incompatibilities (see `Beatmap` bindable callback).
+            if (debounceQueuedSelection == null)
+                ensureGlobalBeatmapValid();
+
+            updateWedgeVisibility();
+        }
+
+        private void updateNoResultsPlaceholder()
+        {
+            int count = carousel.MatchedBeatmapsCount;
+
+            if (count == 0)
+            {
+                if (noResultsPlaceholder.State.Value == Visibility.Hidden)
+                {
+                    // Duck audio temporarily when the no results placeholder becomes visible.
+                    //
+                    // Temporary ducking makes it easier to avoid scenarios where the ducking interacts badly
+                    // with other global UI components (like overlays).
+                    music.DuckMomentarily(400, new DuckParameters
+                    {
+                        DuckVolumeTo = 1,
+                        DuckCutoffTo = 500,
+                        DuckDuration = 250,
+                        RestoreDuration = 2000,
+                    });
+                }
+
+                noResultsPlaceholder.Show();
+                noResultsPlaceholder.Filter = carousel.Criteria!;
+
+                rightGradientBackground.ResizeWidthTo(3, 1000, Easing.OutPow10);
+            }
+            else
+            {
+                noResultsPlaceholder.Hide();
+
+                rightGradientBackground.ResizeWidthTo(1, 400, Easing.OutPow10);
+            }
+        }
+
+        #endregion
+
+        #region Background reveal
+
+        private ScheduledDelegate? revealBackgroundDelegate;
+
+        public CursorContainer? Cursor =&gt; null;
+        bool IProvideCursor.ProvidingUserCursor =&gt; revealBackgroundDelegate?.Completed == true;
+
+        protected override bool OnHover(HoverEvent e) =&gt; true;
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            var containingInputManager = GetContainingInputManager();
+
+            // I don&#39;t know why this works, but it does.
+            // If the carousel panels are hovered, hovered no longer contains the screen.
+            // Maybe there&#39;s a better way of doing this, but I couldn&#39;t immediately find a good setup.
+            bool mouseDownPriority = containingInputManager!.HoveredDrawables.Contains(this);
+
+            // Touch input synthesises right clicks, which allow absolute scroll of the carousel.
+            // For simplicity, disable this functionality on mobile.
+            bool isTouchInput = e.CurrentState.Mouse.LastSource is ISourcedFromTouch;
+
+            if (!carousel.AbsoluteScrolling &amp;&amp; !isTouchInput &amp;&amp; mouseDownPriority &amp;&amp; revealBackgroundDelegate == null)
+            {
+                revealBackgroundDelegate = Scheduler.AddDelayed(() =&gt;
+                {
+                    if (containingInputManager.DraggedDrawable != null)
+                    {
+                        revealBackgroundDelegate = null;
+                        return;
+                    }
+
+                    mainContent.ResizeWidthTo(1.2f, 600, Easing.OutQuint);
+                    mainContent.ScaleTo(1.2f, 600, Easing.OutQuint);
+                    mainContent.FadeOut(200, Easing.OutQuint);
+
+                    skinnableContent.ResizeWidthTo(1.2f, 600, Easing.OutQuint);
+                    skinnableContent.ScaleTo(1.2f, 600, Easing.OutQuint);
+                    skinnableContent.FadeOut(200, Easing.OutQuint);
+
+                    updateBackgroundDim();
+
+                    Footer?.Hide();
+                }, 200);
+            }
+
+            return base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            restoreBackground();
+            base.OnMouseUp(e);
+        }
+
+        private void restoreBackground()
+        {
+            if (revealBackgroundDelegate == null)
+                return;
+
+            if (revealBackgroundDelegate.State == ScheduledDelegate.RunState.Complete)
+            {
+                mainContent.ResizeWidthTo(1f, 500, Easing.OutQuint);
+                mainContent.ScaleTo(1, 500, Easing.OutQuint);
+                mainContent.FadeIn(500, Easing.OutQuint);
+
+                skinnableContent.ResizeWidthTo(1f, 500, Easing.OutQuint);
+                skinnableContent.ScaleTo(1, 500, Easing.OutQuint);
+                skinnableContent.FadeIn(500, Easing.OutQuint);
+
+                Footer?.Show();
+            }
+
+            revealBackgroundDelegate.Cancel();
+            revealBackgroundDelegate = null;
+
+            updateBackgroundDim();
+        }
+
+        #endregion
+
+        #region Input
+
+        public virtual bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (!this.IsCurrentScreen()) return false;
+
+            if (game == null)
+                return false;
+
+            var flattenedMods = ModUtils.FlattenMods(game.AvailableMods.Value.SelectMany(kv =&gt; kv.Value));
+
+            switch (e.Action)
+            {
+                case GlobalAction.Select:
+                    // in most circumstances this is handled already by the carousel itself, but there are cases where it will not be.
+                    // one of which is filtering out all visible beatmaps and attempting to start gameplay.
+                    // in that case, users still expect a `Select` press to advance to gameplay anyway, using the ambient selected beatmap if there is one,
+                    // which matches the behaviour resulting from clicking the osu! cookie in that scenario.
+                    ensureGlobalBeatmapValid();
+                    SelectAndRun(Beatmap.Value.BeatmapInfo, OnStart);
+                    return true;
+
+                case GlobalAction.IncreaseModSpeed:
+                    return modSpeedHotkeyHandler.ChangeSpeed(0.05, flattenedMods);
+
+                case GlobalAction.DecreaseModSpeed:
+                    return modSpeedHotkeyHandler.ChangeSpeed(-0.05, flattenedMods);
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat) return false;
+
+            switch (e.Key)
+            {
+                case Key.Delete:
+                    if (e.ShiftPressed)
+                    {
+                        if (!Beatmap.IsDefault)
+                            Delete(Beatmap.Value.BeatmapSetInfo);
+                        return true;
+                    }
+
+                    break;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        #endregion
+
+        #region Online lookups
+
+        public enum BeatmapSetLookupStatus
+        {
+            InProgress,
+            Completed,
+        }
+
+        public class BeatmapSetLookupResult
+        {
+            public BeatmapSetLookupStatus Status { get; }
+            public APIBeatmapSet? Result { get; }
+
+            private BeatmapSetLookupResult(BeatmapSetLookupStatus status, APIBeatmapSet? result)
+            {
+                Status = status;
+                Result = result;
+            }
+
+            public static BeatmapSetLookupResult InProgress() =&gt; new BeatmapSetLookupResult(BeatmapSetLookupStatus.InProgress, null);
+            public static BeatmapSetLookupResult Completed(APIBeatmapSet? beatmapSet) =&gt; new BeatmapSetLookupResult(BeatmapSetLookupStatus.Completed, beatmapSet);
+        }
+
+        /// &lt;summary&gt;
+        /// Result of the latest online beatmap set lookup.
+        /// Note that this being &lt;see langword=&quot;null&quot;/&gt; or &lt;see cref=&quot;BeatmapSetLookupResult.InProgress&quot;/&gt; is different from
+        /// being a &lt;see cref=&quot;BeatmapSetLookupResult.Completed&quot;/&gt; with a &lt;see cref=&quot;BeatmapSetLookupResult.Result&quot;/&gt; of null.
+        /// The former indicates a lookup never occurring or being in progress, while the latter indicates a completed lookup with no result.
+        /// &lt;/summary&gt;
+        [Cached(typeof(IBindable&lt;BeatmapSetLookupResult?&gt;))]
+        private readonly Bindable&lt;BeatmapSetLookupResult?&gt; lastLookupResult = new Bindable&lt;BeatmapSetLookupResult?&gt;();
+
+        private CancellationTokenSource? onlineLookupCancellation;
+        private Task&lt;APIBeatmapSet?&gt;? currentOnlineLookup;
+
+        private void fetchOnlineInfo(bool force = false)
+        {
+            var beatmapSetInfo = Beatmap.Value.BeatmapSetInfo;
+
+            if (lastLookupResult.Value?.Result?.OnlineID == beatmapSetInfo.OnlineID &amp;&amp; !force)
+                return;
+
+            onlineLookupCancellation?.Cancel();
+            onlineLookupCancellation = null;
+
+            if (beatmapSetInfo.OnlineID &lt; 0)
+            {
+                lastLookupResult.Value = BeatmapSetLookupResult.Completed(null);
+                return;
+            }
+
+            lastLookupResult.Value = BeatmapSetLookupResult.InProgress();
+            onlineLookupCancellation = new CancellationTokenSource();
+            currentOnlineLookup = onlineLookupSource.GetBeatmapSetAsync(beatmapSetInfo.OnlineID, onlineLookupCancellation.Token);
+            currentOnlineLookup.ContinueWith(t =&gt;
+            {
+                if (t.IsCompletedSuccessfully)
+                    Schedule(() =&gt; lastLookupResult.Value = BeatmapSetLookupResult.Completed(t.GetResultSafely()));
+
+                if (t.Exception != null)
+                {
+                    Logger.Log($&quot;Error when fetching online beatmap set: {t.Exception}&quot;, LoggingTarget.Network);
+                    Schedule(() =&gt; lastLookupResult.Value = BeatmapSetLookupResult.Completed(null));
+                }
+            });
+        }
+
+        #endregion
+
+        #region Implementation of ISongSelect
+
+        void ISongSelect.AddToSearch(string query) =&gt; FilterControl.AddToSearch(query);
+
+        bool ISongSelect.CanPresentScore =&gt; true;
+
+        void ISongSelect.PresentScore(ScoreInfo score, ScorePresentType presentType)
+        {
+            switch (presentType)
+            {
+                case ScorePresentType.Results:
+                    Debug.Assert(Beatmap.Value.BeatmapInfo.Equals(score.BeatmapInfo));
+                    Debug.Assert(Ruleset.Value.Equals(score.Ruleset));
+
+                    this.Push(new SoloResultsScreen(score));
+                    break;
+
+                case ScorePresentType.Gameplay:
+                    (game as OsuGame)?.PresentScore(score, presentType);
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region IHandlePresentBeatmap
+
+        void IHandlePresentBeatmap.PresentBeatmap(WorkingBeatmap workingBeatmap, RulesetInfo ruleset)
+        {
+            unscopeBeatmapSet(restorePreviousSelection: false);
+            cancelDebounceSelection();
+
+            var beatmapInfo = workingBeatmap.BeatmapInfo;
+
+            // Don&#39;t change the local ruleset if the user is on another ruleset and is showing converted beatmaps.
+            // Eventually we probably want to check whether conversion is actually possible for the current ruleset.
+            bool requiresRulesetSwitch = !beatmapInfo.Ruleset.Equals(Ruleset.Value)
+                                         &amp;&amp; (beatmapInfo.Ruleset.OnlineID &gt; 0 || !showConvertedBeatmaps.Value);
+
+            if (requiresRulesetSwitch)
+            {
+                Ruleset.Value = beatmapInfo.Ruleset;
+                Beatmap.Value = workingBeatmap;
+
+                Logger.Log($&quot;Completing {nameof(IHandlePresentBeatmap.PresentBeatmap)} with beatmap {workingBeatmap} ruleset {beatmapInfo.Ruleset}&quot;);
+            }
+            else
+            {
+                Beatmap.Value = workingBeatmap;
+
+                Logger.Log($&quot;Completing {nameof(IHandlePresentBeatmap.PresentBeatmap)} with beatmap {workingBeatmap} (maintaining ruleset)&quot;);
+            }
+        }
+
+        #endregion
+
+        #region Beatmap management
+
+        [Resolved]
+        private ManageCollectionsDialog? manageCollectionsDialog { get; set; }
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        public virtual IEnumerable&lt;OsuMenuItem&gt; GetForwardActions(BeatmapInfo beatmap)
+        {
+            yield return new OsuMenuItem(GlobalActionKeyBindingStrings.Select, MenuItemType.Highlighted, () =&gt; SelectAndRun(beatmap, OnStart))
+            {
+                Icon = FontAwesome.Solid.Check
+            };
+
+            yield return new OsuMenuItemSpacer();
+
+            if (beatmap.OnlineID &gt; 0)
+            {
+                yield return new OsuMenuItem(CommonStrings.Details, MenuItemType.Standard, () =&gt; beatmapOverlay?.FetchAndShowBeatmap(beatmap.OnlineID));
+
+                if (beatmap.GetOnlineURL(api, Ruleset.Value) is string url)
+                    yield return new OsuMenuItem(CommonStrings.CopyLink, MenuItemType.Standard, () =&gt; (game as OsuGame)?.CopyToClipboard(url));
+            }
+
+            yield return new OsuMenuItemSpacer();
+
+            foreach (var i in CreateCollectionMenuActions(beatmap))
+                yield return i;
+        }
+
+        protected IEnumerable&lt;OsuMenuItem&gt; CreateCollectionMenuActions(BeatmapInfo beatmap)
+        {
+            var collectionItems = realm.Realm.All&lt;BeatmapCollection&gt;()
+                                       .OrderBy(c =&gt; c.Name)
+                                       .AsEnumerable()
+                                       .Select(c =&gt; new CollectionToggleMenuItem(c.ToLive(realm), beatmap)).Cast&lt;OsuMenuItem&gt;().ToList();
+
+            collectionItems.Add(new OsuMenuItem(CommonStrings.Manage, MenuItemType.Standard, () =&gt; manageCollectionsDialog?.Show()));
+
+            yield return new OsuMenuItem(CommonStrings.Collections) { Items = collectionItems };
+        }
+
+        public void ManageCollections() =&gt; collectionsDialog?.Show();
+
+        public void Delete(BeatmapSetInfo beatmapSet) =&gt; dialogOverlay?.Push(new BeatmapDeleteDialog(beatmapSet));
+
+        public void RestoreAllHidden(BeatmapSetInfo beatmapSet) =&gt; beatmaps.Restore(beatmapSet);
+
+        private GroupedBeatmap? beforeScopedSelection;
+
+        private readonly Bindable&lt;BeatmapSetInfo?&gt; scopedBeatmapSet = new Bindable&lt;BeatmapSetInfo?&gt;();
+        public IBindable&lt;BeatmapSetInfo?&gt; ScopedBeatmapSet =&gt; scopedBeatmapSet;
+
+        public void ScopeToBeatmapSet(BeatmapSetInfo beatmapSet)
+        {
+            beforeScopedSelection = carousel.CurrentGroupedBeatmap;
+
+            scopedBeatmapSet.Value = beatmapSet;
+        }
+
+        public void UnscopeBeatmapSet() =&gt; unscopeBeatmapSet(restorePreviousSelection: true);
+
+        private void unscopeBeatmapSet(bool restorePreviousSelection)
+        {
+            if (scopedBeatmapSet.Value == null)
+                return;
+
+            if (beforeScopedSelection != null &amp;&amp; restorePreviousSelection)
+                queueBeatmapSelection(beforeScopedSelection);
+
+            scopedBeatmapSet.Value = null;
+            beforeScopedSelection = null;
+        }
+
+        #endregion
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            modSelectOverlayRegistration?.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[89,45,89,49,0],[89,50,89,55,0],[89,60,89,64,0],[95,49,95,83,0],[100,38,100,42,0],[100,43,100,48,0],[100,53,100,57,0],[106,35,106,39,0],[106,40,106,45,0],[108,9,108,59,0],[109,9,109,69,0],[115,9,115,117,0],[117,9,117,50,0],[119,49,119,53,0],[119,54,119,66,0],[119,71,119,76,0],[121,9,121,54,0],[122,9,122,56,0],[123,9,123,59,0],[124,9,124,53,0],[125,9,125,47,0],[126,9,126,61,0],[128,9,128,57,0],[130,9,130,67,0],[132,59,132,63,0],[134,44,134,48,0],[139,37,139,41,0],[139,42,139,46,0],[142,33,142,37,0],[142,38,142,42,0],[145,53,145,57,0],[145,58,145,62,0],[148,43,148,47,0],[148,48,148,52,0],[148,57,148,62,0],[151,36,151,40,0],[151,41,151,45,0],[151,50,151,55,0],[154,62,154,66,0],[154,67,154,71,0],[157,64,157,68,0],[157,69,157,73,0],[160,49,160,53,0],[160,54,160,58,0],[163,51,163,55,0],[163,56,163,60,0],[165,9,165,51,0],[167,9,167,121,0],[169,9,169,61,0],[170,9,170,62,0],[176,9,176,10,0],[177,13,177,66,0],[179,13,230,104,0],[230,104,230,132,0],[230,132,279,94,0],[279,94,279,118,0],[279,118,286,96,0],[286,96,286,130,0],[286,130,313,16,0],[315,13,315,72,0],[317,13,317,98,0],[318,13,319,13,0],[319,13,319,14,0],[319,14,320,17,0],[320,17,320,45,0],[320,45,321,21,0],[321,21,321,28,0],[321,28,323,17,0],[323,17,323,39,0],[323,39,324,13,0],[324,13,324,14,0],[324,14,324,16,0],[326,13,326,96,0],[327,9,327,10,0],[331,72,334,10,0],[337,9,337,10,0],[338,13,338,112,0],[338,112,338,122,0],[338,122,338,160,0],[339,13,339,64,0],[339,64,339,102,0],[339,102,339,105,0],[340,9,340,10,0],[349,84,357,17,0],[357,17,357,18,0],[357,18,358,21,0],[358,21,358,76,0],[358,76,359,25,0],[359,25,359,56,0],[359,56,361,25,0],[361,25,361,57,0],[361,57,362,17,0],[362,17,362,18,0],[362,18,367,17,0],[367,17,367,18,0],[367,18,368,21,0],[368,21,368,48,0],[368,48,369,25,0],[369,25,369,45,0],[369,45,370,17,0],[370,17,370,18,0],[370,18,372,17,0],[372,17,372,18,0],[372,18,373,21,0],[373,21,373,52,0],[373,52,374,25,0],[374,25,374,45,0],[374,45,375,17,0],[375,17,375,18,0],[375,18,381,10,0],[384,9,384,10,0],[385,13,385,33,0],[387,13,387,102,0],[389,13,389,57,0],[391,13,391,62,0],[393,13,394,13,0],[394,13,394,14,0],[394,14,395,17,0],[395,17,395,45,0],[395,45,396,21,0],[396,21,396,28,0],[396,28,398,17,0],[398,17,398,33,0],[398,33,399,21,0],[399,21,399,100,0],[399,100,400,13,0],[400,13,400,14,0],[400,14,400,16,0],[401,9,401,10,0],[404,9,404,10,0],[405,13,405,27,0],[407,13,407,92,0],[409,13,409,83,0],[411,13,416,15,0],[418,13,418,40,0],[419,17,419,34,0],[420,9,420,10,0],[428,9,428,10,0],[429,13,429,47,0],[430,13,430,37,0],[431,9,431,10,0],[434,9,434,10,0],[435,13,435,49,0],[435,50,435,57,0],[437,13,437,53,0],[441,13,441,145,0],[444,13,444,73,0],[445,17,445,75,0],[447,13,447,44,0],[449,13,449,57,0],[450,17,450,44,0],[451,9,451,10,0],[454,9,454,10,0],[455,13,455,49,0],[455,50,455,57,0],[458,13,458,14,0],[459,17,459,79,0],[460,21,460,28,0],[462,17,462,90,0],[463,17,463,80,0],[464,21,464,28,0],[466,17,466,48,0],[467,13,467,14,0],[469,13,469,14,0],[470,17,470,43,0],[471,13,471,14,0],[472,9,472,10,0],[475,9,475,10,0],[476,13,476,44,0],[477,13,477,37,0],[478,9,478,10,0],[485,41,485,45,0],[485,46,485,50,0],[485,55,485,60,0],[487,9,487,94,0],[494,9,494,10,0],[495,13,495,37,0],[496,17,496,24,0],[498,13,498,47,0],[500,13,500,86,0],[502,13,502,86,0],[503,13,503,14,0],[504,17,504,87,0],[508,17,508,40,0],[509,13,509,14,0],[511,13,511,40,0],[512,9,512,10,0],[517,9,517,10,0],[518,13,518,46,0],[520,13,520,38,0],[522,13,522,74,0],[524,13,524,54,0],[525,9,525,10,0],[528,9,528,10,0],[530,13,530,36,0],[531,17,531,24,0],[533,13,533,68,0],[535,13,535,54,0],[536,9,536,10,0],[539,16,539,52,0],[551,9,551,10,0],[552,13,552,41,0],[553,17,553,24,0],[555,13,555,57,0],[556,17,556,24,0],[560,13,560,39,0],[563,13,563,71,0],[565,13,565,35,0],[566,17,566,24,0],[568,13,568,27,0],[569,9,569,10,0],[582,9,582,10,0],[583,13,583,41,0],[584,17,584,24,0],[586,13,586,61,0],[589,13,589,60,0],[590,9,590,10,0],[593,9,593,10,0],[594,13,594,41,0],[595,17,595,30,0],[597,13,597,40,0],[601,13,601,29,0],[602,17,602,30,0],[605,13,605,94,0],[606,13,606,93,0],[608,13,608,32,0],[609,13,609,14,0],[610,17,610,70,0],[611,17,611,29,0],[615,13,615,35,0],[616,13,616,14,0],[617,17,617,56,0],[618,17,618,44,0],[619,17,619,39,0],[623,13,623,33,0],[624,13,624,14,0],[626,17,626,63,0],[628,17,628,103,0],[630,17,630,41,0],[631,17,631,18,0],[632,21,632,120,0],[633,21,633,55,0],[634,21,634,53,0],[635,21,635,33,0],[637,13,637,14,0],[640,13,640,34,0],[641,13,641,40,0],[643,13,643,35,0],[644,9,644,10,0],[647,9,647,10,0],[648,13,648,95,0],[649,17,649,30,0],[651,13,651,32,0],[652,17,652,30,0],[654,13,654,44,0],[655,17,655,30,0],[657,13,657,82,0],[658,17,658,30,0],[660,13,660,25,0],[661,9,661,10,0],[668,9,668,10,0],[669,13,669,32,0],[671,13,671,27,0],[672,13,672,34,0],[673,9,673,10,0],[676,9,676,10,0],[677,13,677,32,0],[679,13,679,57,0],[680,13,680,34,0],[682,13,682,40,0],[684,13,684,35,0],[686,13,686,36,0],[687,13,687,14,0],[690,17,690,47,0],[691,17,691,51,0],[692,13,692,14,0],[693,9,693,10,0],[696,9,696,10,0],[697,13,697,51,0],[699,13,699,58,0],[700,13,700,31,0],[702,13,702,34,0],[703,9,703,10,0],[706,9,706,10,0],[707,13,707,58,0],[708,13,708,31,0],[710,13,710,38,0],[711,9,711,10,0],[714,9,714,10,0],[715,13,715,54,0],[716,13,716,54,0],[718,13,718,60,0],[719,13,719,56,0],[721,13,721,52,0],[723,13,723,36,0],[724,13,724,14,0],[727,17,727,38,0],[728,17,728,18,0],[729,21,735,24,0],[736,17,736,18,0],[738,17,738,32,0],[739,13,739,14,0],[741,13,741,64,0],[742,9,742,10,0],[745,9,745,10,0],[746,13,746,41,0],[747,17,747,24,0],[749,13,749,40,0],[751,13,751,37,0],[752,13,752,35,0],[753,13,753,37,0],[754,13,754,77,0],[755,9,755,10,0],[758,9,758,10,0],[759,13,759,33,0],[761,13,761,56,0],[763,13,763,60,0],[764,13,764,58,0],[765,13,765,58,0],[767,13,767,37,0],[769,13,769,26,0],[770,9,770,10,0],[773,9,773,10,0],[774,13,774,47,0],[776,13,776,30,0],[777,17,777,24,0],[779,13,779,47,0],[780,17,780,71,0],[782,13,782,14,0],[783,17,783,29,0],[784,17,784,36,0],[785,17,785,49,0],[786,13,786,14,0],[788,13,788,47,0],[789,13,789,60,0],[791,13,792,13,0],[792,13,792,14,0],[792,14,793,17,0],[793,17,793,44,0],[793,44,794,17,0],[794,17,794,66,0],[794,66,795,17,0],[795,17,795,30,0],[795,30,796,13,0],[796,13,796,14,0],[796,14,796,15,0],[797,9,797,10,0],[800,9,800,10,0],[801,13,801,39,0],[803,13,803,30,0],[804,17,804,24,0],[806,13,806,40,0],[807,9,807,10,0],[810,9,810,10,0],[811,13,811,36,0],[813,13,813,30,0],[814,17,814,24,0],[816,13,816,40,0],[818,13,818,49,0],[819,13,819,43,0],[820,9,820,10,0],[823,9,823,10,0],[828,13,828,102,0],[829,17,829,24,0],[831,13,831,48,0],[832,13,832,14,0],[833,17,833,35,0],[834,17,834,36,0],[835,17,835,38,0],[836,13,836,14,0],[838,13,838,14,0],[839,17,839,35,0],[840,17,840,36,0],[841,17,841,38,0],[842,13,842,14,0],[843,9,843,10,0],[845,47,846,9,0],[846,9,846,10,0],[846,10,847,13,0],[847,13,847,59,0],[847,59,848,13,0],[848,13,848,67,0],[848,67,850,13,0],[850,13,850,75,0],[850,75,854,13,0],[854,13,854,65,0],[854,65,856,13,0],[856,13,856,187,0],[856,187,857,13,0],[857,13,857,118,0],[857,118,858,9,0],[858,9,858,10,0],[858,10,858,11,0],[867,46,867,50,0],[867,51,867,63,0],[872,36,872,119,0],[879,9,879,10,0],[880,13,880,38,0],[883,13,883,57,0],[886,13,886,94,0],[888,13,888,57,0],[888,57,888,101,0],[888,101,888,158,0],[889,9,889,10,0],[892,9,892,10,0],[893,13,893,43,0],[894,17,894,24,0],[896,13,896,43,0],[898,13,898,42,0],[900,13,900,102,0],[906,13,906,49,0],[907,17,907,44,0],[909,13,909,37,0],[910,9,910,10,0],[913,9,913,10,0],[914,13,914,55,0],[916,13,916,28,0],[917,13,917,14,0],[918,17,918,75,0],[919,17,919,18,0],[924,21,930,24,0],[931,17,931,18,0],[933,17,933,45,0],[934,17,934,66,0],[936,17,936,81,0],[937,13,937,14,0],[939,13,939,14,0],[940,17,940,45,0],[942,17,942,80,0],[943,13,943,14,0],[944,9,944,10,0],[952,43,952,47,0],[953,52,953,95,0],[955,58,955,62,0],[958,9,958,10,0],[959,13,959,70,0],[964,13,964,94,0],[968,13,968,86,0],[970,13,970,119,0],[971,13,971,14,0],[972,17,973,17,0],[973,17,973,18,0],[973,18,974,21,0],[974,21,974,72,0],[974,72,975,21,0],[975,21,975,22,0],[975,22,976,25,0],[976,25,976,57,0],[976,57,977,25,0],[977,25,977,32,0],[977,32,980,21,0],[980,21,980,75,0],[980,75,981,21,0],[981,21,981,69,0],[981,69,982,21,0],[982,21,982,63,0],[982,63,984,21,0],[984,21,984,80,0],[984,80,985,21,0],[985,21,985,74,0],[985,74,986,21,0],[986,21,986,68,0],[986,68,988,21,0],[988,21,988,43,0],[988,43,990,21,0],[990,21,990,36,0],[990,36,991,17,0],[991,17,991,18,0],[991,18,991,25,0],[992,13,992,14,0],[994,13,994,40,0],[995,9,995,10,0],[998,9,998,10,0],[999,13,999,33,0],[1000,13,1000,31,0],[1001,9,1001,10,0],[1004,9,1004,10,0],[1005,13,1005,50,0],[1006,17,1006,24,0],[1008,13,1008,87,0],[1009,13,1009,14,0],[1010,17,1010,69,0],[1011,17,1011,62,0],[1012,17,1012,58,0],[1014,17,1014,74,0],[1015,17,1015,67,0],[1016,17,1016,63,0],[1018,17,1018,32,0],[1019,13,1019,14,0],[1021,13,1021,47,0],[1022,13,1022,45,0],[1024,13,1024,35,0],[1025,9,1025,10,0],[1032,9,1032,10,0],[1033,13,1033,41,0],[1033,42,1033,55,0],[1035,13,1035,30,0],[1036,17,1036,30,0],[1038,13,1038,96,0],[1038,96,1038,104,0],[1038,104,1038,107,0],[1040,13,1040,30,0],[1047,21,1047,48,0],[1048,21,1048,70,0],[1049,21,1049,33,0],[1052,21,1052,83,0],[1055,21,1055,84,0],[1058,13,1058,26,0],[1059,9,1059,10,0],[1062,9,1062,10,0],[1063,9,1063,10,0],[1066,9,1066,10,0],[1067,13,1067,26,0],[1067,27,1067,40,0],[1069,13,1069,27,0],[1072,21,1072,40,0],[1073,21,1073,22,0],[1074,25,1074,48,0],[1075,29,1075,66,0],[1076,25,1076,37,0],[1079,21,1079,27,0],[1082,13,1082,38,0],[1083,9,1083,10,0],[1097,52,1097,56,0],[1098,44,1098,48,0],[1100,13,1100,97,0],[1101,13,1101,14,0],[1102,17,1102,33,0],[1103,17,1103,33,0],[1104,13,1104,14,0],[1106,66,1106,133,0],[1107,90,1107,162,0],[1117,9,1117,119,0],[1123,9,1123,10,0],[1124,13,1124,63,0],[1126,13,1126,95,0],[1127,17,1127,24,0],[1129,13,1129,48,0],[1130,13,1130,45,0],[1132,13,1132,45,0],[1133,13,1133,14,0],[1134,17,1134,81,0],[1135,17,1135,24,0],[1138,13,1138,74,0],[1139,13,1139,70,0],[1140,13,1140,130,0],[1141,13,1142,13,0],[1142,13,1142,14,0],[1142,14,1143,17,0],[1143,17,1143,47,0],[1143,47,1144,21,0],[1144,21,1144,36,0],[1144,36,1144,114,0],[1144,114,1144,116,0],[1144,116,1146,17,0],[1146,17,1146,41,0],[1146,41,1147,17,0],[1147,17,1147,18,0],[1147,18,1148,21,0],[1148,21,1148,113,0],[1148,113,1149,21,0],[1149,21,1149,36,0],[1149,36,1149,99,0],[1149,99,1149,101,0],[1149,101,1150,17,0],[1150,17,1150,18,0],[1150,18,1151,13,0],[1151,13,1151,14,0],[1151,14,1151,16,0],[1152,9,1152,10,0],[1158,55,1158,87,0],[1160,45,1160,49,0],[1163,9,1163,10,0],[1164,13,1164,33,0],[1167,21,1167,87,0],[1168,21,1168,71,0],[1170,21,1170,61,0],[1171,21,1171,27,0],[1174,21,1174,73,0],[1175,21,1175,27,0],[1177,9,1177,10,0],[1184,9,1184,10,0],[1185,13,1185,64,0],[1186,13,1186,39,0],[1188,13,1188,58,0],[1192,13,1193,112,0],[1195,13,1195,39,0],[1196,13,1196,14,0],[1197,17,1197,53,0],[1198,17,1198,48,0],[1200,17,1200,150,0],[1201,13,1201,14,0],[1203,13,1203,14,0],[1204,17,1204,48,0],[1206,17,1206,142,0],[1207,13,1207,14,0],[1208,9,1208,10,0],[1215,68,1215,72,0],[1215,73,1215,77,0],[1218,37,1218,41,0],[1218,42,1218,46,0],[1218,51,1218,56,0],[1221,9,1221,10,0],[1222,13,1222,112,0],[1222,112,1222,142,0],[1222,142,1225,15,0],[1227,13,1227,50,0],[1229,13,1229,38,0],[1230,13,1230,14,0],[1231,17,1231,98,0],[1231,98,1231,151,0],[1231,151,1231,153,0],[1233,17,1233,76,0],[1234,21,1234,103,0],[1234,103,1234,142,0],[1234,142,1234,144,0],[1235,13,1235,14,0],[1237,13,1237,50,0],[1239,13,1239,20,0],[1239,22,1239,27,0],[1239,28,1239,30,0],[1239,31,1239,67,0],[1240,17,1240,32,0],[1241,9,1241,10,0],[1244,9,1244,10,0],[1245,13,1248,53,0],[1248,53,1248,107,0],[1248,107,1248,138,0],[1250,13,1250,100,0],[1250,100,1250,131,0],[1250,131,1250,134,0],[1252,13,1252,97,0],[1253,9,1253,10,0],[1255,44,1255,69,0],[1257,58,1257,114,0],[1259,68,1259,96,0],[1263,9,1263,103,0],[1264,63,1264,79,0],[1267,9,1267,10,0],[1268,13,1268,68,0],[1270,13,1270,49,0],[1271,9,1271,10,0],[1273,44,1273,93,0],[1276,9,1276,10,0],[1277,13,1277,48,0],[1278,17,1278,24,0],[1280,13,1280,75,0],[1281,17,1281,62,0],[1283,13,1283,43,0],[1284,13,1284,42,0],[1285,9,1285,10,0],[1290,9,1290,10,0],[1291,13,1291,39,0],[1292,13,1292,53,0],[1293,9,1293,10,0]]);
+    </script>
+  </body>
+</html>

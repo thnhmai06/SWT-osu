@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Chat/ChannelManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using Microsoft.AspNetCore.SignalR;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Chat.Listing;
+using osu.Game.Overlays.Notifications;
+
+namespace osu.Game.Online.Chat
+{
+    /// &lt;summary&gt;
+    /// Manages everything channel related
+    /// &lt;/summary&gt;
+    public partial class ChannelManager : CompositeComponent, IChannelPostTarget
+    {
+        /// &lt;summary&gt;
+        /// The channels the player joins on startup
+        /// &lt;/summary&gt;
+        private readonly string[] defaultChannels =
+        {
+            @&quot;#lazer&quot;,
+            @&quot;#osu&quot;,
+            @&quot;#lobby&quot;
+        };
+
+        private readonly BindableList&lt;Channel&gt; availableChannels = new BindableList&lt;Channel&gt;();
+        private readonly BindableList&lt;Channel&gt; joinedChannels = new BindableList&lt;Channel&gt;();
+
+        /// &lt;summary&gt;
+        /// Keeps a stack of recently closed channels
+        /// &lt;/summary&gt;
+        private readonly List&lt;ClosedChannel&gt; closedChannels = new List&lt;ClosedChannel&gt;();
+
+        // For efficiency purposes, this constant bounds the number of closed channels we store.
+        // This number is somewhat arbitrary; future developers are free to modify it.
+        // Must be a positive number.
+        private const int closed_channels_max_size = 50;
+
+        /// &lt;summary&gt;
+        /// The currently opened channel
+        /// &lt;/summary&gt;
+        public Bindable&lt;Channel&gt; CurrentChannel { get; } = new Bindable&lt;Channel&gt;();
+
+        /// &lt;summary&gt;
+        /// The Channels the player has joined
+        /// &lt;/summary&gt;
+        public IBindableList&lt;Channel&gt; JoinedChannels =&gt; joinedChannels;
+
+        /// &lt;summary&gt;
+        /// The channels available for the player to join
+        /// &lt;/summary&gt;
+        public IBindableList&lt;Channel&gt; AvailableChannels =&gt; availableChannels;
+
+        private readonly IAPIProvider api;
+
+        [Resolved]
+        private UserLookupCache users { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        private MultiplayerClient multiplayerClient { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        private Storage storage { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        private INotificationOverlay notifications { get; set; }
+
+        private readonly IBindable&lt;APIUser&gt; localUser = new Bindable&lt;APIUser&gt;();
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+        private readonly IBindableList&lt;APIRelation&gt; localUserBlocks = new BindableList&lt;APIRelation&gt;();
+        private ScheduledDelegate scheduledAck;
+
+        private IChatClient chatClient = null!;
+        private long? lastSilenceMessageId;
+        private uint? lastSilenceId;
+
+        public ChannelManager(IAPIProvider api)
+        {
+            this.api = api;
+
+            CurrentChannel.ValueChanged += currentChannelChanged;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            chatClient = api.GetChatClient();
+            chatClient.ChannelJoined += ch =&gt; Schedule(() =&gt; joinChannel(ch));
+            chatClient.ChannelParted += ch =&gt; Schedule(() =&gt; leaveChannel(getChannel(ch), false));
+            chatClient.NewMessages += msgs =&gt; Schedule(() =&gt; addMessages(msgs));
+            chatClient.PresenceReceived += () =&gt; Schedule(initializeChannels);
+            chatClient.RequestPresence();
+
+            localUser.BindTo(api.LocalUser);
+            localUser.BindValueChanged(userChanged);
+
+            apiState.BindTo(api.State);
+            apiState.BindValueChanged(_ =&gt; SendAck(), true);
+
+            localUserBlocks.BindTo(api.LocalUserState.Blocks);
+            localUserBlocks.BindCollectionChanged((_, args) =&gt; Schedule(() =&gt; onBlocksChanged(args)));
+        }
+
+        private void userChanged(ValueChangedEvent&lt;APIUser&gt; userChange)
+        {
+            if (userChange.OldValue?.Equals(userChange.NewValue) == true)
+                return;
+
+            CurrentChannel.Value = null;
+
+            foreach (var joinedChannel in joinedChannels)
+                joinedChannel.Joined.Value = false;
+
+            joinedChannels.Clear();
+            // additionally clear the history of last joined channels so that the new user can&#39;t reopen the old user&#39;s channels
+            // (would likely fail web-side on perms anyway, but why even get that far)
+            closedChannels.Clear();
+        }
+
+        /// &lt;summary&gt;
+        /// Opens a channel or switches to the channel if already opened.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;ChannelNotFoundException&quot;&gt;If the name of the specifed channel was not found this exception will be thrown.&lt;/exception&gt;
+        /// &lt;param name=&quot;name&quot;&gt;&lt;/param&gt;
+        public void OpenChannel(string name)
+        {
+            ArgumentNullException.ThrowIfNull(name);
+
+            CurrentChannel.Value = AvailableChannels.FirstOrDefault(c =&gt; c.Name == name) ?? throw new ChannelNotFoundException(name);
+        }
+
+        /// &lt;summary&gt;
+        /// Opens a new private channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;user&quot;&gt;The user the private channel is opened with.&lt;/param&gt;
+        public void OpenPrivateChannel(APIUser user)
+        {
+            ArgumentNullException.ThrowIfNull(user);
+
+            if (user.Id == api.LocalUser.Value.Id)
+                return;
+
+            CurrentChannel.Value = JoinedChannels.FirstOrDefault(c =&gt; c.Type == ChannelType.PM &amp;&amp; c.Users.Count == 1 &amp;&amp; c.Users.Any(u =&gt; u.Id == user.Id))
+                                   ?? JoinChannel(new Channel(user));
+        }
+
+        private void currentChannelChanged(ValueChangedEvent&lt;Channel&gt; channel)
+        {
+            bool isSelectorChannel = channel.NewValue is ChannelListing.ChannelListingChannel;
+
+            if (!isSelectorChannel)
+                JoinChannel(channel.NewValue);
+
+            Logger.Log($&quot;Current channel changed to {channel.NewValue}&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Ensure we run post actions in sequence, once at a time.
+        /// &lt;/summary&gt;
+        private readonly Queue&lt;Action&gt; postQueue = new Queue&lt;Action&gt;();
+
+        /// &lt;summary&gt;
+        /// Posts a message to the currently opened channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;text&quot;&gt;The message text that is going to be posted&lt;/param&gt;
+        /// &lt;param name=&quot;isAction&quot;&gt;Is true if the message is an action, e.g.: user is currently eating &lt;/param&gt;
+        /// &lt;param name=&quot;target&quot;&gt;An optional target channel. If null, &lt;see cref=&quot;CurrentChannel&quot;/&gt; will be used.&lt;/param&gt;
+        public void PostMessage(string text, bool isAction = false, Channel target = null)
+        {
+            target ??= CurrentChannel.Value;
+
+            if (target == null)
+                return;
+
+            void dequeueAndRun()
+            {
+                if (postQueue.Count &gt; 0)
+                    postQueue.Dequeue().Invoke();
+            }
+
+            postQueue.Enqueue(() =&gt;
+            {
+                if (!api.IsLoggedIn)
+                {
+                    target.AddNewMessages(new ErrorMessage(&quot;Please sign in to participate in chat!&quot;));
+                    return;
+                }
+
+                var message = new LocalEchoMessage
+                {
+                    Sender = api.LocalUser.Value,
+                    Timestamp = DateTimeOffset.Now,
+                    ChannelId = target.Id,
+                    IsAction = isAction,
+                    Content = text,
+                    Uuid = Guid.NewGuid().ToString()
+                };
+
+                target.AddLocalEcho(message);
+
+                // if this is a PM and the first message, we need to do a special request to create the PM channel
+                if (target.Type == ChannelType.PM &amp;&amp; target.Id == 0)
+                {
+                    var createNewPrivateMessageRequest = new CreateNewPrivateMessageRequest(target.Users.First(), message);
+
+                    createNewPrivateMessageRequest.Success += _ =&gt; dequeueAndRun();
+                    createNewPrivateMessageRequest.Failure += exception =&gt;
+                    {
+                        handlePostException(exception);
+                        target.ReplaceMessage(message, null);
+                        dequeueAndRun();
+                    };
+
+                    api.Queue(createNewPrivateMessageRequest);
+                    return;
+                }
+
+                var req = new PostMessageRequest(message);
+
+                req.Success += m =&gt; dequeueAndRun();
+                req.Failure += exception =&gt;
+                {
+                    handlePostException(exception);
+                    target.ReplaceMessage(message, null);
+                    dequeueAndRun();
+                };
+
+                api.Queue(req);
+            });
+
+            // always run if the queue is empty
+            if (postQueue.Count == 1)
+                dequeueAndRun();
+        }
+
+        private static void handlePostException(Exception exception)
+        {
+            if (exception is APIException apiException)
+                Logger.Log(apiException.Message, level: LogLevel.Important);
+            else
+                Logger.Error(exception, &quot;Posting message failed.&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Posts a command locally. Commands like /help will result in a help message written in the current channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;text&quot;&gt;the text containing the command identifier and command parameters.&lt;/param&gt;
+        /// &lt;param name=&quot;target&quot;&gt;An optional target channel. If null, &lt;see cref=&quot;CurrentChannel&quot;/&gt; will be used.&lt;/param&gt;
+        public void PostCommand(string text, Channel target = null)
+        {
+            target ??= CurrentChannel.Value;
+
+            if (target == null)
+                return;
+
+            string[] parameters = text.Split(&#39; &#39;, 2);
+            string command = parameters[0];
+            string content = parameters.Length == 2 ? parameters[1] : string.Empty;
+
+            switch (command.ToLowerInvariant())
+            {
+                case @&quot;np&quot;:
+                    AddInternal(new NowPlayingCommand(target));
+                    break;
+
+                case @&quot;watch&quot;:
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        target.AddNewMessages(new ErrorMessage(&quot;Usage: /watch [user]&quot;));
+                        break;
+                    }
+
+                    AddInternal(new WatchCommand(target, content));
+                    break;
+
+                case @&quot;me&quot;:
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        target.AddNewMessages(new ErrorMessage(&quot;Usage: /me [action]&quot;));
+                        break;
+                    }
+
+                    PostMessage(content, true, target);
+                    break;
+
+                case @&quot;join&quot;:
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        target.AddNewMessages(new ErrorMessage(&quot;Usage: /join [channel]&quot;));
+                        break;
+                    }
+
+                    var channel = availableChannels.FirstOrDefault(c =&gt; c.Name == content || c.Name == $&quot;#{content}&quot;);
+
+                    if (channel == null)
+                    {
+                        target.AddNewMessages(new ErrorMessage($&quot;Channel &#39;{content}&#39; not found.&quot;));
+                        break;
+                    }
+
+                    JoinChannel(channel);
+                    break;
+
+                case @&quot;chat&quot;:
+                case @&quot;msg&quot;:
+                case @&quot;query&quot;:
+                    if (string.IsNullOrWhiteSpace(content))
+                    {
+                        target.AddNewMessages(new ErrorMessage($&quot;Usage: /{command} [user]&quot;));
+                        break;
+                    }
+
+                    // Check if the user has joined the requested channel already.
+                    // This uses the channel name for comparison as the PM user&#39;s username is unavailable after a restart.
+                    var privateChannel = JoinedChannels.FirstOrDefault(c =&gt; c.Type == ChannelType.PM &amp;&amp; c.Users.Count == 1 &amp;&amp; c.Name.Equals(content, StringComparison.OrdinalIgnoreCase));
+
+                    if (privateChannel != null)
+                    {
+                        CurrentChannel.Value = privateChannel;
+                        break;
+                    }
+
+                    var request = new GetUserRequest(content);
+                    request.Success += OpenPrivateChannel;
+                    request.Failure += e =&gt; target.AddNewMessages(
+                        new ErrorMessage(e.InnerException?.Message == @&quot;NotFound&quot; ? $&quot;User &#39;{content}&#39; was not found.&quot; : $&quot;Could not fetch user &#39;{content}&#39;.&quot;));
+
+                    api.Queue(request);
+                    break;
+
+                case @&quot;roll&quot;:
+                    if (target.Type != ChannelType.Multiplayer || multiplayerClient?.Room?.ChannelID != target.Id)
+                    {
+                        target.AddNewMessages(new ErrorMessage(&quot;Cannot roll when not in a multiplayer room.&quot;));
+                        break;
+                    }
+
+                    uint max = 100;
+
+                    if (!string.IsNullOrEmpty(content))
+                    {
+                        if (!uint.TryParse(content, out max) || max &lt; 2 || max &gt; 100)
+                        {
+                            target.AddNewMessages(new ErrorMessage(&quot;Usage: /roll [2-100]&quot;));
+                            break;
+                        }
+                    }
+
+                    var rollRequest = new RollRequest { Max = max };
+                    multiplayerClient.SendMatchRequest(rollRequest).FireAndForget(onError: ex =&gt;
+                    {
+                        string message = ex is HubException
+                            ? $&quot;Failed to roll: {ex.Message}&quot;
+                            : &quot;Failed to roll.&quot;;
+                        target.AddNewMessages(new ErrorMessage(message));
+                    });
+                    break;
+
+                case @&quot;savelog&quot;:
+                    ProgressNotification notification = new ProgressNotification
+                    {
+                        State = ProgressNotificationState.Active,
+                        Text = NotificationsStrings.LogsExportOngoing,
+                    };
+                    notifications?.Post(notification);
+
+                    exportChannelLog(target).ContinueWith(t =&gt;
+                    {
+                        if (t.Exception != null)
+                        {
+                            Logger.Log($@&quot;Failed to export channel log: {t.Exception}&quot;);
+                            notification.State = ProgressNotificationState.Cancelled;
+                            return;
+                        }
+
+                        string result = t.GetResultSafely();
+
+                        if (result == null)
+                        {
+                            Logger.Log(&quot;Failed to export channel log due to missing storage.&quot;);
+                            notification.State = ProgressNotificationState.Cancelled;
+                            return;
+                        }
+
+                        notification.CompletionText = NotificationsStrings.FileExportFinished(result);
+                        notification.CompletionClickAction = () =&gt;
+                        {
+                            (storage as OsuStorage)?.GetExportStorage().PresentFileExternally(result);
+                            return true;
+                        };
+                        notification.State = ProgressNotificationState.Completed;
+                    });
+                    break;
+
+                case @&quot;help&quot;:
+                    target.AddNewMessages(new InfoMessage(
+                        &quot;&quot;&quot;
+                        Supported commands:
+                        /help            - Displays all available commands.
+                        /me [action]     - Perform a third-person action.
+                        /join [channel]  - Joins the specified channel.
+                        /chat [user]     - Opens a new chat tab with the specified user.
+                        /watch [user]    - Spectates the specified user.
+                        /np              - Print to chat the current song you are listening to or playing.
+                        /savelog         - Saves the current chat tab to a text file.
+                        /roll [2-100]    - Rolls a random number (multiplayer only).
+                        &quot;&quot;&quot;
+                    ));
+                    break;
+
+                default:
+                    target.AddNewMessages(new ErrorMessage($@&quot;&quot;&quot;/{command}&quot;&quot; is not supported! For a list of supported commands see /help&quot;));
+                    break;
+            }
+        }
+
+        private void addMessages(List&lt;Message&gt; messages)
+        {
+            var channels = JoinedChannels.ToList();
+            var blockedUserIds = localUserBlocks.Select(b =&gt; b.TargetID).ToList();
+
+            foreach (var group in messages.Where(m =&gt; !blockedUserIds.Contains(m.SenderId)).GroupBy(m =&gt; m.ChannelId))
+                channels.Find(c =&gt; c.Id == group.Key)?.AddNewMessages(group.ToArray());
+
+            lastSilenceMessageId ??= messages.LastOrDefault()?.Id;
+        }
+
+        private void initializeChannels()
+        {
+            // This request is self-retrying until it succeeds.
+            // To avoid requests piling up when not logged in (ie. API is unavailable) exit early.
+            if (!api.IsLoggedIn)
+                return;
+
+            var req = new ListChannelsRequest();
+
+            bool joinDefaults = JoinedChannels.Count == 0;
+
+            req.Success += channels =&gt;
+            {
+                foreach (var channel in channels)
+                {
+                    var ch = getChannel(channel, addToAvailable: true);
+
+                    // join any channels classified as &quot;defaults&quot;
+                    if (joinDefaults &amp;&amp; defaultChannels.Any(c =&gt; c.Equals(channel.Name, StringComparison.OrdinalIgnoreCase)))
+                        joinChannel(ch);
+                }
+            };
+
+            req.Failure += error =&gt;
+            {
+                Logger.Error(error, &quot;Fetching channel list failed&quot;);
+                Scheduler.AddDelayed(initializeChannels, 60000);
+            };
+
+            api.Queue(req);
+        }
+
+        /// &lt;summary&gt;
+        /// Fetches inital messages of a channel
+        ///
+        /// TODO: remove this when the API supports returning initial fetch messages for more than one channel by specifying the last message id per channel instead of one last message id globally.
+        /// right now it caps out at 50 messages and therefore only returns one channel&#39;s worth of content.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel &lt;/param&gt;
+        private void fetchInitialMessages(Channel channel)
+        {
+            if (channel.Id &lt;= 0 || channel.MessagesLoaded) return;
+
+            var fetchInitialMsgReq = new GetMessagesRequest(channel);
+            fetchInitialMsgReq.Success += messages =&gt;
+            {
+                addMessages(messages);
+                channel.MessagesLoaded = true; // this will mark the channel as having received messages even if there were none.
+            };
+
+            api.Queue(fetchInitialMsgReq);
+        }
+
+        /// &lt;summary&gt;
+        /// Sends an acknowledgement request to the API.
+        /// This marks the user as online to receive messages from public channels, while also returning a list of silenced users.
+        /// It needs to be called at least once every 10 minutes to remain visibly marked as online.
+        /// &lt;/summary&gt;
+        public void SendAck()
+        {
+            if (apiState.Value != APIState.Online)
+                return;
+
+            var req = new ChatAckRequest
+            {
+                SinceMessageId = lastSilenceMessageId,
+                SinceSilenceId = lastSilenceId
+            };
+
+            req.Failure += _ =&gt; scheduleNextRequest();
+            req.Success += ack =&gt;
+            {
+                foreach (var silence in ack.Silences)
+                {
+                    foreach (var channel in JoinedChannels)
+                        channel.RemoveMessagesFromUser(silence.UserId);
+                    lastSilenceId = Math.Max(lastSilenceId ?? 0, silence.Id);
+                }
+
+                scheduleNextRequest();
+            };
+
+            api.Queue(req);
+
+            void scheduleNextRequest()
+            {
+                scheduledAck?.Cancel();
+                scheduledAck = Scheduler.AddDelayed(SendAck, 60000);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Find an existing channel instance for the provided channel. Lookup is performed based on ID.
+        /// The provided channel may be used if an existing instance is not found.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;lookup&quot;&gt;A candidate channel to be used for lookup or permanently on lookup failure.&lt;/param&gt;
+        /// &lt;param name=&quot;addToAvailable&quot;&gt;Whether the channel should be added to &lt;see cref=&quot;AvailableChannels&quot;/&gt; if not already.&lt;/param&gt;
+        /// &lt;param name=&quot;addToJoined&quot;&gt;Whether the channel should be added to &lt;see cref=&quot;JoinedChannels&quot;/&gt; if not already.&lt;/param&gt;
+        /// &lt;returns&gt;The found channel.&lt;/returns&gt;
+        private Channel getChannel(Channel lookup, bool addToAvailable = false, bool addToJoined = false)
+        {
+            Channel found = null;
+
+            bool lookupCondition(Channel ch)
+            {
+                if (ch.Id &gt; 0 &amp;&amp; lookup.Id &gt; 0)
+                    return ch.Id == lookup.Id;
+
+                return ch.Name == lookup.Name;
+            }
+
+            var available = AvailableChannels.FirstOrDefault(lookupCondition);
+            if (available != null)
+                found = available;
+
+            var joined = JoinedChannels.FirstOrDefault(lookupCondition);
+            if (found == null &amp;&amp; joined != null)
+                found = joined;
+
+            if (found == null)
+            {
+                found = lookup;
+
+                // if we&#39;re using a channel object from the server, we want to remove ourselves from the users list.
+                // this is because we check the first user in the channel to display a name/icon on tabs for now.
+                var foundSelf = found.Users.FirstOrDefault(u =&gt; u.Id == api.LocalUser.Value.Id);
+                if (foundSelf != null)
+                    found.Users.Remove(foundSelf);
+            }
+            else
+            {
+                found.Id = lookup.Id;
+                found.Name = lookup.Name;
+                found.LastMessageId = Math.Max(found.LastMessageId ?? 0, lookup.LastMessageId ?? 0);
+            }
+
+            if (joined == null &amp;&amp; addToJoined) joinedChannels.Add(found);
+            if (available == null &amp;&amp; addToAvailable) availableChannels.Add(found);
+
+            return found;
+        }
+
+        /// &lt;summary&gt;
+        /// Joins a channel if it has not already been joined. Must be called from the update thread.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel to join.&lt;/param&gt;
+        /// &lt;returns&gt;The joined channel. Note that this may not match the parameter channel as it is a backed object.&lt;/returns&gt;
+        public Channel JoinChannel(Channel channel) =&gt; joinChannel(channel, true);
+
+        private Channel joinChannel(Channel channel, bool fetchInitialMessages = false)
+        {
+            if (channel == null) return null;
+
+            channel = getChannel(channel, addToJoined: true);
+
+            // ensure we are joined to the channel
+            if (!channel.Joined.Value)
+            {
+                channel.Joined.Value = true;
+
+                switch (channel.Type)
+                {
+                    case ChannelType.Multiplayer:
+                        // join is implicit. happens when you join a multiplayer game.
+                        // this will probably change in the future.
+                        joinChannel(channel, fetchInitialMessages);
+                        return channel;
+
+                    case ChannelType.PM:
+                        Logger.Log($&quot;Attempting to join PM channel {channel}&quot;);
+
+                        var createRequest = new CreateChannelRequest(channel);
+                        createRequest.Failure += e =&gt;
+                        {
+                            Logger.Log($&quot;Failed to join PM channel {channel} ({e.Message})&quot;);
+                        };
+                        createRequest.Success += resChannel =&gt;
+                        {
+                            Logger.Log($&quot;Joined PM channel {channel} ({resChannel.ChannelID})&quot;);
+
+                            if (resChannel.ChannelID.HasValue)
+                            {
+                                channel.Id = resChannel.ChannelID.Value;
+
+                                addMessages(resChannel.RecentMessages);
+                                channel.MessagesLoaded = true; // this will mark the channel as having received messages even if there were none.
+                            }
+                        };
+
+                        api.Queue(createRequest);
+                        break;
+
+                    default:
+                        Logger.Log($&quot;Attempting to join public channel {channel}&quot;);
+
+                        var req = new JoinChannelRequest(channel);
+                        req.Success += () =&gt;
+                        {
+                            Logger.Log($&quot;Joined public channel {channel}&quot;);
+                            joinChannel(channel, fetchInitialMessages);
+
+                            // Required after joining public channels to mark the user as online in them.
+                            // Todo: Temporary workaround for https://github.com/ppy/osu-web/issues/9602
+                            SendAck();
+                        };
+                        req.Failure += e =&gt;
+                        {
+                            Logger.Log($&quot;Failed to join public channel {channel} ({e.Message})&quot;);
+                            LeaveChannel(channel);
+                        };
+                        api.Queue(req);
+                        return channel;
+                }
+            }
+            else
+            {
+                if (fetchInitialMessages)
+                    this.fetchInitialMessages(channel);
+            }
+
+            CurrentChannel.Value ??= channel;
+
+            return channel;
+        }
+
+        /// &lt;summary&gt;
+        /// Leave the specified channel. Can be called from any thread.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel to leave.&lt;/param&gt;
+        public void LeaveChannel(Channel channel) =&gt; Schedule(() =&gt; leaveChannel(channel, true));
+
+        private void leaveChannel(Channel channel, bool sendLeaveRequest)
+        {
+            if (channel == null) return;
+
+            if (channel == CurrentChannel.Value)
+                CurrentChannel.Value = null;
+
+            joinedChannels.Remove(channel);
+
+            // Prevent the closedChannel list from exceeding the max size
+            // by removing the oldest element
+            if (closedChannels.Count &gt;= closed_channels_max_size)
+            {
+                closedChannels.RemoveAt(0);
+            }
+
+            // For PM channels, we store the user ID; else, we store the channel ID
+            closedChannels.Add(channel.Type == ChannelType.PM
+                ? new ClosedChannel(ChannelType.PM, channel.Users.Single().Id)
+                : new ClosedChannel(channel.Type, channel.Id));
+
+            if (channel.Joined.Value)
+            {
+                if (sendLeaveRequest)
+                    api.Queue(new LeaveChannelRequest(channel));
+                channel.Joined.Value = false;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Opens the most recently closed channel that has not already been reopened,
+        /// Works similarly to reopening the last closed tab on a web browser.
+        /// &lt;/summary&gt;
+        public void JoinLastClosedChannel()
+        {
+            // This loop could be eliminated if the join channel operation ensured that every channel joined
+            // is removed from the closedChannels list, but it&#39;d require a linear scan of closed channels on every join.
+            // To keep the overhead of joining channels low, just lazily scan the list of closed channels locally.
+            while (closedChannels.Count &gt; 0)
+            {
+                ClosedChannel lastClosedChannel = closedChannels.Last();
+                closedChannels.RemoveAt(closedChannels.Count - 1);
+
+                // If the user has already joined the channel, try the next one
+                if (joinedChannels.FirstOrDefault(lastClosedChannel.Matches) != null)
+                    continue;
+
+                Channel lastChannel = AvailableChannels.FirstOrDefault(lastClosedChannel.Matches);
+
+                if (lastChannel != null)
+                {
+                    // Channel exists as an available channel, directly join it
+                    CurrentChannel.Value = JoinChannel(lastChannel);
+                }
+                else if (lastClosedChannel.Type == ChannelType.PM)
+                {
+                    // Try to get user in order to open PM chat
+                    users.GetUserAsync((int)lastClosedChannel.Id).ContinueWith(task =&gt;
+                    {
+                        var user = task.GetResultSafely();
+
+                        if (user != null)
+                            Schedule(() =&gt; CurrentChannel.Value = JoinChannel(new Channel(user)));
+                    });
+                }
+
+                return;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Marks the &lt;paramref name=&quot;channel&quot;/&gt; as read
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel that will be marked as read&lt;/param&gt;
+        public void MarkChannelAsRead(Channel channel)
+        {
+            if (channel.LastMessageId == channel.LastReadId)
+                return;
+
+            var message = channel.Messages.FindLast(msg =&gt; !(msg is LocalMessage));
+
+            if (message == null)
+                return;
+
+            var req = new MarkChannelAsReadRequest(channel, message);
+
+            req.Success += () =&gt; channel.LastReadId = message.Id;
+            req.Failure += e =&gt; Logger.Log($&quot;Failed to mark channel {channel} up to &#39;{message}&#39; as read ({e.Message})&quot;, LoggingTarget.Network);
+
+            api.Queue(req);
+        }
+
+        private void onBlocksChanged(NotifyCollectionChangedEventArgs args)
+        {
+            if (args.Action != NotifyCollectionChangedAction.Add)
+                return;
+
+            foreach (APIRelation newBlock in args.NewItems!)
+            {
+                foreach (var channel in joinedChannels)
+                    channel.RemoveMessagesFromUser(newBlock.TargetID);
+            }
+        }
+
+        [ItemCanBeNull]
+        private async Task&lt;string&gt; exportChannelLog(Channel channel)
+        {
+            if (storage is not OsuStorage osuStorage)
+                return null;
+
+            string filename = string.Format($@&quot;chat-{channel.Name}-{DateTimeOffset.Now:yyyyMMdd-hhmmss}.txt&quot;).GetValidFilename();
+            var exportStorage = osuStorage.GetExportStorage();
+
+            using (var file = exportStorage.CreateFileSafely(filename))
+            {
+                using var textWriter = new StreamWriter(file);
+
+                foreach (var message in channel.Messages)
+                    await textWriter.WriteLineAsync($@&quot;{message.Timestamp:yyyy-MM-dd HH:mm} {message.Sender.Username}: {message.Content}&quot;).ConfigureAwait(false);
+            }
+
+            return filename;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (chatClient.IsNotNull())
+                chatClient.Dispose();
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// An exception thrown when a channel could not been found.
+    /// &lt;/summary&gt;
+    public class ChannelNotFoundException : Exception
+    {
+        public ChannelNotFoundException(string channelName)
+            : base($&quot;A channel with the name {channelName} could not be found.&quot;)
+        {
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Stores information about a closed channel
+    /// &lt;/summary&gt;
+    public class ClosedChannel
+    {
+        public readonly ChannelType Type;
+        public readonly long Id;
+
+        public ClosedChannel(ChannelType type, long id)
+        {
+            Type = type;
+            Id = id;
+        }
+
+        public bool Matches(Channel channel)
+        {
+            if (channel.Type != Type) return false;
+
+            return Type == ChannelType.PM
+                ? channel.Users.Single().Id == Id
+                : channel.Id == Id;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[44,9,49,11,0],[51,9,51,96,0],[52,9,52,93,0],[57,9,57,89,0],[67,51,67,55,0],[67,60,67,83,0],[72,57,72,71,0],[77,60,77,77,0],[82,41,82,45,0],[82,46,82,50,0],[86,55,86,59,0],[86,60,86,64,0],[90,35,90,39,0],[90,40,90,44,0],[94,54,94,58,0],[94,59,94,63,0],[96,9,96,81,0],[97,9,97,82,0],[98,9,98,103,0],[101,9,101,48,0],[105,9,105,48,0],[106,9,106,10,0],[107,13,107,28,0],[109,13,109,66,0],[110,9,110,10,0],[114,9,114,10,0],[115,13,115,46,0],[116,13,116,47,0],[116,47,116,62,0],[116,62,116,77,0],[116,77,116,78,0],[116,78,116,79,0],[117,13,117,47,0],[117,47,117,62,0],[117,62,117,97,0],[117,97,117,98,0],[117,98,117,99,0],[118,13,118,47,0],[118,47,118,62,0],[118,62,118,79,0],[118,79,118,80,0],[118,80,118,81,0],[119,13,119,50,0],[119,50,119,78,0],[119,78,119,79,0],[120,13,120,42,0],[122,13,122,45,0],[123,13,123,53,0],[125,13,125,40,0],[126,13,126,44,0],[126,44,126,53,0],[126,53,126,61,0],[128,13,128,63,0],[129,13,129,64,0],[129,64,129,79,0],[129,79,129,100,0],[129,100,129,101,0],[129,101,129,103,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,74,0],[135,17,135,24,0],[137,13,137,41,0],[139,13,139,20,0],[139,22,139,39,0],[139,40,139,42,0],[139,43,139,57,0],[140,17,140,52,0],[142,13,142,36,0],[145,13,145,36,0],[146,9,146,10,0],[154,9,154,10,0],[155,13,155,53,0],[157,13,157,74,0],[157,74,157,88,0],[157,88,157,134,0],[158,9,158,10,0],[165,9,165,10,0],[166,13,166,53,0],[168,13,168,51,0],[169,17,169,24,0],[171,13,171,71,0],[171,71,171,138,0],[171,138,171,153,0],[171,153,171,154,0],[171,154,172,70,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,177,95,0],[179,13,179,36,0],[180,17,180,47,0],[182,13,182,74,0],[183,9,183,10,0],[188,9,188,72,0],[197,9,197,10,0],[198,13,198,45,0],[200,13,200,32,0],[201,17,201,24,0],[204,13,204,14,0],[205,17,205,41,0],[206,21,206,50,0],[207,13,207,14,0],[209,13,210,13,0],[210,13,210,14,0],[210,14,211,17,0],[211,17,211,37,0],[211,37,212,17,0],[212,17,212,18,0],[212,18,213,21,0],[213,21,213,103,0],[213,103,214,21,0],[214,21,214,28,0],[214,28,217,17,0],[217,17,225,19,0],[225,19,227,17,0],[227,17,227,46,0],[227,46,230,17,0],[230,17,230,69,0],[230,69,231,17,0],[231,17,231,18,0],[231,18,232,21,0],[232,21,232,124,0],[232,124,234,21,0],[234,21,234,68,0],[234,68,234,83,0],[234,83,234,84,0],[234,84,235,21,0],[235,21,236,21,0],[236,21,236,22,0],[236,22,237,25,0],[237,25,237,56,0],[237,56,238,25,0],[238,25,238,62,0],[238,62,239,25,0],[239,25,239,41,0],[239,41,240,21,0],[240,21,240,22,0],[240,22,240,23,0],[240,23,242,21,0],[242,21,242,63,0],[242,63,243,21,0],[243,21,243,28,0],[243,28,246,17,0],[246,17,246,59,0],[246,59,248,17,0],[248,17,248,37,0],[248,37,248,52,0],[248,52,248,53,0],[248,53,249,17,0],[249,17,250,17,0],[250,17,250,18,0],[250,18,251,21,0],[251,21,251,52,0],[251,52,252,21,0],[252,21,252,58,0],[252,58,253,21,0],[253,21,253,37,0],[253,37,254,17,0],[254,17,254,18,0],[254,18,254,19,0],[254,19,256,17,0],[256,17,256,32,0],[256,32,257,13,0],[257,13,257,14,0],[257,14,257,16,0],[260,13,260,38,0],[261,17,261,33,0],[262,9,262,10,0],[265,9,265,10,0],[266,13,266,56,0],[267,17,267,77,0],[269,17,269,68,0],[270,9,270,10,0],[278,9,278,10,0],[279,13,279,45,0],[281,13,281,32,0],[282,17,282,24,0],[284,13,284,54,0],[285,13,285,44,0],[286,13,286,84,0],[291,21,291,64,0],[292,21,292,27,0],[295,21,295,60,0],[296,21,296,22,0],[297,25,297,89,0],[298,25,298,31,0],[301,21,301,68,0],[302,21,302,27,0],[305,21,305,60,0],[306,21,306,22,0],[307,25,307,88,0],[308,25,308,31,0],[311,21,311,56,0],[312,21,312,27,0],[315,21,315,60,0],[316,21,316,22,0],[317,25,317,91,0],[318,25,318,31,0],[321,21,321,73,0],[321,73,321,117,0],[321,117,321,119,0],[323,21,323,41,0],[324,21,324,22,0],[325,25,325,100,0],[326,25,326,31,0],[329,21,329,42,0],[330,21,330,27,0],[335,21,335,60,0],[336,21,336,22,0],[337,25,337,94,0],[338,25,338,31,0],[343,21,343,77,0],[343,77,343,185,0],[343,185,343,187,0],[345,21,345,48,0],[346,21,346,22,0],[347,25,347,63,0],[348,25,348,31,0],[351,21,351,63,0],[352,21,352,59,0],[353,21,353,45,0],[353,45,354,160,0],[354,160,354,161,0],[356,21,356,40,0],[357,21,357,27,0],[360,21,360,115,0],[361,21,361,22,0],[362,25,362,112,0],[363,25,363,31,0],[366,21,366,36,0],[368,21,368,56,0],[369,21,369,22,0],[370,25,370,86,0],[371,25,371,26,0],[372,29,372,93,0],[373,29,373,35,0],[375,21,375,22,0],[377,21,377,69,0],[378,21,379,21,0],[379,21,379,22,0],[379,22,380,25,0],[380,25,382,49,0],[382,49,383,25,0],[383,25,383,74,0],[383,74,384,21,0],[384,21,384,22,0],[384,22,384,24,0],[385,21,385,27,0],[388,21,392,23,0],[393,21,393,55,0],[395,21,396,21,0],[396,21,396,22,0],[396,22,397,25,0],[397,25,397,49,0],[397,49,398,25,0],[398,25,398,26,0],[398,26,399,29,0],[399,29,399,89,0],[399,89,400,29,0],[400,29,400,86,0],[400,86,401,29,0],[401,29,401,36,0],[401,36,404,25,0],[404,25,404,61,0],[404,61,406,25,0],[406,25,406,44,0],[406,44,407,25,0],[407,25,407,26,0],[407,26,408,29,0],[408,29,408,96,0],[408,96,409,29,0],[409,29,409,86,0],[409,86,410,29,0],[410,29,410,36,0],[410,36,413,25,0],[413,25,413,103,0],[413,103,414,25,0],[414,25,415,25,0],[415,25,415,26,0],[415,26,416,29,0],[416,29,416,103,0],[416,103,417,29,0],[417,29,417,41,0],[417,41,418,25,0],[418,25,418,26,0],[418,26,418,27,0],[418,27,419,25,0],[419,25,419,82,0],[419,82,420,21,0],[420,21,420,22,0],[420,22,420,24,0],[421,21,421,27,0],[424,21,436,24,0],[437,21,437,27,0],[440,21,440,142,0],[441,21,441,27,0],[443,9,443,10,0],[446,9,446,10,0],[447,13,447,52,0],[448,13,448,62,0],[448,62,448,72,0],[448,72,448,83,0],[450,13,450,20,0],[450,22,450,31,0],[450,32,450,34,0],[450,35,450,55,0],[450,55,450,91,0],[450,91,450,106,0],[450,106,450,117,0],[450,117,450,118,0],[451,17,451,36,0],[451,36,451,53,0],[451,53,451,88,0],[453,13,453,67,0],[454,9,454,10,0],[457,9,457,10,0],[460,13,460,33,0],[461,17,461,24,0],[463,13,463,49,0],[465,13,465,59,0],[467,13,468,13,0],[468,13,468,14,0],[468,14,469,17,0],[469,17,469,24,0],[469,24,469,26,0],[469,26,469,37,0],[469,37,469,38,0],[469,38,469,40,0],[469,40,469,41,0],[469,41,469,49,0],[469,49,470,17,0],[470,17,470,18,0],[470,18,471,21,0],[471,21,471,72,0],[471,72,474,21,0],[474,21,474,66,0],[474,66,474,124,0],[474,124,474,126,0],[474,126,475,25,0],[475,25,475,41,0],[475,41,476,17,0],[476,17,476,18,0],[476,18,477,13,0],[477,13,477,14,0],[477,14,477,15,0],[479,13,480,13,0],[480,13,480,14,0],[480,14,481,17,0],[481,17,481,69,0],[481,69,482,17,0],[482,17,482,65,0],[482,65,483,13,0],[483,13,483,14,0],[483,14,483,15,0],[485,13,485,28,0],[486,9,486,10,0],[496,9,496,10,0],[497,13,497,59,0],[497,60,497,67,0],[499,13,499,70,0],[500,13,501,13,0],[501,13,501,14,0],[501,14,502,17,0],[502,17,502,39,0],[502,39,503,17,0],[503,17,503,47,0],[503,47,504,13,0],[504,13,504,14,0],[504,14,504,15,0],[506,13,506,43,0],[507,9,507,10,0],[515,9,515,10,0],[516,13,516,51,0],[517,17,517,24,0],[519,13,523,15,0],[525,13,525,33,0],[525,33,525,54,0],[525,54,525,55,0],[526,13,527,13,0],[527,13,527,14,0],[527,14,528,17,0],[528,17,528,24,0],[528,24,528,26,0],[528,26,528,37,0],[528,37,528,38,0],[528,38,528,40,0],[528,40,528,41,0],[528,41,528,53,0],[528,53,529,17,0],[529,17,529,18,0],[529,18,530,21,0],[530,21,530,28,0],[530,28,530,30,0],[530,30,530,41,0],[530,41,530,42,0],[530,42,530,44,0],[530,44,530,45,0],[530,45,530,59,0],[530,59,531,25,0],[531,25,531,72,0],[531,72,532,21,0],[532,21,532,78,0],[532,78,533,17,0],[533,17,533,18,0],[533,18,535,17,0],[535,17,535,39,0],[535,39,536,13,0],[536,13,536,14,0],[536,14,536,15,0],[538,13,538,28,0],[541,13,541,14,0],[542,17,542,40,0],[543,17,543,69,0],[544,13,544,14,0],[545,9,545,10,0],[556,9,556,10,0],[557,13,557,34,0],[560,13,560,14,0],[561,17,561,48,0],[562,21,562,47,0],[564,17,564,47,0],[565,13,565,14,0],[567,13,567,79,0],[568,13,568,35,0],[569,17,569,35,0],[571,13,571,73,0],[572,13,572,49,0],[573,17,573,32,0],[575,13,575,31,0],[576,13,576,14,0],[577,17,577,32,0],[581,17,581,65,0],[581,65,581,95,0],[581,95,581,97,0],[582,17,582,39,0],[583,21,583,51,0],[584,13,584,14,0],[586,13,586,14,0],[587,17,587,38,0],[588,17,588,42,0],[589,17,589,101,0],[590,13,590,14,0],[592,13,592,47,0],[592,48,592,74,0],[593,13,593,53,0],[593,54,593,83,0],[595,13,595,26,0],[596,9,596,10,0],[603,56,603,82,0],[606,9,606,10,0],[607,13,607,33,0],[607,34,607,46,0],[609,13,609,62,0],[612,13,612,39,0],[613,13,613,14,0],[614,17,614,45,0],[616,17,616,38,0],[621,25,621,68,0],[622,25,622,40,0],[625,25,625,80,0],[627,25,627,79,0],[628,25,629,25,0],[629,25,629,26,0],[629,26,630,29,0],[630,29,630,94,0],[630,94,631,25,0],[631,25,631,26,0],[631,26,631,27,0],[632,25,633,25,0],[633,25,633,26,0],[633,26,634,29,0],[634,29,634,97,0],[634,97,636,29,0],[636,29,636,63,0],[636,63,637,29,0],[637,29,637,30,0],[637,30,638,33,0],[638,33,638,73,0],[638,73,640,33,0],[640,33,640,72,0],[640,72,641,33,0],[641,33,641,63,0],[641,63,642,29,0],[642,29,642,30,0],[642,30,643,25,0],[643,25,643,26,0],[643,26,643,27,0],[645,25,645,50,0],[646,25,646,31,0],[649,25,649,84,0],[651,25,651,67,0],[652,25,653,25,0],[653,25,653,26,0],[653,26,654,29,0],[654,29,654,76,0],[654,76,655,29,0],[655,29,655,72,0],[655,72,659,29,0],[659,29,659,39,0],[659,39,660,25,0],[660,25,660,26,0],[660,26,660,27,0],[661,25,662,25,0],[662,25,662,26,0],[662,26,663,29,0],[663,29,663,98,0],[663,98,664,29,0],[664,29,664,51,0],[664,51,665,25,0],[665,25,665,26,0],[665,26,665,27,0],[666,25,666,40,0],[667,25,667,40,0],[669,13,669,14,0],[671,13,671,14,0],[672,17,672,42,0],[673,21,673,56,0],[674,13,674,14,0],[676,13,676,46,0],[678,13,678,28,0],[679,9,679,10,0],[685,54,685,69,0],[685,69,685,96,0],[685,96,685,97,0],[688,9,688,10,0],[689,13,689,33,0],[689,34,689,41,0],[691,13,691,49,0],[692,17,692,45,0],[694,13,694,44,0],[698,13,698,66,0],[699,13,699,14,0],[700,17,700,44,0],[701,13,701,14,0],[704,13,706,64,0],[708,13,708,38,0],[709,13,709,14,0],[710,17,710,38,0],[711,21,711,65,0],[712,17,712,46,0],[713,13,713,14,0],[714,9,714,10,0],[721,9,721,10,0],[725,13,725,45,0],[726,13,726,14,0],[727,17,727,73,0],[728,17,728,67,0],[731,17,731,86,0],[732,21,732,30,0],[734,17,734,99,0],[736,17,736,41,0],[737,17,737,18,0],[739,21,739,69,0],[740,17,740,18,0],[741,22,741,67,0],[742,17,742,18,0],[744,21,745,21,0],[745,21,745,22,0],[745,22,746,25,0],[746,25,746,59,0],[746,59,748,25,0],[748,25,748,42,0],[748,42,749,29,0],[749,29,749,44,0],[749,44,749,97,0],[749,97,749,99,0],[749,99,750,21,0],[750,21,750,22,0],[750,22,750,24,0],[751,17,751,18,0],[753,17,753,24,0],[755,9,755,10,0],[762,9,762,10,0],[763,13,763,61,0],[764,17,764,24,0],[766,13,766,60,0],[766,60,766,82,0],[766,82,766,84,0],[768,13,768,33,0],[769,17,769,24,0],[771,13,771,70,0],[773,13,773,34,0],[773,34,773,65,0],[773,65,773,66,0],[774,13,774,33,0],[774,33,774,143,0],[774,143,774,144,0],[776,13,776,28,0],[777,9,777,10,0],[780,9,780,10,0],[781,13,781,66,0],[782,17,782,24,0],[784,13,784,20,0],[784,22,784,42,0],[784,43,784,45,0],[784,46,784,60,0],[785,13,785,14,0],[786,17,786,24,0],[786,26,786,37,0],[786,38,786,40,0],[786,41,786,55,0],[787,21,787,71,0],[788,13,788,14,0],[789,9,789,10,0],[793,9,793,10,0],[794,13,794,54,0],[795,17,795,29,0],[797,13,797,130,0],[798,13,798,63,0],[800,20,800,71,0],[801,13,801,14,0],[802,17,802,63,0],[804,17,804,24,0],[804,26,804,37,0],[804,38,804,40,0],[804,41,804,57,0],[805,21,805,162,0],[806,13,806,14,0],[808,13,808,29,0],[809,9,809,10,0],[812,9,812,10,0],[813,13,813,39,0],[815,13,815,40,0],[816,17,816,38,0],[817,9,817,10,0],[826,15,826,81,0],[827,9,827,10,0],[828,9,828,10,0],[839,9,839,56,0],[840,9,840,10,0],[841,13,841,25,0],[842,13,842,21,0],[843,9,843,10,0],[846,9,846,10,0],[847,13,847,38,0],[847,39,847,52,0],[849,13,851,36,0],[852,9,852,10,0]]);
+    </script>
+  </body>
+</html>

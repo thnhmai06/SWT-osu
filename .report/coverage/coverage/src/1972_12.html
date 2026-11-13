@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Lounge/LoungeRoomPanel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Extensions;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Screens.OnlinePlay.Components;
+using osu.Game.Screens.OnlinePlay.Lounge.Components;
+using osu.Game.Screens.OnlinePlay.Playlists;
+using osuTK;
+using osuTK.Graphics;
+using Container = osu.Framework.Graphics.Containers.Container;
+
+namespace osu.Game.Screens.OnlinePlay.Lounge
+{
+    /// &lt;summary&gt;
+    /// A &lt;see cref=&quot;RoomPanel&quot;/&gt; with lounge-specific interactions such as selection and hover sounds.
+    /// &lt;/summary&gt;
+    public partial class LoungeRoomPanel : RoomPanel, IFilterable, IHasPopover, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        private const float transition_duration = 60;
+        private const float selection_border_width = 4;
+
+        public required Bindable&lt;Room?&gt; SelectedRoom
+        {
+            get =&gt; selectedRoom;
+            set =&gt; selectedRoom.Current = value;
+        }
+
+        [Resolved(canBeNull: true)]
+        private IOnlinePlayLounge? lounge { get; set; }
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private readonly BindableWithCurrent&lt;Room?&gt; selectedRoom = new BindableWithCurrent&lt;Room?&gt;();
+        private Sample? sampleSelect;
+        private Sample? sampleJoin;
+        private Drawable selectionBox = null!;
+
+        public LoungeRoomPanel(Room room)
+            : base(room)
+        {
+            ShowExternalLink = false;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            sampleSelect = audio.Samples.Get($@&quot;UI/{HoverSampleSet.Default.GetResourceName()}-select&quot;);
+            sampleJoin = audio.Samples.Get($@&quot;UI/{HoverSampleSet.Button.GetResourceName()}-select&quot;);
+
+            AddRangeInternal(new Drawable[]
+            {
+                new StatusColouredContainer(Room, transition_duration)
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Child = selectionBox = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Alpha = 0,
+                        Masking = true,
+                        CornerRadius = CORNER_RADIUS,
+                        BorderThickness = selection_border_width,
+                        BorderColour = Color4.White,
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Alpha = 0,
+                            AlwaysPresent = true
+                        }
+                    }
+                },
+                new HoverSounds()
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Alpha = matchingFilter ? 1 : 0;
+            selectionBox.Alpha = selectedRoom.Value == Room ? 1 : 0;
+
+            selectedRoom.BindValueChanged(updateSelectedRoom);
+
+            Room.PropertyChanged += onRoomPropertyChanged;
+            updateSelectedItem();
+        }
+
+        private void onRoomPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(Room.CurrentPlaylistItem))
+                updateSelectedItem();
+        }
+
+        private void updateSelectedItem()
+            =&gt; SelectedItem.Value = Room.CurrentPlaylistItem;
+
+        private void updateSelectedRoom(ValueChangedEvent&lt;Room?&gt; selected)
+        {
+            if (selected.NewValue == Room)
+                selectionBox.FadeIn(transition_duration);
+            else
+                selectionBox.FadeOut(transition_duration);
+        }
+
+        public bool FilteringActive { get; set; }
+
+        public IEnumerable&lt;LocalisableString&gt; FilterTerms =&gt; new LocalisableString[] { Room.Name };
+
+        private bool matchingFilter = true;
+
+        public bool MatchingFilter
+        {
+            get =&gt; matchingFilter;
+            set
+            {
+                matchingFilter = value;
+
+                if (!IsLoaded)
+                    return;
+
+                if (matchingFilter)
+                    this.FadeIn(200);
+                else
+                    Hide();
+            }
+        }
+
+        public Popover GetPopover() =&gt; new PasswordEntryPopover(Room);
+
+        public override MenuItem[] ContextMenuItems
+        {
+            get
+            {
+                var items = new List&lt;MenuItem&gt;();
+
+                items.AddRange(base.ContextMenuItems);
+
+                items.Add(new OsuMenuItemSpacer());
+                items.Add(new OsuMenuItem(CommonStrings.CreateCopy, MenuItemType.Standard, () =&gt; lounge?.OpenCopy(Room)));
+
+                if (Room.Type == MatchType.Playlists &amp;&amp; Room.Host?.Id == api.LocalUser.Value.Id &amp;&amp; Room.StartDate?.AddMinutes(5) &gt;= DateTimeOffset.Now &amp;&amp; !Room.HasEnded)
+                {
+                    items.Add(new OsuMenuItem(OnlinePlayStrings.ClosePlaylist, MenuItemType.Destructive, () =&gt;
+                    {
+                        dialogOverlay?.Push(new ClosePlaylistDialog(Room, () =&gt; lounge?.Close(Room)));
+                    }));
+                }
+
+                return items.ToArray();
+            }
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            if (selectedRoom.Value != Room)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.Select:
+                    TriggerClick();
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override bool ShouldBeConsideredForInput(Drawable child) =&gt; selectedRoom.Value == Room || child is HoverSounds;
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            if (Room != selectedRoom.Value)
+            {
+                sampleSelect?.Play();
+                selectedRoom.Value = Room;
+                return true;
+            }
+
+            if (Room.HasPassword)
+            {
+                this.ShowPopover();
+                return true;
+            }
+
+            sampleJoin?.Play();
+            lounge?.Join(Room, null);
+            return true;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            Room.PropertyChanged -= onRoomPropertyChanged;
+        }
+
+        public partial class PasswordEntryPopover : OsuPopover
+        {
+            private readonly Room room;
+
+            [Resolved(canBeNull: true)]
+            private IOnlinePlayLounge? lounge { get; set; }
+
+            public override bool HandleNonPositionalInput =&gt; true;
+
+            protected override bool BlockNonPositionalInput =&gt; true;
+
+            public PasswordEntryPopover(Room room)
+            {
+                this.room = room;
+            }
+
+            private OsuPasswordTextBox passwordTextBox = null!;
+            private RoundedButton joinButton = null!;
+            private OsuSpriteText errorText = null!;
+            private Sample? sampleJoinFail;
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, AudioManager audio)
+            {
+                Child = new FillFlowContainer
+                {
+                    Margin = new MarginPadding(10),
+                    Spacing = new Vector2(5),
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    LayoutDuration = 500,
+                    LayoutEasing = Easing.OutQuint,
+                    Children = new Drawable[]
+                    {
+                        new FillFlowContainer
+                        {
+                            Direction = FillDirection.Horizontal,
+                            Spacing = new Vector2(5),
+                            AutoSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                passwordTextBox = new OsuPasswordTextBox
+                                {
+                                    Width = 200,
+                                    PlaceholderText = &quot;password&quot;,
+                                },
+                                joinButton = new RoundedButton
+                                {
+                                    Width = 80,
+                                    Text = &quot;Join Room&quot;,
+                                }
+                            }
+                        },
+                        errorText = new OsuSpriteText
+                        {
+                            Colour = colours.Red,
+                        },
+                    }
+                };
+
+                sampleJoinFail = audio.Samples.Get(@&quot;UI/generic-error&quot;);
+
+                joinButton.Action = performJoin;
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                ScheduleAfterChildren(() =&gt; GetContainingFocusManager()!.ChangeFocus(passwordTextBox));
+                passwordTextBox.OnCommit += (_, _) =&gt; performJoin();
+            }
+
+            private void performJoin()
+            {
+                lounge?.Join(room, passwordTextBox.Text, null, joinFailed);
+                GetContainingFocusManager()?.TriggerFocusContention(passwordTextBox);
+            }
+
+            private void joinFailed(string message, Exception? exception) =&gt; Schedule(() =&gt;
+            {
+                passwordTextBox.Text = string.Empty;
+
+                GetContainingFocusManager()!.ChangeFocus(passwordTextBox);
+
+                Logger.Log($&quot;Failed to join room with password. {exception}&quot;);
+                errorText.Text = message;
+                errorText
+                    .FadeIn()
+                    .FlashColour(Color4.White, 200)
+                    .Delay(1000)
+                    .FadeOutFromOne(1000, Easing.In);
+
+                Body.Shake();
+
+                sampleJoinFail?.Play();
+            });
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,20,50,32,0],[51,20,51,48,0],[55,45,55,49,0],[55,50,55,54,0],[58,49,58,53,0],[58,54,58,58,0],[61,36,61,40,0],[61,41,61,45,0],[61,50,61,55,0],[63,9,63,101,0],[66,9,66,47,0],[69,15,69,25,0],[70,9,70,10,0],[71,13,71,38,0],[72,9,72,10,0],[76,9,76,10,0],[77,13,77,104,0],[78,13,78,101,0],[80,13,102,16,0],[103,9,103,10,0],[106,9,106,10,0],[107,13,107,33,0],[109,13,109,44,0],[110,13,110,69,0],[112,13,112,63,0],[114,13,114,59,0],[115,13,115,34,0],[116,9,116,10,0],[119,9,119,10,0],[120,13,120,68,0],[121,17,121,38,0],[122,9,122,10,0],[125,16,125,61,0],[128,9,128,10,0],[129,13,129,43,0],[130,17,130,58,0],[132,17,132,59,0],[133,9,133,10,0],[135,39,135,43,0],[135,44,135,48,0],[137,62,137,99,0],[139,9,139,44,0],[143,20,143,34,0],[145,13,145,14,0],[146,17,146,40,0],[148,17,148,31,0],[149,21,149,28,0],[151,17,151,36,0],[152,21,152,38,0],[154,21,154,28,0],[155,13,155,14,0],[158,40,158,70,0],[163,13,163,14,0],[164,17,164,50,0],[166,17,166,55,0],[168,17,168,52,0],[169,17,169,98,0],[169,98,169,120,0],[169,120,169,123,0],[171,17,171,170,0],[172,17,172,18,0],[173,21,174,21,0],[174,21,174,22,0],[174,22,175,25,0],[175,25,175,81,0],[175,81,175,100,0],[175,100,175,103,0],[175,103,176,21,0],[176,21,176,22,0],[176,22,176,25,0],[177,17,177,18,0],[179,17,179,40,0],[180,13,180,14,0],[184,9,184,10,0],[185,13,185,26,0],[186,17,186,30,0],[188,13,188,44,0],[189,17,189,30,0],[191,13,191,30,0],[194,21,194,36,0],[195,21,195,33,0],[198,13,198,26,0],[199,9,199,10,0],[202,9,202,10,0],[203,9,203,10,0],[205,79,205,129,0],[208,9,208,10,0],[209,13,209,44,0],[210,13,210,14,0],[211,17,211,38,0],[212,17,212,43,0],[213,17,213,29,0],[216,13,216,34,0],[217,13,217,14,0],[218,17,218,36,0],[219,17,219,29,0],[222,13,222,32,0],[223,13,223,38,0],[224,13,224,25,0],[225,9,225,10,0],[228,9,228,10,0],[229,13,229,39,0],[230,13,230,59,0],[231,9,231,10,0],[238,49,238,53,0],[238,54,238,58,0],[240,62,240,66,0],[242,64,242,68,0],[244,13,244,51,0],[245,13,245,14,0],[246,17,246,34,0],[247,13,247,14,0],[249,13,249,64,0],[250,13,250,54,0],[251,13,251,53,0],[256,13,256,14,0],[257,17,291,19,0],[293,17,293,73,0],[295,17,295,49,0],[296,13,296,14,0],[299,13,299,14,0],[300,17,300,37,0],[302,17,302,45,0],[302,45,302,102,0],[302,102,302,104,0],[303,17,303,55,0],[303,55,303,68,0],[303,68,303,69,0],[304,13,304,14,0],[307,13,307,14,0],[308,17,308,76,0],[309,17,309,86,0],[310,13,310,14,0],[312,78,313,13,0],[313,13,313,14,0],[313,14,314,17,0],[314,17,314,53,0],[314,53,316,17,0],[316,17,316,75,0],[316,75,318,17,0],[318,17,318,79,0],[318,79,319,17,0],[319,17,319,42,0],[319,42,320,17,0],[320,17,324,54,0],[324,54,326,17,0],[326,17,326,30,0],[326,30,328,17,0],[328,17,328,40,0],[328,40,329,13,0],[329,13,329,14,0],[329,14,329,15,0]]);
+    </script>
+  </body>
+</html>

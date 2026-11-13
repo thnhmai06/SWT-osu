@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/BezierConverter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Objects.Types;
+using osuTK;
+
+namespace osu.Game.Rulesets.Objects
+{
+    public static class BezierConverter
+    {
+        private struct CircleBezierPreset
+        {
+            public readonly double ArcLength;
+            public readonly Vector2d[] ControlPoints;
+
+            public CircleBezierPreset(double arcLength, Vector2d[] controlPoints)
+            {
+                ArcLength = arcLength;
+                ControlPoints = controlPoints;
+            }
+        }
+
+        // Extremely accurate a bezier anchor positions for approximating circles of several arc lengths
+        private static readonly CircleBezierPreset[] circle_presets =
+        {
+            new CircleBezierPreset(0.4993379862754501,
+                new[] { new Vector2d(1, 0), new Vector2d(1, 0.2549893626632736f), new Vector2d(0.8778997558480327f, 0.47884446188920726f) }),
+            new CircleBezierPreset(1.7579419829169447,
+                new[] { new Vector2d(1, 0), new Vector2d(1, 0.6263026f), new Vector2d(0.42931178f, 1.0990661f), new Vector2d(-0.18605515f, 0.9825393f) }),
+            new CircleBezierPreset(3.1385246920140215,
+                new[] { new Vector2d(1, 0), new Vector2d(1, 0.87084764f), new Vector2d(0.002304826f, 1.5033062f), new Vector2d(-0.9973236f, 0.8739115f), new Vector2d(-0.9999953f, 0.0030679568f) }),
+            new CircleBezierPreset(5.69720464620727,
+                new[] { new Vector2d(1, 0), new Vector2d(1, 1.4137783f), new Vector2d(-1.4305235f, 2.0779421f), new Vector2d(-2.3410065f, -0.94017583f), new Vector2d(0.05132711f, -1.7309346f), new Vector2d(0.8331702f, -0.5530167f) }),
+            new CircleBezierPreset(2 * Math.PI,
+                new[] { new Vector2d(1, 0), new Vector2d(1, 1.2447058f), new Vector2d(-0.8526471f, 2.118367f), new Vector2d(-2.6211002f, 7.854936e-06f), new Vector2d(-0.8526448f, -2.118357f), new Vector2d(1, -1.2447058f), new Vector2d(1, 0) })
+        };
+
+        /// &lt;summary&gt;
+        /// Counts the number of segments in a slider path.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control points of the path.&lt;/param&gt;
+        /// &lt;returns&gt;The number of segments in a slider path.&lt;/returns&gt;
+        public static int CountSegments(IList&lt;PathControlPoint&gt; controlPoints) =&gt; controlPoints.Where((t, i) =&gt; t.Type != null &amp;&amp; i &lt; controlPoints.Count - 1).Count();
+
+        /// &lt;summary&gt;
+        /// Converts a slider path to bezier control point positions compatible with the legacy osu! client.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control points of the path.&lt;/param&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The offset for the whole path.&lt;/param&gt;
+        /// &lt;returns&gt;The list of legacy bezier control point positions.&lt;/returns&gt;
+        public static List&lt;Vector2&gt; ConvertToLegacyBezier(IList&lt;PathControlPoint&gt; controlPoints, Vector2 position)
+        {
+            Vector2[] vertices = new Vector2[controlPoints.Count];
+            for (int i = 0; i &lt; controlPoints.Count; i++)
+                vertices[i] = controlPoints[i].Position;
+
+            var result = new List&lt;Vector2&gt;();
+            int start = 0;
+
+            for (int i = 0; i &lt; controlPoints.Count; i++)
+            {
+                if (controlPoints[i].Type == null &amp;&amp; i &lt; controlPoints.Count - 1)
+                    continue;
+
+                // The current vertex ends the segment
+                var segmentVertices = vertices.AsSpan().Slice(start, i - start + 1);
+                var segmentType = controlPoints[start].Type ?? PathType.LINEAR;
+
+                switch (segmentType.Type)
+                {
+                    case SplineType.Catmull:
+                        result.AddRange(from segment in ConvertCatmullToBezierAnchors(segmentVertices) from v in segment select v + position);
+                        break;
+
+                    case SplineType.Linear:
+                        result.AddRange(from segment in ConvertLinearToBezierAnchors(segmentVertices) from v in segment select v + position);
+                        break;
+
+                    case SplineType.PerfectCurve:
+                        result.AddRange(ConvertCircleToBezierAnchors(segmentVertices).Select(v =&gt; v + position));
+                        break;
+
+                    case SplineType.BSpline:
+                        if (segmentType.Degree != null)
+                            throw new NotImplementedException(&quot;BSpline conversion of arbitrary degree is not implemented.&quot;);
+
+                        foreach (Vector2 v in segmentVertices)
+                        {
+                            result.Add(v + position);
+                        }
+
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(segmentType.Type), segmentType.Type, &quot;Unsupported segment type found when converting to legacy Bezier&quot;);
+                }
+
+                // Start the new segment at the current vertex
+                start = i;
+            }
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts a path of control points to an identical path using only BEZIER type control points.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control points of the path.&lt;/param&gt;
+        /// &lt;returns&gt;The list of bezier control points.&lt;/returns&gt;
+        public static List&lt;PathControlPoint&gt; ConvertToModernBezier(IList&lt;PathControlPoint&gt; controlPoints)
+        {
+            Vector2[] vertices = new Vector2[controlPoints.Count];
+            for (int i = 0; i &lt; controlPoints.Count; i++)
+                vertices[i] = controlPoints[i].Position;
+
+            var result = new List&lt;PathControlPoint&gt;();
+            int start = 0;
+
+            for (int i = 0; i &lt; controlPoints.Count; i++)
+            {
+                if (controlPoints[i].Type == null &amp;&amp; i &lt; controlPoints.Count - 1)
+                    continue;
+
+                // The current vertex ends the segment
+                var segmentVertices = vertices.AsSpan().Slice(start, i - start + 1);
+                var segmentType = controlPoints[start].Type ?? PathType.LINEAR;
+
+                switch (segmentType.Type)
+                {
+                    case SplineType.Catmull:
+                        foreach (var segment in ConvertCatmullToBezierAnchors(segmentVertices))
+                        {
+                            for (int j = 0; j &lt; segment.Length - 1; j++)
+                            {
+                                result.Add(new PathControlPoint(segment[j], j == 0 ? PathType.BEZIER : null));
+                            }
+                        }
+
+                        break;
+
+                    case SplineType.Linear:
+                        foreach (var segment in ConvertLinearToBezierAnchors(segmentVertices))
+                        {
+                            for (int j = 0; j &lt; segment.Length - 1; j++)
+                            {
+                                result.Add(new PathControlPoint(segment[j], j == 0 ? PathType.BEZIER : null));
+                            }
+                        }
+
+                        break;
+
+                    case SplineType.PerfectCurve:
+                        var circleResult = ConvertCircleToBezierAnchors(segmentVertices);
+
+                        for (int j = 0; j &lt; circleResult.Length - 1; j++)
+                        {
+                            result.Add(new PathControlPoint(circleResult[j], j == 0 ? PathType.BEZIER : null));
+                        }
+
+                        break;
+
+                    case SplineType.BSpline:
+                        var bSplineResult = segmentType.Degree == null
+                            ? segmentVertices
+                            : PathApproximator.BSplineToBezier(segmentVertices, segmentType.Degree.Value);
+
+                        for (int j = 0; j &lt; bSplineResult.Length - 1; j++)
+                        {
+                            result.Add(new PathControlPoint(bSplineResult[j], j == 0 ? PathType.BEZIER : null));
+                        }
+
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(segmentType.Type), segmentType.Type, &quot;Unsupported segment type found when converting to legacy Bezier&quot;);
+                }
+
+                // Start the new segment at the current vertex
+                start = i;
+            }
+
+            result.Add(new PathControlPoint(controlPoints[^1].Position));
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts perfect curve anchors to bezier anchors.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control point positions to convert.&lt;/param&gt;
+        public static Vector2[] ConvertCircleToBezierAnchors(ReadOnlySpan&lt;Vector2&gt; controlPoints)
+        {
+            if (controlPoints.Length != 3)
+                return controlPoints.ToArray();
+
+            var pr = new CircularArcProperties(controlPoints);
+            if (!pr.IsValid)
+                return controlPoints.ToArray();
+
+            CircleBezierPreset preset = circle_presets.Last();
+
+            foreach (CircleBezierPreset cbp in circle_presets)
+            {
+                if (cbp.ArcLength &lt; pr.ThetaRange) continue;
+
+                preset = cbp;
+                break;
+            }
+
+            double arcLength = preset.ArcLength;
+            var arc = new Vector2d[preset.ControlPoints.Length];
+            preset.ControlPoints.CopyTo(arc, 0);
+
+            // Converge on arcLength of thetaRange
+            int n = arc.Length - 1;
+            double tf = pr.ThetaRange / arcLength;
+
+            while (Math.Abs(tf - 1) &gt; 1E-7)
+            {
+                for (int j = 0; j &lt; n; j++)
+                {
+                    for (int i = n; i &gt; j; i--)
+                    {
+                        arc[i] = arc[i] * tf + arc[i - 1] * (1 - tf);
+                    }
+                }
+
+                arcLength = Math.Atan2(arc.Last()[1], arc.Last()[0]);
+
+                if (arcLength &lt; 0)
+                {
+                    arcLength += 2 * Math.PI;
+                }
+
+                tf = pr.ThetaRange / arcLength;
+            }
+
+            // Adjust rotation, radius, and position
+            var result = new Vector2[arc.Length];
+
+            for (int i = 0; i &lt; arc.Length; i++)
+            {
+                result[i] = new Vector2(
+                    (float)((Math.Cos(pr.ThetaStart) * arc[i].X + -Math.Sin(pr.ThetaStart) * pr.Direction * arc[i].Y) * pr.Radius + pr.Centre.X),
+                    (float)((Math.Sin(pr.ThetaStart) * arc[i].X + Math.Cos(pr.ThetaStart) * pr.Direction * arc[i].Y) * pr.Radius + pr.Centre.Y));
+            }
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts catmull anchors to bezier anchors.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control point positions to convert.&lt;/param&gt;
+        public static Vector2[][] ConvertCatmullToBezierAnchors(ReadOnlySpan&lt;Vector2&gt; controlPoints)
+        {
+            int iLen = controlPoints.Length;
+            var bezier = new Vector2[iLen - 1][];
+
+            for (int i = 0; i &lt; iLen - 1; i++)
+            {
+                var v1 = i &gt; 0 ? controlPoints[i - 1] : controlPoints[i];
+                var v2 = controlPoints[i];
+                var v3 = i &lt; iLen - 1 ? controlPoints[i + 1] : v2 + v2 - v1;
+                var v4 = i &lt; iLen - 2 ? controlPoints[i + 2] : v3 + v3 - v2;
+
+                bezier[i] = new[]
+                {
+                    v2,
+                    (-v1 + 6 * v2 + v3) / 6,
+                    (-v4 + 6 * v3 + v2) / 6,
+                    v3
+                };
+            }
+
+            return bezier;
+        }
+
+        /// &lt;summary&gt;
+        /// Converts linear anchors to bezier anchors.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;controlPoints&quot;&gt;The control point positions to convert.&lt;/param&gt;
+        public static Vector2[][] ConvertLinearToBezierAnchors(ReadOnlySpan&lt;Vector2&gt; controlPoints)
+        {
+            int iLen = controlPoints.Length;
+            var bezier = new Vector2[iLen - 1][];
+
+            for (int i = 0; i &lt; iLen - 1; i++)
+            {
+                bezier[i] = new[]
+                {
+                    controlPoints[i],
+                    controlPoints[i + 1]
+                };
+            }
+
+            return bezier;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,13,21,14,0],[22,17,22,39,0],[23,17,23,47,0],[24,13,24,14,0],[28,9,40,11,0],[47,83,47,113,0],[47,113,47,158,0],[47,158,47,167,0],[56,9,56,10,0],[57,13,57,67,0],[58,18,58,27,0],[58,29,58,52,0],[58,54,58,57,0],[59,17,59,57,0],[61,13,61,46,0],[62,13,62,27,0],[64,18,64,27,0],[64,29,64,52,0],[64,54,64,57,0],[65,13,65,14,0],[66,17,66,82,0],[67,21,67,30,0],[70,17,70,85,0],[71,17,71,80,0],[73,17,73,42,0],[76,25,76,114,0],[76,114,76,121,0],[76,121,76,129,0],[76,129,76,141,0],[76,141,76,143,0],[77,25,77,31,0],[80,25,80,113,0],[80,113,80,120,0],[80,120,80,128,0],[80,128,80,140,0],[80,140,80,142,0],[81,25,81,31,0],[84,25,84,99,0],[84,99,84,111,0],[84,111,84,114,0],[85,25,85,31,0],[88,25,88,56,0],[89,29,89,125,0],[91,25,91,32,0],[91,34,91,43,0],[91,44,91,46,0],[91,47,91,62,0],[92,25,92,26,0],[93,29,93,54,0],[94,25,94,26,0],[96,25,96,31,0],[99,25,99,174,0],[103,17,103,27,0],[104,13,104,14,0],[106,13,106,27,0],[107,9,107,10,0],[115,9,115,10,0],[116,13,116,67,0],[117,18,117,27,0],[117,29,117,52,0],[117,54,117,57,0],[118,17,118,57,0],[120,13,120,55,0],[121,13,121,27,0],[123,18,123,27,0],[123,29,123,52,0],[123,54,123,57,0],[124,13,124,14,0],[125,17,125,82,0],[126,21,126,30,0],[129,17,129,85,0],[130,17,130,80,0],[132,17,132,42,0],[135,25,135,32,0],[135,34,135,45,0],[135,46,135,48,0],[135,49,135,95,0],[136,25,136,26,0],[137,34,137,43,0],[137,45,137,67,0],[137,69,137,72,0],[138,29,138,30,0],[139,33,139,111,0],[140,29,140,30,0],[141,25,141,26,0],[143,25,143,31,0],[146,25,146,32,0],[146,34,146,45,0],[146,46,146,48,0],[146,49,146,94,0],[147,25,147,26,0],[148,34,148,43,0],[148,45,148,67,0],[148,69,148,72,0],[149,29,149,30,0],[150,33,150,111,0],[151,29,151,30,0],[152,25,152,26,0],[154,25,154,31,0],[157,25,157,90,0],[159,30,159,39,0],[159,41,159,68,0],[159,70,159,73,0],[160,25,160,26,0],[161,29,161,112,0],[162,25,162,26,0],[164,25,164,31,0],[167,25,169,107,0],[171,30,171,39,0],[171,41,171,69,0],[171,71,171,74,0],[172,25,172,26,0],[173,29,173,113,0],[174,25,174,26,0],[176,25,176,31,0],[179,25,179,174,0],[183,17,183,27,0],[184,13,184,14,0],[186,13,186,74,0],[188,13,188,27,0],[189,9,189,10,0],[196,9,196,10,0],[197,13,197,43,0],[198,17,198,48,0],[200,13,200,63,0],[201,13,201,29,0],[202,17,202,48,0],[204,13,204,63,0],[206,13,206,20,0],[206,22,206,44,0],[206,45,206,47,0],[206,48,206,62,0],[207,13,207,14,0],[208,17,208,51,0],[208,52,208,61,0],[210,17,210,30,0],[211,17,211,23,0],[214,13,214,49,0],[215,13,215,65,0],[216,13,216,49,0],[219,13,219,36,0],[220,13,220,51,0],[222,13,222,44,0],[223,13,223,14,0],[224,22,224,31,0],[224,33,224,38,0],[224,40,224,43,0],[225,17,225,18,0],[226,26,226,35,0],[226,37,226,42,0],[226,44,226,47,0],[227,21,227,22,0],[228,25,228,70,0],[229,21,229,22,0],[230,17,230,18,0],[232,17,232,70,0],[234,17,234,35,0],[235,17,235,18,0],[236,21,236,46,0],[237,17,237,18,0],[239,17,239,48,0],[240,13,240,14,0],[243,13,243,50,0],[245,18,245,27,0],[245,29,245,43,0],[245,45,245,48,0],[246,13,246,14,0],[247,17,249,146,0],[250,13,250,14,0],[252,13,252,27,0],[253,9,253,10,0],[260,9,260,10,0],[261,13,261,45,0],[262,13,262,50,0],[264,18,264,27,0],[264,29,264,41,0],[264,43,264,46,0],[265,13,265,14,0],[266,17,266,74,0],[267,17,267,43,0],[268,17,268,77,0],[269,17,269,77,0],[271,17,277,19,0],[278,13,278,14,0],[280,13,280,27,0],[281,9,281,10,0],[288,9,288,10,0],[289,13,289,45,0],[290,13,290,50,0],[292,18,292,27,0],[292,29,292,41,0],[292,43,292,46,0],[293,13,293,14,0],[294,17,298,19,0],[299,13,299,14,0],[301,13,301,27,0],[302,9,302,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Visual/Multiplayer/TestMultiplayerClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using MessagePack;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Online;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Matchmaking;
+using osu.Game.Online.Matchmaking.Events;
+using osu.Game.Online.Matchmaking.Requests;
+using osu.Game.Online.Matchmaking.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.Countdown;
+using osu.Game.Online.Multiplayer.MatchTypes.Matchmaking;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.Multiplayer.MatchTypes.TeamVersus;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Online.Rooms;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Tests.Visual.OnlinePlay;
+
+namespace osu.Game.Tests.Visual.Multiplayer
+{
+    /// &lt;summary&gt;
+    /// A &lt;see cref=&quot;MultiplayerClient&quot;/&gt; for use in multiplayer test scenes. Should generally not be used by itself outside of a &lt;see cref=&quot;MultiplayerTestScene&quot;/&gt;.
+    /// &lt;/summary&gt;
+    public partial class TestMultiplayerClient : MultiplayerClient
+    {
+        public override IBindable&lt;bool&gt; IsConnected =&gt; isConnected;
+        private readonly Bindable&lt;bool&gt; isConnected = new Bindable&lt;bool&gt;(true);
+
+        /// &lt;summary&gt;
+        /// The local client&#39;s &lt;see cref=&quot;Room&quot;/&gt;. This is not always equivalent to the server-side room.
+        /// &lt;/summary&gt;
+        public Room? ClientAPIRoom =&gt; base.APIRoom;
+
+        /// &lt;summary&gt;
+        /// The local client&#39;s &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;. This is not always equivalent to the server-side room.
+        /// &lt;/summary&gt;
+        public MultiplayerRoom? ClientRoom =&gt; base.Room;
+
+        /// &lt;summary&gt;
+        /// The server&#39;s &lt;see cref=&quot;Room&quot;/&gt;. This is always up-to-date.
+        /// &lt;/summary&gt;
+        public Room? ServerAPIRoom { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The server&#39;s &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;. This is always up-to-date.
+        /// &lt;/summary&gt;
+        public MultiplayerRoom? ServerRoom { get; private set; }
+
+        [Obsolete]
+        protected new Room APIRoom =&gt; throw new InvalidOperationException($&quot;Accessing the client-side API room via {nameof(TestMultiplayerClient)} is unsafe. &quot;
+                                                                          + $&quot;Use {nameof(ClientAPIRoom)} if this was intended.&quot;);
+
+        [Obsolete]
+        public new MultiplayerRoom Room =&gt; throw new InvalidOperationException($&quot;Accessing the client-side room via {nameof(TestMultiplayerClient)} is unsafe. &quot;
+                                                                               + $&quot;Use {nameof(ClientRoom)} if this was intended.&quot;);
+
+        public new MultiplayerRoomUser? LocalUser =&gt; ServerRoom?.Users.SingleOrDefault(u =&gt; u.User?.Id == API.LocalUser.Value.Id);
+
+        public Action&lt;MultiplayerRoom&gt;? RoomSetupAction;
+
+        public bool RoomJoined { get; private set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private MultiplayerPlaylistItem? currentItem =&gt; ServerRoom?.Playlist[currentIndex];
+        private int currentIndex;
+        private long lastPlaylistItemId;
+        private int lastCountdownId;
+
+        private readonly Dictionary&lt;int, long&gt; matchmakingUserPicks = new Dictionary&lt;int, long&gt;();
+
+        private readonly TestRoomRequestsHandler apiRequestHandler;
+
+        public TestMultiplayerClient(TestRoomRequestsHandler? apiRequestHandler = null)
+        {
+            this.apiRequestHandler = apiRequestHandler ?? new TestRoomRequestsHandler();
+        }
+
+        public void Connect() =&gt; isConnected.Value = true;
+
+        public void Disconnect() =&gt; isConnected.Value = false;
+
+        public MultiplayerRoomUser AddUser(APIUser user, bool markAsPlaying = false)
+            =&gt; AddUser(new MultiplayerRoomUser(user.Id) { User = user }, markAsPlaying);
+
+        public MultiplayerRoomUser AddUser(MultiplayerRoomUser roomUser, bool markAsPlaying = false)
+        {
+            addUser(roomUser);
+
+            if (markAsPlaying)
+                PlayingUserIds.Add(roomUser.UserID);
+
+            return roomUser;
+        }
+
+        public void TestAddUnresolvedUser() =&gt; addUser(new MultiplayerRoomUser(TestUserLookupCache.UNRESOLVED_USER_ID));
+
+        private void addUser(MultiplayerRoomUser user)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.Users.Add(user);
+            ((IMultiplayerClient)this).UserJoined(clone(user)).WaitSafely();
+
+            switch (ServerRoom?.MatchState)
+            {
+                case TeamVersusRoomState teamVersus:
+                    // simulate the server&#39;s automatic assignment of users to teams on join.
+                    // the &quot;best&quot; team is the one with the least users on it.
+                    int bestTeam = teamVersus.Teams
+                                             .Select(team =&gt; (teamID: team.ID, userCount: ServerRoom.Users.Count(u =&gt; (u.MatchState as TeamVersusUserState)?.TeamID == team.ID)))
+                                             .MinBy(pair =&gt; pair.userCount).teamID;
+
+                    user.MatchState = new TeamVersusUserState { TeamID = bestTeam };
+                    ((IMultiplayerClient)this).MatchUserStateChanged(clone(user.UserID), clone(user.MatchState)).WaitSafely();
+                    break;
+
+                case RankedPlayRoomState:
+                    ((RankedPlayRoomState)ServerRoom!.MatchState!).Users[user.UserID] = new RankedPlayUserInfo
+                    {
+                        Rating = 1500,
+                        Hand = Enumerable.Range(0, 5).Select(_ =&gt; new RankedPlayCardItem()).ToList()
+                    };
+
+                    ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).WaitSafely();
+                    break;
+            }
+        }
+
+        public void RemoveUser(APIUser user)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.Users.Remove(ServerRoom.Users.Single(u =&gt; u.UserID == user.Id));
+            ((IMultiplayerClient)this).UserLeft(clone(new MultiplayerRoomUser(user.Id)));
+
+            if (ServerRoom.Users.Any())
+                TransferHost(ServerRoom.Users.First().UserID);
+        }
+
+        public void ChangeRoomState(MultiplayerRoomState newState)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.State = clone(newState);
+
+            ((IMultiplayerClient)this).RoomStateChanged(clone(ServerRoom.State));
+        }
+
+        public void ChangeUserState(int userId, MultiplayerUserState newState)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            var user = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+            user.State = clone(newState);
+
+            ((IMultiplayerClient)this).UserStateChanged(clone(userId), clone(user.State));
+
+            updateRoomStateIfRequired();
+        }
+
+        private void updateRoomStateIfRequired()
+        {
+            Debug.Assert(ServerRoom != null);
+
+            switch (ServerRoom.State)
+            {
+                case MultiplayerRoomState.Open:
+                    break;
+
+                case MultiplayerRoomState.WaitingForLoad:
+                    if (ServerRoom.Users.All(u =&gt; u.State != MultiplayerUserState.WaitingForLoad))
+                    {
+                        var loadedUsers = ServerRoom.Users.Where(u =&gt; u.State == MultiplayerUserState.Loaded).ToArray();
+
+                        if (loadedUsers.Length == 0)
+                        {
+                            // all users have bailed from the load sequence. cancel the game start.
+                            ChangeRoomState(MultiplayerRoomState.Open);
+                            return;
+                        }
+
+                        foreach (var u in ServerRoom.Users.Where(u =&gt; u.State == MultiplayerUserState.Loaded))
+                            ChangeUserState(u.UserID, MultiplayerUserState.Playing);
+
+                        ((IMultiplayerClient)this).GameplayStarted();
+
+                        ChangeRoomState(MultiplayerRoomState.Playing);
+                    }
+
+                    break;
+
+                case MultiplayerRoomState.Playing:
+                    if (ServerRoom.Users.All(u =&gt; u.State != MultiplayerUserState.Playing))
+                    {
+                        foreach (var u in ServerRoom.Users.Where(u =&gt; u.State == MultiplayerUserState.FinishedPlay))
+                            ChangeUserState(u.UserID, MultiplayerUserState.Results);
+
+                        ChangeRoomState(MultiplayerRoomState.Open);
+                        ((IMultiplayerClient)this).ResultsReady();
+
+                        FinishCurrentItem().WaitSafely();
+                    }
+
+                    break;
+            }
+        }
+
+        public void ChangeUserBeatmapAvailability(int userId, BeatmapAvailability newBeatmapAvailability)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            var user = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+            user.BeatmapAvailability = newBeatmapAvailability;
+
+            ((IMultiplayerClient)this).UserBeatmapAvailabilityChanged(clone(userId), clone(user.BeatmapAvailability));
+        }
+
+        protected override async Task&lt;MultiplayerRoom&gt; JoinRoomInternal(long roomId, string? password = null)
+        {
+            if (RoomJoined || ServerAPIRoom != null)
+                throw new InvalidOperationException(&quot;Already joined a room&quot;);
+
+            roomId = clone(roomId);
+            password = clone(password);
+
+            ServerAPIRoom = ServerSideRooms.Single(r =&gt; r.RoomID == roomId);
+
+            if (password != ServerAPIRoom.Password)
+                throw new InvalidOperationException(&quot;Invalid password.&quot;);
+
+            lastPlaylistItemId = ServerAPIRoom.Playlist.Max(item =&gt; item.ID);
+
+            var localUser = new MultiplayerRoomUser(api.LocalUser.Value.Id)
+            {
+                User = api.LocalUser.Value
+            };
+
+            ServerRoom = new MultiplayerRoom(roomId)
+            {
+                Settings =
+                {
+                    Name = ServerAPIRoom.Name,
+                    MatchType = ServerAPIRoom.Type,
+                    Password = password ?? string.Empty,
+                    QueueMode = ServerAPIRoom.QueueMode,
+                    AutoStartDuration = ServerAPIRoom.AutoStartDuration,
+                    MaxParticipants = ServerAPIRoom.MaxParticipants,
+                },
+                Playlist = ServerAPIRoom.Playlist.Select(item =&gt; new MultiplayerPlaylistItem(item)).ToList(),
+                Users = { localUser },
+                Host = localUser,
+                ChannelID = ServerAPIRoom.ChannelId
+            };
+
+            await changeMatchType(ServerRoom.Settings.MatchType).ConfigureAwait(false);
+            await updatePlaylistOrder(ServerRoom).ConfigureAwait(false);
+            await updateCurrentItem(ServerRoom, false).ConfigureAwait(false);
+
+            RoomSetupAction?.Invoke(ServerRoom);
+            RoomSetupAction = null;
+
+            return clone(ServerRoom);
+        }
+
+        protected override void OnRoomJoined()
+        {
+            Debug.Assert(ServerRoom != null);
+            RoomJoined = true;
+        }
+
+        protected override Task LeaveRoomInternal()
+        {
+            RoomJoined = false;
+            ServerAPIRoom = null;
+            ServerRoom = null;
+            return Task.CompletedTask;
+        }
+
+        public override Task InvitePlayer(int userId)
+        {
+            return Task.CompletedTask;
+        }
+
+        public override Task TransferHost(int userId)
+        {
+            userId = clone(userId);
+
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.Host = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+
+            return ((IMultiplayerClient)this).HostChanged(clone(userId));
+        }
+
+        public override Task KickUser(int userId)
+        {
+            userId = clone(userId);
+
+            Debug.Assert(ServerRoom != null);
+
+            var user = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+            ServerRoom.Users.Remove(user);
+
+            return ((IMultiplayerClient)this).UserKicked(clone(user));
+        }
+
+        /// &lt;summary&gt;
+        /// Simulates a change to the server-side room&#39;s settings without any other change.
+        /// &lt;/summary&gt;
+        public async Task ChangeServerRoomSettings(MultiplayerRoomSettings settings)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.Settings = settings;
+
+            await ((IMultiplayerClient)this).SettingsChanged(clone(settings)).ConfigureAwait(false);
+        }
+
+        public override async Task ChangeSettings(MultiplayerRoomSettings settings)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            // Server is authoritative for the time being.
+            settings = clone(settings);
+            settings.PlaylistItemId = ServerRoom.Settings.PlaylistItemId;
+            ServerRoom.Settings = settings;
+
+            await changeQueueMode(settings.QueueMode).ConfigureAwait(false);
+
+            await ((IMultiplayerClient)this).SettingsChanged(clone(settings)).ConfigureAwait(false);
+
+            foreach (var user in ServerRoom.Users.Where(u =&gt; u.State == MultiplayerUserState.Ready))
+                ChangeUserState(user.UserID, MultiplayerUserState.Idle);
+
+            await changeMatchType(settings.MatchType).ConfigureAwait(false);
+            updateRoomStateIfRequired();
+        }
+
+        public override Task ChangeState(MultiplayerUserState newState)
+        {
+            newState = clone(newState);
+
+            if (newState == MultiplayerUserState.Idle &amp;&amp; LocalUser?.State == MultiplayerUserState.WaitingForLoad)
+                return Task.CompletedTask;
+
+            ChangeUserState(api.LocalUser.Value.Id, clone(newState));
+            return Task.CompletedTask;
+        }
+
+        public override Task ChangeBeatmapAvailability(BeatmapAvailability newBeatmapAvailability)
+        {
+            ChangeUserBeatmapAvailability(api.LocalUser.Value.Id, clone(newBeatmapAvailability));
+            return Task.CompletedTask;
+        }
+
+        public override Task ChangeUserStyle(int? beatmapId, int? rulesetId)
+        {
+            ChangeUserStyle(api.LocalUser.Value.Id, beatmapId, rulesetId);
+            return Task.CompletedTask;
+        }
+
+        public void ChangeUserStyle(int userId, int? beatmapId, int? rulesetId)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            var user = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+            user.BeatmapId = beatmapId;
+            user.RulesetId = rulesetId;
+
+            ((IMultiplayerClient)this).UserStyleChanged(userId, beatmapId, rulesetId);
+        }
+
+        public void ChangeUserMods(int userId, IEnumerable&lt;Mod&gt; newMods)
+            =&gt; ChangeUserMods(userId, newMods.Select(m =&gt; new APIMod(m)));
+
+        public void ChangeUserMods(int userId, IEnumerable&lt;APIMod&gt; newMods)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            var user = ServerRoom.Users.Single(u =&gt; u.UserID == userId);
+            user.Mods = newMods.ToArray();
+
+            ((IMultiplayerClient)this).UserModsChanged(clone(userId), clone(user.Mods));
+        }
+
+        public override Task ChangeUserMods(IEnumerable&lt;APIMod&gt; newMods)
+        {
+            ChangeUserMods(api.LocalUser.Value.Id, clone(newMods));
+            return Task.CompletedTask;
+        }
+
+        public override Task SendMatchRequest(MatchUserRequest request)
+            =&gt; SendUserMatchRequest(api.LocalUser.Value.OnlineID, request);
+
+        public async Task SendUserMatchRequest(int userId, MatchUserRequest request)
+        {
+            request = clone(request);
+
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(LocalUser != null);
+
+            switch (request)
+            {
+                case ChangeTeamRequest changeTeam:
+                    TeamVersusRoomState roomState = (TeamVersusRoomState)ServerRoom.MatchState!;
+                    TeamVersusUserState userState = (TeamVersusUserState)LocalUser.MatchState!;
+
+                    var targetTeam = roomState.Teams.FirstOrDefault(t =&gt; t.ID == changeTeam.TeamID);
+
+                    if (targetTeam != null)
+                    {
+                        userState.TeamID = targetTeam.ID;
+                        await ((IMultiplayerClient)this).MatchUserStateChanged(userId, clone(userState)).ConfigureAwait(false);
+                    }
+
+                    break;
+
+                case ChangeSlotRequest changeSlot:
+                    if (ServerRoom.MatchState is not StandardMatchRoomState standardMatchRoomState || standardMatchRoomState.Slots is not int?[] slots)
+                        break;
+
+                    byte slotId = changeSlot.SlotID;
+                    if (slotId &gt;= slots.Length || slots[slotId] != null)
+                        break;
+
+                    int previousSlotId = Array.IndexOf(slots, LocalUser.UserID);
+                    if (previousSlotId &gt;= 0)
+                        slots[previousSlotId] = null;
+                    slots[slotId] = LocalUser.UserID;
+                    await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(standardMatchRoomState)).ConfigureAwait(false);
+                    break;
+
+                case StartMatchCountdownRequest startCountdown:
+                    await StartCountdown(new MatchStartCountdown { TimeRemaining = startCountdown.Duration }).ConfigureAwait(false);
+                    break;
+
+                case StopCountdownRequest stopCountdown:
+                    await StopCountdown(ServerRoom.ActiveCountdowns.First(c =&gt; c.ID == stopCountdown.ID)).ConfigureAwait(false);
+                    break;
+
+                case RollRequest rollRequest:
+                    int max = (int)(rollRequest.Max ?? 100);
+                    await ((IMultiplayerClient)this).MatchEvent(new RollEvent
+                    {
+                        UserID = userId,
+                        Max = (uint)max,
+                        Result = (uint)RNG.Next(1, max + 1)
+                    }).ConfigureAwait(false);
+                    break;
+
+                case MatchmakingAvatarActionRequest avatarAction:
+                    await ((IMultiplayerClient)this).MatchEvent(new MatchmakingAvatarActionEvent
+                    {
+                        UserId = userId,
+                        Action = avatarAction.Action
+                    }).ConfigureAwait(false);
+                    break;
+
+                case RankedPlayCardHandReplayRequest cardHandState:
+                    await ((IMultiplayerClient)this).MatchEvent(new RankedPlayCardHandReplayEvent
+                    {
+                        UserId = userId,
+                        Frames = cardHandState.Frames,
+                    }).ConfigureAwait(false);
+                    break;
+            }
+        }
+
+        public async Task StartCountdown(MultiplayerCountdown countdown)
+        {
+            countdown.ID = ++lastCountdownId;
+            countdown = clone(countdown);
+
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(LocalUser != null);
+
+            if (countdown.IsExclusive)
+            {
+                MultiplayerCountdown? existingCountdown = ServerRoom.ActiveCountdowns.FirstOrDefault(c =&gt; c.GetType() == countdown.GetType());
+                if (existingCountdown != null)
+                    await StopCountdown(existingCountdown).ConfigureAwait(false);
+            }
+
+            ServerRoom.ActiveCountdowns.Add(countdown);
+            await ((IMultiplayerClient)this).MatchEvent(clone(new CountdownStartedEvent(ServerRoom.ActiveCountdowns[^1]))).ConfigureAwait(false);
+        }
+
+        public async Task StopCountdown(MultiplayerCountdown countdown)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(LocalUser != null);
+
+            ServerRoom.ActiveCountdowns.Remove(ServerRoom.ActiveCountdowns.First(c =&gt; c.ID == countdown.ID));
+            await ((IMultiplayerClient)this).MatchEvent(clone(new CountdownStoppedEvent(countdown.ID))).ConfigureAwait(false);
+        }
+
+        public override Task StartMatch()
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ChangeRoomState(MultiplayerRoomState.WaitingForLoad);
+            foreach (var user in ServerRoom.Users.Where(u =&gt; u.State == MultiplayerUserState.Ready))
+                ChangeUserState(user.UserID, MultiplayerUserState.WaitingForLoad);
+
+            return ((IMultiplayerClient)this).LoadRequested();
+        }
+
+        public override Task AbortGameplay()
+        {
+            Debug.Assert(LocalUser != null);
+
+            ChangeUserState(LocalUser.UserID, MultiplayerUserState.Idle);
+
+            return Task.CompletedTask;
+        }
+
+        public override async Task AbortMatch()
+        {
+            ChangeUserState(api.LocalUser.Value.Id, MultiplayerUserState.Idle);
+            await ((IMultiplayerClient)this).GameplayAborted(GameplayAbortReason.HostAbortedTheMatch).ConfigureAwait(false);
+        }
+
+        public async Task AddUserPlaylistItem(int userId, MultiplayerPlaylistItem item)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(currentItem != null);
+
+            if (ServerRoom.Settings.QueueMode == QueueMode.HostOnly &amp;&amp; ServerRoom.Host?.UserID != LocalUser?.UserID)
+                throw new InvalidOperationException(&quot;Local user is not the room host.&quot;);
+
+            item.OwnerID = userId;
+
+            await addItem(item).ConfigureAwait(false);
+            await updateCurrentItem(ServerRoom).ConfigureAwait(false);
+            updateRoomStateIfRequired();
+        }
+
+        public override Task AddPlaylistItem(MultiplayerPlaylistItem item) =&gt; AddUserPlaylistItem(api.LocalUser.Value.OnlineID, clone(item));
+
+        public async Task EditUserPlaylistItem(int userId, MultiplayerPlaylistItem item)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(currentItem != null);
+            Debug.Assert(ServerAPIRoom != null);
+
+            item.OwnerID = userId;
+
+            var existingItem = ServerRoom.Playlist.SingleOrDefault(i =&gt; i.ID == item.ID);
+
+            if (existingItem == null)
+                throw new InvalidOperationException(&quot;Attempted to change an item that doesn&#39;t exist.&quot;);
+
+            if (existingItem.OwnerID != userId &amp;&amp; ServerRoom.Host?.UserID != LocalUser?.UserID)
+                throw new InvalidOperationException(&quot;Attempted to change an item which is not owned by the user.&quot;);
+
+            if (existingItem.Expired)
+                throw new InvalidOperationException(&quot;Attempted to change an item which has already been played.&quot;);
+
+            // Ensure the playlist order doesn&#39;t change.
+            item.PlaylistOrder = existingItem.PlaylistOrder;
+
+            ServerRoom.Playlist[ServerRoom.Playlist.IndexOf(existingItem)] = item;
+            ServerAPIRoom.Playlist = ServerAPIRoom.Playlist.Select((pi, i) =&gt; pi.ID == item.ID ? new PlaylistItem(item) : ServerAPIRoom.Playlist[i]).ToArray();
+
+            await ((IMultiplayerClient)this).PlaylistItemChanged(clone(item)).ConfigureAwait(false);
+        }
+
+        public override Task EditPlaylistItem(MultiplayerPlaylistItem item) =&gt; EditUserPlaylistItem(api.LocalUser.Value.OnlineID, clone(item));
+
+        public async Task RemoveUserPlaylistItem(int userId, long playlistItemId)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(ServerAPIRoom != null);
+
+            var item = ServerRoom.Playlist.FirstOrDefault(i =&gt; i.ID == playlistItemId);
+
+            if (item == null)
+                throw new InvalidOperationException(&quot;Item does not exist in the room.&quot;);
+
+            if (item.Equals(currentItem))
+                throw new InvalidOperationException(&quot;The room&#39;s current item cannot be removed.&quot;);
+
+            if (item.OwnerID != userId)
+                throw new InvalidOperationException(&quot;Attempted to remove an item which is not owned by the user.&quot;);
+
+            if (item.Expired)
+                throw new InvalidOperationException(&quot;Attempted to remove an item which has already been played.&quot;);
+
+            ServerRoom.Playlist.Remove(item);
+            ServerAPIRoom.Playlist = ServerAPIRoom.Playlist.Where(i =&gt; i.ID != item.ID).ToArray();
+            await ((IMultiplayerClient)this).PlaylistItemRemoved(clone(playlistItemId)).ConfigureAwait(false);
+
+            await updateCurrentItem(ServerRoom).ConfigureAwait(false);
+            updateRoomStateIfRequired();
+        }
+
+        public override Task RemovePlaylistItem(long playlistItemId) =&gt; RemoveUserPlaylistItem(api.LocalUser.Value.OnlineID, clone(playlistItemId));
+
+        public override Task VoteToSkipIntro()
+        {
+            return UserVoteToSkipIntro(api.LocalUser.Value.OnlineID);
+        }
+
+        public async Task UserVoteToSkipIntro(int userId)
+        {
+            await ((IMultiplayerClient)this).UserVotedToSkipIntro(userId, true).ConfigureAwait(false);
+        }
+
+        protected override Task&lt;MultiplayerRoom&gt; CreateRoomInternal(MultiplayerRoom room)
+        {
+            Room apiRoom = new Room(room)
+            {
+                Type = room.Settings.MatchType == MatchType.Playlists
+                    ? MatchType.HeadToHead
+                    : room.Settings.MatchType
+            };
+
+            AddServerSideRoom(apiRoom, api.LocalUser.Value);
+            return JoinRoomInternal(apiRoom.RoomID!.Value, room.Settings.Password);
+        }
+
+        private async Task changeMatchType(MatchType type)
+        {
+            Debug.Assert(ServerRoom != null);
+            int i = 0;
+
+            switch (type)
+            {
+                case MatchType.HeadToHead:
+                    var headToHeadRoomState = StandardMatchRoomState.Create(ServerRoom.Settings.MaxParticipants);
+
+                    foreach (var user in ServerRoom.Users)
+                    {
+                        headToHeadRoomState.Slots?[i++] = user.UserID;
+
+                        user.MatchState = null;
+                        await ((IMultiplayerClient)this).MatchUserStateChanged(clone(user.UserID), clone(user.MatchState)).ConfigureAwait(false);
+                    }
+
+                    ServerRoom.MatchState = headToHeadRoomState;
+                    await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).ConfigureAwait(false);
+                    break;
+
+                case MatchType.TeamVersus:
+                    var teamVersusRoomState = TeamVersusRoomState.CreateDefault(ServerRoom.Settings.MaxParticipants);
+
+                    foreach (var user in ServerRoom.Users)
+                    {
+                        teamVersusRoomState.Slots?[i++] = user.UserID;
+
+                        user.MatchState = new TeamVersusUserState();
+                        await ((IMultiplayerClient)this).MatchUserStateChanged(clone(user.UserID), clone(user.MatchState)).ConfigureAwait(false);
+                    }
+
+                    ServerRoom.MatchState = teamVersusRoomState;
+                    await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).ConfigureAwait(false);
+                    break;
+
+                case MatchType.Matchmaking:
+                    ServerRoom.MatchState = new MatchmakingRoomState();
+                    await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).ConfigureAwait(false);
+
+                    foreach (var user in ServerRoom.Users)
+                    {
+                        user.MatchState = null;
+                        await ((IMultiplayerClient)this).MatchUserStateChanged(clone(user.UserID), clone(user.MatchState)).ConfigureAwait(false);
+                    }
+
+                    break;
+
+                case MatchType.RankedPlay:
+                    ServerRoom.MatchState = new RankedPlayRoomState();
+
+                    foreach (var user in ServerRoom.Users)
+                    {
+                        ((RankedPlayRoomState)ServerRoom.MatchState).Users[user.UserID] = new RankedPlayUserInfo
+                        {
+                            Rating = 1500,
+                            Hand = Enumerable.Range(0, 5).Select(_ =&gt; new RankedPlayCardItem()).ToList()
+                        };
+                    }
+
+                    await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).ConfigureAwait(false);
+
+                    foreach (var user in ServerRoom.Users)
+                    {
+                        user.MatchState = null;
+                        await ((IMultiplayerClient)this).MatchUserStateChanged(clone(user.UserID), clone(user.MatchState)).ConfigureAwait(false);
+                    }
+
+                    break;
+            }
+        }
+
+        private async Task changeQueueMode(QueueMode newMode)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(currentItem != null);
+
+            // When changing to host-only mode, ensure that at least one non-expired playlist item exists by duplicating the current item.
+            if (newMode == QueueMode.HostOnly &amp;&amp; ServerRoom.Playlist.All(item =&gt; item.Expired))
+                await duplicateCurrentItem().ConfigureAwait(false);
+
+            await updatePlaylistOrder(ServerRoom).ConfigureAwait(false);
+            await updateCurrentItem(ServerRoom).ConfigureAwait(false);
+        }
+
+        public async Task FinishCurrentItem()
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(currentItem != null);
+
+            // Expire the current playlist item.
+            currentItem.Expired = true;
+            currentItem.PlayedAt = DateTimeOffset.Now;
+
+            await ((IMultiplayerClient)this).PlaylistItemChanged(clone(currentItem)).ConfigureAwait(false);
+            await updatePlaylistOrder(ServerRoom).ConfigureAwait(false);
+
+            // In host-only mode, a duplicate playlist item will be used for the next round.
+            if (ServerRoom.Settings.QueueMode == QueueMode.HostOnly &amp;&amp; ServerRoom.Playlist.All(item =&gt; item.Expired))
+                await duplicateCurrentItem().ConfigureAwait(false);
+
+            await updateCurrentItem(ServerRoom).ConfigureAwait(false);
+        }
+
+        private async Task duplicateCurrentItem()
+        {
+            Debug.Assert(currentItem != null);
+
+            await addItem(new MultiplayerPlaylistItem
+            {
+                BeatmapID = currentItem.BeatmapID,
+                BeatmapChecksum = currentItem.BeatmapChecksum,
+                RulesetID = currentItem.RulesetID,
+                RequiredMods = currentItem.RequiredMods,
+                AllowedMods = currentItem.AllowedMods
+            }).ConfigureAwait(false);
+        }
+
+        private async Task addItem(MultiplayerPlaylistItem item)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(ServerAPIRoom != null);
+
+            item.ID = ++lastPlaylistItemId;
+
+            ServerRoom.Playlist.Add(item);
+            ServerAPIRoom.Playlist = ServerAPIRoom.Playlist.Append(new PlaylistItem(item)).ToArray();
+            await ((IMultiplayerClient)this).PlaylistItemAdded(clone(item)).ConfigureAwait(false);
+
+            await updatePlaylistOrder(ServerRoom).ConfigureAwait(false);
+        }
+
+        private IEnumerable&lt;MultiplayerPlaylistItem&gt; upcomingItems =&gt; ServerRoom?.Playlist.Where(i =&gt; !i.Expired).OrderBy(i =&gt; i.PlaylistOrder) ?? Enumerable.Empty&lt;MultiplayerPlaylistItem&gt;();
+
+        private async Task updateCurrentItem(MultiplayerRoom room, bool notify = true)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            // Pick the next non-expired playlist item by playlist order, or default to the most-recently-expired item.
+            MultiplayerPlaylistItem nextItem = upcomingItems.FirstOrDefault() ?? ServerRoom.Playlist.OrderByDescending(i =&gt; i.PlayedAt).First();
+
+            currentIndex = ServerRoom.Playlist.IndexOf(nextItem);
+
+            long lastItem = room.Settings.PlaylistItemId;
+            room.Settings.PlaylistItemId = nextItem.ID;
+
+            if (notify &amp;&amp; nextItem.ID != lastItem)
+                await ((IMultiplayerClient)this).SettingsChanged(clone(room.Settings)).ConfigureAwait(false);
+        }
+
+        private async Task updatePlaylistOrder(MultiplayerRoom room)
+        {
+            Debug.Assert(ServerRoom != null);
+            Debug.Assert(ServerAPIRoom != null);
+
+            List&lt;MultiplayerPlaylistItem&gt; orderedActiveItems;
+
+            switch (room.Settings.QueueMode)
+            {
+                default:
+                    orderedActiveItems = ServerRoom.Playlist.Where(item =&gt; !item.Expired).OrderBy(item =&gt; item.ID).ToList();
+                    break;
+
+                case QueueMode.AllPlayersRoundRobin:
+                    var itemsByPriority = new List&lt;(MultiplayerPlaylistItem item, int priority)&gt;();
+
+                    // Assign a priority for items from each user, starting from 0 and increasing in order which the user added the items.
+                    foreach (var group in ServerRoom.Playlist.Where(item =&gt; !item.Expired).OrderBy(item =&gt; item.ID).GroupBy(item =&gt; item.OwnerID))
+                    {
+                        int priority = 0;
+                        itemsByPriority.AddRange(group.Select(item =&gt; (item, priority++)));
+                    }
+
+                    orderedActiveItems = itemsByPriority
+                                         // Order by each user&#39;s priority.
+                                         .OrderBy(i =&gt; i.priority)
+                                         // Many users will have the same priority of items, so attempt to break the tie by maintaining previous ordering.
+                                         // Suppose there are two users: User1 and User2. User1 adds two items, and then User2 adds a third. If the previous order is not maintained,
+                                         // then after playing the first item by User1, their second item will become priority=0 and jump to the front of the queue (because it was added first).
+                                         .ThenBy(i =&gt; i.item.PlaylistOrder)
+                                         // If there are still ties (normally shouldn&#39;t happen), break ties by making items added earlier go first.
+                                         // This could happen if e.g. the item orders get reset.
+                                         .ThenBy(i =&gt; i.item.ID)
+                                         .Select(i =&gt; i.item)
+                                         .ToList();
+
+                    break;
+            }
+
+            for (int i = 0; i &lt; orderedActiveItems.Count; i++)
+            {
+                var item = orderedActiveItems[i];
+
+                if (item.PlaylistOrder == i)
+                    continue;
+
+                item.PlaylistOrder = (ushort)i;
+
+                await ((IMultiplayerClient)this).PlaylistItemChanged(clone(item)).ConfigureAwait(false);
+            }
+
+            // Also ensure that the API room&#39;s playlist is correct.
+            foreach (var item in ServerAPIRoom.Playlist)
+                item.PlaylistOrder = ServerRoom.Playlist.Single(i =&gt; i.ID == item.ID).PlaylistOrder;
+        }
+
+        private T clone&lt;T&gt;(T incoming)
+        {
+            byte[] serialized = MessagePackSerializer.Serialize(typeof(T), incoming, SignalRUnionWorkaroundResolver.OPTIONS);
+            return MessagePackSerializer.Deserialize&lt;T&gt;(serialized, SignalRUnionWorkaroundResolver.OPTIONS);
+        }
+
+        protected override Task DisconnectInternal()
+        {
+            Disconnect();
+            return Task.CompletedTask;
+        }
+
+        public override Task Reconnect()
+        {
+            return Task.CompletedTask;
+        }
+
+        public async Task ChangeMatchRoomState(MatchRoomState state)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            ServerRoom.MatchState = state;
+            await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom.MatchState)).ConfigureAwait(false);
+        }
+
+        public override Task DiscardCards(RankedPlayCardItem[] cards)
+            =&gt; DiscardCards(_ =&gt; cards);
+
+        public Task DiscardCards(Func&lt;RankedPlayCardItem[], IEnumerable&lt;RankedPlayCardItem&gt;&gt; selector)
+            =&gt; DiscardUserCards(api.LocalUser.Value.OnlineID, selector);
+
+        public async Task DiscardUserCards(int userId, Func&lt;RankedPlayCardItem[], IEnumerable&lt;RankedPlayCardItem&gt;&gt; selector)
+        {
+            RankedPlayUserInfo info = ((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId];
+            RankedPlayCardItem[] cards = selector(info.Hand.ToArray()).ToArray();
+
+            await RankedPlayRemoveUserCards(userId, _ =&gt; cards).ConfigureAwait(false);
+            await RankedPlayAddUserCards(userId, Enumerable.Range(0, cards.Length).Select(_ =&gt; new RankedPlayCardItem()).ToArray()).ConfigureAwait(false);
+        }
+
+        public override Task PlayCard(RankedPlayCardItem card)
+            =&gt; PlayCard(_ =&gt; card);
+
+        public Task PlayCard(Func&lt;RankedPlayCardItem[], RankedPlayCardItem&gt; selector)
+            =&gt; PlayUserCard(api.LocalUser.Value.OnlineID, selector);
+
+        public async Task PlayUserCard(int userId, Func&lt;RankedPlayCardItem[], RankedPlayCardItem&gt; selector)
+        {
+            RankedPlayCardItem card = selector(((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId].Hand.ToArray());
+            MultiplayerPlaylistItem? item = GetCardWithPlaylistItem(card).PlaylistItem.Value;
+
+            if (item != null)
+            {
+                ServerRoom!.Playlist.Add(item);
+                await ((IMultiplayerClient)this).PlaylistItemAdded(clone(item)).ConfigureAwait(false);
+                await ((IMultiplayerClient)this).PlaylistItemChanged(clone(item)).ConfigureAwait(false);
+
+                var settings = clone(ServerRoom!.Settings);
+                settings.PlaylistItemId = item.ID;
+                await ((IMultiplayerClient)this).SettingsChanged(settings).ConfigureAwait(false);
+            }
+
+            await ((IRankedPlayClient)this).RankedPlayCardPlayed(clone(card)).ConfigureAwait(false);
+        }
+
+        public override Task&lt;MatchmakingPool[]&gt; GetMatchmakingPoolsOfType(MatchmakingPoolType type)
+        {
+            return Task.FromResult&lt;MatchmakingPool[]&gt;(
+            [
+                new MatchmakingPool { Id = 0, RulesetId = 0 },
+                new MatchmakingPool { Id = 1, RulesetId = 1 },
+                new MatchmakingPool { Id = 2, RulesetId = 2 },
+                new MatchmakingPool { Id = 3, RulesetId = 3, Variant = 4 },
+                new MatchmakingPool { Id = 4, RulesetId = 3, Variant = 7 },
+            ]);
+        }
+
+        public override Task&lt;MatchmakingJoinLobbyResponse&gt; MatchmakingJoinLobbyWithParams(MatchmakingJoinLobbyRequest request)
+        {
+            return Task.FromResult(new MatchmakingJoinLobbyResponse());
+        }
+
+        public override Task MatchmakingLeaveLobby()
+        {
+            return Task.CompletedTask;
+        }
+
+        public override async Task MatchmakingJoinQueue(int poolId)
+        {
+            await ((IMatchmakingClient)this).MatchmakingQueueJoined().ConfigureAwait(false);
+            await ((IMatchmakingClient)this).MatchmakingQueueStatusChanged(new MatchmakingQueueStatus.Searching()).ConfigureAwait(false);
+        }
+
+        public override async Task MatchmakingLeaveQueue()
+        {
+            await ((IMatchmakingClient)this).MatchmakingQueueLeft().ConfigureAwait(false);
+        }
+
+        public override Task MatchmakingAcceptInvitation()
+        {
+            return Task.CompletedTask;
+        }
+
+        public override Task&lt;MatchmakingIssueDuelResponse&gt; MatchmakingIssueDuel(MatchmakingIssueDuelRequest request)
+        {
+            return Task.FromResult(new MatchmakingIssueDuelResponse());
+        }
+
+        public override Task&lt;MatchmakingAcceptDuelResponse&gt; MatchmakingAcceptDuel(MatchmakingAcceptDuelRequest request)
+        {
+            return Task.FromResult(new MatchmakingAcceptDuelResponse());
+        }
+
+        public override Task MatchmakingDeclineInvitation()
+        {
+            return Task.CompletedTask;
+        }
+
+        public new async Task MatchmakingLobbyStatusChanged(MatchmakingLobbyStatus status)
+        {
+            await ((IMatchmakingClient)this).MatchmakingLobbyStatusChanged(clone(status)).ConfigureAwait(false);
+        }
+
+        public override Task MatchmakingToggleSelection(long playlistItemId)
+            =&gt; MatchmakingToggleUserSelection(api.LocalUser.Value.OnlineID, playlistItemId);
+
+        public override Task MatchmakingSkipToNextStage()
+            =&gt; Task.CompletedTask;
+
+        public async Task MatchmakingToggleUserSelection(int userId, long playlistItemId)
+        {
+            if (matchmakingUserPicks.TryGetValue(userId, out long existingId))
+            {
+                if (existingId == playlistItemId)
+                    return;
+
+                await ((IMatchmakingClient)this).MatchmakingItemDeselected(clone(userId), clone(existingId)).ConfigureAwait(false);
+            }
+
+            matchmakingUserPicks[userId] = playlistItemId;
+
+            await ((IMatchmakingClient)this).MatchmakingItemSelected(clone(userId), clone(playlistItemId)).ConfigureAwait(false);
+        }
+
+        public async Task MatchmakingChangeStage(MatchmakingStage stage, Action&lt;MatchmakingRoomState&gt;? prepare = null)
+        {
+            MatchmakingRoomState state = clone((MatchmakingRoomState)ServerRoom!.MatchState!);
+
+            state.Stage = stage;
+
+            if (stage == MatchmakingStage.RoundWarmupTime)
+                state.CurrentRound++;
+
+            prepare?.Invoke(state);
+
+            await ChangeMatchRoomState(state).ConfigureAwait(false);
+            await StartCountdown(new MatchmakingStageCountdown
+            {
+                Stage = stage,
+                TimeRemaining = TimeSpan.FromSeconds(stage == MatchmakingStage.UserBeatmapSelect ? 30 : 10)
+            }).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a card to the local user&#39;s hand.
+        /// &lt;/summary&gt;
+        public Task RankedPlayAddCards(RankedPlayCardItem[] cards)
+            =&gt; RankedPlayAddUserCards(api.LocalUser.Value.OnlineID, cards);
+
+        /// &lt;summary&gt;
+        /// Adds a card to the given user&#39;s hand.
+        /// &lt;/summary&gt;
+        public async Task RankedPlayAddUserCards(int userId, RankedPlayCardItem[] cards)
+        {
+            foreach (var card in cards)
+            {
+                ((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId].Hand.Add(card);
+                await ((IRankedPlayClient)this).RankedPlayCardAdded(userId, clone(card)).ConfigureAwait(false);
+            }
+
+            await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom!.MatchState)).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a card from the local user&#39;s hand.
+        /// &lt;/summary&gt;
+        public Task RankedPlayRemoveCards(Func&lt;RankedPlayCardItem[], RankedPlayCardItem[]&gt; selector)
+            =&gt; RankedPlayRemoveUserCards(api.LocalUser.Value.OnlineID, selector);
+
+        /// &lt;summary&gt;
+        /// Removes a card from the given user&#39;s hand.
+        /// &lt;/summary&gt;
+        public async Task RankedPlayRemoveUserCards(int userId, Func&lt;RankedPlayCardItem[], RankedPlayCardItem[]&gt; selector)
+        {
+            RankedPlayCardItem[] cards = selector(((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId].Hand.ToArray());
+
+            foreach (var card in cards)
+            {
+                ((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId].Hand.Remove(card);
+                await ((IRankedPlayClient)this).RankedPlayCardRemoved(userId, clone(card)).ConfigureAwait(false);
+            }
+
+            await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom!.MatchState)).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Reveals a card in the local user&#39;s hand.
+        /// &lt;/summary&gt;
+        public Task RankedPlayRevealCard(Func&lt;RankedPlayCardItem[], RankedPlayCardItem&gt; selector, MultiplayerPlaylistItem item)
+            =&gt; RankedPlayRevealUserCard(api.LocalUser.Value.OnlineID, selector, item);
+
+        /// &lt;summary&gt;
+        /// Reveals a card in the given user&#39;s hand.
+        /// &lt;/summary&gt;
+        public async Task RankedPlayRevealUserCard(int userId, Func&lt;RankedPlayCardItem[], RankedPlayCardItem&gt; selector, MultiplayerPlaylistItem item)
+        {
+            RankedPlayCardItem card = selector(((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId].Hand.ToArray());
+            await ((IRankedPlayClient)this).RankedPlayCardRevealed(clone(card), clone(item)).ConfigureAwait(false);
+        }
+
+        public async Task RankedPlayChangeStage(RankedPlayStage stage, Action&lt;RankedPlayRoomState&gt;? prepare = null)
+        {
+            RankedPlayRoomState state = clone((RankedPlayRoomState)ServerRoom!.MatchState!);
+
+            state.Stage = stage;
+
+            if (stage == RankedPlayStage.RoundWarmup)
+                state.CurrentRound++;
+
+            prepare?.Invoke(state);
+
+            await ChangeMatchRoomState(state).ConfigureAwait(false);
+            await StartCountdown(new RankedPlayStageCountdown
+            {
+                Stage = stage,
+                TimeRemaining = TimeSpan.FromSeconds(stage == RankedPlayStage.CardPlay ? 30 : 10)
+            }).ConfigureAwait(false);
+        }
+
+        public async Task RankedPlayChangeUserState(int userId, Action&lt;RankedPlayUserInfo&gt; prepare)
+        {
+            Debug.Assert(ServerRoom != null);
+
+            var userInfo = clone(((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId]);
+            prepare(userInfo);
+
+            ((RankedPlayRoomState)ServerRoom!.MatchState!).Users[userId] = userInfo;
+            await ((IMultiplayerClient)this).MatchRoomStateChanged(clone(ServerRoom!.MatchState)).ConfigureAwait(false);
+        }
+
+        #region API Room Handling
+
+        public IReadOnlyList&lt;Room&gt; ServerSideRooms
+            =&gt; apiRequestHandler.ServerSideRooms;
+
+        public void AddServerSideRoom(Room room, APIUser host)
+            =&gt; apiRequestHandler.AddServerSideRoom(room, host);
+
+        public bool HandleRequest(APIRequest request, APIUser localUser, BeatmapManager beatmapManager)
+            =&gt; apiRequestHandler.HandleRequest(request, localUser, beatmapManager);
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,56,39,67,0],[40,9,40,80,0],[45,39,45,51,0],[50,47,50,56,0],[55,38,55,42,0],[55,43,55,55,0],[60,46,60,50,0],[60,51,60,63,0],[63,39,64,130,0],[67,44,68,132,0],[70,54,70,93,0],[70,93,70,129,0],[70,129,70,130,0],[74,34,74,38,0],[74,39,74,51,0],[77,36,77,40,0],[77,41,77,45,0],[77,50,77,55,0],[79,57,79,91,0],[84,9,84,99,0],[88,9,88,88,0],[89,9,89,10,0],[90,13,90,89,0],[91,9,91,10,0],[93,34,93,58,0],[95,37,95,62,0],[98,16,98,88,0],[101,9,101,10,0],[102,13,102,31,0],[104,13,104,31,0],[105,17,105,53,0],[107,13,107,29,0],[108,9,108,10,0],[110,48,110,120,0],[113,9,113,10,0],[114,13,114,46,0],[116,13,116,40,0],[117,13,117,77,0],[119,13,119,44,0],[124,21,125,62,0],[125,62,125,119,0],[125,119,125,175,0],[125,175,125,177,0],[125,177,126,61,0],[126,61,126,75,0],[126,75,126,84,0],[128,21,128,85,0],[129,21,129,127,0],[130,21,130,27,0],[133,21,136,67,0],[136,67,136,91,0],[136,91,137,23,0],[139,21,139,113,0],[140,21,140,27,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,46,0],[148,13,148,66,0],[148,66,148,85,0],[148,85,148,88,0],[149,13,149,90,0],[151,13,151,40,0],[152,17,152,63,0],[153,9,153,10,0],[156,9,156,10,0],[157,13,157,46,0],[159,13,159,48,0],[161,13,161,82,0],[162,9,162,10,0],[165,9,165,10,0],[166,13,166,46,0],[168,13,168,53,0],[168,53,168,71,0],[168,71,168,73,0],[169,13,169,42,0],[171,13,171,91,0],[173,13,173,41,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,46,0],[180,13,180,38,0],[183,21,183,27,0],[186,21,186,51,0],[186,51,186,97,0],[186,97,186,99,0],[187,21,187,22,0],[188,25,188,71,0],[188,71,188,109,0],[188,109,188,121,0],[190,25,190,53,0],[191,25,191,26,0],[193,29,193,72,0],[194,29,194,36,0],[197,25,197,32,0],[197,34,197,39,0],[197,40,197,42,0],[197,43,197,71,0],[197,71,197,109,0],[197,109,197,110,0],[198,29,198,85,0],[200,25,200,70,0],[202,25,202,71,0],[203,21,203,22,0],[205,21,205,27,0],[208,21,208,51,0],[208,51,208,90,0],[208,90,208,92,0],[209,21,209,22,0],[210,25,210,32,0],[210,34,210,39,0],[210,40,210,42,0],[210,43,210,71,0],[210,71,210,115,0],[210,115,210,116,0],[211,29,211,85,0],[213,25,213,68,0],[214,25,214,67,0],[216,25,216,58,0],[217,21,217,22,0],[219,21,219,27,0],[221,9,221,10,0],[224,9,224,10,0],[225,13,225,46,0],[227,13,227,53,0],[227,53,227,71,0],[227,71,227,73,0],[228,13,228,63,0],[230,13,230,119,0],[231,9,231,10,0],[234,9,234,10,0],[235,13,235,53,0],[236,17,236,78,0],[238,13,238,36,0],[239,13,239,40,0],[241,13,241,57,0],[241,57,241,75,0],[241,75,241,77,0],[243,13,243,52,0],[244,17,244,74,0],[246,13,246,69,0],[246,69,246,76,0],[246,76,246,78,0],[248,13,251,15,0],[253,13,264,66,0],[264,66,264,99,0],[264,99,268,15,0],[270,13,270,88,0],[271,13,271,73,0],[272,13,272,78,0],[274,13,274,49,0],[275,13,275,36,0],[277,13,277,38,0],[278,9,278,10,0],[281,9,281,10,0],[282,13,282,46,0],[283,13,283,31,0],[284,9,284,10,0],[287,9,287,10,0],[288,13,288,32,0],[289,13,289,34,0],[290,13,290,31,0],[291,13,291,39,0],[292,9,292,10,0],[295,9,295,10,0],[296,13,296,39,0],[297,9,297,10,0],[300,9,300,10,0],[301,13,301,36,0],[303,13,303,46,0],[305,13,305,60,0],[305,60,305,78,0],[305,78,305,80,0],[307,13,307,74,0],[308,9,308,10,0],[311,9,311,10,0],[312,13,312,36,0],[314,13,314,46,0],[316,13,316,53,0],[316,53,316,71,0],[316,71,316,73,0],[317,13,317,43,0],[319,13,319,71,0],[320,9,320,10,0],[326,9,326,10,0],[327,13,327,46,0],[329,13,329,44,0],[331,13,331,101,0],[332,9,332,10,0],[335,9,335,10,0],[336,13,336,46,0],[339,13,339,40,0],[340,13,340,74,0],[341,13,341,44,0],[343,13,343,77,0],[345,13,345,101,0],[347,13,347,20,0],[347,22,347,30,0],[347,31,347,33,0],[347,34,347,62,0],[347,62,347,99,0],[347,99,347,100,0],[348,17,348,73,0],[350,13,350,77,0],[351,13,351,41,0],[352,9,352,10,0],[355,9,355,10,0],[356,13,356,40,0],[358,13,358,114,0],[359,17,359,43,0],[361,13,361,70,0],[362,13,362,39,0],[363,9,363,10,0],[366,9,366,10,0],[367,13,367,98,0],[368,13,368,39,0],[369,9,369,10,0],[372,9,372,10,0],[373,13,373,75,0],[374,13,374,39,0],[375,9,375,10,0],[378,9,378,10,0],[379,13,379,46,0],[381,13,381,53,0],[381,53,381,71,0],[381,71,381,73,0],[382,13,382,40,0],[383,13,383,40,0],[385,13,385,87,0],[386,9,386,10,0],[389,16,389,59,0],[389,59,389,72,0],[389,72,389,74,0],[392,9,392,10,0],[393,13,393,46,0],[395,13,395,53,0],[395,53,395,71,0],[395,71,395,73,0],[396,13,396,43,0],[398,13,398,89,0],[399,9,399,10,0],[402,9,402,10,0],[403,13,403,68,0],[404,13,404,39,0],[405,9,405,10,0],[408,16,408,75,0],[411,9,411,10,0],[412,13,412,38,0],[414,13,414,46,0],[415,13,415,45,0],[420,21,420,97,0],[421,21,421,96,0],[423,21,423,74,0],[423,74,423,99,0],[423,99,423,101,0],[425,21,425,44,0],[426,21,426,22,0],[427,25,427,58,0],[428,25,428,128,0],[429,21,429,22,0],[431,21,431,27,0],[434,21,434,152,0],[435,25,435,31,0],[437,21,437,53,0],[438,21,438,73,0],[439,25,439,31,0],[441,21,441,81,0],[442,21,442,45,0],[443,25,443,54,0],[444,21,444,54,0],[445,21,445,129,0],[446,21,446,27,0],[449,21,449,133,0],[450,21,450,27,0],[453,21,453,80,0],[453,80,453,104,0],[453,104,453,129,0],[454,21,454,27,0],[457,21,457,61,0],[458,21,463,46,0],[464,21,464,27,0],[467,21,471,46,0],[472,21,472,27,0],[475,21,479,46,0],[480,21,480,27,0],[482,9,482,10,0],[485,9,485,10,0],[486,13,486,46,0],[487,13,487,42,0],[489,13,489,46,0],[490,13,490,45,0],[492,13,492,39,0],[493,13,493,14,0],[494,17,494,107,0],[494,107,494,141,0],[494,141,494,143,0],[495,17,495,47,0],[496,21,496,82,0],[497,13,497,14,0],[499,13,499,56,0],[500,13,500,146,0],[501,9,501,10,0],[504,9,504,10,0],[505,13,505,46,0],[506,13,506,45,0],[508,13,508,87,0],[508,87,508,107,0],[508,107,508,110,0],[509,13,509,127,0],[510,9,510,10,0],[513,9,513,10,0],[514,13,514,46,0],[516,13,516,66,0],[517,13,517,20,0],[517,22,517,30,0],[517,31,517,33,0],[517,34,517,62,0],[517,62,517,99,0],[517,99,517,100,0],[518,17,518,83,0],[520,13,520,63,0],[521,9,521,10,0],[524,9,524,10,0],[525,13,525,45,0],[527,13,527,74,0],[529,13,529,39,0],[530,9,530,10,0],[533,9,533,10,0],[534,13,534,80,0],[535,13,535,125,0],[536,9,536,10,0],[539,9,539,10,0],[540,13,540,46,0],[541,13,541,47,0],[543,13,543,117,0],[544,17,544,89,0],[546,13,546,35,0],[548,13,548,55,0],[549,13,549,71,0],[550,13,550,41,0],[551,9,551,10,0],[553,79,553,141,0],[556,9,556,10,0],[557,13,557,46,0],[558,13,558,47,0],[559,13,559,49,0],[561,13,561,35,0],[563,13,563,73,0],[563,73,563,88,0],[563,88,563,90,0],[565,13,565,38,0],[566,17,566,104,0],[568,13,568,96,0],[569,17,569,116,0],[571,13,571,38,0],[572,17,572,115,0],[575,13,575,61,0],[577,13,577,83,0],[578,13,578,79,0],[578,79,578,148,0],[578,148,578,160,0],[580,13,580,101,0],[581,9,581,10,0],[583,80,583,143,0],[586,9,586,10,0],[587,13,587,46,0],[588,13,588,49,0],[590,13,590,64,0],[590,64,590,86,0],[590,86,590,88,0],[592,13,592,30,0],[593,17,593,89,0],[595,13,595,42,0],[596,17,596,99,0],[598,13,598,40,0],[599,17,599,116,0],[601,13,601,30,0],[602,17,602,115,0],[604,13,604,46,0],[605,13,605,72,0],[605,72,605,87,0],[605,87,605,99,0],[606,13,606,111,0],[608,13,608,71,0],[609,13,609,41,0],[610,9,610,10,0],[612,73,612,148,0],[615,9,615,10,0],[616,13,616,70,0],[617,9,617,10,0],[620,9,620,10,0],[621,13,621,103,0],[622,9,622,10,0],[625,9,625,10,0],[626,13,631,15,0],[633,13,633,61,0],[634,13,634,84,0],[635,9,635,10,0],[638,9,638,10,0],[639,13,639,46,0],[640,13,640,23,0],[642,13,642,26,0],[645,21,645,114,0],[647,21,647,28,0],[647,30,647,38,0],[647,39,647,41,0],[647,42,647,58,0],[648,21,648,22,0],[649,25,649,71,0],[651,25,651,48,0],[652,25,652,146,0],[653,21,653,22,0],[655,21,655,65,0],[656,21,656,128,0],[657,21,657,27,0],[660,21,660,118,0],[662,21,662,28,0],[662,30,662,38,0],[662,39,662,41,0],[662,42,662,58,0],[663,21,663,22,0],[664,25,664,71,0],[666,25,666,69,0],[667,25,667,146,0],[668,21,668,22,0],[670,21,670,65,0],[671,21,671,128,0],[672,21,672,27,0],[675,21,675,72,0],[676,21,676,128,0],[678,21,678,28,0],[678,30,678,38,0],[678,39,678,41,0],[678,42,678,58,0],[679,21,679,22,0],[680,25,680,48,0],[681,25,681,146,0],[682,21,682,22,0],[684,21,684,27,0],[687,21,687,71,0],[689,21,689,28,0],[689,30,689,38,0],[689,39,689,41,0],[689,42,689,58,0],[690,21,690,22,0],[691,25,694,71,0],[694,71,694,95,0],[694,95,695,27,0],[696,21,696,22,0],[698,21,698,128,0],[700,21,700,28,0],[700,30,700,38,0],[700,39,700,41,0],[700,42,700,58,0],[701,21,701,22,0],[702,25,702,48,0],[703,25,703,146,0],[704,21,704,22,0],[706,21,706,27,0],[708,9,708,10,0],[711,9,711,10,0],[712,13,712,46,0],[713,13,713,47,0],[716,13,716,82,0],[716,82,716,94,0],[716,94,716,96,0],[717,17,717,68,0],[719,13,719,73,0],[720,13,720,71,0],[721,9,721,10,0],[724,9,724,10,0],[725,13,725,46,0],[726,13,726,47,0],[729,13,729,40,0],[730,13,730,55,0],[732,13,732,108,0],[733,13,733,73,0],[736,13,736,104,0],[736,104,736,116,0],[736,116,736,118,0],[737,17,737,68,0],[739,13,739,71,0],[740,9,740,10,0],[743,9,743,10,0],[744,13,744,47,0],[746,13,753,38,0],[754,9,754,10,0],[757,9,757,10,0],[758,13,758,46,0],[759,13,759,49,0],[761,13,761,44,0],[763,13,763,43,0],[764,13,764,102,0],[765,13,765,99,0],[767,13,767,73,0],[768,9,768,10,0],[770,71,770,103,0],[770,103,770,113,0],[770,113,770,128,0],[770,128,770,143,0],[770,143,770,191,0],[773,9,773,10,0],[774,13,774,46,0],[777,13,777,125,0],[777,125,777,135,0],[777,135,777,145,0],[779,13,779,66,0],[781,13,781,58,0],[782,13,782,56,0],[784,13,784,51,0],[785,17,785,110,0],[786,9,786,10,0],[789,9,789,10,0],[790,13,790,46,0],[791,13,791,49,0],[795,13,795,45,0],[798,21,798,76,0],[798,76,798,89,0],[798,89,798,107,0],[798,107,798,114,0],[798,114,798,125,0],[799,21,799,27,0],[802,21,802,100,0],[805,21,805,28,0],[805,30,805,39,0],[805,40,805,42,0],[805,43,805,77,0],[805,77,805,90,0],[805,90,805,108,0],[805,108,805,115,0],[805,115,805,133,0],[805,133,805,145,0],[805,145,805,146,0],[806,21,806,22,0],[807,25,807,42,0],[808,25,808,71,0],[808,71,808,89,0],[808,89,808,92,0],[809,21,809,22,0],[811,21,813,56,0],[813,56,813,66,0],[813,66,817,55,0],[817,55,817,75,0],[817,75,820,55,0],[820,55,820,64,0],[820,64,821,55,0],[821,55,821,61,0],[821,61,822,52,0],[824,21,824,27,0],[827,18,827,27,0],[827,29,827,57,0],[827,59,827,62,0],[828,13,828,14,0],[829,17,829,50,0],[831,17,831,45,0],[832,21,832,30,0],[834,17,834,48,0],[836,17,836,105,0],[837,13,837,14,0],[840,13,840,20,0],[840,22,840,30,0],[840,31,840,33,0],[840,34,840,56,0],[841,17,841,70,0],[841,70,841,85,0],[841,85,841,101,0],[842,9,842,10,0],[845,9,845,10,0],[846,13,846,126,0],[847,13,847,109,0],[848,9,848,10,0],[851,9,851,10,0],[852,13,852,26,0],[853,13,853,39,0],[854,9,854,10,0],[857,9,857,10,0],[858,13,858,39,0],[859,9,859,10,0],[862,9,862,10,0],[863,13,863,46,0],[865,13,865,43,0],[866,13,866,120,0],[867,9,867,10,0],[870,16,870,34,0],[870,34,870,39,0],[870,39,870,40,0],[873,16,873,72,0],[876,9,876,10,0],[877,13,877,100,0],[878,13,878,82,0],[880,13,880,58,0],[880,58,880,63,0],[880,63,880,87,0],[881,13,881,96,0],[881,96,881,120,0],[881,120,881,155,0],[882,9,882,10,0],[885,16,885,30,0],[885,30,885,34,0],[885,34,885,35,0],[888,16,888,68,0],[891,9,891,10,0],[892,13,892,125,0],[893,13,893,94,0],[895,13,895,30,0],[896,13,896,14,0],[897,17,897,48,0],[898,17,898,103,0],[899,17,899,105,0],[901,17,901,60,0],[902,17,902,51,0],[903,17,903,98,0],[904,13,904,14,0],[906,13,906,101,0],[907,9,907,10,0],[910,9,910,10,0],[911,13,918,16,0],[919,9,919,10,0],[922,9,922,10,0],[923,13,923,72,0],[924,9,924,10,0],[927,9,927,10,0],[928,13,928,39,0],[929,9,929,10,0],[932,9,932,10,0],[933,13,933,93,0],[934,13,934,138,0],[935,9,935,10,0],[938,9,938,10,0],[939,13,939,91,0],[940,9,940,10,0],[943,9,943,10,0],[944,13,944,39,0],[945,9,945,10,0],[948,9,948,10,0],[949,13,949,72,0],[950,9,950,10,0],[953,9,953,10,0],[954,13,954,73,0],[955,9,955,10,0],[958,9,958,10,0],[959,13,959,39,0],[960,9,960,10,0],[963,9,963,10,0],[964,13,964,113,0],[965,9,965,10,0],[968,16,968,92,0],[971,16,971,34,0],[974,9,974,10,0],[975,13,975,79,0],[976,13,976,14,0],[977,17,977,50,0],[978,21,978,28,0],[980,17,980,132,0],[981,13,981,14,0],[983,13,983,59,0],[985,13,985,130,0],[986,9,986,10,0],[989,9,989,10,0],[990,13,990,95,0],[992,13,992,33,0],[994,13,994,59,0],[995,17,995,38,0],[997,13,997,36,0],[999,13,999,69,0],[1000,13,1004,38,0],[1005,9,1005,10,0],[1011,16,1011,75,0],[1017,9,1017,10,0],[1018,13,1018,20,0],[1018,22,1018,30,0],[1018,31,1018,33,0],[1018,34,1018,39,0],[1019,13,1019,14,0],[1020,17,1020,93,0],[1021,17,1021,112,0],[1022,13,1022,14,0],[1024,13,1024,121,0],[1025,9,1025,10,0],[1031,16,1031,81,0],[1037,9,1037,10,0],[1038,13,1038,128,0],[1040,13,1040,20,0],[1040,22,1040,30,0],[1040,31,1040,33,0],[1040,34,1040,39,0],[1041,13,1041,14,0],[1042,17,1042,96,0],[1043,17,1043,114,0],[1044,13,1044,14,0],[1046,13,1046,121,0],[1047,9,1047,10,0],[1053,16,1053,86,0],[1059,9,1059,10,0],[1060,13,1060,125,0],[1061,13,1061,116,0],[1062,9,1062,10,0],[1065,9,1065,10,0],[1066,13,1066,93,0],[1068,13,1068,33,0],[1070,13,1070,54,0],[1071,17,1071,38,0],[1073,13,1073,36,0],[1075,13,1075,69,0],[1076,13,1080,38,0],[1081,9,1081,10,0],[1084,9,1084,10,0],[1085,13,1085,46,0],[1087,13,1087,96,0],[1088,13,1088,31,0],[1090,13,1090,85,0],[1091,13,1091,121,0],[1092,9,1092,10,0],[1097,16,1097,49,0],[1100,16,1100,63,0],[1103,16,1103,83,0]]);
+    </script>
+  </body>
+</html>

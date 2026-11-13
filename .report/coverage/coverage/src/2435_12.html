@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/BeatmapListingOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Localisation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Input.Events;
+using osu.Game.Audio;
+using osu.Game.Beatmaps.Drawables.Cards;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.BeatmapListing;
+using osu.Game.Resources.Localisation.Web;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays
+{
+    public partial class BeatmapListingOverlay : OnlineOverlay&lt;BeatmapListingHeader&gt;
+    {
+        [Resolved]
+        private PreviewTrackManager previewTrackManager { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        private IBindable&lt;APIUser&gt; apiUser;
+
+        private Container panelTarget;
+        private FillFlowContainer&lt;BeatmapCard&gt; foundContent;
+
+        private BeatmapListingFilterControl filterControl =&gt; Header.FilterControl;
+
+        public BeatmapListingOverlay()
+            : base(OverlayColourScheme.Blue)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Child = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Children = new Drawable[]
+                {
+                    new Container
+                    {
+                        AutoSizeAxes = Axes.Y,
+                        RelativeSizeAxes = Axes.X,
+                        Children = new Drawable[]
+                        {
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = ColourProvider.Background5,
+                            },
+                            panelTarget = new Container
+                            {
+                                AutoSizeAxes = Axes.Y,
+                                RelativeSizeAxes = Axes.X,
+                                Masking = true,
+                                Padding = new MarginPadding { Horizontal = 20 },
+                            }
+                        },
+                    },
+                }
+            };
+
+            filterControl.TypingStarted = onTypingStarted;
+            filterControl.SearchStarted = onSearchStarted;
+            filterControl.SearchFinished = onSearchFinished;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            filterControl.CardSize.BindValueChanged(_ =&gt; onCardSizeChanged());
+
+            apiUser = api.LocalUser.GetBoundCopy();
+            apiUser.BindValueChanged(_ =&gt; Schedule(() =&gt;
+            {
+                if (api.IsLoggedIn)
+                    replaceResultsAreaContent(Empty());
+            }));
+        }
+
+        public void ShowWithSearch(string query)
+        {
+            filterControl.Search(query);
+            Show();
+            ScrollFlow.ScrollToStart();
+        }
+
+        public void ShowWithGenreFilter(SearchGenre genre)
+        {
+            ShowWithSearch(string.Empty);
+            filterControl.FilterGenre(genre);
+        }
+
+        public void ShowWithLanguageFilter(SearchLanguage language)
+        {
+            ShowWithSearch(string.Empty);
+            filterControl.FilterLanguage(language);
+        }
+
+        protected override BeatmapListingHeader CreateHeader() =&gt; new BeatmapListingHeader();
+
+        protected override Color4 BackgroundColour =&gt; ColourProvider.Background6;
+
+        private void onTypingStarted()
+        {
+            // temporary until the textbox/header is updated to always stay on screen.
+            ScrollFlow.ScrollToStart();
+        }
+
+        protected override void OnFocus(FocusEvent e)
+        {
+            base.OnFocus(e);
+
+            filterControl.TakeFocus();
+        }
+
+        private CancellationTokenSource cancellationToken;
+
+        private Task panelLoadTask;
+
+        private void onSearchStarted()
+        {
+            cancellationToken?.Cancel();
+
+            previewTrackManager.StopAnyPlaying(this);
+
+            if (panelTarget.Any())
+                Loading.Show();
+        }
+
+        private void onSearchFinished(BeatmapListingFilterControl.SearchResult searchResult)
+        {
+            cancellationToken?.Cancel();
+
+            if (searchResult.Type == BeatmapListingFilterControl.SearchResultType.SupporterOnlyFilters)
+            {
+                var supporterOnly = new SupporterRequiredDrawable(searchResult.SupporterOnlyFiltersUsed);
+                replaceResultsAreaContent(supporterOnly);
+                return;
+            }
+
+            var newCards = createCardsFor(searchResult.Results);
+
+            if (filterControl.CurrentPage == 0)
+            {
+                //No matches case
+                if (!newCards.Any())
+                {
+                    replaceResultsAreaContent(new NotFoundDrawable());
+                    return;
+                }
+
+                var content = createCardContainerFor(newCards);
+
+                panelLoadTask = LoadComponentAsync(foundContent = content, replaceResultsAreaContent, (cancellationToken = new CancellationTokenSource()).Token);
+            }
+            else
+            {
+                // new results may contain beatmaps from a previous page,
+                // this is dodgy but matches web behaviour for now.
+                // see: https://github.com/ppy/osu-web/issues/9270
+                newCards = newCards.ExceptBy(foundContent.Select(c =&gt; c.BeatmapSet.OnlineID), c =&gt; c.BeatmapSet.OnlineID);
+
+                panelLoadTask = LoadComponentsAsync(newCards, loaded =&gt;
+                {
+                    lastFetchDisplayedTime = Time.Current;
+                    foundContent.AddRange(loaded);
+                    loaded.ForEach(p =&gt; p.FadeIn(200, Easing.OutQuint));
+                }, (cancellationToken = new CancellationTokenSource()).Token);
+            }
+        }
+
+        private IEnumerable&lt;BeatmapCard&gt; createCardsFor(IEnumerable&lt;APIBeatmapSet&gt; beatmapSets) =&gt; beatmapSets.Select(set =&gt; BeatmapCard.Create(set, filterControl.CardSize.Value).With(c =&gt;
+        {
+            c.Anchor = Anchor.TopCentre;
+            c.Origin = Anchor.TopCentre;
+        })).ToArray();
+
+        private static ReverseChildIDFillFlowContainer&lt;BeatmapCard&gt; createCardContainerFor(IEnumerable&lt;BeatmapCard&gt; newCards)
+        {
+            // spawn new children with the contained so we only clear old content at the last moment.
+            // reverse ID flow is required for correct Z-ordering of the cards&#39; expandable content (last card should be front-most).
+            var content = new ReverseChildIDFillFlowContainer&lt;BeatmapCard&gt;
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(10),
+                Alpha = 0,
+                Margin = new MarginPadding
+                {
+                    Top = 15,
+                    // the + 20 adjustment is roughly eyeballed in order to fit all of the expanded content height after it&#39;s scaled
+                    // as well as provide visual balance to the top margin.
+                    Bottom = ExpandedContentScrollContainer.HEIGHT + 20
+                },
+                ChildrenEnumerable = newCards
+            };
+            return content;
+        }
+
+        private void replaceResultsAreaContent(Drawable content)
+        {
+            Loading.Hide();
+            lastFetchDisplayedTime = Time.Current;
+
+            panelTarget.Child = content;
+
+            content.FadeInFromZero();
+        }
+
+        private void onCardSizeChanged()
+        {
+            if (foundContent?.IsAlive != true || !foundContent.Any())
+                return;
+
+            Loading.Show();
+
+            var newCards = createCardsFor(foundContent.Reverse().Select(card =&gt; card.BeatmapSet));
+
+            cancellationToken?.Cancel();
+
+            panelLoadTask = LoadComponentsAsync(newCards, cards =&gt;
+            {
+                foundContent.Clear();
+                foundContent.AddRange(cards);
+                Loading.Hide();
+            }, (cancellationToken = new CancellationTokenSource()).Token);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            cancellationToken?.Cancel();
+            base.Dispose(isDisposing);
+        }
+
+        public partial class NotFoundDrawable : CompositeDrawable
+        {
+            public NotFoundDrawable()
+            {
+                RelativeSizeAxes = Axes.X;
+                Height = 250;
+                Alpha = 0;
+                Margin = new MarginPadding { Top = 15 };
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(LargeTextureStore textures)
+            {
+                AddInternal(new FillFlowContainer
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Y,
+                    AutoSizeAxes = Axes.X,
+                    Direction = FillDirection.Horizontal,
+                    Spacing = new Vector2(10, 0),
+                    Children = new Drawable[]
+                    {
+                        new Sprite
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            RelativeSizeAxes = Axes.Both,
+                            FillMode = FillMode.Fit,
+                            Texture = textures.Get(@&quot;Online/not-found&quot;)
+                        },
+                        new OsuSpriteText
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Text = BeatmapsStrings.ListingSearchNotFoundQuote,
+                        }
+                    }
+                });
+            }
+        }
+
+        // TODO: localisation requires Text/LinkFlowContainer support for localising strings with links inside
+        // (https://github.com/ppy/osu-framework/issues/4530)
+        public partial class SupporterRequiredDrawable : CompositeDrawable
+        {
+            private LinkFlowContainer supporterRequiredText;
+
+            private readonly List&lt;LocalisableString&gt; filtersUsed;
+
+            public SupporterRequiredDrawable(List&lt;LocalisableString&gt; filtersUsed)
+            {
+                RelativeSizeAxes = Axes.X;
+                Height = 225;
+                Alpha = 0;
+
+                this.filtersUsed = filtersUsed;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(LargeTextureStore textures)
+            {
+                AddInternal(new FillFlowContainer
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Y,
+                    AutoSizeAxes = Axes.X,
+                    Direction = FillDirection.Horizontal,
+                    Children = new Drawable[]
+                    {
+                        new Sprite
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            RelativeSizeAxes = Axes.Both,
+                            FillMode = FillMode.Fit,
+                            Texture = textures.Get(@&quot;Online/supporter-required&quot;),
+                        },
+                        supporterRequiredText = new LinkFlowContainer
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            AutoSizeAxes = Axes.Both,
+                            Margin = new MarginPadding { Bottom = 10 },
+                        },
+                    }
+                });
+
+                supporterRequiredText.AddText(
+                    BeatmapsStrings.ListingSearchSupporterFilterQuoteDefault(string.Join(&quot; and &quot;, filtersUsed), &quot;&quot;).ToString(),
+                    t =&gt;
+                    {
+                        t.Font = OsuFont.GetFont(size: 16);
+                        t.Colour = Colour4.White;
+                    }
+                );
+
+                supporterRequiredText.AddLink(BeatmapsStrings.ListingSearchSupporterFilterQuoteLinkText.ToString(), @&quot;/store/products/supporter-tag&quot;);
+            }
+        }
+
+        private const double time_between_fetches = 500;
+
+        private double lastFetchDisplayedTime;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            const int pagination_scroll_distance = 500;
+
+            bool shouldShowMore = panelLoadTask?.IsCompleted != false
+                                  &amp;&amp; Time.Current - lastFetchDisplayedTime &gt; time_between_fetches
+                                  &amp;&amp; (ScrollFlow.ScrollableExtent &gt; 0 &amp;&amp; ScrollFlow.IsScrolledToEnd(pagination_scroll_distance));
+
+            if (shouldShowMore)
+                filterControl.FetchNextPage();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,59,37,63,0],[37,64,37,68,0],[40,36,40,40,0],[40,41,40,45,0],[47,62,47,82,0],[50,15,50,45,0],[51,9,51,10,0],[52,9,52,10,0],[56,9,56,10,0],[57,13,85,15,0],[87,13,87,59,0],[88,13,88,59,0],[89,13,89,61,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,33,0],[95,13,95,58,0],[95,58,95,77,0],[95,77,95,79,0],[97,13,97,52,0],[98,13,98,43,0],[98,43,99,13,0],[99,13,99,14,0],[99,14,100,17,0],[100,17,100,36,0],[100,36,101,21,0],[101,21,101,56,0],[101,56,102,13,0],[102,13,102,14,0],[102,14,102,15,0],[102,15,102,17,0],[103,9,103,10,0],[106,9,106,10,0],[107,13,107,41,0],[108,13,108,20,0],[109,13,109,40,0],[110,9,110,10,0],[113,9,113,10,0],[114,13,114,42,0],[115,13,115,46,0],[116,9,116,10,0],[119,9,119,10,0],[120,13,120,42,0],[121,13,121,52,0],[122,9,122,10,0],[124,67,124,93,0],[126,55,126,81,0],[129,9,129,10,0],[131,13,131,40,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,29,0],[138,13,138,39,0],[139,9,139,10,0],[146,9,146,10,0],[147,13,147,41,0],[149,13,149,54,0],[151,13,151,35,0],[152,17,152,32,0],[153,9,153,10,0],[156,9,156,10,0],[157,13,157,41,0],[159,13,159,104,0],[160,13,160,14,0],[161,17,161,106,0],[162,17,162,58,0],[163,17,163,24,0],[166,13,166,65,0],[168,13,168,48,0],[169,13,169,14,0],[171,17,171,37,0],[172,17,172,18,0],[173,21,173,71,0],[174,21,174,28,0],[177,17,177,64,0],[179,17,179,162,0],[180,13,180,14,0],[182,13,182,14,0],[186,17,186,71,0],[186,71,186,92,0],[186,92,186,100,0],[186,100,186,121,0],[186,121,186,123,0],[188,17,189,17,0],[189,17,189,18,0],[189,18,190,21,0],[190,21,190,59,0],[190,59,191,21,0],[191,21,191,51,0],[191,51,192,21,0],[192,21,192,41,0],[192,41,192,71,0],[192,71,192,73,0],[192,73,193,17,0],[193,17,193,18,0],[193,18,193,79,0],[194,13,194,14,0],[195,9,195,10,0],[197,100,197,126,0],[197,126,198,9,0],[198,9,198,10,0],[198,10,199,13,0],[199,13,199,41,0],[199,41,200,13,0],[200,13,200,41,0],[200,41,201,9,0],[201,9,201,10,0],[201,10,201,11,0],[201,11,201,22,0],[204,9,204,10,0],[207,13,221,15,0],[222,13,222,28,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,28,0],[228,13,228,51,0],[230,13,230,41,0],[232,13,232,38,0],[233,9,233,10,0],[236,9,236,10,0],[237,13,237,70,0],[238,17,238,24,0],[240,13,240,28,0],[242,13,242,81,0],[242,81,242,96,0],[242,96,242,99,0],[244,13,244,41,0],[246,13,247,13,0],[247,13,247,14,0],[247,14,248,17,0],[248,17,248,38,0],[248,38,249,17,0],[249,17,249,46,0],[249,46,250,17,0],[250,17,250,32,0],[250,32,251,13,0],[251,13,251,14,0],[251,14,251,75,0],[252,9,252,10,0],[255,9,255,10,0],[256,13,256,41,0],[257,13,257,39,0],[258,9,258,10,0],[262,13,262,38,0],[263,13,263,14,0],[264,17,264,43,0],[265,17,265,30,0],[266,17,266,27,0],[267,17,267,57,0],[268,13,268,14,0],[272,13,272,14,0],[273,17,298,20,0],[299,13,299,14,0],[310,13,310,82,0],[311,13,311,14,0],[312,17,312,43,0],[313,17,313,30,0],[314,17,314,27,0],[316,17,316,48,0],[317,13,317,14,0],[321,13,321,14,0],[322,17,347,20,0],[349,17,352,21,0],[352,21,352,22,0],[352,22,353,25,0],[353,25,353,60,0],[353,60,354,25,0],[354,25,354,50,0],[354,50,355,21,0],[355,21,355,22,0],[355,22,356,19,0],[358,17,358,151,0],[359,13,359,14,0],[367,9,367,10,0],[368,13,368,27,0],[372,13,374,130,0],[376,13,376,32,0],[377,17,377,47,0],[378,9,378,10,0]]);
+    </script>
+  </body>
+</html>

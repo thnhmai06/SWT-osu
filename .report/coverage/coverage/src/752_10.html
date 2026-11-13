@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/Beatmaps/CatchBeatmapProcessor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Catch.UI;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Utils;
+
+namespace osu.Game.Rulesets.Catch.Beatmaps
+{
+    public class CatchBeatmapProcessor : BeatmapProcessor
+    {
+        public const int RNG_SEED = 1337;
+
+        public bool HardRockOffsets { get; set; }
+
+        public CatchBeatmapProcessor(IBeatmap beatmap)
+            : base(beatmap)
+        {
+        }
+
+        public override void PreProcess()
+        {
+            IHasComboInformation? lastObj = null;
+
+            // For sanity, ensures that both the first hitobject and the first hitobject after a banana shower start a new combo.
+            // This is normally enforced by the legacy decoder, but is not enforced by the editor.
+            foreach (var obj in Beatmap.HitObjects.OfType&lt;IHasComboInformation&gt;())
+            {
+                if (obj is not BananaShower &amp;&amp; (lastObj == null || lastObj is BananaShower))
+                    obj.NewCombo = true;
+                lastObj = obj;
+            }
+
+            base.PreProcess();
+        }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+
+            ApplyPositionOffsets(Beatmap);
+
+            int index = 0;
+
+            foreach (var obj in Beatmap.HitObjects.OfType&lt;CatchHitObject&gt;())
+            {
+                obj.IndexInBeatmap = index;
+                foreach (var nested in obj.NestedHitObjects.OfType&lt;CatchHitObject&gt;())
+                    nested.IndexInBeatmap = index;
+
+                if (obj.LastInCombo &amp;&amp; obj.NestedHitObjects.LastOrDefault() is IHasComboInformation lastNested)
+                    lastNested.LastInCombo = true;
+
+                index++;
+            }
+        }
+
+        public void ApplyPositionOffsets(IBeatmap beatmap)
+        {
+            var rng = new LegacyRandom(RNG_SEED);
+
+            float? lastPosition = null;
+            double lastStartTime = 0;
+
+            foreach (var obj in beatmap.HitObjects.OfType&lt;CatchHitObject&gt;())
+            {
+                obj.XOffset = 0;
+
+                switch (obj)
+                {
+                    case Fruit fruit:
+                        if (HardRockOffsets)
+                            applyHardRockOffset(fruit, ref lastPosition, ref lastStartTime, rng);
+                        break;
+
+                    case BananaShower bananaShower:
+                        foreach (var banana in bananaShower.NestedHitObjects.OfType&lt;Banana&gt;())
+                        {
+                            banana.XOffset = (float)(rng.NextDouble() * CatchPlayfield.WIDTH);
+                            rng.Next(); // osu!stable retrieved a random banana type
+                            rng.Next(); // osu!stable retrieved a random banana rotation
+                            rng.Next(); // osu!stable retrieved a random banana colour
+                        }
+
+                        break;
+
+                    case JuiceStream juiceStream:
+                        // Todo: BUG!! Stable used the last control point as the final position of the path, but it should use the computed path instead.
+                        lastPosition = juiceStream.OriginalX + juiceStream.Path.ControlPoints[^1].Position.X;
+
+                        // Todo: BUG!! Stable attempted to use the end time of the stream, but referenced it too early in execution and used the start time instead.
+                        lastStartTime = juiceStream.StartTime;
+
+                        foreach (var nested in juiceStream.NestedHitObjects)
+                        {
+                            var catchObject = (CatchHitObject)nested;
+                            catchObject.XOffset = 0;
+
+                            if (catchObject is TinyDroplet)
+                                catchObject.XOffset = Math.Clamp(rng.Next(-20, 20), -catchObject.OriginalX, CatchPlayfield.WIDTH - catchObject.OriginalX);
+                            else if (catchObject is Droplet)
+                                rng.Next(); // osu!stable retrieved a random droplet rotation
+                        }
+
+                        break;
+                }
+            }
+
+            initialiseHyperDash(beatmap);
+        }
+
+        private static void applyHardRockOffset(CatchHitObject hitObject, ref float? lastPosition, ref double lastStartTime, LegacyRandom rng)
+        {
+            float offsetPosition = hitObject.OriginalX;
+            double startTime = hitObject.StartTime;
+
+            if (lastPosition == null ||
+                // some objects can get assigned position zero, making stable incorrectly go inside this if branch on the next object. to maintain behaviour and compatibility, do the same here.
+                // reference: https://github.com/peppy/osu-stable-reference/blob/3ea48705eb67172c430371dcfc8a16a002ed0d3d/osu!/GameplayElements/HitObjects/Fruits/HitFactoryFruits.cs#L45-L50
+                // todo: should be revisited and corrected later probably.
+                lastPosition == 0)
+            {
+                lastPosition = offsetPosition;
+                lastStartTime = startTime;
+
+                return;
+            }
+
+            float positionDiff = offsetPosition - lastPosition.Value;
+
+            // Todo: BUG!! Stable calculated time deltas as ints, which affects randomisation. This should be changed to a double.
+            int timeDiff = (int)(startTime - lastStartTime);
+
+            if (timeDiff &gt; 1000)
+            {
+                lastPosition = offsetPosition;
+                lastStartTime = startTime;
+                return;
+            }
+
+            if (positionDiff == 0)
+            {
+                applyRandomOffset(ref offsetPosition, timeDiff / 4d, rng);
+                hitObject.XOffset = offsetPosition - hitObject.OriginalX;
+                return;
+            }
+
+            // ReSharper disable once PossibleLossOfFraction
+            if (Math.Abs(positionDiff) &lt; timeDiff / 3)
+                applyOffset(ref offsetPosition, positionDiff);
+
+            hitObject.XOffset = offsetPosition - hitObject.OriginalX;
+
+            lastPosition = offsetPosition;
+            lastStartTime = startTime;
+        }
+
+        /// &lt;summary&gt;
+        /// Applies a random offset in a random direction to a position, ensuring that the final position remains within the boundary of the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position which the offset should be applied to.&lt;/param&gt;
+        /// &lt;param name=&quot;maxOffset&quot;&gt;The maximum offset, cannot exceed 20px.&lt;/param&gt;
+        /// &lt;param name=&quot;rng&quot;&gt;The random number generator.&lt;/param&gt;
+        private static void applyRandomOffset(ref float position, double maxOffset, LegacyRandom rng)
+        {
+            bool right = rng.NextBool();
+            float rand = Math.Min(20, (float)rng.Next(0, Math.Max(0, maxOffset)));
+
+            if (right)
+            {
+                // Clamp to the right bound
+                if (position + rand &lt;= CatchPlayfield.WIDTH)
+                    position += rand;
+                else
+                    position -= rand;
+            }
+            else
+            {
+                // Clamp to the left bound
+                if (position - rand &gt;= 0)
+                    position -= rand;
+                else
+                    position += rand;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Applies an offset to a position, ensuring that the final position remains within the boundary of the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The position which the offset should be applied to.&lt;/param&gt;
+        /// &lt;param name=&quot;amount&quot;&gt;The amount to offset by.&lt;/param&gt;
+        private static void applyOffset(ref float position, float amount)
+        {
+            if (amount &gt; 0)
+            {
+                // Clamp to the right bound
+                if (position + amount &lt; CatchPlayfield.WIDTH)
+                    position += amount;
+            }
+            else
+            {
+                // Clamp to the left bound
+                if (position + amount &gt; 0)
+                    position += amount;
+            }
+        }
+
+        private static void initialiseHyperDash(IBeatmap beatmap)
+        {
+            var palpableObjects = CatchBeatmap.GetPalpableObjects(beatmap.HitObjects)
+                                              .Where(h =&gt; h is Fruit || (h is Droplet &amp;&amp; h is not TinyDroplet))
+                                              .ToArray();
+
+            double halfCatcherWidth = Catcher.CalculateCatchWidth(beatmap.Difficulty) / 2;
+
+            // Todo: This is wrong. osu!stable calculated hyperdashes using the full catcher size, excluding the margins.
+            // This should theoretically cause impossible scenarios, but practically, likely due to the size of the playfield, it doesn&#39;t seem possible.
+            // For now, to bring gameplay (and diffcalc!) completely in-line with stable, this code also uses the full catcher size.
+            halfCatcherWidth /= Catcher.ALLOWED_CATCH_RANGE;
+
+            int lastDirection = 0;
+            double lastExcess = halfCatcherWidth;
+
+            for (int i = 0; i &lt; palpableObjects.Length - 1; i++)
+            {
+                var currentObject = palpableObjects[i];
+                var nextObject = palpableObjects[i + 1];
+
+                // Reset variables in-case values have changed (e.g. after applying HR)
+                currentObject.HyperDashTarget = null;
+                currentObject.DistanceToHyperDash = 0;
+
+                int thisDirection = nextObject.EffectiveX &gt; currentObject.EffectiveX ? 1 : -1;
+
+                // Int truncation added to match osu!stable.
+                double timeToNext = (int)nextObject.StartTime - (int)currentObject.StartTime - 1000f / 60f / 4; // 1/4th of a frame of grace time, taken from osu-stable
+                double distanceToNext = Math.Abs(nextObject.EffectiveX - currentObject.EffectiveX) - (lastDirection == thisDirection ? lastExcess : halfCatcherWidth);
+                float distanceToHyper = (float)(timeToNext * Catcher.BASE_DASH_SPEED - distanceToNext);
+
+                if (distanceToHyper &lt; 0)
+                {
+                    currentObject.HyperDashTarget = nextObject;
+                    lastExcess = halfCatcherWidth;
+                }
+                else
+                {
+                    currentObject.DistanceToHyperDash = distanceToHyper;
+                    lastExcess = Math.Clamp(distanceToHyper, 0, halfCatcherWidth);
+                }
+
+                lastDirection = thisDirection;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[18,39,18,43,1],[18,44,18,48,1],[21,15,21,28,1],[22,9,22,10,1],[23,9,23,10,1],[26,9,26,10,1],[27,13,27,50,1],[31,13,31,20,1],[31,22,31,29,1],[31,30,31,32,1],[31,33,31,82,1],[32,13,32,14,1],[33,17,33,93,1],[34,21,34,41,1],[35,17,35,31,1],[36,13,36,14,1],[38,13,38,31,1],[39,9,39,10,1],[42,9,42,10,1],[43,13,43,32,1],[45,13,45,43,1],[47,13,47,27,1],[49,13,49,20,1],[49,22,49,29,1],[49,30,49,32,1],[49,33,49,76,1],[50,13,50,14,1],[51,17,51,44,1],[52,17,52,24,1],[52,26,52,36,1],[52,37,52,39,1],[52,40,52,85,1],[53,21,53,51,1],[55,17,55,112,1],[56,21,56,51,1],[58,17,58,25,1],[59,13,59,14,1],[60,9,60,10,1],[63,9,63,10,1],[64,13,64,50,1],[66,13,66,40,1],[67,13,67,38,1],[69,13,69,20,1],[69,22,69,29,1],[69,30,69,32,1],[69,33,69,76,1],[70,13,70,14,1],[71,17,71,33,1],[73,17,73,29,1],[76,25,76,45,1],[77,29,77,98,1],[78,25,78,31,1],[81,25,81,32,1],[81,34,81,44,1],[81,45,81,47,1],[81,48,81,94,1],[82,25,82,26,1],[83,29,83,95,1],[84,29,84,40,1],[85,29,85,40,1],[86,29,86,40,1],[87,25,87,26,1],[89,25,89,31,1],[93,25,93,110,1],[96,25,96,63,1],[98,25,98,32,1],[98,34,98,44,1],[98,45,98,47,1],[98,48,98,76,1],[99,25,99,26,1],[100,29,100,70,1],[101,29,101,53,1],[103,29,103,60,1],[104,33,104,155,1],[105,34,105,61,1],[106,33,106,44,0],[107,25,107,26,1],[109,25,109,31,1],[111,13,111,14,1],[113,13,113,42,1],[114,9,114,10,1],[117,9,117,10,1],[118,13,118,56,1],[119,13,119,52,1],[121,13,125,35,1],[126,13,126,14,1],[127,17,127,47,1],[128,17,128,43,1],[130,17,130,24,1],[133,13,133,70,1],[136,13,136,61,1],[138,13,138,33,1],[139,13,139,14,1],[140,17,140,47,1],[141,17,141,43,1],[142,17,142,24,1],[145,13,145,35,1],[146,13,146,14,1],[147,17,147,75,1],[148,17,148,74,1],[149,17,149,24,1],[153,13,153,55,1],[154,17,154,63,1],[156,13,156,70,1],[158,13,158,43,1],[159,13,159,39,1],[160,9,160,10,1],[169,9,169,10,1],[170,13,170,41,1],[171,13,171,83,1],[173,13,173,23,1],[174,13,174,14,0],[176,17,176,61,0],[177,21,177,38,0],[179,21,179,38,0],[180,13,180,14,0],[182,13,182,14,1],[184,17,184,42,1],[185,21,185,38,1],[187,21,187,38,1],[188,13,188,14,1],[189,9,189,10,1],[197,9,197,10,1],[198,13,198,28,1],[199,13,199,14,1],[201,17,201,62,1],[202,21,202,40,1],[203,13,203,14,1],[205,13,205,14,1],[207,17,207,43,1],[208,21,208,40,1],[209,13,209,14,1],[210,9,210,10,1],[213,9,213,10,1],[214,13,215,59,1],[215,59,215,111,1],[215,111,216,58,1],[218,13,218,91,1],[223,13,223,61,1],[225,13,225,35,1],[226,13,226,50,1],[228,18,228,27,1],[228,29,228,59,1],[228,61,228,64,1],[229,13,229,14,1],[230,17,230,56,1],[231,17,231,57,1],[234,17,234,54,1],[235,17,235,55,1],[237,17,237,95,1],[240,17,240,112,1],[241,17,241,167,1],[242,17,242,104,1],[244,17,244,41,1],[245,17,245,18,1],[246,21,246,64,1],[247,21,247,51,1],[248,17,248,18,1],[250,17,250,18,1],[251,21,251,73,1],[252,21,252,83,1],[253,17,253,18,1],[255,17,255,47,1],[256,13,256,14,1],[257,9,257,10,1]]);
+    </script>
+  </body>
+</html>

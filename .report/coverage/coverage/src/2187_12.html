@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/Timeline/ZoomableScrollContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Transforms;
+using osu.Framework.Input.Events;
+using osu.Framework.Layout;
+using osu.Framework.Timing;
+using osu.Framework.Utils;
+using osu.Game.Graphics.Containers;
+using osuTK;
+
+namespace osu.Game.Screens.Edit.Compose.Components.Timeline
+{
+    public partial class ZoomableScrollContainer : OsuScrollContainer
+    {
+        /// &lt;summary&gt;
+        /// The time to zoom into/out of a point.
+        /// All user scroll input will be overwritten during the zoom transform.
+        /// &lt;/summary&gt;
+        public double ZoomDuration;
+
+        /// &lt;summary&gt;
+        /// The easing with which to transform the zoom.
+        /// &lt;/summary&gt;
+        public Easing ZoomEasing;
+
+        private readonly Container zoomedContent;
+        protected override Container&lt;Drawable&gt; Content =&gt; zoomedContent;
+
+        /// &lt;summary&gt;
+        /// The current (final) zoom level of &lt;see cref=&quot;ZoomableScrollContainer&quot;/&gt;.
+        /// It may differ from &lt;see cref=&quot;Zoom&quot;/&gt; during transitions.
+        /// &lt;/summary&gt;
+        public BindableFloat CurrentZoom { get; private set; } = new BindableFloat(1);
+
+        private bool isZoomSetUp;
+
+        [Resolved]
+        private IFrameBasedClock? editorClock { get; set; }
+
+        private readonly LayoutValue zoomedContentWidthCache = new LayoutValue(Invalidation.DrawSize);
+
+        private float minZoom;
+        private float maxZoom;
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;ZoomableScrollContainer&quot;/&gt; with no zoom range.
+        /// Functionality will be disabled until zoom is set up via &lt;see cref=&quot;SetupZoom&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected ZoomableScrollContainer()
+            : base(Direction.Horizontal)
+        {
+            base.Content.Add(zoomedContent = new Container
+            {
+                RelativeSizeAxes = Axes.Y,
+                // We must hide content until SetupZoom is called.
+                // If not, a child component that relies on its DrawWidth (via RelativeSizeAxes) may see a very incorrect value
+                // momentarily, as noticed in the TimelineTickDisplay, which would render thousands of ticks incorrectly.
+                Alpha = 0,
+            });
+
+            AddLayout(zoomedContentWidthCache);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;ZoomableScrollContainer&quot;/&gt; with a defined zoom range.
+        /// &lt;/summary&gt;
+        public ZoomableScrollContainer(float minimum, float maximum, float initial)
+            : this()
+        {
+            SetupZoom(initial, minimum, maximum);
+        }
+
+        /// &lt;summary&gt;
+        /// Sets up the minimum and maximum range of this zoomable scroll container, along with the initial zoom value.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;initial&quot;&gt;The initial zoom value, applied immediately.&lt;/param&gt;
+        /// &lt;param name=&quot;minimum&quot;&gt;The minimum zoom value.&lt;/param&gt;
+        /// &lt;param name=&quot;maximum&quot;&gt;The maximum zoom value.&lt;/param&gt;
+        protected void SetupZoom(float initial, float minimum, float maximum)
+        {
+            if (minimum &lt; 1)
+                throw new ArgumentException($&quot;{nameof(minimum)} ({minimum}) must be &gt;= 1.&quot;, nameof(maximum));
+
+            if (maximum &lt; 1)
+                throw new ArgumentException($&quot;{nameof(maximum)} ({maximum}) must be &gt;= 1.&quot;, nameof(maximum));
+
+            if (minimum &gt; maximum)
+                throw new ArgumentException($&quot;{nameof(minimum)} ({minimum}) must be less than {nameof(maximum)} ({maximum})&quot;);
+
+            if (initial &lt; minimum || initial &gt; maximum)
+                throw new ArgumentException($&quot;{nameof(initial)} ({initial}) must be between {nameof(minimum)} ({minimum}) and {nameof(maximum)} ({maximum})&quot;);
+
+            minZoom = minimum;
+            maxZoom = maximum;
+
+            CurrentZoom.Value = zoomTarget = initial;
+            zoomedContentWidthCache.Invalidate();
+
+            isZoomSetUp = true;
+            zoomedContent.Show();
+        }
+
+        /// &lt;summary&gt;
+        /// Gets or sets the content zoom level of this &lt;see cref=&quot;ZoomableScrollContainer&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public float Zoom
+        {
+            get =&gt; zoomTarget;
+            set =&gt; updateZoom(value);
+        }
+
+        private void updateZoom(float value)
+        {
+            if (!isZoomSetUp)
+                return;
+
+            float newZoom = Math.Clamp(value, minZoom, maxZoom);
+
+            if (IsLoaded)
+                setZoomTarget(newZoom, ToSpaceOfOtherDrawable(new Vector2(DrawWidth / 2, 0), zoomedContent).X);
+            else
+                CurrentZoom.Value = zoomTarget = newZoom;
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (!zoomedContentWidthCache.IsValid)
+                updateZoomedContentWidth();
+        }
+
+        protected override bool OnScroll(ScrollEvent e)
+        {
+            if (e.AltPressed)
+            {
+                // zoom when holding alt.
+                AdjustZoomRelatively(e.ScrollDelta.Y);
+                return true;
+            }
+
+            // can&#39;t handle scroll correctly while playing.
+            // the editor will handle this case for us.
+            if (editorClock?.IsRunning == true)
+                return false;
+
+            return base.OnScroll(e);
+        }
+
+        private void updateZoomedContentWidth()
+        {
+            zoomedContent.Width = DrawWidth * CurrentZoom.Value;
+            zoomedContentWidthCache.Validate();
+        }
+
+        public void AdjustZoomRelatively(float change, float? focusPoint = null)
+        {
+            if (!isZoomSetUp)
+                return;
+
+            const float zoom_change_sensitivity = 0.02f;
+
+            setZoomTarget(zoomTarget + change * (maxZoom - minZoom) * zoom_change_sensitivity, focusPoint);
+        }
+
+        private float zoomTarget = 1;
+
+        private void setZoomTarget(float newZoom, float? focusPoint = null)
+        {
+            zoomTarget = Math.Clamp(newZoom, minZoom, maxZoom);
+            focusPoint ??= zoomedContent.ToLocalSpace(ToScreenSpace(new Vector2(DrawWidth / 2, 0))).X;
+
+            transformZoomTo(zoomTarget, focusPoint.Value, ZoomDuration, ZoomEasing);
+
+            OnZoomChanged();
+        }
+
+        private void transformZoomTo(float newZoom, float focusPoint, double duration = 0, Easing easing = Easing.None)
+            =&gt; this.TransformTo(this.PopulateTransform(new TransformZoom(focusPoint, zoomedContent.DrawWidth, (float)Current), newZoom, duration, easing));
+
+        /// &lt;summary&gt;
+        /// Invoked when &lt;see cref=&quot;Zoom&quot;/&gt; has changed.
+        /// &lt;/summary&gt;
+        protected virtual void OnZoomChanged()
+        {
+        }
+
+        private class TransformZoom : Transform&lt;float, ZoomableScrollContainer&gt;
+        {
+            /// &lt;summary&gt;
+            /// The focus point in absolute coordinates local to the content.
+            /// &lt;/summary&gt;
+            private readonly float focusPoint;
+
+            /// &lt;summary&gt;
+            /// The size of the content.
+            /// &lt;/summary&gt;
+            private readonly float contentSize;
+
+            /// &lt;summary&gt;
+            /// The scroll offset at the start of the transform.
+            /// &lt;/summary&gt;
+            private readonly float scrollOffset;
+
+            /// &lt;summary&gt;
+            /// Transforms &lt;see cref=&quot;ZoomableScrollContainer.CurrentZoom&quot;/&gt; to a new value.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;focusPoint&quot;&gt;The focus point in absolute coordinates local to the content.&lt;/param&gt;
+            /// &lt;param name=&quot;contentSize&quot;&gt;The size of the content.&lt;/param&gt;
+            /// &lt;param name=&quot;scrollOffset&quot;&gt;The scroll offset at the start of the transform.&lt;/param&gt;
+            public TransformZoom(float focusPoint, float contentSize, float scrollOffset)
+            {
+                this.focusPoint = focusPoint;
+                this.contentSize = contentSize;
+                this.scrollOffset = scrollOffset;
+            }
+
+            public override string TargetMember =&gt; nameof(CurrentZoom);
+
+            private float valueAt(double time)
+            {
+                if (time &lt; StartTime) return StartValue;
+                if (time &gt;= EndTime) return EndValue;
+
+                return Interpolation.ValueAt(time, StartValue, EndValue, StartTime, EndTime, Easing);
+            }
+
+            protected override void Apply(ZoomableScrollContainer d, double time)
+            {
+                float newZoom = valueAt(time);
+
+                float focusOffset = focusPoint - scrollOffset;
+                float expectedWidth = d.DrawWidth * newZoom;
+                float targetOffset = expectedWidth * (focusPoint / contentSize) - focusOffset;
+
+                d.CurrentZoom.Value = newZoom;
+                d.updateZoomedContentWidth();
+
+                // Temporarily here to make sure ScrollTo gets the correct DrawSize for scrollable area.
+                // TODO: Make sure draw size gets invalidated properly on the framework side, and remove this once it is.
+                d.Invalidate(Invalidation.DrawSize);
+                d.ScrollTo(targetOffset, false);
+            }
+
+            protected override void ReadIntoStartValue(ZoomableScrollContainer d) =&gt; StartValue = d.CurrentZoom.Value;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,59,33,72,0],[39,44,39,48,0],[39,49,39,61,0],[39,66,39,86,0],[44,49,44,53,0],[44,54,44,58,0],[46,9,46,103,0],[56,15,56,41,0],[57,9,57,10,0],[58,13,65,16,0],[67,13,67,48,0],[68,9,68,10,0],[74,15,74,21,0],[75,9,75,10,0],[76,13,76,50,0],[77,9,77,10,0],[86,9,86,10,0],[87,13,87,29,0],[88,17,88,110,0],[90,13,90,29,0],[91,17,91,110,0],[93,13,93,35,0],[94,17,94,127,0],[96,13,96,56,0],[97,17,97,159,0],[99,13,99,31,0],[100,13,100,31,0],[102,13,102,54,0],[103,13,103,50,0],[105,13,105,32,0],[106,13,106,34,0],[107,9,107,10,0],[114,20,114,30,0],[115,20,115,37,0],[119,9,119,10,0],[120,13,120,30,0],[121,17,121,24,0],[123,13,123,65,0],[125,13,125,26,0],[126,17,126,112,0],[128,17,128,58,0],[129,9,129,10,0],[132,9,132,10,0],[133,13,133,40,0],[135,13,135,50,0],[136,17,136,44,0],[137,9,137,10,0],[140,9,140,10,0],[141,13,141,30,0],[142,13,142,14,0],[144,17,144,55,0],[145,17,145,29,0],[150,13,150,48,0],[151,17,151,30,0],[153,13,153,37,0],[154,9,154,10,0],[157,9,157,10,0],[158,13,158,65,0],[159,13,159,48,0],[160,9,160,10,0],[163,9,163,10,0],[164,13,164,30,0],[165,17,165,24,0],[169,13,169,108,0],[170,9,170,10,0],[172,9,172,38,0],[175,9,175,10,0],[176,13,176,64,0],[177,13,177,103,0],[179,13,179,85,0],[181,13,181,29,0],[182,9,182,10,0],[185,16,185,155,0],[191,9,191,10,0],[192,9,192,10,0],[217,13,217,90,0],[218,13,218,14,0],[219,17,219,46,0],[220,17,220,48,0],[221,17,221,50,0],[222,13,222,14,0],[224,52,224,71,0],[227,13,227,14,0],[228,17,228,38,0],[228,39,228,57,0],[229,17,229,37,0],[229,38,229,54,0],[231,17,231,102,0],[232,13,232,14,0],[235,13,235,14,0],[236,17,236,47,0],[238,17,238,63,0],[239,17,239,61,0],[240,17,240,95,0],[242,17,242,47,0],[243,17,243,46,0],[247,17,247,53,0],[248,17,248,49,0],[249,13,249,14,0],[251,86,251,118,0]]);
+    </script>
+  </body>
+</html>

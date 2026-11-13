@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Utils/ModUtils.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Rooms;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+
+namespace osu.Game.Utils
+{
+    /// &lt;summary&gt;
+    /// A set of utilities to handle &lt;see cref=&quot;Mod&quot;/&gt; combinations.
+    /// &lt;/summary&gt;
+    public static class ModUtils
+    {
+        /// &lt;summary&gt;
+        /// Checks that all &lt;see cref=&quot;Mod&quot;/&gt;s are compatible with each-other, and that all appear within a set of allowed types.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The allowed types must contain exact &lt;see cref=&quot;Mod&quot;/&gt; types for the respective &lt;see cref=&quot;Mod&quot;/&gt;s to be allowed.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;combination&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to check.&lt;/param&gt;
+        /// &lt;param name=&quot;allowedTypes&quot;&gt;The set of allowed &lt;see cref=&quot;Mod&quot;/&gt; types.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;see cref=&quot;Mod&quot;/&gt;s are compatible with each-other and appear in the set of allowed types.&lt;/returns&gt;
+        public static bool CheckCompatibleSetAndAllowed(IEnumerable&lt;Mod&gt; combination, IEnumerable&lt;Type&gt; allowedTypes)
+        {
+            // Prevent multiple-enumeration.
+            var combinationList = combination as ICollection&lt;Mod&gt; ?? combination.ToArray();
+            return CheckCompatibleSet(combinationList, out _) &amp;&amp; CheckAllowed(combinationList, allowedTypes);
+        }
+
+        /// &lt;summary&gt;
+        /// Checks that all &lt;see cref=&quot;Mod&quot;/&gt;s in a combination are compatible with each-other.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;combination&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; combination to check.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;see cref=&quot;Mod&quot;/&gt;s in the combination are compatible with each-other.&lt;/returns&gt;
+        public static bool CheckCompatibleSet(IEnumerable&lt;Mod&gt; combination)
+            =&gt; CheckCompatibleSet(combination, out _);
+
+        /// &lt;summary&gt;
+        /// Checks that all &lt;see cref=&quot;Mod&quot;/&gt;s in a combination are compatible with each-other.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;combination&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; combination to check.&lt;/param&gt;
+        /// &lt;param name=&quot;invalidMods&quot;&gt;Any invalid mods in the set.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;see cref=&quot;Mod&quot;/&gt;s in the combination are compatible with each-other.&lt;/returns&gt;
+        public static bool CheckCompatibleSet(IEnumerable&lt;Mod&gt; combination, [NotNullWhen(false)] out List&lt;Mod&gt;? invalidMods)
+        {
+            var mods = FlattenMods(combination).ToArray();
+            invalidMods = null;
+
+            // ensure there are no duplicate mod definitions.
+            for (int i = 0; i &lt; mods.Length; i++)
+            {
+                var candidate = mods[i];
+
+                for (int j = i + 1; j &lt; mods.Length; j++)
+                {
+                    var m = mods[j];
+
+                    if (candidate.GetType() == m.GetType())
+                    {
+                        invalidMods ??= new List&lt;Mod&gt;();
+                        invalidMods.Add(m);
+                    }
+                }
+            }
+
+            foreach (var mod in mods)
+            {
+                foreach (var type in mod.IncompatibleMods)
+                {
+                    foreach (var invalid in mods.Where(m =&gt; type.IsInstanceOfType(m)))
+                    {
+                        if (invalid == mod)
+                            continue;
+
+                        invalidMods ??= new List&lt;Mod&gt;();
+                        invalidMods.Add(invalid);
+                    }
+                }
+            }
+
+            return invalidMods == null;
+        }
+
+        /// &lt;summary&gt;
+        /// Checks that all &lt;see cref=&quot;Mod&quot;/&gt;s in a combination appear within a set of allowed types.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The set of allowed types must contain exact &lt;see cref=&quot;Mod&quot;/&gt; types for the respective &lt;see cref=&quot;Mod&quot;/&gt;s to be allowed.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;combination&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; combination to check.&lt;/param&gt;
+        /// &lt;param name=&quot;allowedTypes&quot;&gt;The set of allowed &lt;see cref=&quot;Mod&quot;/&gt; types.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;see cref=&quot;Mod&quot;/&gt;s in the combination are allowed.&lt;/returns&gt;
+        public static bool CheckAllowed(IEnumerable&lt;Mod&gt; combination, IEnumerable&lt;Type&gt; allowedTypes)
+        {
+            var allowedSet = new HashSet&lt;Type&gt;(allowedTypes);
+
+            return combination.SelectMany(FlattenMod)
+                              .All(m =&gt; allowedSet.Contains(m.GetType()));
+        }
+
+        /// &lt;summary&gt;
+        /// Checks that all &lt;see cref=&quot;Mod&quot;/&gt;s in a combination are valid for a local gameplay session.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods to check.&lt;/param&gt;
+        /// &lt;param name=&quot;invalidMods&quot;&gt;Invalid mods, if any were found. Will be null if all mods were valid.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the input mods were all valid. If false, &lt;paramref name=&quot;invalidMods&quot;/&gt; will contain all invalid entries.&lt;/returns&gt;
+        public static bool CheckValidForGameplay(IEnumerable&lt;Mod&gt; mods, [NotNullWhen(false)] out List&lt;Mod&gt;? invalidMods)
+        {
+            mods = mods.ToArray();
+
+            // checking compatibility of multi mods would try to flatten them and return incompatible mods.
+            // in gameplay context, we never want MultiMod selected in the first place, therefore check against it first.
+            if (!checkValid(mods, m =&gt; !(m is MultiMod), out invalidMods))
+                return false;
+
+            if (!CheckCompatibleSet(mods, out invalidMods))
+                return false;
+
+            return checkValid(mods, m =&gt; m.HasImplementation, out invalidMods);
+        }
+
+        /// &lt;summary&gt;
+        /// Checks whether the given combination of mods may be set as the &lt;see cref=&quot;MultiplayerPlaylistItem.RequiredMods&quot;&gt;required mods&lt;/see&gt; of a multiplayer playlist item.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods to check.&lt;/param&gt;
+        /// &lt;param name=&quot;freestyle&quot;&gt;Whether freestyle is enabled for the playlist item.&lt;/param&gt;
+        /// &lt;param name=&quot;invalidMods&quot;&gt;Invalid mods, if any were found. Will be null if all mods were valid.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the input mods were all valid. If false, &lt;paramref name=&quot;invalidMods&quot;/&gt; will contain all invalid entries.&lt;/returns&gt;
+        public static bool CheckValidRequiredModsForMultiplayer(IEnumerable&lt;Mod&gt; mods, bool freestyle, [NotNullWhen(false)] out List&lt;Mod&gt;? invalidMods)
+        {
+            mods = mods.ToArray();
+
+            // checking compatibility of multi mods would try to flatten them and return incompatible mods.
+            // in gameplay context, we never want MultiMod selected in the first place, therefore check against it first.
+            if (!checkValid(mods, m =&gt; !(m is MultiMod), out invalidMods))
+                return false;
+
+            if (!CheckCompatibleSet(mods, out invalidMods))
+                return false;
+
+            return checkValid(mods, m =&gt; IsValidModForMatch(m, true, MatchType.HeadToHead, freestyle), out invalidMods);
+        }
+
+        /// &lt;summary&gt;
+        /// Checks whether the given mods are valid to appear as &lt;see cref=&quot;MultiplayerPlaylistItem.AllowedMods&quot;&gt;allowed mods&lt;/see&gt; in a multiplayer playlist item.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Note that this does not check compatibility between mods,
+        /// given that the passed mods are expected to be the ones to be allowed for the multiplayer match,
+        /// not to be confused with the list of mods the user currently has selected for the multiplayer match.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods to check.&lt;/param&gt;
+        /// &lt;param name=&quot;freestyle&quot;&gt;Whether freestyle is enabled for the playlist item.&lt;/param&gt;
+        /// &lt;param name=&quot;invalidMods&quot;&gt;Invalid mods, if any were found. Will be null if all mods were valid.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the input mods were all valid. If false, &lt;paramref name=&quot;invalidMods&quot;/&gt; will contain all invalid entries.&lt;/returns&gt;
+        public static bool CheckValidAllowedModsForMultiplayer(IEnumerable&lt;Mod&gt; mods, bool freestyle, [NotNullWhen(false)] out List&lt;Mod&gt;? invalidMods)
+            =&gt; checkValid(mods, m =&gt; IsValidModForMatch(m, false, MatchType.HeadToHead, freestyle), out invalidMods);
+
+        private static bool checkValid(IEnumerable&lt;Mod&gt; mods, Predicate&lt;Mod&gt; valid, [NotNullWhen(false)] out List&lt;Mod&gt;? invalidMods)
+        {
+            mods = mods.ToArray();
+            invalidMods = null;
+
+            foreach (var mod in mods)
+            {
+                if (!valid(mod))
+                {
+                    invalidMods ??= new List&lt;Mod&gt;();
+                    invalidMods.Add(mod);
+                }
+            }
+
+            return invalidMods == null;
+        }
+
+        /// &lt;summary&gt;
+        /// Flattens a set of &lt;see cref=&quot;Mod&quot;/&gt;s, returning a new set with all &lt;see cref=&quot;MultiMod&quot;/&gt;s removed.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The set of &lt;see cref=&quot;Mod&quot;/&gt;s to flatten.&lt;/param&gt;
+        /// &lt;returns&gt;The new set, containing all &lt;see cref=&quot;Mod&quot;/&gt;s in &lt;paramref name=&quot;mods&quot;/&gt; recursively with all &lt;see cref=&quot;MultiMod&quot;/&gt;s removed.&lt;/returns&gt;
+        public static IEnumerable&lt;Mod&gt; FlattenMods(IEnumerable&lt;Mod&gt; mods) =&gt; mods.SelectMany(FlattenMod);
+
+        /// &lt;summary&gt;
+        /// Flattens a &lt;see cref=&quot;Mod&quot;/&gt;, returning a set of &lt;see cref=&quot;Mod&quot;/&gt;s in-place of any &lt;see cref=&quot;MultiMod&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mod&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt; to flatten.&lt;/param&gt;
+        /// &lt;returns&gt;A set of singular &quot;flattened&quot; &lt;see cref=&quot;Mod&quot;/&gt;s&lt;/returns&gt;
+        public static IEnumerable&lt;Mod&gt; FlattenMod(Mod mod)
+        {
+            if (mod is MultiMod multi)
+            {
+                foreach (var m in multi.Mods.SelectMany(FlattenMod))
+                    yield return m;
+            }
+            else
+                yield return mod;
+        }
+
+        /// &lt;summary&gt;
+        /// Verifies all proposed mods are valid for a given ruleset and returns instantiated &lt;see cref=&quot;Mod&quot;/&gt;s for further processing.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset to verify mods against.&lt;/param&gt;
+        /// &lt;param name=&quot;proposedMods&quot;&gt;The proposed mods.&lt;/param&gt;
+        /// &lt;param name=&quot;valid&quot;&gt;Mods instantiated from &lt;paramref name=&quot;proposedMods&quot;/&gt; which were valid for the given &lt;paramref name=&quot;ruleset&quot;/&gt;.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;paramref name=&quot;proposedMods&quot;/&gt; were valid for the given &lt;paramref name=&quot;ruleset&quot;/&gt;.&lt;/returns&gt;
+        public static bool InstantiateValidModsForRuleset(Ruleset ruleset, IEnumerable&lt;APIMod&gt; proposedMods, out List&lt;Mod&gt; valid)
+        {
+            valid = new List&lt;Mod&gt;();
+            bool proposedWereValid = true;
+
+            foreach (var apiMod in proposedMods)
+            {
+                var mod = apiMod.ToMod(ruleset);
+
+                if (mod is UnknownMod)
+                {
+                    proposedWereValid = false;
+                    continue;
+                }
+
+                valid.Add(mod);
+            }
+
+            return proposedWereValid;
+        }
+
+        /// &lt;summary&gt;
+        /// Verifies all mods provided belong to the given ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset to check the proposed mods against.&lt;/param&gt;
+        /// &lt;param name=&quot;proposedMods&quot;&gt;The mods proposed for checking.&lt;/param&gt;
+        /// &lt;returns&gt;Whether all &lt;paramref name=&quot;proposedMods&quot;/&gt; belong to the given &lt;paramref name=&quot;ruleset&quot;/&gt;.&lt;/returns&gt;
+        public static bool CheckModsBelongToRuleset(Ruleset ruleset, IEnumerable&lt;Mod&gt; proposedMods)
+        {
+            var rulesetModsTypes = ruleset.AllMods.Select(m =&gt; m.GetType()).ToList();
+
+            foreach (var proposedMod in proposedMods)
+            {
+                bool found = false;
+
+                var proposedModType = proposedMod.GetType();
+
+                foreach (var rulesetModType in rulesetModsTypes)
+                {
+                    if (rulesetModType.IsAssignableFrom(proposedModType))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Given a value of a score multiplier, returns a string version with special handling for a value near 1.00x.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scoreMultiplier&quot;&gt;The value of the score multiplier.&lt;/param&gt;
+        /// &lt;returns&gt;A formatted score multiplier with a trailing &quot;x&quot; symbol&lt;/returns&gt;
+        public static LocalisableString FormatScoreMultiplier(double scoreMultiplier)
+        {
+            // Round multiplier values away from 1.00x to two significant digits.
+            if (scoreMultiplier &gt; 1)
+                scoreMultiplier = Math.Ceiling(Math.Round(scoreMultiplier * 100, 4)) / 100;
+            else
+                scoreMultiplier = Math.Floor(Math.Round(scoreMultiplier * 100, 4)) / 100;
+
+            return scoreMultiplier.ToLocalisableString(&quot;0.00x&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Calculate the rate for the song with the selected mods.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The list of selected mods.&lt;/param&gt;
+        /// &lt;returns&gt;The rate with mods.&lt;/returns&gt;
+        public static double CalculateRateWithMods(IEnumerable&lt;Mod&gt; mods)
+        {
+            double rate = 1;
+
+            // TODO: This doesn&#39;t consider mods which apply variable rates, yet.
+            foreach (var mod in mods.OfType&lt;IApplicableToRate&gt;())
+                rate = mod.ApplyToRate(0, rate);
+
+            return rate;
+        }
+
+        /// &lt;summary&gt;
+        /// Determines whether a given mod is valid on a playlist item.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mod&quot;&gt;The mod to test.&lt;/param&gt;
+        /// &lt;param name=&quot;required&quot;&gt;
+        /// &lt;c&gt;true&lt;/c&gt; if the mod is intended as a &lt;see cref=&quot;MultiplayerPlaylistItem.RequiredMods&quot;&gt;required mod&lt;/see&gt; on the target playlist item.
+        /// &lt;c&gt;false&lt;/c&gt; if it is intended as an &lt;see cref=&quot;MultiplayerPlaylistItem.AllowedMods&quot;&gt;allowed mod&lt;/see&gt;.
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;matchType&quot;&gt;The type of match being played.&lt;/param&gt;
+        /// &lt;param name=&quot;freestyle&quot;&gt;Whether the target playlist item enables &lt;see cref=&quot;MultiplayerPlaylistItem.Freestyle&quot;&gt;freestyle&lt;/see&gt; mode.&lt;/param&gt;
+        /// &lt;seealso href=&quot;https://github.com/ppy/osu-web/blob/40936b514c6485b874f6c6496d55d9e8b1b88fd4/app/Singletons/Mods.php#L95-L113&quot;&gt;Related osu!web function.&lt;/seealso&gt;
+        public static bool IsValidModForMatch(Mod mod, bool required, MatchType matchType, bool freestyle)
+        {
+            if (mod.Type == ModType.System || !mod.UserPlayable || !mod.HasImplementation)
+                return false;
+
+            if (freestyle &amp;&amp; required &amp;&amp; !mod.ValidForFreestyleAsRequiredMod)
+                return false;
+
+            switch (matchType)
+            {
+                case MatchType.Playlists:
+                    return true;
+
+                default:
+                    return required ? mod.ValidForMultiplayer : mod.ValidForMultiplayerAsFreeMod;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Given an online listing of mods and the user&#39;s preferred ruleset, gathers the mods which are selectable as free mods by the current user.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;matchType&quot;&gt;The type of match being played.&lt;/param&gt;
+        /// &lt;param name=&quot;requiredMods&quot;&gt;The required mods for the playlist item.&lt;/param&gt;
+        /// &lt;param name=&quot;allowedMods&quot;&gt;The allowed mods for the playlist item.&lt;/param&gt;
+        /// &lt;param name=&quot;freestyle&quot;&gt;Whether freestyle is enabled for the playlist item.&lt;/param&gt;
+        /// &lt;param name=&quot;userRuleset&quot;&gt;The user&#39;s preferred ruleset, which may differ from the playlist item&#39;s selection on freestyle playlist items.&lt;/param&gt;
+        public static Mod[] EnumerateUserSelectableFreeMods(MatchType matchType, IEnumerable&lt;APIMod&gt; requiredMods, IEnumerable&lt;APIMod&gt; allowedMods, bool freestyle, Ruleset userRuleset)
+        {
+            if (freestyle)
+            {
+                Mod[] rulesetRequiredMods = requiredMods.Select(m =&gt; m.ToMod(userRuleset)).ToArray();
+
+                // In freestyle, the playlist item doesn&#39;t provide the allowed mods. Instead, all mods are unconditionally allowed by default.
+                return userRuleset.AllMods.OfType&lt;Mod&gt;()
+                                  // But the mods must still be compatible with the room...
+                                  .Where(m =&gt; IsValidModForMatch(m, false, matchType, true))
+                                  // ... And compatible with the required mods listing (this also handles de-duplication).
+                                  .Where(m =&gt; CheckCompatibleSet(rulesetRequiredMods.Append(m)))
+                                  .ToArray();
+            }
+
+            // Without freestyle, only the mods specified by the playlist item are valid.
+            return allowedMods.Select(m =&gt; m.ToMod(userRuleset)).ToArray();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,9,32,10,1],[34,13,34,92,1],[35,13,35,110,1],[36,9,36,10,1],[44,16,44,54,1],[53,9,53,10,1],[54,13,54,59,1],[55,13,55,32,1],[58,18,58,27,1],[58,29,58,44,1],[58,46,58,49,1],[59,13,59,14,1],[60,17,60,41,1],[62,22,62,35,1],[62,37,62,52,1],[62,54,62,57,1],[63,17,63,18,1],[64,21,64,37,1],[66,21,66,60,1],[67,21,67,22,1],[68,25,68,57,1],[69,25,69,44,1],[70,21,70,22,1],[71,17,71,18,1],[72,13,72,14,1],[74,13,74,20,1],[74,22,74,29,1],[74,30,74,32,1],[74,33,74,37,1],[75,13,75,14,1],[76,17,76,24,1],[76,26,76,34,1],[76,35,76,37,1],[76,38,76,58,1],[77,17,77,18,1],[78,21,78,28,1],[78,30,78,41,1],[78,42,78,44,1],[78,45,78,61,1],[78,61,78,85,1],[78,85,78,86,1],[79,21,79,22,1],[80,25,80,44,1],[81,29,81,38,1],[83,25,83,57,1],[84,25,84,50,1],[85,21,85,22,1],[86,17,86,18,1],[87,13,87,14,1],[89,13,89,40,1],[90,9,90,10,1],[102,9,102,10,1],[103,13,103,62,1],[105,13,106,41,1],[106,41,106,73,1],[106,73,106,75,1],[107,9,107,10,1],[116,9,116,10,1],[117,13,117,35,1],[121,13,121,40,1],[121,40,121,56,1],[121,56,121,75,1],[122,17,122,30,1],[124,13,124,60,1],[125,17,125,30,1],[127,13,127,42,1],[127,42,127,61,1],[127,61,127,80,1],[128,9,128,10,1],[138,9,138,10,1],[139,13,139,35,1],[143,13,143,40,1],[143,40,143,56,1],[143,56,143,75,1],[144,17,144,30,1],[146,13,146,60,1],[147,17,147,30,1],[149,13,149,42,1],[149,42,149,102,1],[149,102,149,121,1],[150,9,150,10,1],[165,16,165,38,1],[165,38,165,99,1],[165,99,165,117,1],[168,9,168,10,1],[169,13,169,35,1],[170,13,170,32,1],[172,13,172,20,1],[172,22,172,29,1],[172,30,172,32,1],[172,33,172,37,1],[173,13,173,14,1],[174,17,174,33,1],[175,17,175,18,1],[176,21,176,53,1],[177,21,177,42,1],[178,17,178,18,1],[179,13,179,14,1],[181,13,181,40,1],[182,9,182,10,1],[189,78,189,105,1],[197,9,197,10,1],[198,13,198,39,1],[199,13,199,14,1],[200,17,200,24,1],[200,26,200,31,1],[200,32,200,34,1],[200,35,200,68,1],[201,21,201,36,1],[202,13,202,14,1],[204,17,204,34,1],[205,9,205,10,1],[215,9,215,10,1],[216,13,216,37,1],[217,13,217,43,1],[219,13,219,20,1],[219,22,219,32,1],[219,33,219,35,1],[219,36,219,48,1],[220,13,220,14,1],[221,17,221,49,1],[223,17,223,39,1],[224,17,224,18,1],[225,21,225,47,1],[226,21,226,30,1],[229,17,229,32,1],[230,13,230,14,1],[232,13,232,38,1],[233,9,233,10,1],[242,9,242,10,1],[243,13,243,64,1],[243,64,243,75,1],[243,75,243,86,1],[245,13,245,20,1],[245,22,245,37,1],[245,38,245,40,1],[245,41,245,53,1],[246,13,246,14,1],[247,17,247,36,1],[249,17,249,61,1],[251,17,251,24,1],[251,26,251,44,1],[251,45,251,47,1],[251,48,251,64,1],[252,17,252,18,1],[253,21,253,74,1],[254,21,254,22,1],[255,25,255,38,1],[256,25,256,31,1],[258,17,258,18,1],[260,17,260,28,1],[261,21,261,34,1],[262,13,262,14,1],[264,13,264,25,1],[265,9,265,10,1],[273,9,273,10,1],[275,13,275,37,1],[276,17,276,92,1],[278,17,278,90,1],[280,13,280,65,1],[281,9,281,10,1],[289,9,289,10,1],[290,13,290,29,1],[293,13,293,20,1],[293,22,293,29,1],[293,30,293,32,1],[293,33,293,65,1],[294,17,294,49,1],[296,13,296,25,1],[297,9,297,10,1],[311,9,311,10,1],[312,13,312,91,1],[313,17,313,30,1],[315,13,315,78,1],[316,17,316,30,1],[318,13,318,31,1],[321,21,321,33,1],[324,21,324,98,1],[326,9,326,10,1],[337,9,337,10,1],[338,13,338,27,1],[339,13,339,14,1],[340,17,340,70,1],[340,70,340,90,1],[340,90,340,102,1],[343,17,345,47,1],[345,47,345,92,1],[345,92,347,47,1],[347,47,347,96,1],[347,96,348,46,1],[352,13,352,44,1],[352,44,352,64,1],[352,64,352,76,1],[353,9,353,10,1]]);
+    </script>
+  </body>
+</html>

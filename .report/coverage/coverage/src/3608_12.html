@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Configuration/SettingSourceAttribute.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using JetBrains.Annotations;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Localisation;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Overlays.Settings;
+using osu.Game.Utils;
+
+namespace osu.Game.Configuration
+{
+    /// &lt;summary&gt;
+    /// An attribute to mark a bindable as being exposed to the user via settings controls.
+    /// Can be used in conjunction with &lt;see cref=&quot;SettingSourceExtensions.CreateSettingsControls&quot;/&gt; to automatically create UI controls.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// All controls with &lt;see cref=&quot;OrderPosition&quot;/&gt; set will be placed first in ascending order.
+    /// All controls with no &lt;see cref=&quot;OrderPosition&quot;/&gt; will come afterward in default order.
+    /// &lt;/remarks&gt;
+    [MeansImplicitUse]
+    [AttributeUsage(AttributeTargets.Property)]
+    public class SettingSourceAttribute : Attribute, IComparable&lt;SettingSourceAttribute&gt;
+    {
+        public LocalisableString Label { get; }
+
+        public LocalisableString Description { get; }
+
+        public int? OrderPosition { get; }
+
+        /// &lt;summary&gt;
+        /// The type of the settings control which handles this setting source.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Must be a type deriving &lt;see cref=&quot;SettingsItem{T}&quot;/&gt; with a public parameterless constructor.
+        /// &lt;/remarks&gt;
+        public Type? SettingControlType { get; set; }
+
+        public SettingSourceAttribute(Type declaringType, string label, string? description = null)
+        {
+            Label = getLocalisableStringFromMember(label) ?? string.Empty;
+            Description = getLocalisableStringFromMember(description) ?? string.Empty;
+
+            LocalisableString? getLocalisableStringFromMember(string? member)
+            {
+                if (member == null)
+                    return null;
+
+                var property = declaringType.GetMember(member, BindingFlags.Static | BindingFlags.Public).FirstOrDefault();
+
+                if (property == null)
+                    return null;
+
+                switch (property)
+                {
+                    case FieldInfo f:
+                        return (LocalisableString)f.GetValue(null).AsNonNull();
+
+                    case PropertyInfo p:
+                        return (LocalisableString)p.GetValue(null).AsNonNull();
+
+                    default:
+                        throw new InvalidOperationException($&quot;Member \&quot;{member}\&quot; was not found in type {declaringType} (must be a static field or property)&quot;);
+                }
+            }
+        }
+
+        public SettingSourceAttribute(string? label, string? description = null)
+        {
+            Label = label ?? string.Empty;
+            Description = description ?? string.Empty;
+        }
+
+        public SettingSourceAttribute(Type declaringType, string label, string description, int orderPosition)
+            : this(declaringType, label, description)
+        {
+            OrderPosition = orderPosition;
+        }
+
+        public SettingSourceAttribute(string label, string description, int orderPosition)
+            : this(label, description)
+        {
+            OrderPosition = orderPosition;
+        }
+
+        public int CompareTo(SettingSourceAttribute? other)
+        {
+            if (OrderPosition == other?.OrderPosition)
+                return 0;
+
+            // unordered items come last (are greater than any ordered items).
+            if (OrderPosition == null)
+                return 1;
+            if (other?.OrderPosition == null)
+                return -1;
+
+            // ordered items are sorted by the order value.
+            return OrderPosition.Value.CompareTo(other.OrderPosition);
+        }
+    }
+
+    public static partial class SettingSourceExtensions
+    {
+        public static IEnumerable&lt;Drawable&gt; CreateSettingsControls(this object obj)
+        {
+            foreach (var (attr, property) in obj.GetOrderedSettingsSourceProperties())
+            {
+                object value = property.GetValue(obj)!;
+
+                if (attr.SettingControlType != null)
+                {
+                    var controlType = attr.SettingControlType;
+                    if (controlType.EnumerateBaseTypes().All(t =&gt; !t.IsGenericType || t.GetGenericTypeDefinition() != typeof(SettingsItem&lt;&gt;)))
+                        throw new InvalidOperationException($&quot;{nameof(SettingSourceAttribute)} had an unsupported custom control type ({controlType.ReadableName()})&quot;);
+
+                    var control = (Drawable)Activator.CreateInstance(controlType)!;
+                    controlType.GetProperty(nameof(SettingsItem&lt;&gt;.SettingSourceObject))?.SetValue(control, obj);
+                    controlType.GetProperty(nameof(SettingsItem&lt;&gt;.LabelText))?.SetValue(control, attr.Label);
+                    controlType.GetProperty(nameof(SettingsItem&lt;&gt;.TooltipText))?.SetValue(control, attr.Description);
+                    controlType.GetProperty(nameof(SettingsItem&lt;&gt;.Current))?.SetValue(control, value);
+
+                    yield return control;
+
+                    continue;
+                }
+
+                switch (value)
+                {
+                    case BindableNumber&lt;float&gt; bNumber:
+                        yield return new SettingsSlider&lt;float&gt;
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bNumber,
+                            KeyboardStep = bNumber.Precision,
+                        };
+
+                        break;
+
+                    case BindableNumber&lt;double&gt; bNumber:
+                        yield return new SettingsSlider&lt;double&gt;
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bNumber,
+                            KeyboardStep = (float)bNumber.Precision,
+                        };
+
+                        break;
+
+                    case BindableNumber&lt;int&gt; bNumber:
+                        yield return new SettingsSlider&lt;int&gt;
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bNumber,
+                            KeyboardStep = bNumber.Precision,
+                        };
+
+                        break;
+
+                    case Bindable&lt;bool&gt; bBool:
+                        yield return new SettingsCheckbox
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bBool
+                        };
+
+                        break;
+
+                    case Bindable&lt;string&gt; bString:
+                        yield return new SettingsTextBox
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bString
+                        };
+
+                        break;
+
+                    case BindableColour4 bColour:
+                        yield return new SettingsColour
+                        {
+                            LabelText = attr.Label,
+                            TooltipText = attr.Description,
+                            Current = bColour
+                        };
+
+                        break;
+
+                    case IBindable bindable:
+                        var dropdownType = typeof(ModSettingsEnumDropdown&lt;&gt;).MakeGenericType(bindable.GetType().GetGenericArguments()[0]);
+                        var dropdown = (Drawable)Activator.CreateInstance(dropdownType)!;
+
+                        dropdownType.GetProperty(nameof(SettingsDropdown&lt;&gt;.LabelText))?.SetValue(dropdown, attr.Label);
+                        dropdownType.GetProperty(nameof(SettingsDropdown&lt;&gt;.TooltipText))?.SetValue(dropdown, attr.Description);
+                        dropdownType.GetProperty(nameof(SettingsDropdown&lt;&gt;.Current))?.SetValue(dropdown, bindable);
+
+                        yield return dropdown;
+
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($&quot;{nameof(SettingSourceAttribute)} was attached to an unsupported type ({value})&quot;);
+                }
+            }
+        }
+
+        private static readonly ConcurrentDictionary&lt;Type, (SettingSourceAttribute, PropertyInfo)[]&gt; property_info_cache = new ConcurrentDictionary&lt;Type, (SettingSourceAttribute, PropertyInfo)[]&gt;();
+
+        /// &lt;summary&gt;
+        /// Returns the underlying value of the given mod setting object.
+        /// Can be used for serialization and equality comparison purposes.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;setting&quot;&gt;A &lt;see cref=&quot;SettingSourceAttribute&quot;/&gt; bindable.&lt;/param&gt;
+        public static object GetUnderlyingSettingValue(this object setting)
+        {
+            switch (setting)
+            {
+                case Bindable&lt;double&gt; d:
+                    return d.Value;
+
+                case Bindable&lt;int&gt; i:
+                    return i.Value;
+
+                case Bindable&lt;float&gt; f:
+                    return f.Value;
+
+                case Bindable&lt;bool&gt; b:
+                    return b.Value;
+
+                case BindableColour4 c:
+                    return c.Value.ToHex();
+
+                case IBindable u:
+                    return BindableValueAccessor.GetValue(u);
+
+                default:
+                    // fall back for non-bindable cases.
+                    return setting;
+            }
+        }
+
+        public static IEnumerable&lt;(SettingSourceAttribute, PropertyInfo)&gt; GetSettingsSourceProperties(this object obj)
+        {
+            var type = obj.GetType();
+
+            if (!property_info_cache.TryGetValue(type, out var properties))
+                property_info_cache[type] = properties = getSettingsSourceProperties(type).ToArray();
+
+            return properties;
+        }
+
+        private static IEnumerable&lt;(SettingSourceAttribute, PropertyInfo)&gt; getSettingsSourceProperties(Type type)
+        {
+            foreach (var property in type.GetProperties(BindingFlags.GetProperty | BindingFlags.Public | BindingFlags.Instance))
+            {
+                var attr = property.GetCustomAttribute&lt;SettingSourceAttribute&gt;(true);
+
+                if (attr == null)
+                    continue;
+
+                yield return (attr, property);
+            }
+        }
+
+        public static ICollection&lt;(SettingSourceAttribute, PropertyInfo)&gt; GetOrderedSettingsSourceProperties(this object obj)
+            =&gt; obj.GetSettingsSourceProperties()
+                  .OrderBy(attr =&gt; attr.Item1)
+                  .ToArray();
+
+        private partial class ModSettingsEnumDropdown&lt;T&gt; : SettingsEnumDropdown&lt;T&gt;
+            where T : struct, Enum
+        {
+            protected override OsuDropdown&lt;T&gt; CreateDropdown() =&gt; new ModDropdownControl();
+
+            private partial class ModDropdownControl : DropdownControl
+            {
+                // Set menu&#39;s max height low enough to workaround nested scroll issues (see https://github.com/ppy/osu-framework/issues/4536).
+                protected override DropdownMenu CreateMenu() =&gt; base.CreateMenu().With(m =&gt; m.MaxHeight = 100);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,42,33,46,0],[35,48,35,52,0],[37,37,37,41,1],[45,43,45,47,0],[45,48,45,52,1],[47,9,47,100,0],[48,9,48,10,0],[49,13,49,75,0],[50,13,50,87,0],[53,13,53,14,0],[54,17,54,36,0],[55,21,55,33,0],[57,17,57,124,0],[59,17,59,38,0],[60,21,60,33,0],[62,17,62,34,0],[65,25,65,80,0],[68,25,68,80,0],[71,25,71,160,0],[73,13,73,14,0],[74,9,74,10,0],[76,9,76,81,1],[77,9,77,10,1],[78,13,78,43,1],[79,13,79,55,1],[80,9,80,10,1],[83,15,83,54,0],[84,9,84,10,0],[85,13,85,43,0],[86,9,86,10,0],[89,15,89,39,1],[90,9,90,10,1],[91,13,91,43,1],[92,9,92,10,1],[95,9,95,10,1],[96,13,96,55,1],[97,17,97,26,1],[100,13,100,39,1],[101,17,101,26,1],[102,13,102,46,1],[103,17,103,27,1],[106,13,106,71,1],[107,9,107,10,1],[113,9,113,10,0],[114,13,114,20,0],[114,22,114,42,0],[114,43,114,45,0],[114,46,114,86,0],[115,13,115,14,0],[116,17,116,56,0],[118,17,118,53,0],[119,17,119,18,0],[120,21,120,63,0],[121,21,121,67,0],[121,67,121,141,0],[121,141,121,143,0],[122,25,122,168,0],[124,21,124,84,0],[125,21,125,113,0],[126,21,126,110,0],[127,21,127,118,0],[128,21,128,103,0],[130,21,130,42,0],[132,21,132,30,0],[135,17,135,31,0],[138,25,144,27,0],[146,25,146,31,0],[149,25,155,27,0],[157,25,157,31,0],[160,25,166,27,0],[168,25,168,31,0],[171,25,176,27,0],[178,25,178,31,0],[181,25,186,27,0],[188,25,188,31,0],[191,25,196,27,0],[198,25,198,31,0],[201,25,201,139,0],[202,25,202,90,0],[204,25,204,120,0],[205,25,205,128,0],[206,25,206,116,0],[208,25,208,47,0],[210,25,210,31,0],[213,25,213,144,0],[215,13,215,14,0],[216,9,216,10,0],[218,9,218,199,1],[226,9,226,10,1],[227,13,227,29,1],[230,21,230,36,0],[233,21,233,36,1],[236,21,236,36,0],[239,21,239,36,0],[242,21,242,44,0],[245,21,245,62,0],[249,21,249,36,0],[251,9,251,10,1],[254,9,254,10,1],[255,13,255,38,1],[257,13,257,76,1],[258,17,258,102,1],[260,13,260,31,1],[261,9,261,10,1],[264,9,264,10,1],[265,13,265,20,1],[265,22,265,34,1],[265,35,265,37,1],[265,38,265,128,1],[266,13,266,14,1],[267,17,267,86,1],[269,17,269,34,1],[270,21,270,30,1],[272,17,272,47,1],[273,13,273,14,1],[274,9,274,10,1],[277,16,278,36,1],[278,36,278,46,1],[278,46,279,29,1],[284,67,284,91,0],[289,65,289,93,0],[289,93,289,110,0],[289,110,289,111,0]]);
+    </script>
+  </body>
+</html>

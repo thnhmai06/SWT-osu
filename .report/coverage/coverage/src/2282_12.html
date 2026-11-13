@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Replays/FramedReplayInputHandler.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Input.StateChanges;
+using osu.Game.Input.Handlers;
+using osu.Game.Replays;
+
+namespace osu.Game.Rulesets.Replays
+{
+    /// &lt;summary&gt;
+    /// The ReplayHandler will take a replay and handle the propagation of updates to the input stack.
+    /// It handles logic of any frames which *must* be executed.
+    /// &lt;/summary&gt;
+    public abstract class FramedReplayInputHandler&lt;TFrame&gt; : ReplayInputHandler
+        where TFrame : ReplayFrame
+    {
+        /// &lt;summary&gt;
+        /// Whether we have at least one replay frame.
+        /// &lt;/summary&gt;
+        public bool HasFrames =&gt; Frames.Count != 0;
+
+        /// &lt;summary&gt;
+        /// Whether we are waiting for new frames to be received.
+        /// &lt;/summary&gt;
+        public bool WaitingForFrame =&gt; !replay.HasReceivedAllFrames &amp;&amp; currentFrameIndex == Frames.Count - 1;
+
+        /// &lt;summary&gt;
+        /// The current frame of the replay.
+        /// The current time is always between the start and the end time of the current frame.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;Returns null if the current time is strictly before the first frame.&lt;/remarks&gt;
+        public TFrame? CurrentFrame =&gt; currentFrameIndex == -1 ? null : (TFrame)Frames[currentFrameIndex];
+
+        /// &lt;summary&gt;
+        /// The next frame of the replay.
+        /// The start time of &lt;see cref=&quot;NextFrame&quot;/&gt; is always greater or equal to the start time of &lt;see cref=&quot;CurrentFrame&quot;/&gt; regardless of the seeking direction.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;Returns null if the current frame is the last frame.&lt;/remarks&gt;
+        public TFrame? NextFrame =&gt; currentFrameIndex == Frames.Count - 1 ? null : (TFrame)Frames[currentFrameIndex + 1];
+
+        /// &lt;summary&gt;
+        /// The frame for the start value of the interpolation of the replay movement.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;The replay is empty.&lt;/exception&gt;
+        public TFrame StartFrame
+        {
+            get
+            {
+                if (!HasFrames)
+                    throw new InvalidOperationException($&quot;Attempted to get {nameof(StartFrame)} of an empty replay&quot;);
+
+                return (TFrame)Frames[Math.Max(0, currentFrameIndex)];
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The frame for the end value of the interpolation of the replay movement.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;The replay is empty.&lt;/exception&gt;
+        public TFrame EndFrame
+        {
+            get
+            {
+                if (!HasFrames)
+                    throw new InvalidOperationException($&quot;Attempted to get {nameof(EndFrame)} of an empty replay&quot;);
+
+                return (TFrame)Frames[Math.Min(currentFrameIndex + 1, Frames.Count - 1)];
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// When set, we will ensure frames executed by nested drawables are frame-accurate to replay data.
+        /// Disabling this can make replay playback smoother (useful for autoplay, currently).
+        /// &lt;/summary&gt;
+        public bool FrameAccuratePlayback;
+
+        // This input handler should be enabled only if there is at least one replay frame.
+        public override bool IsActive =&gt; HasFrames;
+
+        protected double CurrentTime { get; private set; }
+
+        protected virtual double AllowedImportantTimeSpan =&gt; sixty_frame_time * 1.2;
+
+        protected List&lt;ReplayFrame&gt; Frames =&gt; replay.Frames;
+
+        private readonly Replay replay;
+
+        private int currentFrameIndex;
+
+        private const double sixty_frame_time = 1000.0 / 60;
+
+        protected FramedReplayInputHandler(Replay replay)
+        {
+            // TODO: This replay frame ordering should be enforced on the Replay type.
+            // Currently, the ordering can be broken if the frames are added after this construction.
+            replay.Frames = replay.Frames.OrderBy(f =&gt; f.Time).ToList();
+
+            this.replay = replay;
+            currentFrameIndex = -1;
+            CurrentTime = double.NegativeInfinity;
+        }
+
+        private bool inImportantSection
+        {
+            get
+            {
+                if (!HasFrames || !FrameAccuratePlayback || currentFrameIndex == -1)
+                    return false;
+
+                return IsImportant(StartFrame) &amp;&amp; // a button is in a pressed state
+                       Math.Abs(CurrentTime - EndFrame.Time) &lt;= AllowedImportantTimeSpan; // the next frame is within an allowable time span
+            }
+        }
+
+        protected virtual bool IsImportant(TFrame frame) =&gt; false;
+
+        /// &lt;summary&gt;
+        /// Update the current frame based on an incoming time value.
+        /// There are cases where we return a &quot;must-use&quot; time value that is different from the input.
+        /// This is to ensure accurate playback of replay data.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time which we should use for finding the current frame.&lt;/param&gt;
+        /// &lt;returns&gt;The usable time value. If null, we should not advance time as we do not have enough data.&lt;/returns&gt;
+        public override double? SetFrameFromTime(double time)
+        {
+            if (!HasFrames)
+            {
+                // In the case all frames are received, allow time to progress regardless.
+                if (replay.HasReceivedAllFrames)
+                    return CurrentTime = time;
+
+                return null;
+            }
+
+            double frameStart = getFrameTime(currentFrameIndex);
+            double frameEnd = getFrameTime(currentFrameIndex + 1);
+
+            // If the proposed time is after the current frame end time, we progress forwards to precisely the new frame&#39;s time (regardless of incoming time).
+            if (frameEnd &lt;= time)
+            {
+                time = frameEnd;
+                currentFrameIndex++;
+            }
+            // If the proposed time is before the current frame start time, and we are at the frame boundary, we progress backwards.
+            else if (time &lt; frameStart &amp;&amp; CurrentTime == frameStart)
+                currentFrameIndex--;
+
+            frameStart = getFrameTime(currentFrameIndex);
+            frameEnd = getFrameTime(currentFrameIndex + 1);
+
+            // Pause until more frames are arrived.
+            if (WaitingForFrame &amp;&amp; frameStart &lt; time)
+            {
+                CurrentTime = frameStart;
+                return null;
+            }
+
+            CurrentTime = Math.Clamp(time, frameStart, frameEnd);
+
+            // In an important section, a mid-frame time cannot be used and a null is returned instead.
+            return inImportantSection &amp;&amp; frameStart &lt; time &amp;&amp; time &lt; frameEnd ? null : CurrentTime;
+        }
+
+        private double getFrameTime(int index)
+        {
+            if (index &lt; 0)
+                return double.NegativeInfinity;
+            if (index &gt;= Frames.Count)
+                return double.PositiveInfinity;
+
+            return Frames[index].Time;
+        }
+
+        public sealed override void CollectPendingInputs(List&lt;IInput&gt; inputs)
+        {
+            base.CollectPendingInputs(inputs);
+
+            CollectReplayInputs(inputs);
+
+            if (CurrentFrame?.Header != null)
+                inputs.Add(new ReplayStatisticsFrameInput { Frame = CurrentFrame });
+        }
+
+        protected virtual void CollectReplayInputs(List&lt;IInput&gt; inputs)
+        {
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,34,23,51,0],[28,40,28,109,0],[35,40,35,106,0],[42,37,42,121,0],[51,13,51,14,0],[52,17,52,32,0],[53,21,53,118,0],[55,17,55,71,0],[56,13,56,14,0],[66,13,66,14,0],[67,17,67,32,0],[68,21,68,116,0],[70,17,70,90,0],[71,13,71,14,0],[81,42,81,51,0],[83,40,83,44,0],[83,45,83,57,0],[85,62,85,84,0],[87,47,87,60,0],[95,9,95,58,0],[96,9,96,10,0],[99,13,99,56,0],[99,56,99,62,0],[99,62,99,73,0],[101,13,101,34,0],[102,13,102,36,0],[103,13,103,51,0],[104,9,104,10,0],[109,13,109,14,0],[110,17,110,85,0],[111,21,111,34,0],[113,17,114,90,0],[115,13,115,14,0],[118,61,118,66,0],[128,9,128,10,0],[129,13,129,28,0],[130,13,130,14,0],[132,17,132,49,0],[133,21,133,47,0],[135,17,135,29,0],[138,13,138,65,0],[139,13,139,67,0],[142,13,142,34,0],[143,13,143,14,0],[144,17,144,33,0],[145,17,145,37,0],[146,13,146,14,0],[148,18,148,69,0],[149,17,149,37,0],[151,13,151,58,0],[152,13,152,60,0],[155,13,155,54,0],[156,13,156,14,0],[157,17,157,42,0],[158,17,158,29,0],[161,13,161,66,0],[164,13,164,100,0],[165,9,165,10,0],[168,9,168,10,0],[169,13,169,27,0],[170,17,170,48,0],[171,13,171,39,0],[172,17,172,48,0],[174,13,174,39,0],[175,9,175,10,0],[178,9,178,10,0],[179,13,179,47,0],[181,13,181,41,0],[183,13,183,46,0],[184,17,184,85,0],[185,9,185,10,0],[188,9,188,10,0],[189,9,189,10,0]]);
+    </script>
+  </body>
+</html>

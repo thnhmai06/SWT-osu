@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Ladder/Components/DrawableTournamentMatch.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Game.Tournament.Models;
+using osu.Game.Tournament.Screens.Editors;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Tournament.Screens.Ladder.Components
+{
+    public partial class DrawableTournamentMatch : CompositeDrawable
+    {
+        public readonly TournamentMatch Match;
+        private readonly bool editor;
+        protected readonly FillFlowContainer&lt;DrawableMatchTeam&gt; Flow;
+        private readonly Drawable selectionBox;
+        private readonly Drawable currentMatchSelectionBox;
+        private Bindable&lt;TournamentMatch&gt;? globalSelection;
+
+        [Resolved]
+        private LadderEditorInfo? editorInfo { get; set; }
+
+        [Resolved]
+        private LadderInfo? ladderInfo { get; set; }
+
+        public DrawableTournamentMatch(TournamentMatch match, bool editor = false)
+        {
+            Match = match;
+            this.editor = editor;
+
+            AutoSizeAxes = Axes.Both;
+
+            const float border_thickness = 5;
+            const float spacing = 2;
+
+            Margin = new MarginPadding(10);
+
+            InternalChildren = new Drawable[]
+            {
+                Flow = new FillFlowContainer&lt;DrawableMatchTeam&gt;
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Spacing = new Vector2(spacing)
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding(-10),
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Child = selectionBox = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Alpha = 0,
+                        Masking = true,
+                        BorderColour = Color4.YellowGreen,
+                        BorderThickness = border_thickness,
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            AlwaysPresent = true,
+                            Alpha = 0,
+                        }
+                    },
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding(-(spacing + border_thickness)),
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Child = currentMatchSelectionBox = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Alpha = 0,
+                        BorderColour = Color4.White,
+                        BorderThickness = border_thickness,
+                        Masking = true,
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            AlwaysPresent = true,
+                            Alpha = 0,
+                        }
+                    },
+                }
+            };
+
+            boundReference(match.Team1).BindValueChanged(_ =&gt; updateTeams());
+            boundReference(match.Team2).BindValueChanged(_ =&gt; updateTeams());
+            boundReference(match.Team1Score).BindValueChanged(_ =&gt; updateWinConditions());
+            boundReference(match.Team2Score).BindValueChanged(_ =&gt; updateWinConditions());
+            boundReference(match.Round).BindValueChanged(_ =&gt;
+            {
+                updateWinConditions();
+                Changed?.Invoke();
+            });
+            boundReference(match.Completed).BindValueChanged(_ =&gt; updateProgression());
+            boundReference(match.Progression).BindValueChanged(_ =&gt; updateProgression());
+            boundReference(match.LosersProgression).BindValueChanged(_ =&gt; updateProgression());
+            boundReference(match.Losers).BindValueChanged(_ =&gt;
+            {
+                updateTeams();
+                Changed?.Invoke();
+            });
+            boundReference(match.Current).BindValueChanged(_ =&gt; updateCurrentMatch(), true);
+            boundReference(match.Position).BindValueChanged(pos =&gt;
+            {
+                if (!IsDragged)
+                    Position = new Vector2(pos.NewValue.X, pos.NewValue.Y);
+                Changed?.Invoke();
+            }, true);
+            updateTeams();
+        }
+
+        /// &lt;summary&gt;
+        /// Fired when something changed that requires a ladder redraw.
+        /// &lt;/summary&gt;
+        public Action? Changed;
+
+        private readonly List&lt;IUnbindable&gt; refBindables = new List&lt;IUnbindable&gt;();
+
+        private T boundReference&lt;T&gt;(T obj)
+            where T : IBindable
+        {
+            obj = (T)obj.GetBoundCopy();
+            refBindables.Add(obj);
+            return obj;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            foreach (var b in refBindables)
+                b.UnbindAll();
+        }
+
+        private void updateCurrentMatch()
+        {
+            if (Match.Current.Value)
+                currentMatchSelectionBox.Show();
+            else
+                currentMatchSelectionBox.Hide();
+        }
+
+        private bool selected;
+
+        public bool Selected
+        {
+            get =&gt; selected;
+
+            set
+            {
+                if (value == selected) return;
+
+                selected = value;
+
+                if (selected)
+                {
+                    selectionBox.Show();
+
+                    if (editor &amp;&amp; editorInfo != null)
+                        editorInfo.Selected.Value = Match;
+                    else
+                        ladderInfo?.CurrentMatch.Value = Match;
+                }
+                else
+                    selectionBox.Hide();
+            }
+        }
+
+        private void updateProgression()
+        {
+            if (!Match.Completed.Value)
+            {
+                // ensure we clear any of our teams from our progression.
+                // this is not pretty logic but should suffice for now.
+                if (Match.Progression.Value != null &amp;&amp; Match.Progression.Value.Team1.Value == Match.Team1.Value)
+                    Match.Progression.Value.Team1.Value = null;
+
+                if (Match.Progression.Value != null &amp;&amp; Match.Progression.Value.Team2.Value == Match.Team2.Value)
+                    Match.Progression.Value.Team2.Value = null;
+
+                if (Match.LosersProgression.Value != null &amp;&amp; Match.LosersProgression.Value.Team1.Value == Match.Team1.Value)
+                    Match.LosersProgression.Value.Team1.Value = null;
+
+                if (Match.LosersProgression.Value != null &amp;&amp; Match.LosersProgression.Value.Team2.Value == Match.Team2.Value)
+                    Match.LosersProgression.Value.Team2.Value = null;
+            }
+            else
+            {
+                Debug.Assert(Match.Winner != null);
+                transferProgression(Match.Progression.Value, Match.Winner);
+                Debug.Assert(Match.Loser != null);
+                transferProgression(Match.LosersProgression.Value, Match.Loser);
+            }
+
+            Changed?.Invoke();
+        }
+
+        private void transferProgression(TournamentMatch? destination, TournamentTeam team)
+        {
+            if (destination == null) return;
+
+            bool progressionAbove = destination.ID &lt; Match.ID;
+
+            Bindable&lt;TournamentTeam?&gt; destinationTeam;
+
+            // check for the case where we have already transferred out value
+            if (destination.Team1.Value == team)
+                destinationTeam = destination.Team1;
+            else if (destination.Team2.Value == team)
+                destinationTeam = destination.Team2;
+            else
+            {
+                destinationTeam = progressionAbove ? destination.Team2 : destination.Team1;
+                if (destinationTeam.Value != null)
+                    destinationTeam = progressionAbove ? destination.Team1 : destination.Team2;
+            }
+
+            destinationTeam.Value = team;
+        }
+
+        private void updateWinConditions()
+        {
+            if (Match.Round.Value == null) return;
+
+            int instantWinAmount = Match.Round.Value.BestOf.Value / 2;
+
+            Match.Completed.Value = Match.Round.Value.BestOf.Value &gt; 0
+                                    &amp;&amp; (Match.Team1Score.Value + Match.Team2Score.Value &gt;= Match.Round.Value.BestOf.Value || Match.Team1Score.Value &gt; instantWinAmount
+                                                                                                                          || Match.Team2Score.Value &gt; instantWinAmount);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            updateTeams();
+
+            if (editorInfo != null)
+            {
+                globalSelection = editorInfo.Selected.GetBoundCopy();
+                globalSelection.BindValueChanged(s =&gt; Selected = s.NewValue == Match, true);
+            }
+        }
+
+        private void updateTeams()
+        {
+            if (LoadState != LoadState.Loaded)
+                return;
+
+            // todo: teams may need to be bindable for transitions at a later point.
+
+            if (Match.Team1.Value == null || Match.Team2.Value == null)
+                Match.CancelMatchStart();
+
+            if (Match.ConditionalMatches.Count &gt; 0)
+            {
+                foreach (var conditional in Match.ConditionalMatches)
+                {
+                    bool team1Match = Match.Team1Acronym != null &amp;&amp; conditional.Acronyms.Contains(Match.Team1Acronym);
+                    bool team2Match = Match.Team2Acronym != null &amp;&amp; conditional.Acronyms.Contains(Match.Team2Acronym);
+
+                    if (team1Match &amp;&amp; team2Match)
+                        Match.Date.Value = conditional.Date.Value;
+                }
+            }
+
+            Flow.Children = new[]
+            {
+                new DrawableMatchTeam(Match.Team1.Value, Match, Match.Losers.Value),
+                new DrawableMatchTeam(Match.Team2.Value, Match, Match.Losers.Value)
+            };
+
+            SchedulerAfterChildren.Add(() =&gt; Scheduler.Add(updateProgression));
+            updateWinConditions();
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e) =&gt; e.Button == MouseButton.Left &amp;&amp; editorInfo != null;
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (Selected &amp;&amp; editorInfo != null &amp;&amp; e.Key == Key.Delete)
+            {
+                Remove();
+                return true;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            if (editorInfo == null || Match is ConditionalTournamentMatch || e.Button != MouseButton.Left)
+                return false;
+
+            Selected = true;
+            return true;
+        }
+
+        private Vector2 positionAtStartOfDrag;
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (editorInfo != null)
+            {
+                positionAtStartOfDrag = Position;
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override void OnDrag(DragEvent e)
+        {
+            base.OnDrag(e);
+
+            Selected = true;
+
+            this.MoveTo(snapToGrid(positionAtStartOfDrag + (e.MousePosition - e.MouseDownPosition)));
+
+            Match.Position.Value = new Point((int)Position.X, (int)Position.Y);
+        }
+
+        private Vector2 snapToGrid(Vector2 pos) =&gt;
+            new Vector2(
+                (int)(pos.X / LadderEditorScreen.GRID_SPACING) * LadderEditorScreen.GRID_SPACING,
+                (int)(pos.Y / LadderEditorScreen.GRID_SPACING) * LadderEditorScreen.GRID_SPACING
+            );
+
+        public void Remove()
+        {
+            Selected = false;
+            Match.Progression.Value = null;
+            Match.LosersProgression.Value = null;
+
+            if (ladderInfo == null)
+                return;
+
+            ladderInfo.Matches.Remove(Match);
+
+            foreach (var m in ladderInfo.Matches)
+            {
+                if (m.Progression.Value == Match)
+                    m.Progression.Value = null;
+
+                if (m.LosersProgression.Value == Match)
+                    m.LosersProgression.Value = null;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,48,32,52,0],[32,53,32,57,0],[35,42,35,46,0],[35,47,35,51,0],[37,9,37,83,0],[38,9,38,10,0],[39,13,39,27,0],[40,13,40,34,0],[42,13,42,38,0],[47,13,47,44,0],[49,13,99,15,0],[101,13,101,63,0],[101,63,101,76,0],[101,76,101,78,0],[102,13,102,63,0],[102,63,102,76,0],[102,76,102,78,0],[103,13,103,68,0],[103,68,103,89,0],[103,89,103,91,0],[104,13,104,68,0],[104,68,104,89,0],[104,89,104,91,0],[105,13,106,13,0],[106,13,106,14,0],[106,14,107,17,0],[107,17,107,39,0],[107,39,108,17,0],[108,17,108,35,0],[108,35,109,13,0],[109,13,109,14,0],[109,14,109,16,0],[110,13,110,67,0],[110,67,110,86,0],[110,86,110,88,0],[111,13,111,69,0],[111,69,111,88,0],[111,88,111,90,0],[112,13,112,75,0],[112,75,112,94,0],[112,94,112,96,0],[113,13,114,13,0],[114,13,114,14,0],[114,14,115,17,0],[115,17,115,31,0],[115,31,116,17,0],[116,17,116,35,0],[116,35,117,13,0],[117,13,117,14,0],[117,14,117,16,0],[118,13,118,65,0],[118,65,118,85,0],[118,85,118,93,0],[119,13,120,13,0],[120,13,120,14,0],[120,14,121,17,0],[121,17,121,32,0],[121,32,122,21,0],[122,21,122,76,0],[122,76,123,17,0],[123,17,123,35,0],[123,35,124,13,0],[124,13,124,14,0],[124,14,124,22,0],[125,13,125,27,0],[126,9,126,10,0],[133,9,133,83,0],[137,9,137,10,0],[138,13,138,41,0],[139,13,139,35,0],[140,13,140,24,0],[141,9,141,10,0],[144,9,144,10,0],[145,13,145,39,0],[146,13,146,20,0],[146,22,146,27,0],[146,28,146,30,0],[146,31,146,43,0],[147,17,147,31,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,37,0],[153,17,153,49,0],[155,17,155,49,0],[156,9,156,10,0],[162,20,162,28,0],[165,13,165,14,0],[166,17,166,39,0],[166,40,166,47,0],[168,17,168,34,0],[170,17,170,30,0],[171,17,171,18,0],[172,21,172,41,0],[174,21,174,54,0],[175,25,175,59,0],[177,25,177,64,0],[178,17,178,18,0],[180,21,180,41,0],[181,13,181,14,0],[185,9,185,10,0],[186,13,186,40,0],[187,13,187,14,0],[190,17,190,113,0],[191,21,191,64,0],[193,17,193,113,0],[194,21,194,64,0],[196,17,196,125,0],[197,21,197,70,0],[199,17,199,125,0],[200,21,200,70,0],[201,13,201,14,0],[203,13,203,14,0],[204,17,204,52,0],[205,17,205,76,0],[206,17,206,51,0],[207,17,207,81,0],[208,13,208,14,0],[210,13,210,31,0],[211,9,211,10,0],[214,9,214,10,0],[215,13,215,37,0],[215,38,215,45,0],[217,13,217,63,0],[222,13,222,49,0],[223,17,223,53,0],[224,18,224,54,0],[225,17,225,53,0],[227,13,227,14,0],[228,17,228,92,0],[229,17,229,51,0],[230,21,230,96,0],[231,13,231,14,0],[233,13,233,42,0],[234,9,234,10,0],[237,9,237,10,0],[238,13,238,43,0],[238,44,238,51,0],[240,13,240,71,0],[242,13,244,169,0],[245,9,245,10,0],[248,9,248,10,0],[249,13,249,33,0],[250,13,250,27,0],[252,13,252,36,0],[253,13,253,14,0],[254,17,254,70,0],[255,17,255,55,0],[255,55,255,85,0],[255,85,255,93,0],[256,13,256,14,0],[257,9,257,10,0],[260,9,260,10,0],[261,13,261,47,0],[262,17,262,24,0],[266,13,266,72,0],[267,17,267,42,0],[269,13,269,52,0],[270,13,270,14,0],[271,17,271,24,0],[271,26,271,41,0],[271,42,271,44,0],[271,45,271,69,0],[272,17,272,18,0],[273,21,273,119,0],[274,21,274,119,0],[276,21,276,50,0],[277,25,277,67,0],[278,17,278,18,0],[279,13,279,14,0],[281,13,285,15,0],[287,13,287,46,0],[287,46,287,78,0],[287,78,287,80,0],[288,13,288,35,0],[289,9,289,10,0],[291,66,291,116,0],[294,9,294,10,0],[295,13,295,71,0],[296,13,296,14,0],[297,17,297,26,0],[298,17,298,29,0],[301,13,301,38,0],[302,9,302,10,0],[305,9,305,10,0],[306,13,306,107,0],[307,17,307,30,0],[309,13,309,29,0],[310,13,310,25,0],[311,9,311,10,0],[316,9,316,10,0],[317,13,317,36,0],[318,13,318,14,0],[319,17,319,50,0],[320,17,320,29,0],[323,13,323,26,0],[324,9,324,10,0],[327,9,327,10,0],[328,13,328,28,0],[330,13,330,29,0],[332,13,332,102,0],[334,13,334,80,0],[335,9,335,10,0],[338,13,341,14,0],[344,9,344,10,0],[345,13,345,30,0],[346,13,346,44,0],[347,13,347,50,0],[349,13,349,36,0],[350,17,350,24,0],[352,13,352,46,0],[354,13,354,20,0],[354,22,354,27,0],[354,28,354,30,0],[354,31,354,49,0],[355,13,355,14,0],[356,17,356,50,0],[357,21,357,48,0],[359,17,359,56,0],[360,21,360,54,0],[361,13,361,14,0],[362,9,362,10,0]]);
+    </script>
+  </body>
+</html>

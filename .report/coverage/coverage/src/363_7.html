@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Ladder/LadderScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Caching;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Lines;
+using osu.Game.Tournament.Components;
+using osu.Game.Tournament.Models;
+using osu.Game.Tournament.Screens.Editors;
+using osu.Game.Tournament.Screens.Ladder.Components;
+using osuTK.Graphics;
+
+namespace osu.Game.Tournament.Screens.Ladder
+{
+    public partial class LadderScreen : TournamentScreen
+    {
+        protected Container&lt;DrawableTournamentMatch&gt; MatchesContainer = null!;
+        private Container&lt;Path&gt; paths = null!;
+        private Container headings = null!;
+
+        protected LadderDragContainer ScrollContent = null!;
+
+        protected Container Content = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            normalPathColour = Color4Extensions.FromHex(&quot;#66D1FF&quot;);
+            losersPathColour = Color4Extensions.FromHex(&quot;#FFC700&quot;);
+
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChild = Content = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Masking = true,
+                Children = new Drawable[]
+                {
+                    new TourneyVideo(&quot;ladder&quot;)
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Loop = true,
+                    },
+                    new DrawableTournamentHeaderText
+                    {
+                        Y = 100,
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                    },
+                    ScrollContent = new LadderDragContainer
+                    {
+                        AutoSizeAxes = Axes.Both,
+                        Children = new Drawable[]
+                        {
+                            paths = new Container&lt;Path&gt; { RelativeSizeAxes = Axes.Both },
+                            headings = new Container { RelativeSizeAxes = Axes.Both },
+                            MatchesContainer = new Container&lt;DrawableTournamentMatch&gt;
+                            {
+                                AutoSizeAxes = Axes.Both
+                            },
+                        }
+                    },
+                }
+            };
+
+            void addMatch(TournamentMatch match) =&gt;
+                MatchesContainer.Add(new DrawableTournamentMatch(match, this is LadderEditorScreen)
+                {
+                    Changed = () =&gt; layout.Invalidate()
+                });
+
+            foreach (var match in LadderInfo.Matches)
+                addMatch(match);
+
+            LadderInfo.Rounds.CollectionChanged += (_, _) =&gt; layout.Invalidate();
+            LadderInfo.Matches.CollectionChanged += (_, args) =&gt;
+            {
+                switch (args.Action)
+                {
+                    case NotifyCollectionChangedAction.Add:
+                        Debug.Assert(args.NewItems != null);
+
+                        foreach (var p in args.NewItems.Cast&lt;TournamentMatch&gt;())
+                            addMatch(p);
+                        break;
+
+                    case NotifyCollectionChangedAction.Remove:
+                        Debug.Assert(args.OldItems != null);
+
+                        foreach (var p in args.OldItems.Cast&lt;TournamentMatch&gt;())
+                        {
+                            foreach (var d in MatchesContainer.Where(d =&gt; d.Match == p))
+                                d.Expire();
+                        }
+
+                        break;
+                }
+
+                layout.Invalidate();
+            };
+        }
+
+        private readonly Cached layout = new Cached();
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!layout.IsValid)
+                UpdateLayout();
+        }
+
+        private Color4 normalPathColour;
+        private Color4 losersPathColour;
+
+        protected virtual bool DrawLoserPaths =&gt; false;
+
+        protected virtual void UpdateLayout()
+        {
+            paths.Clear();
+            headings.Clear();
+
+            int id = 1;
+
+            foreach (var match in MatchesContainer.OrderBy(d =&gt; d.Y).ThenBy(d =&gt; d.X))
+            {
+                match.Match.ID = id++;
+
+                if (match.Match.Progression.Value != null)
+                {
+                    var dest = MatchesContainer.FirstOrDefault(p =&gt; p.Match == match.Match.Progression.Value);
+
+                    if (dest == null)
+                        // clean up outdated progressions.
+                        match.Match.Progression.Value = null;
+                    else
+                        paths.Add(new ProgressionPath(match, dest) { Colour = match.Match.Losers.Value ? losersPathColour : normalPathColour });
+                }
+
+                if (DrawLoserPaths)
+                {
+                    if (match.Match.LosersProgression.Value != null)
+                    {
+                        var dest = MatchesContainer.FirstOrDefault(p =&gt; p.Match == match.Match.LosersProgression.Value);
+
+                        if (dest == null)
+                            // clean up outdated progressions.
+                            match.Match.LosersProgression.Value = null;
+                        else
+                            paths.Add(new ProgressionPath(match, dest) { Colour = losersPathColour.Opacity(0.1f) });
+                    }
+                }
+            }
+
+            foreach (var round in LadderInfo.Rounds)
+            {
+                var topMatch = MatchesContainer.Where(p =&gt; !p.Match.Losers.Value &amp;&amp; p.Match.Round.Value == round).MinBy(p =&gt; p.Y);
+
+                if (topMatch == null) continue;
+
+                headings.Add(new DrawableTournamentRound(round)
+                {
+                    Position = headings.ToLocalSpace((topMatch.ScreenSpaceDrawQuad.TopLeft + topMatch.ScreenSpaceDrawQuad.TopRight) / 2),
+                    Margin = new MarginPadding { Bottom = 10 },
+                    Origin = Anchor.BottomCentre,
+                });
+            }
+
+            foreach (var round in LadderInfo.Rounds)
+            {
+                var topMatch = MatchesContainer.Where(p =&gt; p.Match.Losers.Value &amp;&amp; p.Match.Round.Value == round).MinBy(p =&gt; p.Y);
+
+                if (topMatch == null) continue;
+
+                headings.Add(new DrawableTournamentRound(round, true)
+                {
+                    Position = headings.ToLocalSpace((topMatch.ScreenSpaceDrawQuad.TopLeft + topMatch.ScreenSpaceDrawQuad.TopRight) / 2),
+                    Margin = new MarginPadding { Bottom = 10 },
+                    Origin = Anchor.BottomCentre,
+                });
+            }
+
+            layout.Validate();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,9,23,79,0],[24,9,24,47,0],[25,9,25,44,0],[27,9,27,61,0],[29,9,29,45,0],[33,9,33,10,0],[34,13,34,68,0],[35,13,35,68,0],[37,13,37,42,0],[39,13,70,15,0],[73,17,75,37,0],[75,37,75,56,0],[75,56,76,19,0],[78,13,78,20,0],[78,22,78,31,0],[78,32,78,34,0],[78,35,78,53,0],[79,17,79,33,0],[81,13,81,62,0],[81,62,81,81,0],[81,81,81,82,0],[82,13,83,13,0],[83,13,83,14,0],[83,14,84,17,0],[84,17,84,37,0],[84,37,87,25,0],[87,25,87,61,0],[87,61,89,25,0],[89,25,89,32,0],[89,32,89,34,0],[89,34,89,39,0],[89,39,89,40,0],[89,40,89,42,0],[89,42,89,43,0],[89,43,89,80,0],[89,80,90,29,0],[90,29,90,41,0],[90,41,91,25,0],[91,25,91,31,0],[91,31,94,25,0],[94,25,94,61,0],[94,61,96,25,0],[96,25,96,32,0],[96,32,96,34,0],[96,34,96,39,0],[96,39,96,40,0],[96,40,96,42,0],[96,42,96,43,0],[96,43,96,80,0],[96,80,97,25,0],[97,25,97,26,0],[97,26,98,29,0],[98,29,98,36,0],[98,36,98,38,0],[98,38,98,43,0],[98,43,98,44,0],[98,44,98,46,0],[98,46,98,47,0],[98,47,98,75,0],[98,75,98,87,0],[98,87,98,88,0],[98,88,99,33,0],[99,33,99,44,0],[99,44,100,25,0],[100,25,100,26,0],[100,26,102,25,0],[102,25,102,31,0],[102,31,105,17,0],[105,17,105,37,0],[105,37,106,13,0],[106,13,106,14,0],[106,14,106,15,0],[107,9,107,10,0],[109,9,109,55,0],[112,9,112,10,0],[113,13,113,27,0],[115,13,115,33,0],[116,17,116,32,0],[117,9,117,10,0],[122,50,122,55,0],[125,9,125,10,0],[126,13,126,27,0],[127,13,127,30,0],[129,13,129,24,0],[131,13,131,20,0],[131,22,131,31,0],[131,32,131,34,0],[131,35,131,65,0],[131,65,131,68,0],[131,68,131,82,0],[131,82,131,85,0],[131,85,131,86,0],[132,13,132,14,0],[133,17,133,39,0],[135,17,135,59,0],[136,17,136,18,0],[137,21,137,69,0],[137,69,137,109,0],[137,109,137,111,0],[139,21,139,38,0],[141,25,141,62,0],[143,25,143,145,0],[144,17,144,18,0],[146,17,146,36,0],[147,17,147,18,0],[148,21,148,69,0],[149,21,149,22,0],[150,25,150,73,0],[150,73,150,119,0],[150,119,150,121,0],[152,25,152,42,0],[154,29,154,72,0],[156,29,156,117,0],[157,21,157,22,0],[158,17,158,18,0],[159,13,159,14,0],[161,13,161,20,0],[161,22,161,31,0],[161,32,161,34,0],[161,35,161,52,0],[162,13,162,14,0],[163,17,163,60,0],[163,60,163,113,0],[163,113,163,126,0],[163,126,163,129,0],[163,129,163,131,0],[165,17,165,38,0],[165,39,165,48,0],[167,17,172,20,0],[173,13,173,14,0],[175,13,175,20,0],[175,22,175,31,0],[175,32,175,34,0],[175,35,175,52,0],[176,13,176,14,0],[177,17,177,60,0],[177,60,177,112,0],[177,112,177,125,0],[177,125,177,128,0],[177,128,177,130,0],[179,17,179,38,0],[179,39,179,48,0],[181,17,186,20,0],[187,13,187,14,0],[189,13,189,31,0],[190,9,190,10,0]]);
+    </script>
+  </body>
+</html>

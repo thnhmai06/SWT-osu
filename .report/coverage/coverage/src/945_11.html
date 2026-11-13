@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/Skills/Aim.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Utils;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Skills;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Osu.Difficulty.Evaluators.Aim;
+using osu.Game.Rulesets.Osu.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Osu.Mods;
+using osu.Game.Rulesets.Osu.Objects;
+
+namespace osu.Game.Rulesets.Osu.Difficulty.Skills
+{
+    /// &lt;summary&gt;
+    /// Represents the skill required to correctly aim at every object in the map with a uniform CircleSize and normalized distances.
+    /// &lt;/summary&gt;
+    public class Aim : VariableLengthStrainSkill
+    {
+        public readonly bool IncludeSliders;
+
+        public Aim(Mod[] mods, bool includeSliders)
+            : base(mods)
+        {
+            IncludeSliders = includeSliders;
+        }
+
+        private double currentStrain;
+
+        private readonly List&lt;double&gt; sliderStrains = new List&lt;double&gt;();
+
+        private double strainDecay(double ms) =&gt; DiffUtils.Pow(0.2, ms / 1000);
+
+        protected override double CalculateInitialStrain(double time, DifficultyHitObject current) =&gt;
+            currentStrain * strainDecay(time - current.Previous().StartTime);
+
+        protected override double StrainValueAt(DifficultyHitObject current)
+        {
+            if (Mods.Any(m =&gt; m is OsuModAutopilot))
+                return 0;
+
+            double decay = strainDecay(((OsuDifficultyHitObject)current).AdjustedDeltaTime);
+
+            currentStrain *= decay;
+            currentStrain += calculateAdjustedDifficulty(current) * (1 - decay);
+
+            if (current.BaseObject is Slider)
+                sliderStrains.Add(currentStrain);
+
+            return currentStrain;
+        }
+
+        private double calculateAdjustedDifficulty(DifficultyHitObject current)
+        {
+            const double skill_multiplier_snap = 70.9;
+            const double skill_multiplier_agility = 2.35;
+            const double skill_multiplier_flow = 242.0;
+
+            double snapDifficulty = SnapAimEvaluator.EvaluateDifficultyOf(current, IncludeSliders) * skill_multiplier_snap;
+            double agilityDifficulty = AgilityEvaluator.EvaluateDifficultyOf(current) * skill_multiplier_agility;
+            double flowDifficulty = FlowAimEvaluator.EvaluateDifficultyOf(current, IncludeSliders) * skill_multiplier_flow;
+
+            double totalDifficulty = calculateTotalValue(snapDifficulty, agilityDifficulty, flowDifficulty);
+
+            if (Mods.Any(m =&gt; m is OsuModMagnetised))
+            {
+                float magnetisedStrength = Mods.OfType&lt;OsuModMagnetised&gt;().First().AttractionStrength.Value;
+                totalDifficulty *= 1.0 - magnetisedStrength;
+            }
+
+            totalDifficulty *= 0.985 + DiffUtils.Pow(Math.Max(0, ((OsuDifficultyHitObject)current).OverallDifficulty), 2) / 4000;
+
+            return totalDifficulty;
+        }
+
+        private double calculateTotalValue(double snapDifficulty, double agilityDifficulty, double flowDifficulty)
+        {
+            const double skill_multiplier_total = 1.12;
+            const double combined_snap_norm_exponent = 1.2;
+
+            // We compare flow to combined snap and agility because snap by itself doesn&#39;t have enough difficulty to be above flow on streams
+            // Agility on the other hand is supposed to measure the rate of cursor velocity changes while snapping
+            // So snapping every circle on a stream requires an enormous amount of agility at which point it&#39;s easier to flow
+            double combinedSnapDifficulty = DiffUtils.Norm(combined_snap_norm_exponent, snapDifficulty, agilityDifficulty);
+
+            double pSnap = calculateSnapFlowProbability(flowDifficulty / combinedSnapDifficulty);
+            double pFlow = 1 - pSnap;
+
+            if (Mods.Any(m =&gt; m is OsuModTouchDevice))
+            {
+                // we don&#39;t adjust agility here since agility represents TD difficulty in a decent enough way
+                snapDifficulty = DiffUtils.Pow(snapDifficulty, 0.89);
+                combinedSnapDifficulty = DiffUtils.Norm(combined_snap_norm_exponent, snapDifficulty, agilityDifficulty);
+            }
+
+            if (Mods.Any(m =&gt; m is OsuModRelax))
+            {
+                combinedSnapDifficulty *= 0.75;
+                flowDifficulty *= 0.6;
+            }
+
+            double totalDifficulty = combinedSnapDifficulty * pSnap + flowDifficulty * pFlow;
+
+            double totalStrain = totalDifficulty * skill_multiplier_total;
+
+            return totalStrain;
+        }
+
+        // A function that turns the ratio of snap : flow into the probability of snapping/flowing
+        // It has the constraints:
+        // P(snap) + P(flow) = 1 (the object is always either snapped or flowed)
+        // P(snap) = f(snap/flow), P(flow) = f(flow/snap) (ie snap and flow are symmetric and reversible)
+        // Therefore: f(x) + f(1/x) = 1
+        // 0 &lt;= f(x) &lt;= 1 (cannot have negative or greater than 100% probability of snapping or flowing)
+        // This logistic function is a solution, which fits nicely with the general idea of interpolation and provides a tuneable constant
+        private static double calculateSnapFlowProbability(double ratio)
+        {
+            const double k = 7.27;
+
+            if (ratio == 0)
+                return 0;
+
+            if (double.IsNaN(ratio))
+                return 1;
+
+            return DiffUtils.Logistic(-k * Math.Log(ratio));
+        }
+
+        public double GetDifficultSliders()
+        {
+            if (sliderStrains.Count == 0)
+                return 0;
+
+            double maxSliderStrain = sliderStrains.Max();
+
+            if (maxSliderStrain == 0)
+                return 0;
+
+            return sliderStrains.Sum(strain =&gt; DiffUtils.Logistic(strain / maxSliderStrain, 0.5, 12.0));
+        }
+
+        public double CountTopWeightedSliders(double difficultyValue)
+        {
+            if (sliderStrains.Count == 0)
+                return 0;
+
+            double consistentTopStrain = difficultyValue * (1 - DecayWeight); // What would the top strain be if all strain values were identical
+
+            if (consistentTopStrain == 0)
+                return 0;
+
+            // Use a weighted sum of all strains. Constants are arbitrary and give nice values
+            return sliderStrains.Sum(s =&gt; DiffUtils.Logistic(s / consistentTopStrain, 0.88, 10, 1.1));
+        }
+
+        public override double DifficultyValue()
+        {
+            double difficulty = 0;
+            double time = 0;
+
+            var strains = getReducedStrainPeaks();
+
+            // Difficulty is a continuous weighted sum of the sorted strains
+            foreach (StrainPeak strain in strains)
+            {
+                /* Weighting function can be thought of as:
+                        b
+                        ∫ DecayWeight^x dx
+                        a
+                    where a = startTime and b = endTime
+
+                    Technically, the function below has been slightly modified from the equation above.
+                    The real function would be
+                        double weight = DiffUtils.Pow(DecayWeight, startTime) - DiffUtils.Pow(DecayWeight, endTime);
+                        ...
+                        return difficulty / Math.Log(1 / DecayWeight);
+                    E.g. for a DecayWeight of 0.9, we&#39;re multiplying by 10 instead of 9.49122...
+
+                    This change makes it so that a map composed solely of MaxSectionLength chunks will have the exact same value when summed in this class and StrainSkill.
+                    Doing this ensures the relationship between strain values and difficulty values remains the same between the two classes.
+                */
+                double startTime = time;
+                double endTime = time + strain.SectionLength / MaxSectionLength;
+
+                double weight = DiffUtils.Pow(DecayWeight, startTime) - DiffUtils.Pow(DecayWeight, endTime);
+
+                difficulty += strain.Value * weight;
+                time = endTime;
+            }
+
+            return difficulty / (1 - DecayWeight);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a sorted enumerable of strain peaks with the highest values reduced.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;&lt;/returns&gt;
+        private IEnumerable&lt;StrainPeak&gt; getReducedStrainPeaks()
+        {
+            const int reduced_section_time = 4000;
+            const double reduced_strain_baseline = 0.727;
+
+            // Sections with 0 strain are excluded to avoid worst-case time complexity of the following sort (e.g. /b/2351871).
+            // These sections will not contribute to the difficulty.
+            List&lt;StrainPeak&gt; strains = GetCurrentStrainPeaks()
+                                       .Where(p =&gt; p.Value &gt; 0)
+                                       .ToList();
+
+            const int chunk_size = 20;
+            double time = 0;
+            int skipCount = 0;
+
+            // We are reducing the highest strains first to account for extreme difficulty spikes
+            // Strains are split into 20ms chunks to try to mitigate inconsistencies caused by reducing strains
+            while (strains.Count &gt; skipCount &amp;&amp; time &lt; reduced_section_time)
+            {
+                StrainPeak strain = strains[skipCount];
+
+                for (double addedTime = 0; addedTime &lt; strain.SectionLength; addedTime += chunk_size)
+                {
+                    double scale = Math.Log10(Interpolation.Lerp(1, 10, Math.Clamp((time + addedTime) / reduced_section_time, 0, 1)));
+
+                    // intentionally add at end and sort afterwards, should be cheaper.
+                    strains.Add(new StrainPeak(
+                        strain.Value * Interpolation.Lerp(reduced_strain_baseline, 1.0, scale),
+                        Math.Min(chunk_size, strain.SectionLength - addedTime)
+                    ));
+                }
+
+                time += strain.SectionLength;
+                skipCount++;
+            }
+
+            return strains.Skip(skipCount).OrderByDescending(p =&gt; p.Value);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,15,27,25,1],[28,9,28,10,1],[29,13,29,45,1],[30,9,30,10,1],[34,9,34,74,1],[36,50,36,79,1],[39,13,39,77,1],[42,9,42,10,1],[43,13,43,31,1],[43,31,43,51,1],[43,51,43,53,1],[44,17,44,26,1],[46,13,46,93,1],[48,13,48,36,1],[49,13,49,81,1],[51,13,51,46,1],[52,17,52,50,1],[54,13,54,34,1],[55,9,55,10,1],[58,9,58,10,1],[63,13,63,124,1],[64,13,64,114,1],[65,13,65,124,1],[67,13,67,109,1],[69,13,69,31,1],[69,31,69,52,1],[69,52,69,54,1],[70,13,70,14,1],[71,17,71,109,1],[72,17,72,61,1],[73,13,73,14,1],[75,13,75,130,1],[77,13,77,36,1],[78,9,78,10,1],[81,9,81,10,1],[88,13,88,124,1],[90,13,90,98,1],[91,13,91,38,1],[93,13,93,31,1],[93,31,93,53,1],[93,53,93,55,1],[94,13,94,14,1],[96,17,96,70,1],[97,17,97,121,1],[98,13,98,14,1],[100,13,100,31,1],[100,31,100,47,1],[100,47,100,49,1],[101,13,101,14,1],[102,17,102,48,1],[103,17,103,39,1],[104,13,104,14,1],[106,13,106,94,1],[108,13,108,75,1],[110,13,110,32,1],[111,9,111,10,1],[121,9,121,10,1],[124,13,124,28,1],[125,17,125,26,1],[127,13,127,37,1],[128,17,128,26,1],[130,13,130,61,1],[131,9,131,10,1],[134,9,134,10,1],[135,13,135,42,1],[136,17,136,26,1],[138,13,138,58,1],[140,13,140,38,1],[141,17,141,26,0],[143,13,143,48,1],[143,48,143,103,1],[143,103,143,105,1],[144,9,144,10,1],[147,9,147,10,1],[148,13,148,42,1],[149,17,149,26,1],[151,13,151,78,1],[153,13,153,42,1],[154,17,154,26,0],[157,13,157,43,1],[157,43,157,101,1],[157,101,157,103,1],[158,9,158,10,1],[161,9,161,10,1],[162,13,162,35,1],[163,13,163,29,1],[165,13,165,51,1],[168,13,168,20,1],[168,22,168,39,1],[168,40,168,42,1],[168,43,168,50,1],[169,13,169,14,1],[186,17,186,41,1],[187,17,187,81,1],[189,17,189,109,1],[191,17,191,53,1],[192,17,192,32,1],[193,13,193,14,1],[195,13,195,51,1],[196,9,196,10,1],[203,9,203,10,1],[209,13,210,52,1],[210,52,210,63,1],[210,63,211,50,1],[214,13,214,29,1],[215,13,215,31,1],[219,13,219,77,1],[220,13,220,14,1],[221,17,221,56,1],[223,22,223,42,1],[223,44,223,76,1],[223,78,223,101,1],[224,17,224,18,1],[225,21,225,135,1],[228,21,231,24,1],[232,17,232,18,1],[234,17,234,46,1],[235,17,235,29,1],[236,13,236,14,1],[238,13,238,67,1],[238,67,238,74,1],[238,74,238,76,1],[239,9,239,10,1]]);
+    </script>
+  </body>
+</html>

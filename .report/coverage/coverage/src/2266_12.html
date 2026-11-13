@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/Scrolling/Algorithms/SequentialScrollAlgorithm.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using JetBrains.Annotations;
+using osu.Game.Rulesets.Timing;
+
+namespace osu.Game.Rulesets.UI.Scrolling.Algorithms
+{
+    public class SequentialScrollAlgorithm : IScrollAlgorithm
+    {
+        private static readonly IComparer&lt;PositionMapping&gt; by_position_comparer = Comparer&lt;PositionMapping&gt;.Create((c1, c2) =&gt; c1.Position.CompareTo(c2.Position));
+
+        private readonly IReadOnlyList&lt;MultiplierControlPoint&gt; controlPoints;
+
+        /// &lt;summary&gt;
+        /// Stores a mapping of time -&gt; position for each control point.
+        /// &lt;/summary&gt;
+        private readonly List&lt;PositionMapping&gt; positionMappings = new List&lt;PositionMapping&gt;();
+
+        public SequentialScrollAlgorithm(IReadOnlyList&lt;MultiplierControlPoint&gt; controlPoints)
+        {
+            this.controlPoints = controlPoints;
+        }
+
+        public double GetDisplayStartTime(double originTime, float offset, double timeRange, float scrollLength)
+        {
+            return TimeAt(-(scrollLength + offset), originTime, timeRange, scrollLength);
+        }
+
+        public float GetLength(double startTime, double endTime, double timeRange, float scrollLength)
+        {
+            double objectLength = relativePositionAt(endTime, timeRange) - relativePositionAt(startTime, timeRange);
+            return (float)(objectLength * scrollLength);
+        }
+
+        public float PositionAt(double time, double currentTime, double timeRange, float scrollLength, double? originTime = null)
+        {
+            double timelineLength = relativePositionAt(time, timeRange) - relativePositionAt(currentTime, timeRange);
+            return (float)(timelineLength * scrollLength);
+        }
+
+        public double TimeAt(float position, double currentTime, double timeRange, float scrollLength)
+        {
+            if (controlPoints.Count == 0)
+                return position * timeRange;
+
+            // Find the position at the current time, and the given length.
+            double relativePosition = relativePositionAt(currentTime, timeRange) + position / scrollLength;
+
+            var positionMapping = findControlPointMapping(timeRange, new PositionMapping(0, null, relativePosition), by_position_comparer);
+
+            // Begin at the control point&#39;s time and add the remaining time to reach the given position.
+            return positionMapping.Time + (relativePosition - positionMapping.Position) * timeRange / positionMapping.ControlPoint.Multiplier;
+        }
+
+        public void Reset() =&gt; positionMappings.Clear();
+
+        /// &lt;summary&gt;
+        /// Finds the position which corresponds to a point in time.
+        /// This is a non-linear operation that depends on all the control points up to and including the one active at the time value.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the position at.&lt;/param&gt;
+        /// &lt;param name=&quot;timeRange&quot;&gt;The amount of time visualised by the scrolling area.&lt;/param&gt;
+        /// &lt;returns&gt;A positive value indicating the position at &lt;paramref name=&quot;time&quot;/&gt;.&lt;/returns&gt;
+        private double relativePositionAt(in double time, in double timeRange)
+        {
+            if (controlPoints.Count == 0)
+                return time / timeRange;
+
+            var mapping = findControlPointMapping(timeRange, new PositionMapping(time));
+
+            // Begin at the control point&#39;s position and add the remaining distance to reach the given time.
+            return mapping.Position + (time - mapping.Time) / timeRange * mapping.ControlPoint.Multiplier;
+        }
+
+        /// &lt;summary&gt;
+        /// Finds a &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt;&#39;s &lt;see cref=&quot;PositionMapping&quot;/&gt; that is relevant to a given &lt;see cref=&quot;PositionMapping&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is used to find the last &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt; occuring prior to a time value, or prior to a position value (if &lt;see cref=&quot;by_position_comparer&quot;/&gt; is used).
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;timeRange&quot;&gt;The time range.&lt;/param&gt;
+        /// &lt;param name=&quot;search&quot;&gt;The &lt;see cref=&quot;PositionMapping&quot;/&gt; to find the closest &lt;see cref=&quot;PositionMapping&quot;/&gt; to.&lt;/param&gt;
+        /// &lt;param name=&quot;comparer&quot;&gt;The comparison. If null, the default comparer is used (by time).&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt;&#39;s &lt;see cref=&quot;PositionMapping&quot;/&gt; that is relevant for &lt;paramref name=&quot;search&quot;/&gt;.&lt;/returns&gt;
+        private PositionMapping findControlPointMapping(in double timeRange, in PositionMapping search, IComparer&lt;PositionMapping&gt; comparer = null)
+        {
+            generatePositionMappings(timeRange);
+
+            int mappingIndex = positionMappings.BinarySearch(search, comparer ?? Comparer&lt;PositionMapping&gt;.Default);
+
+            if (mappingIndex &lt; 0)
+            {
+                // If the search value isn&#39;t found, the _next_ control point is returned, but we actually want the _previous_ control point.
+                // In doing so, we must make sure to not underflow the position mapping list (i.e. always use the 0th control point for time &lt; first_control_point_time).
+                mappingIndex = Math.Max(0, ~mappingIndex - 1);
+
+                Debug.Assert(mappingIndex &lt; positionMappings.Count);
+            }
+
+            var mapping = positionMappings[mappingIndex];
+            Debug.Assert(mapping.ControlPoint != null);
+
+            return mapping;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates the mapping of &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt; (and their respective start times) to their relative position from 0.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;timeRange&quot;&gt;The time range.&lt;/param&gt;
+        private void generatePositionMappings(in double timeRange)
+        {
+            if (positionMappings.Count &gt; 0)
+                return;
+
+            if (controlPoints.Count == 0)
+                return;
+
+            positionMappings.Add(new PositionMapping(controlPoints[0].Time, controlPoints[0]));
+
+            for (int i = 0; i &lt; controlPoints.Count - 1; i++)
+            {
+                var current = controlPoints[i];
+                var next = controlPoints[i + 1];
+
+                // Figure out how much of the time range the duration represents, and adjust it by the speed multiplier
+                float length = (float)((next.Time - current.Time) / timeRange * current.Multiplier);
+
+                positionMappings.Add(new PositionMapping(next.Time, next, positionMappings[^1].Position + length));
+            }
+        }
+
+        private readonly struct PositionMapping : IComparable&lt;PositionMapping&gt;
+        {
+            /// &lt;summary&gt;
+            /// The time corresponding to this position.
+            /// &lt;/summary&gt;
+            public readonly double Time;
+
+            /// &lt;summary&gt;
+            /// The &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt; at &lt;see cref=&quot;Time&quot;/&gt;.
+            /// &lt;/summary&gt;
+            [CanBeNull]
+            public readonly MultiplierControlPoint ControlPoint;
+
+            /// &lt;summary&gt;
+            /// The relative position from 0 of &lt;see cref=&quot;ControlPoint&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public readonly double Position;
+
+            public PositionMapping(double time, MultiplierControlPoint controlPoint = null, double position = 0)
+            {
+                Time = time;
+                ControlPoint = controlPoint;
+                Position = position;
+            }
+
+            public int CompareTo(PositionMapping other) =&gt; Time.CompareTo(other.Time);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[16,9,16,128,0],[16,128,16,162,0],[16,162,16,164,0],[23,9,23,95,0],[25,9,25,94,0],[26,9,26,10,0],[27,13,27,48,0],[28,9,28,10,0],[31,9,31,10,0],[32,13,32,90,0],[33,9,33,10,0],[36,9,36,10,0],[37,13,37,117,0],[38,13,38,57,0],[39,9,39,10,0],[42,9,42,10,0],[43,13,43,118,0],[44,13,44,59,0],[45,9,45,10,0],[48,9,48,10,0],[49,13,49,42,0],[50,17,50,45,0],[53,13,53,108,0],[55,13,55,140,0],[58,13,58,143,0],[59,9,59,10,0],[61,32,61,56,0],[71,9,71,10,0],[72,13,72,42,0],[73,17,73,41,0],[75,13,75,89,0],[78,13,78,107,0],[79,9,79,10,0],[92,9,92,10,0],[93,13,93,49,0],[95,13,95,117,0],[97,13,97,34,0],[98,13,98,14,0],[101,17,101,63,0],[103,17,103,69,0],[104,13,104,14,0],[106,13,106,58,0],[107,13,107,56,0],[109,13,109,28,0],[110,9,110,10,0],[117,9,117,10,0],[118,13,118,44,0],[119,17,119,24,0],[121,13,121,42,0],[122,17,122,24,0],[124,13,124,96,0],[126,18,126,27,0],[126,29,126,56,0],[126,58,126,61,0],[127,13,127,14,0],[128,17,128,48,0],[129,17,129,49,0],[132,17,132,101,0],[134,17,134,116,0],[135,13,135,14,0],[136,9,136,10,0],[157,13,157,14,0],[158,17,158,29,0],[159,17,159,45,0],[160,17,160,37,0],[161,13,161,14,0],[163,60,163,86,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/ScorePanel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Audio;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Scoring;
+using osu.Game.Screens.Ranking.Contracted;
+using osu.Game.Screens.Ranking.Expanded;
+using osu.Game.Users;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Ranking
+{
+    public partial class ScorePanel : CompositeDrawable, IStateful&lt;PanelState&gt;
+    {
+        /// &lt;summary&gt;
+        /// Width of the panel when contracted.
+        /// &lt;/summary&gt;
+        public const float CONTRACTED_WIDTH = 130;
+
+        /// &lt;summary&gt;
+        /// Height of the panel when contracted.
+        /// &lt;/summary&gt;
+        public const float CONTRACTED_HEIGHT = 385;
+
+        /// &lt;summary&gt;
+        /// Width of the panel when expanded.
+        /// &lt;/summary&gt;
+        public const float EXPANDED_WIDTH = 360;
+
+        /// &lt;summary&gt;
+        /// Height of the panel when expanded.
+        /// &lt;/summary&gt;
+        private const float expanded_height = 586;
+
+        /// &lt;summary&gt;
+        /// Height of the top layer when the panel is expanded.
+        /// &lt;/summary&gt;
+        public const float EXPANDED_TOP_LAYER_HEIGHT = 53;
+
+        /// &lt;summary&gt;
+        /// Height of the top layer when the panel is contracted.
+        /// &lt;/summary&gt;
+        private const float contracted_top_layer_height = 30;
+
+        /// &lt;summary&gt;
+        /// Duration for the panel to resize into its expanded/contracted size.
+        /// &lt;/summary&gt;
+        public const double RESIZE_DURATION = 200;
+
+        /// &lt;summary&gt;
+        /// Delay after &lt;see cref=&quot;RESIZE_DURATION&quot;/&gt; before the top layer is expanded.
+        /// &lt;/summary&gt;
+        public const double TOP_LAYER_EXPAND_DELAY = 100;
+
+        /// &lt;summary&gt;
+        /// Duration for the top layer expansion.
+        /// &lt;/summary&gt;
+        private const double top_layer_expand_duration = 200;
+
+        /// &lt;summary&gt;
+        /// Duration for the panel contents to fade in.
+        /// &lt;/summary&gt;
+        private const double content_fade_duration = 50;
+
+        private static readonly ColourInfo expanded_top_layer_colour = ColourInfo.GradientVertical(Color4Extensions.FromHex(&quot;#444&quot;), Color4Extensions.FromHex(&quot;#333&quot;));
+        private static readonly ColourInfo expanded_middle_layer_colour = ColourInfo.GradientVertical(Color4Extensions.FromHex(&quot;#555&quot;), Color4Extensions.FromHex(&quot;#333&quot;));
+        private static readonly Color4 contracted_top_layer_colour = Color4Extensions.FromHex(&quot;#353535&quot;);
+        private static readonly Color4 contracted_middle_layer_colour = Color4Extensions.FromHex(&quot;#353535&quot;);
+
+        public event Action&lt;PanelState&gt;? StateChanged;
+
+        /// &lt;summary&gt;
+        /// The position of the score in the rankings.
+        /// &lt;/summary&gt;
+        public readonly Bindable&lt;int?&gt; ScorePosition = new Bindable&lt;int?&gt;();
+
+        /// &lt;summary&gt;
+        /// An action to be invoked if this &lt;see cref=&quot;ScorePanel&quot;/&gt; is clicked while in an expanded state.
+        /// &lt;/summary&gt;
+        public Action? PostExpandAction;
+
+        public readonly ScoreInfo Score;
+
+        [Resolved]
+        private OsuGameBase game { get; set; } = null!;
+
+        private AudioContainer audioContent = null!;
+
+        private bool displayWithFlair;
+
+        private Container topLayerContainer = null!;
+        private Drawable topLayerBackground = null!;
+        private Container topLayerContentContainer = null!;
+        private Drawable? topLayerContent;
+
+        private Container middleLayerContainer = null!;
+        private Drawable middleLayerBackground = null!;
+        private Container middleLayerContentContainer = null!;
+        private Drawable? middleLayerContent;
+
+        private ScorePanelTrackingContainer? trackingContainer;
+
+        private DrawableSample? samplePanelFocus;
+
+        public ScorePanel(ScoreInfo score, bool isNewLocalScore = false)
+        {
+            Score = score;
+            displayWithFlair = isNewLocalScore;
+
+            ScorePosition.Value = score.Position;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            // ScorePanel doesn&#39;t include the top extruding area in its own size.
+            // Adding a manual offset here allows the expanded version to take on an &quot;acceptable&quot; vertical centre when at 100% UI scale.
+            const float vertical_fudge = 20;
+
+            InternalChild = audioContent = new AudioContainer
+            {
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                Size = new Vector2(40),
+                Y = vertical_fudge,
+                Children = new Drawable[]
+                {
+                    topLayerContainer = new Container
+                    {
+                        Name = &quot;Top layer&quot;,
+                        RelativeSizeAxes = Axes.X,
+                        Alpha = 0,
+                        Height = 120,
+                        Children = new Drawable[]
+                        {
+                            new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                CornerRadius = 20,
+                                CornerExponent = 2.5f,
+                                Masking = true,
+                                Child = topLayerBackground = new Box { RelativeSizeAxes = Axes.Both }
+                            },
+                            topLayerContentContainer = new Container { RelativeSizeAxes = Axes.Both }
+                        }
+                    },
+                    middleLayerContainer = new Container
+                    {
+                        Name = &quot;Middle layer&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        Children = new Drawable[]
+                        {
+                            new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                CornerRadius = 20,
+                                CornerExponent = 2.5f,
+                                Masking = true,
+                                Children = new[]
+                                {
+                                    middleLayerBackground = new Box { RelativeSizeAxes = Axes.Both },
+                                    new UserCoverBackground
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        User = Score.User,
+                                        Colour = ColourInfo.GradientVertical(Color4.White.Opacity(0.5f), Color4Extensions.FromHex(&quot;#444&quot;).Opacity(0))
+                                    }
+                                }
+                            },
+                            middleLayerContentContainer = new Container { RelativeSizeAxes = Axes.Both }
+                        }
+                    },
+                    samplePanelFocus = new DrawableSample(audio.Samples.Get(@&quot;Results/score-panel-focus&quot;))
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            updateState();
+
+            topLayerBackground.FinishTransforms(false, nameof(Colour));
+            middleLayerBackground.FinishTransforms(false, nameof(Colour));
+        }
+
+        private PanelState state = PanelState.Contracted;
+
+        public PanelState State
+        {
+            get =&gt; state;
+            set
+            {
+                if (state == value)
+                    return;
+
+                state = value;
+
+                if (IsLoaded)
+                {
+                    updateState();
+
+                    if (value == PanelState.Expanded)
+                        playAppearSample();
+                }
+
+                StateChanged?.Invoke(value);
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+            audioContent.Balance.Value = (Math.Clamp(ScreenSpaceDrawQuad.Centre.X / game.ScreenSpaceDrawQuad.Width, -1, 1) * 2 - 1) * OsuGameBase.SFX_STEREO_STRENGTH;
+        }
+
+        private void playAppearSample()
+        {
+            var channel = samplePanelFocus?.GetChannel();
+            if (channel == null) return;
+
+            channel.Frequency.Value = 0.99 + RNG.NextDouble(0.2);
+            channel.Play();
+        }
+
+        private void updateState()
+        {
+            topLayerContent?.FadeOut(content_fade_duration).Expire();
+            middleLayerContent?.FadeOut(content_fade_duration).Expire();
+
+            switch (state)
+            {
+                case PanelState.Expanded:
+                    Size = new Vector2(EXPANDED_WIDTH, expanded_height);
+
+                    topLayerBackground.FadeColour(expanded_top_layer_colour, RESIZE_DURATION, Easing.OutQuint);
+                    middleLayerBackground.FadeColour(expanded_middle_layer_colour, RESIZE_DURATION, Easing.OutQuint);
+
+                    bool firstLoad = topLayerContent == null;
+                    topLayerContentContainer.Add(topLayerContent = new ExpandedPanelTopContent(Score.User, firstLoad) { Alpha = 0 });
+                    middleLayerContentContainer.Add(middleLayerContent = new ExpandedPanelMiddleContent(Score, displayWithFlair) { Alpha = 0 });
+
+                    // only the first expanded display should happen with flair.
+                    displayWithFlair = false;
+                    break;
+
+                case PanelState.Contracted:
+                    Size = new Vector2(CONTRACTED_WIDTH, CONTRACTED_HEIGHT);
+
+                    topLayerBackground.FadeColour(contracted_top_layer_colour, RESIZE_DURATION, Easing.OutQuint);
+                    middleLayerBackground.FadeColour(contracted_middle_layer_colour, RESIZE_DURATION, Easing.OutQuint);
+
+                    topLayerContentContainer.Add(topLayerContent = new ContractedPanelTopContent
+                    {
+                        ScorePosition = { BindTarget = ScorePosition },
+                        Alpha = 0
+                    });
+
+                    middleLayerContentContainer.Add(middleLayerContent = new ContractedPanelMiddleContent(Score) { Alpha = 0 });
+                    break;
+            }
+
+            audioContent.ResizeTo(Size, RESIZE_DURATION, Easing.OutQuint);
+
+            bool topLayerExpanded = topLayerContainer.Y &lt; 0;
+
+            // If the top layer was already expanded, then we don&#39;t need to wait for the resize and can instead transform immediately. This looks better when changing the panel state.
+            using (BeginDelayedSequence(topLayerExpanded ? 0 : RESIZE_DURATION + TOP_LAYER_EXPAND_DELAY))
+            {
+                topLayerContainer.FadeIn();
+
+                switch (state)
+                {
+                    case PanelState.Expanded:
+                        topLayerContainer.MoveToY(-EXPANDED_TOP_LAYER_HEIGHT / 2, top_layer_expand_duration, Easing.OutQuint);
+                        middleLayerContainer.MoveToY(EXPANDED_TOP_LAYER_HEIGHT / 2, top_layer_expand_duration, Easing.OutQuint);
+                        break;
+
+                    case PanelState.Contracted:
+                        topLayerContainer.MoveToY(-contracted_top_layer_height / 2, top_layer_expand_duration, Easing.OutQuint);
+                        middleLayerContainer.MoveToY(contracted_top_layer_height / 2, top_layer_expand_duration, Easing.OutQuint);
+                        break;
+                }
+
+                topLayerContent?.FadeIn(content_fade_duration);
+                middleLayerContent?.FadeIn(content_fade_duration);
+            }
+        }
+
+        public override Vector2 Size
+        {
+            get =&gt; base.Size;
+            set
+            {
+                base.Size = value;
+
+                // Auto-size isn&#39;t used to avoid 1-frame issues and because the score panel is removed/re-added to the container.
+                trackingContainer?.Size = value;
+            }
+        }
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            if (State == PanelState.Contracted)
+            {
+                State = PanelState.Expanded;
+                return true;
+            }
+
+            PostExpandAction?.Invoke();
+
+            return true;
+        }
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+            =&gt; base.ReceivePositionalInputAt(screenSpacePos)
+               || topLayerContainer.ReceivePositionalInputAt(screenSpacePos)
+               || middleLayerContainer.ReceivePositionalInputAt(screenSpacePos);
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt; which this &lt;see cref=&quot;ScorePanel&quot;/&gt; can reside inside.
+        /// The &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt; will track the size of this &lt;see cref=&quot;ScorePanel&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This &lt;see cref=&quot;ScorePanel&quot;/&gt; is immediately added as a child of the &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt;.&lt;/returns&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If a &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt; already exists.&lt;/exception&gt;
+        public ScorePanelTrackingContainer CreateTrackingContainer()
+        {
+            if (trackingContainer != null)
+                throw new InvalidOperationException(&quot;A score panel container has already been created.&quot;);
+
+            return trackingContainer = new ScorePanelTrackingContainer(this);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[78,9,78,168,0],[79,9,79,171,0],[80,9,80,106,0],[81,9,81,109,0],[88,9,88,77,0],[98,36,98,40,0],[98,41,98,45,0],[98,50,98,55,0],[100,9,100,53,0],[104,9,104,53,0],[105,9,105,53,0],[106,9,106,60,0],[109,9,109,56,0],[110,9,110,56,0],[111,9,111,63,0],[118,9,118,73,0],[119,9,119,10,0],[120,13,120,27,0],[121,13,121,48,0],[123,13,123,50,0],[124,9,124,10,0],[128,9,128,10,0],[133,13,188,15,0],[189,9,189,10,0],[192,9,192,10,0],[193,13,193,33,0],[195,13,195,27,0],[197,13,197,72,0],[198,13,198,75,0],[199,9,199,10,0],[201,9,201,58,0],[205,20,205,25,0],[207,13,207,14,0],[208,17,208,36,0],[209,21,209,28,0],[211,17,211,31,0],[213,17,213,30,0],[214,17,214,18,0],[215,21,215,35,0],[217,21,217,54,0],[218,25,218,44,0],[219,17,219,18,0],[221,17,221,45,0],[222,13,222,14,0],[226,9,226,10,0],[227,13,227,27,0],[228,13,228,167,0],[229,9,229,10,0],[232,9,232,10,0],[233,13,233,58,0],[234,13,234,33,0],[234,34,234,41,0],[236,13,236,66,0],[237,13,237,28,0],[238,9,238,10,0],[241,9,241,10,0],[242,13,242,70,0],[243,13,243,73,0],[245,13,245,27,0],[248,21,248,73,0],[250,21,250,112,0],[251,21,251,118,0],[253,21,253,62,0],[254,21,254,134,0],[255,21,255,145,0],[258,21,258,46,0],[259,21,259,27,0],[262,21,262,77,0],[264,21,264,114,0],[265,21,265,120,0],[267,21,271,24,0],[273,21,273,129,0],[274,21,274,27,0],[277,13,277,75,0],[279,13,279,61,0],[282,13,282,106,0],[283,13,283,14,0],[284,17,284,44,0],[286,17,286,31,0],[289,25,289,127,0],[290,25,290,129,0],[291,25,291,31,0],[294,25,294,129,0],[295,25,295,131,0],[296,25,296,31,0],[299,17,299,64,0],[300,17,300,67,0],[301,13,301,14,0],[302,9,302,10,0],[306,20,306,29,0],[308,13,308,14,0],[309,17,309,35,0],[312,17,312,49,0],[313,13,313,14,0],[317,9,317,10,0],[318,13,318,48,0],[319,13,319,14,0],[320,17,320,45,0],[321,17,321,29,0],[324,13,324,40,0],[326,13,326,25,0],[327,9,327,10,0],[330,16,332,80,0],[344,9,344,10,0],[345,13,345,43,0],[346,17,346,106,0],[348,13,348,78,0],[349,9,349,10,0]]);
+    </script>
+  </body>
+</html>

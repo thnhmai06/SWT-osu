@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/UserInterface/FPSCounter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Platform;
+using osu.Framework.Timing;
+using osu.Framework.Utils;
+using osu.Game.Configuration;
+using osu.Game.Graphics.Sprites;
+using osuTK;
+
+namespace osu.Game.Graphics.UserInterface
+{
+    public partial class FPSCounter : VisibilityContainer, IHasCustomTooltip
+    {
+        private OsuSpriteText counterUpdateFrameTime = null!;
+        private OsuSpriteText counterDrawFPS = null!;
+
+        private Container mainContent = null!;
+
+        private Container background = null!;
+
+        private Container counters = null!;
+
+        private const double min_time_between_updates = 10;
+
+        private const double spike_time_ms = 20;
+
+        private const float idle_background_alpha = 0.4f;
+
+        private readonly BindableBool showFpsDisplay = new BindableBool(true);
+
+        private double displayedFpsCount;
+        private double displayedFrameTime;
+
+        private bool isDisplayed;
+
+        private double aimDrawFPS;
+        private double aimUpdateFPS;
+
+        private double lastUpdate;
+        private ThrottledFrameClock drawClock = null!;
+        private ThrottledFrameClock updateClock = null!;
+        private ThrottledFrameClock inputClock = null!;
+
+        /// &lt;summary&gt;
+        /// The last time value where the display was required (due to a significant change or hovering).
+        /// &lt;/summary&gt;
+        private double lastDisplayRequiredTime;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        public FPSCounter()
+        {
+            AutoSizeAxes = Axes.Both;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config, GameHost gameHost)
+        {
+            InternalChildren = new Drawable[]
+            {
+                mainContent = new Container
+                {
+                    Alpha = 0,
+                    Height = 26,
+                    Children = new Drawable[]
+                    {
+                        background = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            CornerRadius = 5,
+                            CornerExponent = 5f,
+                            Masking = true,
+                            Alpha = idle_background_alpha,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    Colour = colours.Gray0,
+                                    RelativeSizeAxes = Axes.Both,
+                                },
+                            }
+                        },
+                        counters = new Container
+                        {
+                            Anchor = Anchor.TopRight,
+                            Origin = Anchor.TopRight,
+                            AutoSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                counterUpdateFrameTime = new OsuSpriteText
+                                {
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    Margin = new MarginPadding(1),
+                                    Font = OsuFont.Default.With(fixedWidth: true, size: 16, weight: FontWeight.SemiBold),
+                                    Spacing = new Vector2(-1),
+                                    Y = -2,
+                                },
+                                counterDrawFPS = new OsuSpriteText
+                                {
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    Margin = new MarginPadding(2),
+                                    Font = OsuFont.Default.With(fixedWidth: true, size: 13, weight: FontWeight.SemiBold),
+                                    Spacing = new Vector2(-2),
+                                    Y = 10,
+                                }
+                            }
+                        },
+                    }
+                },
+            };
+
+            config.BindWith(OsuSetting.ShowFpsDisplay, showFpsDisplay);
+
+            drawClock = gameHost.DrawThread.Clock;
+            updateClock = gameHost.UpdateThread.Clock;
+            inputClock = gameHost.InputThread.Clock;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            requestDisplay();
+
+            showFpsDisplay.BindValueChanged(showFps =&gt;
+            {
+                State.Value = showFps.NewValue ? Visibility.Visible : Visibility.Hidden;
+                if (showFps.NewValue)
+                    requestDisplay();
+            }, true);
+
+            State.BindValueChanged(state =&gt; showFpsDisplay.Value = state.NewValue == Visibility.Visible);
+        }
+
+        protected override void PopIn() =&gt; this.FadeIn(100);
+
+        protected override void PopOut() =&gt; this.FadeOut(100);
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            background.FadeTo(1, 200);
+            requestDisplay();
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            background.FadeTo(idle_background_alpha, 200);
+            requestDisplay();
+            base.OnHoverLost(e);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            double elapsedDrawFrameTime = drawClock.ElapsedFrameTime;
+            double elapsedUpdateFrameTime = updateClock.ElapsedFrameTime;
+
+            // If the game goes into a suspended state (ie. debugger attached or backgrounded on a mobile device)
+            // we want to ignore really long periods of no processing.
+            if (elapsedUpdateFrameTime &gt; 10000)
+                return;
+
+            mainContent.Width = Math.Max(mainContent.Width, counters.DrawWidth);
+
+            // Handle the case where the window has become inactive or the user changed the
+            // frame limiter (we want to show the FPS as it&#39;s changing, even if it isn&#39;t an outlier).
+            bool aimRatesChanged = updateAimFPS();
+
+            bool hasUpdateSpike = displayedFrameTime &lt; spike_time_ms &amp;&amp; elapsedUpdateFrameTime &gt; spike_time_ms;
+            // use elapsed frame time rather then FramesPerSecond to better catch stutter frames.
+            bool hasDrawSpike = displayedFpsCount &gt; (1000 / spike_time_ms) &amp;&amp; elapsedDrawFrameTime &gt; spike_time_ms;
+
+            const float damp_time = 100;
+
+            displayedFrameTime = Interpolation.DampContinuously(displayedFrameTime, elapsedUpdateFrameTime, hasUpdateSpike ? 0 : damp_time, elapsedUpdateFrameTime);
+
+            if (hasDrawSpike)
+                // show spike time using raw elapsed value, to account for `FramesPerSecond` being so averaged spike frames don&#39;t show.
+                displayedFpsCount = 1000 / elapsedDrawFrameTime;
+            else
+                displayedFpsCount = Interpolation.DampContinuously(displayedFpsCount, drawClock.FramesPerSecond, damp_time, Time.Elapsed);
+
+            if (Time.Current - lastUpdate &gt; min_time_between_updates)
+            {
+                updateFpsDisplay();
+                updateFrameTimeDisplay();
+
+                lastUpdate = Time.Current;
+            }
+
+            bool hasSignificantChanges = aimRatesChanged
+                                         || hasDrawSpike
+                                         || hasUpdateSpike
+                                         || displayedFpsCount &lt; aimDrawFPS * 0.8
+                                         || 1000 / displayedFrameTime &lt; aimUpdateFPS * 0.8;
+
+            if (hasSignificantChanges)
+                requestDisplay();
+            else if (isDisplayed &amp;&amp; Time.Current - lastDisplayRequiredTime &gt; 2000 &amp;&amp; !IsHovered)
+            {
+                mainContent.FadeTo(0.7f, 300, Easing.OutQuint);
+                isDisplayed = false;
+            }
+        }
+
+        private void requestDisplay()
+        {
+            lastDisplayRequiredTime = Time.Current;
+
+            if (!isDisplayed)
+            {
+                mainContent.FadeTo(1, 300, Easing.OutQuint);
+                isDisplayed = true;
+            }
+        }
+
+        private void updateFpsDisplay()
+        {
+            counterDrawFPS.Colour = getColour(displayedFpsCount / aimDrawFPS);
+            counterDrawFPS.Text = $&quot;{displayedFpsCount:#,0} fps&quot;;
+        }
+
+        private void updateFrameTimeDisplay()
+        {
+            counterUpdateFrameTime.Text = displayedFrameTime &lt; 5
+                ? $&quot;{displayedFrameTime:N1} ms&quot;
+                : $&quot;{displayedFrameTime:N0} ms&quot;;
+
+            counterUpdateFrameTime.Colour = getColour((1000 / displayedFrameTime) / aimUpdateFPS);
+        }
+
+        private bool updateAimFPS()
+        {
+            if (updateClock.Throttling)
+            {
+                double newAimDrawFPS = drawClock.MaximumUpdateHz;
+                double newAimUpdateFPS = updateClock.MaximumUpdateHz;
+
+                if (aimDrawFPS != newAimDrawFPS || aimUpdateFPS != newAimUpdateFPS)
+                {
+                    aimDrawFPS = newAimDrawFPS;
+                    aimUpdateFPS = newAimUpdateFPS;
+                    return true;
+                }
+            }
+            else
+            {
+                double newAimFPS = inputClock.MaximumUpdateHz;
+
+                if (aimDrawFPS != newAimFPS || aimUpdateFPS != newAimFPS)
+                {
+                    aimUpdateFPS = aimDrawFPS = newAimFPS;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private ColourInfo getColour(double performanceRatio)
+        {
+            if (performanceRatio &lt; 0.5f)
+                return Interpolation.ValueAt(performanceRatio, colours.Red, colours.Orange2, 0, 0.5);
+
+            return Interpolation.ValueAt(performanceRatio, colours.Orange2, colours.Lime0, 0.5, 0.9);
+        }
+
+        public ITooltip GetCustomTooltip() =&gt; new FPSCounterTooltip();
+
+        public object TooltipContent =&gt; this;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,62,0],[25,9,25,54,0],[27,9,27,47,0],[29,9,29,46,0],[31,9,31,44,0],[39,9,39,79,0],[50,9,50,55,0],[51,9,51,57,0],[52,9,52,56,0],[60,37,60,41,0],[60,42,60,46,0],[60,51,60,56,0],[62,9,62,28,0],[63,9,63,10,0],[64,13,64,38,0],[65,9,65,10,0],[69,9,69,10,0],[70,13,123,15,0],[125,13,125,72,0],[127,13,127,51,0],[128,13,128,55,0],[129,13,129,53,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,33,0],[136,13,136,30,0],[138,13,139,13,0],[139,13,139,14,0],[139,14,140,17,0],[140,17,140,89,0],[140,89,141,17,0],[141,17,141,38,0],[141,38,142,21,0],[142,21,142,38,0],[142,38,143,13,0],[143,13,143,14,0],[143,14,143,22,0],[145,13,145,45,0],[145,45,145,104,0],[145,104,145,106,0],[146,9,146,10,0],[148,44,148,60,0],[150,45,150,62,0],[153,9,153,10,0],[154,13,154,39,0],[155,13,155,30,0],[156,13,156,36,0],[157,9,157,10,0],[160,9,160,10,0],[161,13,161,59,0],[162,13,162,30,0],[163,13,163,33,0],[164,9,164,10,0],[167,9,167,10,0],[168,13,168,27,0],[170,13,170,70,0],[171,13,171,74,0],[175,13,175,48,0],[176,17,176,24,0],[178,13,178,81,0],[182,13,182,51,0],[184,13,184,112,0],[186,13,186,116,0],[190,13,190,165,0],[192,13,192,30,0],[194,17,194,65,0],[196,17,196,139,0],[198,13,198,70,0],[199,13,199,14,0],[200,17,200,36,0],[201,17,201,42,0],[203,17,203,43,0],[204,13,204,14,0],[206,13,210,92,0],[212,13,212,39,0],[213,17,213,34,0],[214,18,214,97,0],[215,13,215,14,0],[216,17,216,64,0],[217,17,217,37,0],[218,13,218,14,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,52,0],[225,13,225,30,0],[226,13,226,14,0],[227,17,227,61,0],[228,17,228,36,0],[229,13,229,14,0],[230,9,230,10,0],[233,9,233,10,0],[234,13,234,79,0],[235,13,235,66,0],[236,9,236,10,0],[239,9,239,10,0],[240,13,242,49,0],[244,13,244,99,0],[245,9,245,10,0],[248,9,248,10,0],[249,13,249,40,0],[250,13,250,14,0],[251,17,251,66,0],[252,17,252,70,0],[254,17,254,84,0],[255,17,255,18,0],[256,21,256,48,0],[257,21,257,52,0],[258,21,258,33,0],[260,13,260,14,0],[262,13,262,14,0],[263,17,263,63,0],[265,17,265,74,0],[266,17,266,18,0],[267,21,267,59,0],[268,21,268,33,0],[270,13,270,14,0],[272,13,272,26,0],[273,9,273,10,0],[276,9,276,10,0],[277,13,277,41,0],[278,17,278,102,0],[280,13,280,102,0],[281,9,281,10,0],[283,47,283,70,0],[285,41,285,45,0]]);
+    </script>
+  </body>
+</html>

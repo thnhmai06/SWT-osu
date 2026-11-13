@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/BeatmapSet/Scores/ScoresContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Game.Beatmaps;
+using osu.Game.Extensions;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play.Leaderboards;
+using osuTK;
+using APIUser = osu.Game.Online.API.Requests.Responses.APIUser;
+
+namespace osu.Game.Overlays.BeatmapSet.Scores
+{
+    public partial class ScoresContainer : BeatmapSetLayoutSection
+    {
+        private const int spacing = 15;
+
+        public readonly Bindable&lt;APIBeatmap&gt; Beatmap = new Bindable&lt;APIBeatmap&gt;();
+        private readonly Bindable&lt;IRulesetInfo&gt; ruleset = new Bindable&lt;IRulesetInfo&gt;();
+        private readonly Bindable&lt;BeatmapLeaderboardScope&gt; scope = new Bindable&lt;BeatmapLeaderboardScope&gt;(BeatmapLeaderboardScope.Global);
+        private readonly IBindable&lt;APIUser&gt; user = new Bindable&lt;APIUser&gt;();
+
+        private readonly Box background;
+        private readonly ScoreTable scoreTable;
+        private readonly FillFlowContainer topScoresContainer;
+        private readonly LoadingLayer loading;
+        private readonly LeaderboardModSelector modSelector;
+        private readonly NoScoresPlaceholder noScoresPlaceholder;
+        private readonly NotSupporterPlaceholder notSupporterPlaceholder;
+        private readonly NoTeamPlaceholder noTeamPlaceholder;
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; }
+
+        private GetScoresRequest getScoresRequest;
+
+        private CancellationTokenSource loadCancellationSource;
+
+        protected APIScoresCollection Scores
+        {
+            set =&gt; Schedule(() =&gt;
+            {
+                loadCancellationSource?.Cancel();
+                loadCancellationSource = new CancellationTokenSource();
+
+                topScoresContainer.Clear();
+                scoreTable.ClearScores();
+                scoreTable.Hide();
+
+                loading.Hide();
+                loading.FinishTransforms();
+
+                if (value?.Scores.Any() != true)
+                    return;
+
+                var apiBeatmap = Beatmap.Value;
+
+                Debug.Assert(apiBeatmap != null);
+
+                // TODO: temporary. should be removed once `OrderByTotalScore` can accept `IScoreInfo`.
+                var beatmapInfo = new BeatmapInfo
+                {
+#pragma warning disable 618
+                    MaxCombo = apiBeatmap.MaxCombo,
+#pragma warning restore 618
+                    Status = apiBeatmap.Status,
+                    MD5Hash = apiBeatmap.MD5Hash
+                };
+
+                var scores = value.Scores.Select(s =&gt; s.ToScoreInfo(rulesets, beatmapInfo)).OrderByTotalScore().ToArray();
+                var topScore = scores.First();
+
+                scoreTable.DisplayScores(scores, apiBeatmap.Status.GrantsPerformancePoints());
+                scoreTable.Show();
+
+                var userScore = value.UserScore;
+                var userScoreInfo = userScore?.Score.ToScoreInfo(rulesets, beatmapInfo);
+
+                topScoresContainer.Add(new DrawableTopScore(topScore));
+
+                if (userScoreInfo != null &amp;&amp; userScoreInfo.OnlineID != topScore.OnlineID)
+                    topScoresContainer.Add(new DrawableTopScore(userScoreInfo, userScore.Position));
+            });
+        }
+
+        public ScoresContainer()
+        {
+            AddRange(new Drawable[]
+            {
+                background = new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
+                new FillFlowContainer
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Direction = FillDirection.Vertical,
+                    Padding = new MarginPadding { Horizontal = WaveOverlayContainer.HORIZONTAL_PADDING },
+                    Margin = new MarginPadding { Vertical = 20 },
+                    Children = new Drawable[]
+                    {
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(0, spacing),
+                            Children = new Drawable[]
+                            {
+                                new LeaderboardScopeSelector
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Current = { BindTarget = scope }
+                                },
+                                modSelector = new LeaderboardModSelector
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Ruleset = { BindTarget = ruleset }
+                                }
+                            }
+                        },
+                        new Container
+                        {
+                            AutoSizeAxes = Axes.Y,
+                            RelativeSizeAxes = Axes.X,
+                            Margin = new MarginPadding { Top = spacing },
+                            Children = new Drawable[]
+                            {
+                                noScoresPlaceholder = new NoScoresPlaceholder
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Alpha = 0,
+                                    AlwaysPresent = true,
+                                    Margin = new MarginPadding { Vertical = 10 }
+                                },
+                                noTeamPlaceholder = new NoTeamPlaceholder
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Margin = new MarginPadding { Vertical = 10 },
+                                    Alpha = 0,
+                                },
+                                notSupporterPlaceholder = new NotSupporterPlaceholder
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Margin = new MarginPadding { Vertical = 10 },
+                                    Alpha = 0,
+                                },
+                                new FillFlowContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Direction = FillDirection.Vertical,
+                                    Spacing = new Vector2(0, spacing),
+                                    Children = new Drawable[]
+                                    {
+                                        topScoresContainer = new FillFlowContainer
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            AutoSizeAxes = Axes.Y,
+                                            Direction = FillDirection.Vertical,
+                                            Spacing = new Vector2(0, 5),
+                                        },
+                                        scoreTable = new ScoreTable
+                                        {
+                                            Anchor = Anchor.TopCentre,
+                                            Origin = Anchor.TopCentre,
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    },
+                },
+                loading = new LoadingLayer()
+            });
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider)
+        {
+            background.Colour = colourProvider.Background5;
+
+            user.BindTo(api.LocalUser);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            scope.BindValueChanged(_ =&gt; getScores());
+            ruleset.BindValueChanged(_ =&gt; getScores());
+
+            modSelector.SelectedMods.CollectionChanged += (_, _) =&gt; getScores();
+
+            Beatmap.BindValueChanged(onBeatmapChanged);
+            user.BindValueChanged(onUserChanged, true);
+        }
+
+        private void onBeatmapChanged(ValueChangedEvent&lt;APIBeatmap&gt; beatmap)
+        {
+            var beatmapRuleset = beatmap.NewValue?.Ruleset;
+
+            if (ruleset.Value?.OnlineID == beatmapRuleset?.OnlineID)
+            {
+                modSelector.DeselectAll();
+                ruleset.TriggerChange();
+            }
+            else
+                ruleset.Value = beatmapRuleset;
+
+            scope.Value = BeatmapLeaderboardScope.Global;
+        }
+
+        private void onUserChanged(ValueChangedEvent&lt;APIUser&gt; user)
+        {
+            if (modSelector.SelectedMods.Any())
+                modSelector.DeselectAll();
+            else
+                getScores();
+        }
+
+        private void getScores()
+        {
+            getScoresRequest?.Cancel();
+            getScoresRequest = null;
+
+            noScoresPlaceholder.Hide();
+            noTeamPlaceholder.Hide();
+            notSupporterPlaceholder.Hide();
+
+            if (Beatmap.Value == null || Beatmap.Value.OnlineID &lt;= 0 || (Beatmap.Value.Status &lt;= BeatmapOnlineStatus.Pending))
+            {
+                Scores = null;
+                Hide();
+                return;
+            }
+
+            if ((scope.Value == BeatmapLeaderboardScope.Team) &amp;&amp; user.Value.Team == null)
+            {
+                Scores = null;
+                noTeamPlaceholder.Show();
+                return;
+            }
+
+            if (scope.Value.RequiresSupporter(modSelector.SelectedMods.Count &gt; 0) &amp;&amp; !userIsSupporter)
+            {
+                Scores = null;
+                notSupporterPlaceholder.Show();
+                return;
+            }
+
+            Show();
+            loading.Show();
+
+            getScoresRequest = new GetScoresRequest(Beatmap.Value, Beatmap.Value.Ruleset, scope.Value, modSelector.SelectedMods);
+            getScoresRequest.Success += scores =&gt;
+            {
+                Scores = scores;
+
+                if (!scores.Scores.Any())
+                    noScoresPlaceholder.ShowWithScope(scope.Value);
+            };
+
+            api.Queue(getScoresRequest);
+        }
+
+        private bool userIsSupporter =&gt; api.IsLoggedIn &amp;&amp; api.LocalUser.Value.IsSupporter;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,9,32,83,0],[33,9,33,88,0],[34,9,34,138,0],[35,9,35,76,0],[47,36,47,40,0],[47,41,47,45,0],[50,41,50,45,0],[50,46,50,50,0],[58,20,59,13,0],[59,13,59,14,0],[59,14,60,17,0],[60,17,60,50,0],[60,50,61,17,0],[61,17,61,72,0],[61,72,63,17,0],[63,17,63,44,0],[63,44,64,17,0],[64,17,64,42,0],[64,42,65,17,0],[65,17,65,35,0],[65,35,67,17,0],[67,17,67,32,0],[67,32,68,17,0],[68,17,68,44,0],[68,44,70,17,0],[70,17,70,49,0],[70,49,71,21,0],[71,21,71,28,0],[71,28,73,17,0],[73,17,73,48,0],[73,48,75,17,0],[75,17,75,50,0],[75,50,78,17,0],[78,17,85,19,0],[85,19,87,17,0],[87,17,87,55,0],[87,55,87,91,0],[87,91,87,123,0],[87,123,88,17,0],[88,17,88,47,0],[88,47,90,17,0],[90,17,90,95,0],[90,95,91,17,0],[91,17,91,35,0],[91,35,93,17,0],[93,17,93,49,0],[93,49,94,17,0],[94,17,94,89,0],[94,89,96,17,0],[96,17,96,72,0],[96,72,98,17,0],[98,17,98,90,0],[98,90,99,21,0],[99,21,99,101,0],[99,101,100,13,0],[100,13,100,14,0],[100,14,100,15,0],[103,9,103,33,0],[104,9,104,10,0],[105,13,200,16,0],[201,9,201,10,0],[205,9,205,10,0],[206,13,206,60,0],[208,13,208,40,0],[209,9,209,10,0],[212,9,212,10,0],[213,13,213,33,0],[214,13,214,41,0],[214,41,214,52,0],[214,52,214,54,0],[215,13,215,43,0],[215,43,215,54,0],[215,54,215,56,0],[217,13,217,69,0],[217,69,217,80,0],[217,80,217,81,0],[219,13,219,56,0],[220,13,220,56,0],[221,9,221,10,0],[224,9,224,10,0],[225,13,225,60,0],[227,13,227,69,0],[228,13,228,14,0],[229,17,229,43,0],[230,17,230,41,0],[231,13,231,14,0],[233,17,233,48,0],[235,13,235,58,0],[236,9,236,10,0],[239,9,239,10,0],[240,13,240,48,0],[241,17,241,43,0],[243,17,243,29,0],[244,9,244,10,0],[247,9,247,10,0],[248,13,248,40,0],[249,13,249,37,0],[251,13,251,40,0],[252,13,252,38,0],[253,13,253,44,0],[255,13,255,127,0],[256,13,256,14,0],[257,17,257,31,0],[258,17,258,24,0],[259,17,259,24,0],[262,13,262,90,0],[263,13,263,14,0],[264,17,264,31,0],[265,17,265,42,0],[266,17,266,24,0],[269,13,269,103,0],[270,13,270,14,0],[271,17,271,31,0],[272,17,272,48,0],[273,17,273,24,0],[276,13,276,20,0],[277,13,277,28,0],[279,13,279,130,0],[280,13,281,13,0],[281,13,281,14,0],[281,14,282,17,0],[282,17,282,33,0],[282,33,284,17,0],[284,17,284,42,0],[284,42,285,21,0],[285,21,285,68,0],[285,68,286,13,0],[286,13,286,14,0],[286,14,286,15,0],[288,13,288,41,0],[289,9,289,10,0],[291,41,291,90,0]]);
+    </script>
+  </body>
+</html>

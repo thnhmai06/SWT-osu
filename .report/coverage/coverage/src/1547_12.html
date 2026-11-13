@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapCarouselFilterSorting.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Screens.Select.Filter;
+using osu.Game.Utils;
+
+namespace osu.Game.Screens.Select
+{
+    public class BeatmapCarouselFilterSorting : ICarouselFilter
+    {
+        public int BeatmapItemsCount { get; private set; }
+
+        private readonly Func&lt;FilterCriteria&gt; getCriteria;
+
+        public BeatmapCarouselFilterSorting(Func&lt;FilterCriteria&gt; getCriteria)
+        {
+            this.getCriteria = getCriteria;
+        }
+
+        public async Task&lt;List&lt;CarouselItem&gt;&gt; Run(IEnumerable&lt;CarouselItem&gt; items, CancellationToken cancellationToken) =&gt; await Task.Run(() =&gt;
+        {
+            var criteria = getCriteria();
+
+            bool groupedSets = BeatmapCarouselFilterGrouping.ShouldGroupBeatmapsTogether(criteria);
+
+            BeatmapItemsCount = items.Count();
+
+            return items.Order(Comparer&lt;CarouselItem&gt;.Create((a, b) =&gt;
+            {
+                var ab = (BeatmapInfo)a.Model;
+                var bb = (BeatmapInfo)b.Model;
+
+                if (groupedSets)
+                {
+                    if (ab.BeatmapSet!.Equals(bb.BeatmapSet))
+                        return compareDifficulty(ab, bb, criteria.Sort);
+
+                    // If we&#39;re grouping by sets, all fallback sorts need to be aggregates for the set.
+                    return compare(ab, bb, criteria.Sort, aggregate: true);
+                }
+
+                return compare(ab, bb, criteria.Sort, aggregate: false);
+            })).ToList();
+        }, cancellationToken).ConfigureAwait(false);
+
+        private static int compare(BeatmapInfo a, BeatmapInfo b, SortMode sort, bool aggregate)
+        {
+            int comparison;
+
+            switch (sort)
+            {
+                case SortMode.Artist:
+                    comparison = OrdinalSortByCaseStringComparer.DEFAULT.Compare(a.BeatmapSet!.Metadata.Artist, b.BeatmapSet!.Metadata.Artist);
+                    if (comparison == 0)
+                        goto case SortMode.Title;
+                    break;
+
+                case SortMode.Title:
+                    comparison = OrdinalSortByCaseStringComparer.DEFAULT.Compare(a.BeatmapSet!.Metadata.Title, b.BeatmapSet!.Metadata.Title);
+                    break;
+
+                case SortMode.Author:
+                    comparison = OrdinalSortByCaseStringComparer.DEFAULT.Compare(a.BeatmapSet!.Metadata.Author.Username, b.BeatmapSet!.Metadata.Author.Username);
+                    break;
+
+                case SortMode.Source:
+                    comparison = OrdinalSortByCaseStringComparer.DEFAULT.Compare(a.BeatmapSet!.Metadata.Source, b.BeatmapSet!.Metadata.Source);
+                    break;
+
+                case SortMode.Difficulty:
+                    comparison = a.StarRating.CompareTo(b.StarRating);
+                    break;
+
+                case SortMode.DateAdded:
+                    comparison = b.BeatmapSet!.DateAdded.CompareTo(a.BeatmapSet!.DateAdded);
+                    break;
+
+                case SortMode.DateRanked:
+                    comparison = Nullable.Compare(b.BeatmapSet!.DateRanked, a.BeatmapSet!.DateRanked);
+                    break;
+
+                case SortMode.DateSubmitted:
+                    comparison = Nullable.Compare(b.BeatmapSet!.DateSubmitted, a.BeatmapSet!.DateSubmitted);
+                    break;
+
+                case SortMode.LastPlayed:
+                    if (aggregate)
+                        comparison = compareUsingAggregateMax(b, a, static b =&gt; (b.LastPlayed ?? DateTimeOffset.MinValue).ToUnixTimeSeconds());
+                    else
+                        comparison = Nullable.Compare(b.LastPlayed, a.LastPlayed);
+                    break;
+
+                case SortMode.BPM:
+                    if (aggregate)
+                        comparison = compareUsingAggregateMax(a, b, static b =&gt; b.BPM);
+                    else
+                        comparison = a.BPM.CompareTo(b.BPM);
+                    break;
+
+                case SortMode.Length:
+                    if (aggregate)
+                        comparison = compareUsingAggregateMax(a, b, static b =&gt; b.Length);
+                    else
+                        comparison = a.Length.CompareTo(b.Length);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            // If the initial sort could not differentiate, attempt to use Title then DateAdded to order sets in a stable fashion.
+            if (comparison == 0)
+                comparison = OrdinalSortByCaseStringComparer.DEFAULT.Compare(a.BeatmapSet!.Metadata.Title, b.BeatmapSet!.Metadata.Title);
+
+            // The directionality of this matches the current SortMode.DateAdded, but we may want to reconsider if that becomes a user decision (ie. asc / desc).
+            if (comparison == 0)
+                comparison = b.BeatmapSet!.DateAdded.CompareTo(a.BeatmapSet!.DateAdded);
+
+            // If both failed to break the tie, fallback to our internal GUID for stability.
+            // This basically means it&#39;s a stable random sort.
+            if (comparison == 0)
+                comparison = b.BeatmapSet!.ID.CompareTo(a.BeatmapSet!.ID);
+
+            return comparison;
+        }
+
+        private static int compareDifficulty(BeatmapInfo a, BeatmapInfo b, SortMode sort)
+        {
+            int comparison = a.Ruleset.CompareTo(b.Ruleset);
+
+            if (comparison == 0)
+                comparison = a.StarRating.CompareTo(b.StarRating);
+
+            return comparison;
+        }
+
+        private static int compareUsingAggregateMax(BeatmapInfo a, BeatmapInfo b, Func&lt;BeatmapInfo, double&gt; func)
+        {
+            var aMatchedBeatmaps = a.BeatmapSet!.Beatmaps.Where(bb =&gt; !bb.Hidden);
+            var bMatchedBeatmaps = b.BeatmapSet!.Beatmaps.Where(bb =&gt; !bb.Hidden);
+
+            bool aAny = aMatchedBeatmaps.Any();
+            bool bAny = bMatchedBeatmaps.Any();
+
+            if (!aAny &amp;&amp; !bAny) return 0;
+            if (!aAny) return -1;
+            if (!bAny) return 1;
+
+            return aMatchedBeatmaps.Max(func).CompareTo(bMatchedBeatmaps.Max(func));
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[18,40,18,44,1],[18,45,18,57,1],[22,9,22,78,1],[23,9,23,10,1],[24,13,24,44,1],[25,9,25,10,1],[27,124,28,9,1],[28,9,28,10,1],[28,10,29,13,1],[29,13,29,42,1],[29,42,31,13,1],[31,13,31,100,1],[31,100,33,13,1],[33,13,33,47,1],[33,47,35,13,1],[35,13,36,13,1],[36,13,36,14,1],[36,14,37,17,1],[37,17,37,47,1],[37,47,38,17,1],[38,17,38,47,1],[38,47,40,17,1],[40,17,40,33,1],[40,33,41,17,1],[41,17,41,18,1],[41,18,42,21,1],[42,21,42,62,1],[42,62,43,25,1],[43,25,43,73,1],[43,73,46,21,1],[46,21,46,76,1],[46,76,49,17,1],[49,17,49,73,1],[49,73,50,13,1],[50,13,50,14,1],[50,14,50,26,1],[50,26,51,9,1],[51,9,51,10,1],[51,10,51,52,1],[54,9,54,10,1],[57,13,57,26,1],[60,21,60,144,1],[61,21,61,41,1],[62,25,62,50,1],[63,21,63,27,1],[66,21,66,142,1],[67,21,67,27,1],[70,21,70,162,1],[71,21,71,27,1],[74,21,74,144,1],[75,21,75,27,1],[78,21,78,71,1],[79,21,79,27,1],[82,21,82,93,1],[83,21,83,27,1],[86,21,86,103,1],[87,21,87,27,1],[90,21,90,109,1],[91,21,91,27,1],[94,21,94,35,1],[95,25,95,81,1],[95,81,95,142,1],[95,142,95,144,1],[97,25,97,83,1],[98,21,98,27,1],[101,21,101,35,1],[102,25,102,81,1],[102,81,102,86,1],[102,86,102,88,1],[104,25,104,61,1],[105,21,105,27,1],[108,21,108,35,1],[109,25,109,81,1],[109,81,109,89,1],[109,89,109,91,1],[111,25,111,67,1],[112,21,112,27,1],[115,21,115,61,1],[119,13,119,33,1],[120,17,120,138,1],[123,13,123,33,1],[124,17,124,89,1],[128,13,128,33,1],[129,17,129,75,1],[131,13,131,31,1],[132,9,132,10,1],[135,9,135,10,1],[136,13,136,61,1],[138,13,138,33,1],[139,17,139,67,1],[141,13,141,31,1],[142,9,142,10,1],[145,9,145,10,1],[146,13,146,71,1],[146,71,146,81,1],[146,81,146,83,1],[147,13,147,71,1],[147,71,147,81,1],[147,81,147,83,1],[149,13,149,48,1],[150,13,150,48,1],[152,13,152,32,1],[152,33,152,42,1],[153,13,153,23,1],[153,24,153,34,1],[154,13,154,23,1],[154,24,154,33,1],[156,13,156,85,1],[157,9,157,10,1]]);
+    </script>
+  </body>
+</html>

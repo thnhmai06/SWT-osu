@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/OpponentPickScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Graphics;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Audio;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay
+{
+    public partial class OpponentPickScreen : RankedPlaySubScreen
+    {
+        public CardFlow CenterRow { get; private set; } = null!;
+
+        public override bool ShowStageOverlay =&gt; true;
+        public override LocalisableString StageHeading =&gt; &quot;Pick Phase&quot;;
+
+        protected override RankedPlayColourScheme ColourScheme =&gt; RankedPlayColourScheme.RED;
+
+        private PlayerHandOfCards playerHand = null!;
+        private OpponentHandOfCards opponentHand = null!;
+
+        [Resolved]
+        private RankedPlayMatchInfo matchInfo { get; set; } = null!;
+
+        private Sample? cardAddSample;
+
+        private const int card_play_samples = 2;
+        private Sample?[]? cardPlaySamples;
+
+        public OpponentPickScreen()
+        {
+            StageCaption = &quot;Waiting for your opponent...&quot;;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            Children =
+            [
+                CenterRow = new CardFlow
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                },
+            ];
+
+            CenterColumn.Children =
+            [
+                opponentHand = new OpponentHandOfCards
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    RelativeSizeAxes = Axes.Both,
+                    Height = 0.5f,
+                },
+                playerHand = new PlayerHandOfCards
+                {
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    RelativeSizeAxes = Axes.Both,
+                    Height = 0.5f,
+                },
+                new HandReplayRecorder(playerHand),
+                new HandReplayPlayer(matchInfo.OpponentId, opponentHand),
+            ];
+
+            cardAddSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/card-add-1&quot;);
+
+            cardPlaySamples = new Sample?[card_play_samples];
+            for (int i = 0; i &lt; card_play_samples; i++)
+                cardPlaySamples[i] = audio.Samples.Get($@&quot;Multiplayer/Matchmaking/Ranked/card-play-{1 + i}&quot;);
+        }
+
+        public override void OnEntering(RankedPlaySubScreen? previous)
+        {
+            base.OnEntering(previous);
+
+            const double stagger = 50;
+            double delay = 0;
+
+            foreach (var item in matchInfo.PlayerCards)
+            {
+                double currentDelay = delay;
+
+                if ((previous as DiscardScreen)?.CenterRow.RemoveCard(item, out var card, out var drawQuad) == true)
+                {
+                    playerHand.AddCard(card, c =&gt;
+                    {
+                        c.MatchScreenSpaceDrawQuad(drawQuad, playerHand);
+                        c.DelayMovementOnEntering(currentDelay);
+                    });
+                }
+                else
+                {
+                    playerHand.AddCard(item, c =&gt;
+                    {
+                        c.Position = playerHand.BottomCardInsertPosition;
+                        c.DelayMovementOnEntering(currentDelay);
+                    });
+                    Scheduler.AddDelayed(() =&gt;
+                    {
+                        SamplePlaybackHelper.PlayWithRandomPitch(cardAddSample);
+                    }, delay);
+                }
+
+                delay += stagger;
+            }
+
+            delay = 0;
+
+            foreach (var card in matchInfo.OpponentCards)
+            {
+                double currentDelay = delay;
+
+                opponentHand.AddCard(card, c =&gt;
+                {
+                    c.Position = opponentHand.BottomCardInsertPosition;
+                    c.DelayMovementOnEntering(currentDelay);
+                });
+
+                delay += 50;
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            matchInfo.CardPlayed += cardPlayed;
+        }
+
+        private void cardPlayed(RankedPlayCardWithPlaylistItem item) =&gt; Task.Run(async () =&gt;
+        {
+            if (opponentHand.Cards.FirstOrDefault(it =&gt; it.Card.Item.Equals(item)) is { } c)
+                await c.Card.CardRevealed.ConfigureAwait(false);
+
+            Schedule(() =&gt;
+            {
+                RankedPlayCard? card;
+
+                if (opponentHand.RemoveCard(item, out card, out var drawQuad))
+                {
+                    card.MatchScreenSpaceDrawQuad(drawQuad, CenterRow);
+                }
+                else
+                {
+                    Logger.Log($&quot;Played card {item.Card.ID} was not present in hand.&quot;, level: LogLevel.Error);
+
+                    card = new RankedPlayCard(item)
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    };
+                }
+
+                CenterRow.Add(card);
+
+                SamplePlaybackHelper.PlayWithRandomPitch(cardPlaySamples);
+
+                card
+                    .MoveTo(new Vector2(0), 600, Easing.OutExpo)
+                    .ScaleTo(CENTERED_CARD_SCALE, 600, Easing.OutExpo)
+                    .RotateTo(0, 400, Easing.OutExpo);
+
+                opponentHand.Contract();
+                playerHand.Contract();
+            });
+        });
+
+        protected override void Dispose(bool isDisposing)
+        {
+            matchInfo.CardPlayed -= cardPlayed;
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,37,22,41,0],[22,42,22,54,0],[22,59,22,64,0],[24,50,24,54,0],[25,59,25,71,0],[27,67,27,93,0],[29,9,29,54,0],[30,9,30,58,0],[33,49,33,53,0],[33,54,33,58,0],[33,63,33,68,0],[40,9,40,36,0],[41,9,41,10,0],[42,13,42,59,0],[43,9,43,10,0],[47,9,47,10,0],[48,13,56,15,0],[58,13,76,15,0],[78,13,78,93,0],[80,13,80,62,0],[81,18,81,27,0],[81,29,81,50,0],[81,52,81,55,0],[82,17,82,110,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,39,0],[90,13,90,30,0],[92,13,92,20,0],[92,22,92,30,0],[92,31,92,33,0],[92,34,92,55,0],[93,13,93,14,0],[94,17,94,45,0],[96,17,96,117,0],[97,17,97,18,0],[98,21,99,21,0],[99,21,99,22,0],[99,22,100,25,0],[100,25,100,74,0],[100,74,101,25,0],[101,25,101,65,0],[101,65,102,21,0],[102,21,102,22,0],[102,22,102,24,0],[103,17,103,18,0],[105,17,105,18,0],[106,21,107,21,0],[107,21,107,22,0],[107,22,108,25,0],[108,25,108,74,0],[108,74,109,25,0],[109,25,109,65,0],[109,65,110,21,0],[110,21,110,22,0],[110,22,110,24,0],[111,21,112,21,0],[112,21,112,22,0],[112,22,113,25,0],[113,25,113,81,0],[113,81,114,21,0],[114,21,114,22,0],[114,22,114,31,0],[115,17,115,18,0],[117,17,117,34,0],[118,13,118,14,0],[120,13,120,23,0],[122,13,122,20,0],[122,22,122,30,0],[122,31,122,33,0],[122,34,122,57,0],[123,13,123,14,0],[124,17,124,45,0],[126,17,127,17,0],[127,17,127,18,0],[127,18,128,21,0],[128,21,128,72,0],[128,72,129,21,0],[129,21,129,61,0],[129,61,130,17,0],[130,17,130,18,0],[130,18,130,20,0],[132,17,132,29,0],[133,13,133,14,0],[134,9,134,10,0],[137,9,137,10,0],[138,13,138,33,0],[140,13,140,48,0],[141,9,141,10,0],[143,73,144,9,0],[144,9,144,10,0],[144,10,145,13,0],[145,13,145,57,0],[145,57,145,82,0],[145,82,145,93,0],[145,93,146,17,0],[146,17,146,65,0],[146,65,148,13,0],[148,13,149,13,0],[149,13,149,14,0],[149,14,152,17,0],[152,17,152,79,0],[152,79,153,17,0],[153,17,153,18,0],[153,18,154,21,0],[154,21,154,72,0],[154,72,155,17,0],[155,17,155,18,0],[155,18,157,17,0],[157,17,157,18,0],[157,18,158,21,0],[158,21,158,111,0],[158,111,160,21,0],[160,21,164,23,0],[164,23,165,17,0],[165,17,165,18,0],[165,18,167,17,0],[167,17,167,37,0],[167,37,169,17,0],[169,17,169,75,0],[169,75,171,17,0],[171,17,174,55,0],[174,55,176,17,0],[176,17,176,41,0],[176,41,177,17,0],[177,17,177,39,0],[177,39,178,13,0],[178,13,178,14,0],[178,14,178,16,0],[178,16,179,9,0],[179,9,179,10,0],[179,10,179,11,0],[182,9,182,10,0],[183,13,183,48,0],[185,13,185,39,0],[186,9,186,10,0]]);
+    </script>
+  </body>
+</html>

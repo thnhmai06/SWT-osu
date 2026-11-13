@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Multiplayer/MultiplayerClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Graphics;
+using osu.Game.Database;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Matchmaking;
+using osu.Game.Online.Matchmaking.Requests;
+using osu.Game.Online.Matchmaking.Responses;
+using osu.Game.Online.Multiplayer.Countdown;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay;
+using osu.Game.Utils;
+
+namespace osu.Game.Online.Multiplayer
+{
+    public abstract partial class MultiplayerClient :
+        Component,
+        IMultiplayerClient, IMultiplayerRoomServer,
+        IMatchmakingServer, IMatchmakingClient,
+        IRankedPlayClient, IRankedPlayServer
+    {
+        public Action&lt;Notification&gt;? PostNotification { protected get; set; }
+
+        public Action&lt;Room, string&gt;? PresentMatch { protected get; set; }
+
+        /// &lt;summary&gt;
+        /// Invoked when any change occurs to the multiplayer room.
+        /// &lt;/summary&gt;
+        public virtual event Action? RoomUpdated;
+
+        /// &lt;summary&gt;
+        /// Invoked when a user&#39;s local style is changed.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomUser&gt;? UserStyleChanged;
+
+        /// &lt;summary&gt;
+        /// Invoked when a user&#39;s local mods are changed.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomUser&gt;? UserModsChanged;
+
+        /// &lt;summary&gt;
+        /// Invoked when the room&#39;s settings are changed.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomSettings&gt;? SettingsChanged;
+
+        /// &lt;summary&gt;
+        /// Invoked when a new user joins the room.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomUser&gt;? UserJoined;
+
+        /// &lt;summary&gt;
+        /// Invoked when a user leaves the room of their own accord.
+        /// &lt;/summary&gt;
+        public virtual event Action&lt;MultiplayerRoomUser&gt;? UserLeft;
+
+        /// &lt;summary&gt;
+        /// Invoked when a user was kicked from the room forcefully.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomUser&gt;? UserKicked;
+
+        /// &lt;summary&gt;
+        /// Invoked when the room&#39;s host is changed.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerRoomUser?&gt;? HostChanged;
+
+        /// &lt;summary&gt;
+        /// Invoked when a new item is added to the playlist.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerPlaylistItem&gt;? ItemAdded;
+
+        /// &lt;summary&gt;
+        /// Invoked when a playlist item is removed from the playlist. The provided &lt;c&gt;long&lt;/c&gt; is the playlist&#39;s item ID.
+        /// &lt;/summary&gt;
+        public event Action&lt;long&gt;? ItemRemoved;
+
+        /// &lt;summary&gt;
+        /// Invoked when a playlist item&#39;s details change.
+        /// &lt;/summary&gt;
+        public event Action&lt;MultiplayerPlaylistItem&gt;? ItemChanged;
+
+        /// &lt;summary&gt;
+        /// Invoked when the multiplayer server requests the current beatmap to be loaded into play.
+        /// &lt;/summary&gt;
+        public virtual event Action? LoadRequested;
+
+        /// &lt;summary&gt;
+        /// Invoked when the multiplayer server requests gameplay to be aborted.
+        /// &lt;/summary&gt;
+        public event Action&lt;GameplayAbortReason&gt;? GameplayAborted;
+
+        /// &lt;summary&gt;
+        /// Invoked when the multiplayer server requests gameplay to be started.
+        /// &lt;/summary&gt;
+        public event Action? GameplayStarted;
+
+        /// &lt;summary&gt;
+        /// Invoked when the multiplayer server has finished collating results.
+        /// &lt;/summary&gt;
+        public event Action? ResultsReady;
+
+        public event Action&lt;MultiplayerCountdown&gt;? CountdownStarted;
+
+        public event Action&lt;MultiplayerCountdown&gt;? CountdownStopped;
+
+        public event Action&lt;MatchServerEvent&gt;? MatchEvent;
+
+        public event Action&lt;MultiplayerRoomUser, MultiplayerUserState&gt;? UserStateChanged;
+
+        public event Action? MatchmakingQueueJoined;
+        public event Action? MatchmakingQueueLeft;
+        public event Action&lt;MatchmakingRoomInvitationParams&gt;? MatchmakingRoomInvited;
+        public event Action&lt;MatchmakingDuelIssuedParams&gt;? MatchmakingDuelIssued;
+        public event Action&lt;long, string&gt;? MatchmakingRoomReady;
+        public event Action&lt;MatchmakingLobbyStatus&gt;? MatchmakingLobbyStatusChanged;
+        public event Action&lt;MatchmakingQueueStatus&gt;? MatchmakingQueueStatusChanged;
+        public event Action&lt;int, long&gt;? MatchmakingItemSelected;
+        public event Action&lt;int, long&gt;? MatchmakingItemDeselected;
+        public event Action&lt;MatchRoomState&gt;? MatchRoomStateChanged;
+
+        public event Action&lt;int, RankedPlayCardWithPlaylistItem&gt;? RankedPlayCardAdded;
+        public event Action&lt;int, RankedPlayCardWithPlaylistItem&gt;? RankedPlayCardRemoved;
+        public event Action&lt;RankedPlayCardWithPlaylistItem&gt;? RankedPlayCardPlayed;
+
+        public event Action&lt;int, bool&gt;? UserVotedToSkipIntro;
+        public event Action? VoteToSkipIntroPassed;
+
+        public event Action&lt;MultiplayerRoomUser, BeatmapAvailability&gt;? BeatmapAvailabilityChanged;
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;MultiplayerClient&quot;/&gt; is currently connected.
+        /// This is NOT thread safe and usage should be scheduled.
+        /// &lt;/summary&gt;
+        public abstract IBindable&lt;bool&gt; IsConnected { get; }
+
+        /// &lt;summary&gt;
+        /// The joined &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual MultiplayerRoom? Room // virtual for moq
+        {
+            get
+            {
+                Debug.Assert(ThreadSafety.IsUpdateThread);
+                return room;
+            }
+            private set
+            {
+                Debug.Assert(ThreadSafety.IsUpdateThread);
+                room = value;
+            }
+        }
+
+        private MultiplayerRoom? room;
+
+        /// &lt;summary&gt;
+        /// The users in the joined &lt;see cref=&quot;Room&quot;/&gt; which are participating in the current gameplay loop.
+        /// &lt;/summary&gt;
+        public virtual IBindableList&lt;int&gt; CurrentMatchPlayingUserIds =&gt; PlayingUserIds;
+
+        protected readonly BindableList&lt;int&gt; PlayingUserIds = new BindableList&lt;int&gt;();
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;MultiplayerRoomUser&quot;/&gt; corresponding to the local player, if available.
+        /// &lt;/summary&gt;
+        public virtual MultiplayerRoomUser? LocalUser =&gt; Room?.Users.SingleOrDefault(u =&gt; u.User?.Id == API.LocalUser.Value.Id);
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;LocalUser&quot;/&gt; is the host in &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual bool IsHost
+        {
+            get
+            {
+                var localUser = LocalUser;
+                return localUser != null &amp;&amp; Room?.Host != null &amp;&amp; localUser.Equals(Room.Host);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;LocalUser&quot;/&gt; is a referee in the &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual bool IsReferee =&gt; LocalUser?.Role == MultiplayerRoomUserRole.Referee;
+
+        [Resolved]
+        protected IAPIProvider API { get; private set; } = null!;
+
+        [Resolved]
+        protected IRulesetStore Rulesets { get; private set; } = null!;
+
+        [Resolved]
+        private UserLookupCache userLookupCache { get; set; } = null!;
+
+        protected Room? APIRoom { get; private set; }
+
+        private readonly Queue&lt;Action&gt; pendingRequests = new Queue&lt;Action&gt;();
+        private readonly Dictionary&lt;RankedPlayCardItem, RankedPlayCardWithPlaylistItem&gt; cardsWithPlaylistItems = [];
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            IsConnected.BindValueChanged(connected =&gt; Scheduler.Add(() =&gt;
+            {
+                if (!connected.NewValue)
+                {
+                    if (Room != null)
+                        LeaveRoom().FireAndForget();
+
+                    MatchmakingQueueLeft?.Invoke();
+                }
+            }));
+        }
+
+        private readonly TaskChain joinOrLeaveTaskChain = new TaskChain();
+        private CancellationTokenSource? joinCancellationSource;
+
+        /// &lt;summary&gt;
+        /// Creates and joins a &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; described by an API &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The API &lt;see cref=&quot;Room&quot;/&gt; describing the room to create.&lt;/param&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If the current user is already in another room.&lt;/exception&gt;
+        public async Task CreateRoom(Room room)
+        {
+            if (Room != null)
+                throw new InvalidOperationException(&quot;Cannot create a multiplayer room while already in one.&quot;);
+
+            var cancellationSource = joinCancellationSource = new CancellationTokenSource();
+
+            await joinOrLeaveTaskChain.Add(async () =&gt;
+            {
+                await runOnUpdateThreadAsync(() =&gt; pendingRequests.Clear(), cancellationSource.Token).ConfigureAwait(false);
+                var multiplayerRoom = await CreateRoomInternal(new MultiplayerRoom(room)).ConfigureAwait(false);
+                await setupJoinedRoom(room, multiplayerRoom, cancellationSource.Token).ConfigureAwait(false);
+            }, cancellationSource.Token).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Joins the &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; for a given API &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The API &lt;see cref=&quot;Room&quot;/&gt;.&lt;/param&gt;
+        /// &lt;param name=&quot;password&quot;&gt;An optional password to use for the join operation.&lt;/param&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If the current user is already in another room, or &lt;paramref name=&quot;room&quot;/&gt; does not represent an active room.&lt;/exception&gt;
+        public async Task JoinRoom(Room room, string? password = null)
+        {
+            if (Room != null)
+                throw new InvalidOperationException(&quot;Cannot join a multiplayer room while already in one.&quot;);
+
+            if (room.RoomID == null)
+                throw new InvalidOperationException(&quot;Cannot join an inactive room.&quot;);
+
+            var cancellationSource = joinCancellationSource = new CancellationTokenSource();
+
+            await joinOrLeaveTaskChain.Add(async () =&gt;
+            {
+                await runOnUpdateThreadAsync(() =&gt; pendingRequests.Clear(), cancellationSource.Token).ConfigureAwait(false);
+                var multiplayerRoom = await JoinRoomInternal(room.RoomID.Value, password ?? room.Password).ConfigureAwait(false);
+                await setupJoinedRoom(room, multiplayerRoom, cancellationSource.Token).ConfigureAwait(false);
+            }, cancellationSource.Token).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Performs post-join setup of a &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;apiRoom&quot;&gt;The incoming API &lt;see cref=&quot;Room&quot;/&gt; that was requested to be joined.&lt;/param&gt;
+        /// &lt;param name=&quot;joinedRoom&quot;&gt;The resuling &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; that was joined.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;A token to cancel the process.&lt;/param&gt;
+        private async Task setupJoinedRoom(Room apiRoom, MultiplayerRoom joinedRoom, CancellationToken cancellationToken)
+        {
+            // Populate users.
+            await PopulateUsers(joinedRoom.Users).ConfigureAwait(false);
+            if (joinedRoom.Host != null)
+                await PopulateUsers([joinedRoom.Host]).ConfigureAwait(false);
+
+            // Update the stored room (must be done on update thread for thread-safety).
+            await runOnUpdateThreadAsync(() =&gt;
+            {
+                Debug.Assert(Room == null);
+                Debug.Assert(APIRoom == null);
+
+                Room = joinedRoom;
+                APIRoom = apiRoom;
+
+                while (pendingRequests.TryDequeue(out Action? action))
+                    action();
+
+                APIRoom.RoomID = joinedRoom.RoomID;
+                APIRoom.ChannelId = joinedRoom.ChannelID;
+                APIRoom.Host = joinedRoom.Host?.User;
+                APIRoom.Playlist = joinedRoom.Playlist.Select(item =&gt; new PlaylistItem(item)).ToArray();
+                APIRoom.CurrentPlaylistItem = APIRoom.Playlist.Single(item =&gt; item.ID == joinedRoom.Settings.PlaylistItemId);
+                // The server will null out the end date upon the host joining the room, but the null value is never communicated to the client.
+                APIRoom.EndDate = null;
+
+                Debug.Assert(LocalUser != null);
+                addUserToAPIRoom(LocalUser);
+
+                foreach (var user in joinedRoom.Users)
+                    updateUserPlayingState(user.UserID, user.State);
+
+                updateLocalRoomSettings(joinedRoom.Settings);
+
+                while (pendingRequests.TryDequeue(out Action? action))
+                    action();
+
+                postServerShuttingDownNotification();
+
+                OnRoomJoined();
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Fired when the room join sequence is complete
+        /// &lt;/summary&gt;
+        protected virtual void OnRoomJoined()
+        {
+        }
+
+        public Task LeaveRoom()
+        {
+            // The join may have not completed yet, so certain tasks that either update the room or reference the room should be cancelled.
+            // This includes the setting of Room itself along with the initial update of the room settings on join.
+            joinCancellationSource?.Cancel();
+
+            // Leaving rooms is expected to occur instantaneously whilst the operation is finalised in the background.
+            // However a few members need to be reset immediately to prevent other components from entering invalid states whilst the operation hasn&#39;t yet completed.
+            // For example, if a room was left and the user immediately pressed the &quot;create room&quot; button, then the user could be taken into the lobby if the value of Room is not reset in time.
+            var scheduledReset = runOnUpdateThreadAsync(() =&gt;
+            {
+                APIRoom = null;
+                Room = null;
+                PlayingUserIds.Clear();
+                cardsWithPlaylistItems.Clear();
+
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.Run(async () =&gt;
+            {
+                try
+                {
+                    await joinOrLeaveTaskChain.Add(async () =&gt;
+                    {
+                        await scheduledReset.ConfigureAwait(false);
+                        await LeaveRoomInternal().ConfigureAwait(false);
+                    }).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await runOnUpdateThreadAsync(() =&gt;
+                    {
+                        pendingRequests.Clear();
+                    }).ConfigureAwait(false);
+                }
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; with the given settings.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;The room.&lt;/param&gt;
+        /// &lt;returns&gt;The joined &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;&lt;/returns&gt;
+        protected abstract Task&lt;MultiplayerRoom&gt; CreateRoomInternal(MultiplayerRoom room);
+
+        /// &lt;summary&gt;
+        /// Joins the &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; with a given ID.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;roomId&quot;&gt;The room ID.&lt;/param&gt;
+        /// &lt;param name=&quot;password&quot;&gt;An optional password to use when joining the room.&lt;/param&gt;
+        /// &lt;returns&gt;The joined &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;.&lt;/returns&gt;
+        protected abstract Task&lt;MultiplayerRoom&gt; JoinRoomInternal(long roomId, string? password = null);
+
+        /// &lt;summary&gt;
+        /// Leaves the currently-joined &lt;see cref=&quot;MultiplayerRoom&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected abstract Task LeaveRoomInternal();
+
+        public abstract Task InvitePlayer(int userId);
+
+        /// &lt;summary&gt;
+        /// Change the current &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; settings.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// A room must be joined for this to have any effect.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;name&quot;&gt;The new room name, if any.&lt;/param&gt;
+        /// &lt;param name=&quot;password&quot;&gt;The new password, if any.&lt;/param&gt;
+        /// &lt;param name=&quot;matchType&quot;&gt;The type of the match, if any.&lt;/param&gt;
+        /// &lt;param name=&quot;queueMode&quot;&gt;The new queue mode, if any.&lt;/param&gt;
+        /// &lt;param name=&quot;autoStartDuration&quot;&gt;The new auto-start countdown duration, if any.&lt;/param&gt;
+        /// &lt;param name=&quot;autoSkip&quot;&gt;The new auto-skip setting.&lt;/param&gt;
+        /// &lt;param name=&quot;maxParticipants&quot;&gt;The new participant count limit, if any.&lt;/param&gt;
+        public Task ChangeSettings(Optional&lt;string&gt; name = default, Optional&lt;string&gt; password = default, Optional&lt;MatchType&gt; matchType = default, Optional&lt;QueueMode&gt; queueMode = default,
+                                   Optional&lt;TimeSpan&gt; autoStartDuration = default, Optional&lt;bool&gt; autoSkip = default, Optional&lt;byte?&gt; maxParticipants = default)
+        {
+            if (Room == null)
+                throw new InvalidOperationException(&quot;Must be joined to a match to change settings.&quot;);
+
+            return ChangeSettings(new MultiplayerRoomSettings
+            {
+                Name = name.GetOr(Room.Settings.Name),
+                Password = password.GetOr(Room.Settings.Password),
+                MatchType = matchType.GetOr(Room.Settings.MatchType),
+                QueueMode = queueMode.GetOr(Room.Settings.QueueMode),
+                AutoStartDuration = autoStartDuration.GetOr(Room.Settings.AutoStartDuration),
+                AutoSkip = autoSkip.GetOr(Room.Settings.AutoSkip),
+                MaxParticipants = maxParticipants.GetOr(Room.Settings.MaxParticipants),
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Toggles the &lt;see cref=&quot;LocalUser&quot;/&gt;&#39;s ready state.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If a toggle of ready state is not valid at this time.&lt;/exception&gt;
+        public async Task ToggleReady()
+        {
+            var localUser = LocalUser;
+
+            if (localUser == null)
+                return;
+
+            switch (localUser.State)
+            {
+                case MultiplayerUserState.Idle:
+                    await ChangeState(MultiplayerUserState.Ready).ConfigureAwait(false);
+                    return;
+
+                case MultiplayerUserState.Ready:
+                    await ChangeState(MultiplayerUserState.Idle).ConfigureAwait(false);
+                    return;
+
+                default:
+                    throw new InvalidOperationException($&quot;Cannot toggle ready when in {localUser.State}&quot;);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Toggles the &lt;see cref=&quot;LocalUser&quot;/&gt;&#39;s spectating state.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If a toggle of the spectating state is not valid at this time.&lt;/exception&gt;
+        public async Task ToggleSpectate()
+        {
+            var localUser = LocalUser;
+
+            if (localUser == null)
+                return;
+
+            switch (localUser.State)
+            {
+                case MultiplayerUserState.Idle:
+                case MultiplayerUserState.Ready:
+                    await ChangeState(MultiplayerUserState.Spectating).ConfigureAwait(false);
+                    return;
+
+                case MultiplayerUserState.Spectating:
+                    await ChangeState(MultiplayerUserState.Idle).ConfigureAwait(false);
+                    return;
+
+                default:
+                    throw new InvalidOperationException($&quot;Cannot toggle spectate when in {localUser.State}&quot;);
+            }
+        }
+
+        public abstract Task TransferHost(int userId);
+
+        public abstract Task KickUser(int userId);
+
+        public abstract Task ChangeSettings(MultiplayerRoomSettings settings);
+
+        public abstract Task ChangeState(MultiplayerUserState newState);
+
+        public abstract Task ChangeBeatmapAvailability(BeatmapAvailability newBeatmapAvailability);
+
+        public abstract Task ChangeUserStyle(int? beatmapId, int? rulesetId);
+
+        /// &lt;summary&gt;
+        /// Change the local user&#39;s mods in the currently joined room.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;newMods&quot;&gt;The proposed new mods, excluding any required by the room itself.&lt;/param&gt;
+        public Task ChangeUserMods(IEnumerable&lt;Mod&gt; newMods) =&gt; ChangeUserMods(newMods.Select(m =&gt; new APIMod(m)).ToList());
+
+        public abstract Task ChangeUserMods(IEnumerable&lt;APIMod&gt; newMods);
+
+        public abstract Task SendMatchRequest(MatchUserRequest request);
+
+        public abstract Task StartMatch();
+
+        public abstract Task AbortGameplay();
+
+        public abstract Task AbortMatch();
+
+        public abstract Task AddPlaylistItem(MultiplayerPlaylistItem item);
+
+        public abstract Task EditPlaylistItem(MultiplayerPlaylistItem item);
+
+        public abstract Task RemovePlaylistItem(long playlistItemId);
+
+        public abstract Task VoteToSkipIntro();
+
+        Task IMultiplayerClient.RoomStateChanged(MultiplayerRoomState state)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                Debug.Assert(APIRoom != null);
+
+                Room.State = state;
+
+                switch (state)
+                {
+                    case MultiplayerRoomState.Open:
+                        APIRoom.Status = RoomStatus.Idle;
+                        break;
+
+                    case MultiplayerRoomState.WaitingForLoad:
+                    case MultiplayerRoomState.Playing:
+                        APIRoom.Status = RoomStatus.Playing;
+                        break;
+
+                    case MultiplayerRoomState.Closed:
+                        APIRoom.EndDate = DateTimeOffset.Now;
+                        APIRoom.Status = RoomStatus.Idle;
+                        break;
+                }
+
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        async Task IMultiplayerClient.UserJoined(MultiplayerRoomUser user)
+        {
+            await PopulateUsers([user]).ConfigureAwait(false);
+
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                // for sanity, ensure that there can be no duplicate users in the room user list.
+                if (Room.Users.Any(existing =&gt; existing.UserID == user.UserID))
+                    return;
+
+                Room.Users.Add(user);
+
+                addUserToAPIRoom(user);
+
+                UserJoined?.Invoke(user);
+                RoomUpdated?.Invoke();
+            });
+        }
+
+        Task IMultiplayerClient.UserLeft(MultiplayerRoomUser user)
+        {
+            handleRoomRequest(() =&gt; handleUserLeft(user, UserLeft));
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.UserKicked(MultiplayerRoomUser user)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                if (LocalUser == null)
+                    return;
+
+                if (user.Equals(LocalUser))
+                    LeaveRoom().FireAndForget();
+
+                handleUserLeft(user, UserKicked);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        private void handleUserLeft(MultiplayerRoomUser user, Action&lt;MultiplayerRoomUser&gt;? callback)
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+            Debug.Assert(Room != null);
+
+            Room.Users.Remove(user);
+            PlayingUserIds.Remove(user.UserID);
+
+            Debug.Assert(APIRoom != null);
+            APIRoom.RecentParticipants = APIRoom.RecentParticipants.Where(u =&gt; u.Id != user.UserID).ToArray();
+            APIRoom.ParticipantCount--;
+
+            callback?.Invoke(user);
+            RoomUpdated?.Invoke();
+        }
+
+        async Task IMultiplayerClient.Invited(int invitedBy, long roomID, string password)
+        {
+            APIUser? apiUser = await userLookupCache.GetUserAsync(invitedBy).ConfigureAwait(false);
+            Room? apiRoom = await getRoomAsync(roomID).ConfigureAwait(false);
+
+            if (apiUser == null || apiRoom == null) return;
+
+            PostNotification?.Invoke(new MultiplayerInvitationNotification(apiUser, apiRoom)
+            {
+                Activated = () =&gt;
+                {
+                    PresentMatch?.Invoke(apiRoom, password);
+                    return true;
+                }
+            });
+
+            Task&lt;Room?&gt; getRoomAsync(long id)
+            {
+                TaskCompletionSource&lt;Room?&gt; taskCompletionSource = new TaskCompletionSource&lt;Room?&gt;();
+
+                var request = new GetRoomRequest(id);
+                request.Success += room =&gt; taskCompletionSource.TrySetResult(room);
+                request.Failure += _ =&gt; taskCompletionSource.TrySetResult(null);
+
+                API.Queue(request);
+
+                return taskCompletionSource.Task;
+            }
+        }
+
+        private void addUserToAPIRoom(MultiplayerRoomUser user)
+        {
+            Debug.Assert(APIRoom != null);
+
+            APIRoom.RecentParticipants = APIRoom.RecentParticipants.Append(user.User ?? new APIUser
+            {
+                Id = user.UserID,
+                Username = &quot;[Unresolved]&quot;
+            }).ToArray();
+            APIRoom.ParticipantCount++;
+        }
+
+        Task IMultiplayerClient.HostChanged(int userId)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                Debug.Assert(APIRoom != null);
+
+                var user = Room.Users.FirstOrDefault(u =&gt; u.UserID == userId);
+
+                Room.Host = user;
+                APIRoom.Host = user?.User;
+
+                HostChanged?.Invoke(user);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.SettingsChanged(MultiplayerRoomSettings newSettings)
+        {
+            handleRoomRequest(() =&gt; updateLocalRoomSettings(newSettings));
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.UserStateChanged(int userId, MultiplayerUserState state)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // TODO: user should NEVER be null here, see https://github.com/ppy/osu/issues/17713.
+                if (user == null)
+                    return;
+
+                user.State = state;
+                updateUserPlayingState(userId, state);
+
+                UserStateChanged?.Invoke(user, state);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.MatchUserStateChanged(int userId, MatchUserState state)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // TODO: user should NEVER be null here, see https://github.com/ppy/osu/issues/17713.
+                if (user == null)
+                    return;
+
+                user.MatchState = state;
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.MatchRoomStateChanged(MatchRoomState state)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                Room.MatchState = state;
+                MatchRoomStateChanged?.Invoke(state);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.MatchEvent(MatchServerEvent e)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                switch (e)
+                {
+                    case CountdownStartedEvent countdownStartedEvent:
+                        Room.ActiveCountdowns.Add(countdownStartedEvent.Countdown);
+                        CountdownStarted?.Invoke(countdownStartedEvent.Countdown);
+
+                        switch (countdownStartedEvent.Countdown)
+                        {
+                            case ServerShuttingDownCountdown:
+                                postServerShuttingDownNotification();
+                                break;
+                        }
+
+                        break;
+
+                    case CountdownStoppedEvent countdownStoppedEvent:
+                        MultiplayerCountdown? countdown = Room.ActiveCountdowns.FirstOrDefault(countdown =&gt; countdown.ID == countdownStoppedEvent.ID);
+
+                        if (countdown != null)
+                        {
+                            Room.ActiveCountdowns.Remove(countdown);
+                            CountdownStopped?.Invoke(countdown);
+                        }
+
+                        break;
+                }
+
+                MatchEvent?.Invoke(e);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        private void postServerShuttingDownNotification()
+        {
+            ServerShuttingDownCountdown? countdown = room?.ActiveCountdowns.OfType&lt;ServerShuttingDownCountdown&gt;().FirstOrDefault();
+
+            if (countdown == null)
+                return;
+
+            PostNotification?.Invoke(new ServerShutdownNotification(countdown.TimeRemaining));
+        }
+
+        Task IMultiplayerClient.UserBeatmapAvailabilityChanged(int userId, BeatmapAvailability beatmapAvailability)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // errors here are not critical - beatmap availability state is mostly for display.
+                if (user == null)
+                    return;
+
+                user.BeatmapAvailability = beatmapAvailability;
+
+                BeatmapAvailabilityChanged?.Invoke(user, beatmapAvailability);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.UserStyleChanged(int userId, int? beatmapId, int? rulesetId)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // errors here are not critical - user style is mostly for display.
+                if (user == null)
+                    return;
+
+                user.BeatmapId = beatmapId;
+                user.RulesetId = rulesetId;
+
+                UserStyleChanged?.Invoke(user);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.UserModsChanged(int userId, IEnumerable&lt;APIMod&gt; mods)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // errors here are not critical - user mods are mostly for display.
+                if (user == null)
+                    return;
+
+                user.Mods = mods;
+
+                UserModsChanged?.Invoke(user);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.LoadRequested()
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                LoadRequested?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.GameplayAborted(GameplayAbortReason reason)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                GameplayAborted?.Invoke(reason);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.GameplayStarted()
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                GameplayStarted?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.ResultsReady()
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                ResultsReady?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public Task PlaylistItemAdded(MultiplayerPlaylistItem item)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                Debug.Assert(APIRoom != null);
+
+                Room.Playlist.Add(item);
+                APIRoom.Playlist = APIRoom.Playlist.Append(new PlaylistItem(item)).ToArray();
+
+                ItemAdded?.Invoke(item);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public Task PlaylistItemRemoved(long playlistItemId)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                Debug.Assert(APIRoom != null);
+
+                Room.Playlist.Remove(Room.Playlist.Single(existing =&gt; existing.ID == playlistItemId));
+                APIRoom.Playlist = APIRoom.Playlist.Where(i =&gt; i.ID != playlistItemId).ToArray();
+
+                Debug.Assert(Room.Playlist.Count &gt; 0);
+
+                ItemRemoved?.Invoke(playlistItemId);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public Task PlaylistItemChanged(MultiplayerPlaylistItem item)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                Debug.Assert(APIRoom != null);
+
+                Room.Playlist[Room.Playlist.IndexOf(Room.Playlist.Single(existing =&gt; existing.ID == item.ID))] = item;
+                APIRoom.Playlist = APIRoom.Playlist.Select((pi, i) =&gt; pi.ID == item.ID ? new PlaylistItem(item) : APIRoom.Playlist[i]).ToArray();
+
+                ItemChanged?.Invoke(item);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.UserVotedToSkipIntro(int userId, bool voted)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+
+                var user = Room.Users.SingleOrDefault(u =&gt; u.UserID == userId);
+
+                // TODO: user should NEVER be null here, see https://github.com/ppy/osu/issues/17713.
+                if (user == null)
+                    return;
+
+                user.VotedToSkipIntro = voted;
+                UserVotedToSkipIntro?.Invoke(userId, voted);
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMultiplayerClient.VoteToSkipIntroPassed()
+        {
+            handleRoomRequest(() =&gt;
+            {
+                Debug.Assert(Room != null);
+                VoteToSkipIntroPassed?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        /// &lt;summary&gt;
+        /// Populates the &lt;see cref=&quot;APIUser&quot;/&gt; for a given collection of &lt;see cref=&quot;MultiplayerRoomUser&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;multiplayerUsers&quot;&gt;The &lt;see cref=&quot;MultiplayerRoomUser&quot;/&gt;s to populate.&lt;/param&gt;
+        protected async Task PopulateUsers(IEnumerable&lt;MultiplayerRoomUser&gt; multiplayerUsers)
+        {
+            foreach (int[] userChunk in multiplayerUsers.Select(u =&gt; u.UserID).Distinct().Chunk(GetUsersRequest.MAX_IDS_PER_REQUEST))
+            {
+                var request = new GetUsersRequest(userChunk);
+
+                await API.PerformAsync(request).ConfigureAwait(false);
+
+                if (request.Response == null)
+                    return;
+
+                Dictionary&lt;int, APIUser&gt; users = request.Response.Users.ToDictionary(user =&gt; user.Id);
+
+                foreach (var multiplayerUser in multiplayerUsers)
+                {
+                    if (users.TryGetValue(multiplayerUser.UserID, out var user))
+                        multiplayerUser.User = user;
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the local room settings with the given &lt;see cref=&quot;MultiplayerRoomSettings&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This updates both the joined &lt;see cref=&quot;MultiplayerRoom&quot;/&gt; and the respective API &lt;see cref=&quot;Room&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;settings&quot;&gt;The new &lt;see cref=&quot;MultiplayerRoomSettings&quot;/&gt; to update from.&lt;/param&gt;
+        private void updateLocalRoomSettings(MultiplayerRoomSettings settings)
+        {
+            Debug.Assert(Room != null);
+            Debug.Assert(APIRoom != null);
+
+            // Update a few properties of the room instantaneously.
+            Room.Settings = settings;
+            APIRoom.Name = Room.Settings.Name;
+            APIRoom.Password = Room.Settings.Password;
+            APIRoom.Type = Room.Settings.MatchType;
+            APIRoom.QueueMode = Room.Settings.QueueMode;
+            APIRoom.AutoStartDuration = Room.Settings.AutoStartDuration;
+            APIRoom.CurrentPlaylistItem = APIRoom.Playlist.Single(item =&gt; item.ID == settings.PlaylistItemId);
+            APIRoom.AutoSkip = Room.Settings.AutoSkip;
+            APIRoom.MaxParticipants = Room.Settings.MaxParticipants;
+
+            SettingsChanged?.Invoke(settings);
+            RoomUpdated?.Invoke();
+        }
+
+        /// &lt;summary&gt;
+        /// For the provided user ID, update whether the user is included in &lt;see cref=&quot;CurrentMatchPlayingUserIds&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;userId&quot;&gt;The user&#39;s ID.&lt;/param&gt;
+        /// &lt;param name=&quot;state&quot;&gt;The new state of the user.&lt;/param&gt;
+        private void updateUserPlayingState(int userId, MultiplayerUserState state)
+        {
+            bool wasPlaying = PlayingUserIds.Contains(userId);
+            bool isPlaying = state &gt;= MultiplayerUserState.WaitingForLoad &amp;&amp; state &lt;= MultiplayerUserState.FinishedPlay;
+
+            if (isPlaying == wasPlaying)
+                return;
+
+            if (isPlaying)
+                PlayingUserIds.Add(userId);
+            else
+                PlayingUserIds.Remove(userId);
+        }
+
+        private Task runOnUpdateThreadAsync(Action action, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource&lt;bool&gt;();
+
+            Scheduler.Add(() =&gt;
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    tcs.SetCanceled(cancellationToken);
+                    return;
+                }
+
+                try
+                {
+                    action();
+                    tcs.SetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    tcs.SetException(ex);
+                }
+            });
+
+            return tcs.Task;
+        }
+
+        private void handleRoomRequest(Action request)
+        {
+            Scheduler.Add(() =&gt;
+            {
+                if (Room == null)
+                {
+                    pendingRequests.Enqueue(request);
+                    return;
+                }
+
+                request();
+            });
+        }
+
+        #region Matchmaking / Ranked Play
+
+        Task IMatchmakingClient.MatchmakingQueueJoined()
+        {
+            Scheduler.Add(() =&gt; MatchmakingQueueJoined?.Invoke());
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingQueueLeft()
+        {
+            Scheduler.Add(() =&gt; MatchmakingQueueLeft?.Invoke());
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingRoomInvited()
+        {
+            // Not implemented (used by older clients).
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingRoomInvitedWithParams(MatchmakingRoomInvitationParams invitation)
+        {
+            Scheduler.Add(() =&gt; MatchmakingRoomInvited?.Invoke(invitation));
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingDuelIssued(MatchmakingDuelIssuedParams issue)
+        {
+            Scheduler.Add(() =&gt; MatchmakingDuelIssued?.Invoke(issue));
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingRoomReady(long roomId, string password)
+        {
+            Scheduler.Add(() =&gt; MatchmakingRoomReady?.Invoke(roomId, password));
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingLobbyStatusChanged(MatchmakingLobbyStatus status)
+        {
+            Scheduler.Add(() =&gt; MatchmakingLobbyStatusChanged?.Invoke(status));
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingQueueStatusChanged(MatchmakingQueueStatus status)
+        {
+            Scheduler.Add(() =&gt; MatchmakingQueueStatusChanged?.Invoke(status));
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingItemSelected(int userId, long playlistItemId)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                MatchmakingItemSelected?.Invoke(userId, playlistItemId);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IMatchmakingClient.MatchmakingItemDeselected(int userId, long playlistItemId)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                MatchmakingItemDeselected?.Invoke(userId, playlistItemId);
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public abstract Task DiscardCards(RankedPlayCardItem[] cards);
+
+        public abstract Task PlayCard(RankedPlayCardItem card);
+
+        Task IRankedPlayClient.RankedPlayCardAdded(int userId, RankedPlayCardItem card)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                RankedPlayCardAdded?.Invoke(userId, GetCardWithPlaylistItem(card));
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IRankedPlayClient.RankedPlayCardRemoved(int userId, RankedPlayCardItem card)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                RankedPlayCardRemoved?.Invoke(userId, GetCardWithPlaylistItem(card));
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IRankedPlayClient.RankedPlayCardRevealed(RankedPlayCardItem card, MultiplayerPlaylistItem item)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                GetCardWithPlaylistItem(card).PlaylistItem.Value = item;
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        Task IRankedPlayClient.RankedPlayCardPlayed(RankedPlayCardItem card)
+        {
+            handleRoomRequest(() =&gt;
+            {
+                RankedPlayCardPlayed?.Invoke(GetCardWithPlaylistItem(card));
+                RoomUpdated?.Invoke();
+            });
+
+            return Task.CompletedTask;
+        }
+
+        public RankedPlayCardWithPlaylistItem GetCardWithPlaylistItem(RankedPlayCardItem card)
+        {
+            if (cardsWithPlaylistItems.TryGetValue(card, out var existing))
+                return existing;
+
+            return cardsWithPlaylistItems[card] = new RankedPlayCardWithPlaylistItem(card);
+        }
+
+        public abstract Task&lt;MatchmakingPool[]&gt; GetMatchmakingPoolsOfType(MatchmakingPoolType type);
+
+        public abstract Task&lt;MatchmakingJoinLobbyResponse&gt; MatchmakingJoinLobbyWithParams(MatchmakingJoinLobbyRequest request);
+
+        public abstract Task MatchmakingLeaveLobby();
+
+        public abstract Task MatchmakingJoinQueue(int poolId);
+
+        public abstract Task MatchmakingLeaveQueue();
+
+        public abstract Task MatchmakingAcceptInvitation();
+
+        public abstract Task&lt;MatchmakingIssueDuelResponse&gt; MatchmakingIssueDuel(MatchmakingIssueDuelRequest request);
+
+        public abstract Task&lt;MatchmakingAcceptDuelResponse&gt; MatchmakingAcceptDuel(MatchmakingAcceptDuelRequest request);
+
+        public abstract Task MatchmakingDeclineInvitation();
+
+        public abstract Task MatchmakingToggleSelection(long playlistItemId);
+
+        public abstract Task MatchmakingSkipToNextStage();
+
+        #endregion
+
+        #region Disconnection handling
+
+        /// &lt;summary&gt;
+        /// Invoked just prior to disconnection.
+        /// &lt;/summary&gt;
+        public event Action? Disconnecting;
+
+        protected abstract Task DisconnectInternal();
+
+        public abstract Task Reconnect();
+
+        Task IStatefulUserHubClient.DisconnectRequested()
+        {
+            Schedule(() =&gt;
+            {
+                Disconnecting?.Invoke();
+                DisconnectInternal().FireAndForget();
+            });
+            return Task.CompletedTask;
+        }
+
+        Task IStatefulUserHubClient.ServerShuttingDown()
+        {
+            this.ReconnectWhenReady(IsConnected, () =&gt; room == null, Reconnect);
+            return Task.CompletedTask;
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,57,39,71,0],[39,72,39,76,0],[41,53,41,67,0],[41,68,41,72,0],[158,13,158,14,0],[159,17,159,59,0],[160,17,160,29,0],[161,13,161,14,0],[163,13,163,14,0],[164,17,164,59,0],[165,17,165,30,0],[166,13,166,14,0],[174,73,174,87,0],[176,9,176,87,0],[181,58,181,91,0],[181,91,181,127,0],[181,127,181,128,0],[189,13,189,14,0],[190,17,190,43,0],[191,17,191,95,0],[192,13,192,14,0],[198,42,198,92,0],[201,38,201,42,0],[201,43,201,55,0],[201,60,201,65,0],[204,44,204,48,0],[204,49,204,61,0],[204,66,204,71,0],[207,51,207,55,0],[207,56,207,60,0],[207,65,207,70,0],[209,35,209,39,0],[209,40,209,52,0],[211,9,211,78,0],[212,9,212,117,0],[216,9,216,10,0],[217,13,217,55,0],[217,55,218,13,0],[218,13,218,14,0],[218,14,219,17,0],[219,17,219,41,0],[219,41,220,17,0],[220,17,220,18,0],[220,18,221,21,0],[221,21,221,38,0],[221,38,222,25,0],[222,25,222,53,0],[222,53,224,21,0],[224,21,224,52,0],[224,52,225,17,0],[225,17,225,18,0],[225,18,226,13,0],[226,13,226,14,0],[226,14,226,15,0],[226,15,226,17,0],[227,9,227,10,0],[229,9,229,75,0],[238,9,238,10,0],[239,13,239,30,0],[240,17,240,111,0],[242,13,242,93,0],[244,13,245,13,0],[245,13,245,14,0],[245,14,246,17,0],[246,17,246,52,0],[246,52,246,75,0],[246,75,246,125,0],[246,125,247,17,0],[247,17,247,113,0],[247,113,248,17,0],[248,17,248,110,0],[248,110,249,13,0],[249,13,249,14,0],[249,14,249,64,0],[250,9,250,10,0],[259,9,259,10,0],[260,13,260,30,0],[261,17,261,109,0],[263,13,263,37,0],[264,17,264,86,0],[266,13,266,93,0],[268,13,269,13,0],[269,13,269,14,0],[269,14,270,17,0],[270,17,270,52,0],[270,52,270,75,0],[270,75,270,125,0],[270,125,271,17,0],[271,17,271,130,0],[271,130,272,17,0],[272,17,272,110,0],[272,110,273,13,0],[273,13,273,14,0],[273,14,273,64,0],[274,9,274,10,0],[283,9,283,10,0],[285,13,285,73,0],[286,13,286,41,0],[287,17,287,78,0],[290,13,291,13,0],[291,13,291,14,0],[291,14,292,17,0],[292,17,292,44,0],[292,44,293,17,0],[293,17,293,47,0],[293,47,295,17,0],[295,17,295,35,0],[295,35,296,17,0],[296,17,296,35,0],[296,35,298,17,0],[298,17,298,71,0],[298,71,299,21,0],[299,21,299,30,0],[299,30,301,17,0],[301,17,301,52,0],[301,52,302,17,0],[302,17,302,58,0],[302,58,303,17,0],[303,17,303,54,0],[303,54,304,17,0],[304,17,304,71,0],[304,71,304,93,0],[304,93,304,105,0],[304,105,305,17,0],[305,17,305,79,0],[305,79,305,124,0],[305,124,305,126,0],[305,126,307,17,0],[307,17,307,40,0],[307,40,309,17,0],[309,17,309,49,0],[309,49,310,17,0],[310,17,310,45,0],[310,45,312,17,0],[312,17,312,24,0],[312,24,312,26,0],[312,26,312,34,0],[312,34,312,35,0],[312,35,312,37,0],[312,37,312,38,0],[312,38,312,54,0],[312,54,313,21,0],[313,21,313,69,0],[313,69,315,17,0],[315,17,315,62,0],[315,62,317,17,0],[317,17,317,71,0],[317,71,318,21,0],[318,21,318,30,0],[318,30,320,17,0],[320,17,320,54,0],[320,54,322,17,0],[322,17,322,32,0],[322,32,323,13,0],[323,13,323,14,0],[323,14,323,57,0],[324,9,324,10,0],[330,9,330,10,0],[331,9,331,10,0],[334,9,334,10,0],[337,13,337,46,0],[342,13,343,13,0],[343,13,343,14,0],[343,14,344,17,0],[344,17,344,32,0],[344,32,345,17,0],[345,17,345,29,0],[345,29,346,17,0],[346,17,346,40,0],[346,40,347,17,0],[347,17,347,48,0],[347,48,349,17,0],[349,17,349,39,0],[349,39,350,13,0],[350,13,350,14,0],[350,14,350,16,0],[352,13,353,13,0],[353,13,353,14,0],[353,14,355,17,0],[355,17,355,18,0],[355,18,356,21,0],[356,21,357,21,0],[357,21,357,22,0],[357,22,358,25,0],[358,25,358,68,0],[358,68,359,25,0],[359,25,359,73,0],[359,73,360,21,0],[360,21,360,22,0],[360,22,360,46,0],[360,46,361,17,0],[361,17,361,18,0],[361,18,363,17,0],[363,17,363,18,0],[363,18,364,21,0],[364,21,365,21,0],[365,21,365,22,0],[365,22,366,25,0],[366,25,366,49,0],[366,49,367,21,0],[367,21,367,22,0],[367,22,367,46,0],[367,46,368,17,0],[368,17,368,18,0],[368,18,370,9,0],[370,9,370,10,0],[370,10,369,16,0],[370,9,370,10,0],[409,9,409,10,0],[410,13,410,30,0],[411,17,411,102,0],[413,13,422,16,0],[423,9,423,10,0],[430,9,430,10,0],[431,13,431,39,0],[433,13,433,35,0],[434,17,434,24,0],[436,13,436,37,0],[439,21,439,89,0],[440,21,440,28,0],[443,21,443,88,0],[444,21,444,28,0],[447,21,447,107,0],[449,9,449,10,0],[456,9,456,10,0],[457,13,457,39,0],[459,13,459,35,0],[460,17,460,24,0],[462,13,462,37,0],[466,21,466,94,0],[467,21,467,28,0],[470,21,470,88,0],[471,21,471,28,0],[474,21,474,110,0],[476,9,476,10,0],[494,65,494,100,0],[494,100,494,113,0],[494,113,494,124,0],[515,9,515,10,0],[516,13,517,13,0],[517,13,517,14,0],[517,14,518,17,0],[518,17,518,44,0],[518,44,519,17,0],[519,17,519,47,0],[519,47,521,17,0],[521,17,521,36,0],[521,36,523,17,0],[523,17,523,31,0],[523,31,526,25,0],[526,25,526,58,0],[526,58,527,25,0],[527,25,527,31,0],[527,31,531,25,0],[531,25,531,61,0],[531,61,532,25,0],[532,25,532,31,0],[532,31,535,25,0],[535,25,535,62,0],[535,62,536,25,0],[536,25,536,58,0],[536,58,537,25,0],[537,25,537,31,0],[537,31,540,17,0],[540,17,540,39,0],[540,39,541,13,0],[541,13,541,14,0],[541,14,541,16,0],[543,13,543,39,0],[544,9,544,10,0],[547,9,547,10,0],[548,13,548,63,0],[550,13,551,13,0],[551,13,551,14,0],[551,14,552,17,0],[552,17,552,44,0],[552,44,555,17,0],[555,17,555,48,0],[555,48,555,78,0],[555,78,555,80,0],[555,80,556,21,0],[556,21,556,28,0],[556,28,558,17,0],[558,17,558,38,0],[558,38,560,17,0],[560,17,560,40,0],[560,40,562,17,0],[562,17,562,42,0],[562,42,563,17,0],[563,17,563,39,0],[563,39,564,13,0],[564,13,564,14,0],[564,14,564,16,0],[565,9,565,10,0],[568,9,568,10,0],[569,13,569,37,0],[569,37,569,67,0],[569,67,569,69,0],[570,13,570,39,0],[571,9,571,10,0],[574,9,574,10,0],[575,13,576,13,0],[576,13,576,14,0],[576,14,577,17,0],[577,17,577,39,0],[577,39,578,21,0],[578,21,578,28,0],[578,28,580,17,0],[580,17,580,44,0],[580,44,581,21,0],[581,21,581,49,0],[581,49,583,17,0],[583,17,583,50,0],[583,50,584,13,0],[584,13,584,14,0],[584,14,584,16,0],[586,13,586,39,0],[587,9,587,10,0],[590,9,590,10,0],[591,13,591,55,0],[592,13,592,40,0],[594,13,594,37,0],[595,13,595,48,0],[597,13,597,43,0],[598,13,598,80,0],[598,80,598,99,0],[598,99,598,111,0],[599,13,599,40,0],[601,13,601,36,0],[602,13,602,35,0],[603,9,603,10,0],[606,9,606,10,0],[607,13,607,100,0],[608,13,608,78,0],[610,13,610,52,0],[610,53,610,60,0],[612,13,615,17,0],[615,17,615,18,0],[615,18,616,21,0],[616,21,616,61,0],[616,61,617,21,0],[617,21,617,33,0],[617,33,618,17,0],[618,17,618,18,0],[618,18,619,16,0],[622,13,622,14,0],[623,17,623,102,0],[625,17,625,54,0],[626,17,626,44,0],[626,44,626,83,0],[626,83,626,84,0],[627,17,627,41,0],[627,41,627,80,0],[627,80,627,81,0],[629,17,629,36,0],[631,17,631,50,0],[632,13,632,14,0],[633,9,633,10,0],[636,9,636,10,0],[637,13,637,43,0],[639,13,643,26,0],[644,13,644,40,0],[645,9,645,10,0],[648,9,648,10,0],[649,13,650,13,0],[650,13,650,14,0],[650,14,651,17,0],[651,17,651,44,0],[651,44,652,17,0],[652,17,652,47,0],[652,47,654,17,0],[654,17,654,59,0],[654,59,654,77,0],[654,77,654,79,0],[654,79,656,17,0],[656,17,656,34,0],[656,34,657,17,0],[657,17,657,43,0],[657,43,659,17,0],[659,17,659,43,0],[659,43,660,17,0],[660,17,660,39,0],[660,39,661,13,0],[661,13,661,14,0],[661,14,661,16,0],[663,13,663,39,0],[664,9,664,10,0],[667,9,667,10,0],[668,13,668,37,0],[668,37,668,73,0],[668,73,668,75,0],[669,13,669,39,0],[670,9,670,10,0],[673,9,673,10,0],[674,13,675,13,0],[675,13,675,14,0],[675,14,676,17,0],[676,17,676,44,0],[676,44,678,17,0],[678,17,678,60,0],[678,60,678,78,0],[678,78,678,80,0],[678,80,681,17,0],[681,17,681,34,0],[681,34,682,21,0],[682,21,682,28,0],[682,28,684,17,0],[684,17,684,36,0],[684,36,685,17,0],[685,17,685,55,0],[685,55,687,17,0],[687,17,687,55,0],[687,55,688,17,0],[688,17,688,39,0],[688,39,689,13,0],[689,13,689,14,0],[689,14,689,16,0],[691,13,691,39,0],[692,9,692,10,0],[695,9,695,10,0],[696,13,697,13,0],[697,13,697,14,0],[697,14,698,17,0],[698,17,698,44,0],[698,44,700,17,0],[700,17,700,60,0],[700,60,700,78,0],[700,78,700,80,0],[700,80,703,17,0],[703,17,703,34,0],[703,34,704,21,0],[704,21,704,28,0],[704,28,706,17,0],[706,17,706,41,0],[706,41,707,17,0],[707,17,707,39,0],[707,39,708,13,0],[708,13,708,14,0],[708,14,708,16,0],[710,13,710,39,0],[711,9,711,10,0],[714,9,714,10,0],[715,13,716,13,0],[716,13,716,14,0],[716,14,717,17,0],[717,17,717,44,0],[717,44,719,17,0],[719,17,719,41,0],[719,41,720,17,0],[720,17,720,54,0],[720,54,721,17,0],[721,17,721,39,0],[721,39,722,13,0],[722,13,722,14,0],[722,14,722,16,0],[724,13,724,39,0],[725,9,725,10,0],[728,9,728,10,0],[729,13,730,13,0],[730,13,730,14,0],[730,14,731,17,0],[731,17,731,44,0],[731,44,736,25,0],[736,25,736,84,0],[736,84,737,25,0],[737,25,737,83,0],[737,83,739,25,0],[739,25,739,65,0],[739,65,742,33,0],[742,33,742,70,0],[742,70,743,33,0],[743,33,743,39,0],[743,39,746,25,0],[746,25,746,31,0],[746,31,749,25,0],[749,25,749,109,0],[749,109,749,149,0],[749,149,749,151,0],[749,151,751,25,0],[751,25,751,47,0],[751,47,752,25,0],[752,25,752,26,0],[752,26,753,29,0],[753,29,753,69,0],[753,69,754,29,0],[754,29,754,65,0],[754,65,755,25,0],[755,25,755,26,0],[755,26,757,25,0],[757,25,757,31,0],[757,31,760,17,0],[760,17,760,39,0],[760,39,761,17,0],[761,17,761,39,0],[761,39,762,13,0],[762,13,762,14,0],[762,14,762,16,0],[764,13,764,39,0],[765,9,765,10,0],[768,9,768,10,0],[769,13,769,132,0],[771,13,771,35,0],[772,17,772,24,0],[774,13,774,95,0],[775,9,775,10,0],[778,9,778,10,0],[779,13,780,13,0],[780,13,780,14,0],[780,14,781,17,0],[781,17,781,44,0],[781,44,783,17,0],[783,17,783,60,0],[783,60,783,78,0],[783,78,783,80,0],[783,80,786,17,0],[786,17,786,34,0],[786,34,787,21,0],[787,21,787,28,0],[787,28,789,17,0],[789,17,789,64,0],[789,64,791,17,0],[791,17,791,79,0],[791,79,792,17,0],[792,17,792,39,0],[792,39,793,13,0],[793,13,793,14,0],[793,14,793,16,0],[795,13,795,39,0],[796,9,796,10,0],[799,9,799,10,0],[800,13,801,13,0],[801,13,801,14,0],[801,14,802,17,0],[802,17,802,44,0],[802,44,804,17,0],[804,17,804,60,0],[804,60,804,78,0],[804,78,804,80,0],[804,80,807,17,0],[807,17,807,34,0],[807,34,808,21,0],[808,21,808,28,0],[808,28,810,17,0],[810,17,810,44,0],[810,44,811,17,0],[811,17,811,44,0],[811,44,813,17,0],[813,17,813,48,0],[813,48,814,17,0],[814,17,814,39,0],[814,39,815,13,0],[815,13,815,14,0],[815,14,815,16,0],[817,13,817,39,0],[818,9,818,10,0],[821,9,821,10,0],[822,13,823,13,0],[823,13,823,14,0],[823,14,824,17,0],[824,17,824,44,0],[824,44,826,17,0],[826,17,826,60,0],[826,60,826,78,0],[826,78,826,80,0],[826,80,829,17,0],[829,17,829,34,0],[829,34,830,21,0],[830,21,830,28,0],[830,28,832,17,0],[832,17,832,34,0],[832,34,834,17,0],[834,17,834,47,0],[834,47,835,17,0],[835,17,835,39,0],[835,39,836,13,0],[836,13,836,14,0],[836,14,836,16,0],[838,13,838,39,0],[839,9,839,10,0],[842,9,842,10,0],[843,13,844,13,0],[844,13,844,14,0],[844,14,845,17,0],[845,17,845,44,0],[845,44,846,17,0],[846,17,846,41,0],[846,41,847,13,0],[847,13,847,14,0],[847,14,847,16,0],[849,13,849,39,0],[850,9,850,10,0],[853,9,853,10,0],[854,13,855,13,0],[855,13,855,14,0],[855,14,856,17,0],[856,17,856,44,0],[856,44,857,17,0],[857,17,857,49,0],[857,49,858,13,0],[858,13,858,14,0],[858,14,858,16,0],[860,13,860,39,0],[861,9,861,10,0],[864,9,864,10,0],[865,13,866,13,0],[866,13,866,14,0],[866,14,867,17,0],[867,17,867,44,0],[867,44,868,17,0],[868,17,868,43,0],[868,43,869,13,0],[869,13,869,14,0],[869,14,869,16,0],[871,13,871,39,0],[872,9,872,10,0],[875,9,875,10,0],[876,13,877,13,0],[877,13,877,14,0],[877,14,878,17,0],[878,17,878,44,0],[878,44,879,17,0],[879,17,879,40,0],[879,40,880,13,0],[880,13,880,14,0],[880,14,880,16,0],[882,13,882,39,0],[883,9,883,10,0],[886,9,886,10,0],[887,13,888,13,0],[888,13,888,14,0],[888,14,889,17,0],[889,17,889,44,0],[889,44,890,17,0],[890,17,890,47,0],[890,47,892,17,0],[892,17,892,41,0],[892,41,893,17,0],[893,17,893,94,0],[893,94,895,17,0],[895,17,895,41,0],[895,41,896,17,0],[896,17,896,39,0],[896,39,897,13,0],[897,13,897,14,0],[897,14,897,16,0],[899,13,899,39,0],[900,9,900,10,0],[903,9,903,10,0],[904,13,905,13,0],[905,13,905,14,0],[905,14,906,17,0],[906,17,906,44,0],[906,44,907,17,0],[907,17,907,47,0],[907,47,909,17,0],[909,17,909,71,0],[909,71,909,100,0],[909,100,909,103,0],[909,103,910,17,0],[910,17,910,64,0],[910,64,910,86,0],[910,86,910,98,0],[910,98,912,17,0],[912,17,912,55,0],[912,55,914,17,0],[914,17,914,53,0],[914,53,915,17,0],[915,17,915,39,0],[915,39,916,13,0],[916,13,916,14,0],[916,14,916,16,0],[918,13,918,39,0],[919,9,919,10,0],[922,9,922,10,0],[923,13,924,13,0],[924,13,924,14,0],[924,14,925,17,0],[925,17,925,44,0],[925,44,926,17,0],[926,17,926,47,0],[926,47,928,17,0],[928,17,928,86,0],[928,86,928,108,0],[928,108,928,119,0],[928,119,929,17,0],[929,17,929,71,0],[929,71,929,134,0],[929,134,929,146,0],[929,146,931,17,0],[931,17,931,43,0],[931,43,932,17,0],[932,17,932,39,0],[932,39,933,13,0],[933,13,933,14,0],[933,14,933,16,0],[935,13,935,39,0],[936,9,936,10,0],[939,9,939,10,0],[940,13,941,13,0],[941,13,941,14,0],[941,14,942,17,0],[942,17,942,44,0],[942,44,944,17,0],[944,17,944,60,0],[944,60,944,78,0],[944,78,944,80,0],[944,80,947,17,0],[947,17,947,34,0],[947,34,948,21,0],[948,21,948,28,0],[948,28,950,17,0],[950,17,950,47,0],[950,47,951,17,0],[951,17,951,61,0],[951,61,952,13,0],[952,13,952,14,0],[952,14,952,16,0],[954,13,954,39,0],[955,9,955,10,0],[958,9,958,10,0],[959,13,960,13,0],[960,13,960,14,0],[960,14,961,17,0],[961,17,961,44,0],[961,44,962,17,0],[962,17,962,49,0],[962,49,963,13,0],[963,13,963,14,0],[963,14,963,16,0],[965,13,965,39,0],[966,9,966,10,0],[973,9,973,10,0],[974,13,974,20,0],[974,22,974,37,0],[974,38,974,40,0],[974,41,974,70,0],[974,70,974,78,0],[974,78,974,133,0],[975,13,975,14,0],[976,17,976,62,0],[978,17,978,71,0],[980,17,980,46,0],[981,21,981,28,0],[983,17,983,94,0],[983,94,983,101,0],[983,101,983,103,0],[985,17,985,24,0],[985,26,985,45,0],[985,46,985,48,0],[985,49,985,65,0],[986,17,986,18,0],[987,21,987,81,0],[988,25,988,53,0],[989,17,989,18,0],[990,13,990,14,0],[991,9,991,10,0],[1001,9,1001,10,0],[1002,13,1002,40,0],[1003,13,1003,43,0],[1006,13,1006,38,0],[1007,13,1007,47,0],[1008,13,1008,55,0],[1009,13,1009,52,0],[1010,13,1010,57,0],[1011,13,1011,73,0],[1012,13,1012,75,0],[1012,75,1012,109,0],[1012,109,1012,111,0],[1013,13,1013,55,0],[1014,13,1014,69,0],[1016,13,1016,47,0],[1017,13,1017,35,0],[1018,9,1018,10,0],[1026,9,1026,10,0],[1027,13,1027,63,0],[1028,13,1028,121,0],[1030,13,1030,41,0],[1031,17,1031,24,0],[1033,13,1033,27,0],[1034,17,1034,44,0],[1036,17,1036,47,0],[1037,9,1037,10,0],[1040,9,1040,10,0],[1041,13,1041,56,0],[1043,13,1044,13,0],[1044,13,1044,14,0],[1044,14,1045,17,0],[1045,17,1045,63,0],[1045,63,1046,17,0],[1046,17,1046,18,0],[1046,18,1047,21,0],[1047,21,1047,56,0],[1047,56,1048,21,0],[1048,21,1048,28,0],[1048,28,1052,17,0],[1052,17,1052,18,0],[1052,18,1053,21,0],[1053,21,1053,30,0],[1053,30,1054,21,0],[1054,21,1054,41,0],[1054,41,1055,17,0],[1055,17,1055,18,0],[1055,18,1056,17,0],[1056,17,1056,37,0],[1056,37,1057,17,0],[1057,17,1057,18,0],[1057,18,1058,21,0],[1058,21,1058,42,0],[1058,42,1059,17,0],[1059,17,1059,18,0],[1059,18,1060,13,0],[1060,13,1060,14,0],[1060,14,1060,16,0],[1062,13,1062,29,0],[1063,9,1063,10,0],[1066,9,1066,10,0],[1067,13,1068,13,0],[1068,13,1068,14,0],[1068,14,1069,17,0],[1069,17,1069,34,0],[1069,34,1070,17,0],[1070,17,1070,18,0],[1070,18,1071,21,0],[1071,21,1071,54,0],[1071,54,1072,21,0],[1072,21,1072,28,0],[1072,28,1075,17,0],[1075,17,1075,27,0],[1075,27,1076,13,0],[1076,13,1076,14,0],[1076,14,1076,16,0],[1077,9,1077,10,0],[1082,9,1082,10,0],[1083,13,1083,33,0],[1083,33,1083,65,0],[1083,65,1083,67,0],[1084,13,1084,39,0],[1085,9,1085,10,0],[1088,9,1088,10,0],[1089,13,1089,33,0],[1089,33,1089,63,0],[1089,63,1089,65,0],[1090,13,1090,39,0],[1091,9,1091,10,0],[1094,9,1094,10,0],[1096,13,1096,39,0],[1097,9,1097,10,0],[1100,9,1100,10,0],[1101,13,1101,33,0],[1101,33,1101,75,0],[1101,75,1101,77,0],[1102,13,1102,39,0],[1103,9,1103,10,0],[1106,9,1106,10,0],[1107,13,1107,33,0],[1107,33,1107,69,0],[1107,69,1107,71,0],[1108,13,1108,39,0],[1109,9,1109,10,0],[1112,9,1112,10,0],[1113,13,1113,33,0],[1113,33,1113,79,0],[1113,79,1113,81,0],[1114,13,1114,39,0],[1115,9,1115,10,0],[1118,9,1118,10,0],[1119,13,1119,33,0],[1119,33,1119,78,0],[1119,78,1119,80,0],[1120,13,1120,39,0],[1121,9,1121,10,0],[1124,9,1124,10,0],[1125,13,1125,33,0],[1125,33,1125,78,0],[1125,78,1125,80,0],[1126,13,1126,39,0],[1127,9,1127,10,0],[1130,9,1130,10,0],[1131,13,1132,13,0],[1132,13,1132,14,0],[1132,14,1133,17,0],[1133,17,1133,73,0],[1133,73,1134,17,0],[1134,17,1134,39,0],[1134,39,1135,13,0],[1135,13,1135,14,0],[1135,14,1135,16,0],[1137,13,1137,39,0],[1138,9,1138,10,0],[1141,9,1141,10,0],[1142,13,1143,13,0],[1143,13,1143,14,0],[1143,14,1144,17,0],[1144,17,1144,75,0],[1144,75,1145,17,0],[1145,17,1145,39,0],[1145,39,1146,13,0],[1146,13,1146,14,0],[1146,14,1146,16,0],[1148,13,1148,39,0],[1149,9,1149,10,0],[1156,9,1156,10,0],[1157,13,1158,13,0],[1158,13,1158,14,0],[1158,14,1159,17,0],[1159,17,1159,84,0],[1159,84,1160,17,0],[1160,17,1160,39,0],[1160,39,1161,13,0],[1161,13,1161,14,0],[1161,14,1161,16,0],[1163,13,1163,39,0],[1164,9,1164,10,0],[1167,9,1167,10,0],[1168,13,1169,13,0],[1169,13,1169,14,0],[1169,14,1170,17,0],[1170,17,1170,86,0],[1170,86,1171,17,0],[1171,17,1171,39,0],[1171,39,1172,13,0],[1172,13,1172,14,0],[1172,14,1172,16,0],[1174,13,1174,39,0],[1175,9,1175,10,0],[1178,9,1178,10,0],[1179,13,1180,13,0],[1180,13,1180,14,0],[1180,14,1181,17,0],[1181,17,1181,73,0],[1181,73,1182,17,0],[1182,17,1182,39,0],[1182,39,1183,13,0],[1183,13,1183,14,0],[1183,14,1183,16,0],[1185,13,1185,39,0],[1186,9,1186,10,0],[1189,9,1189,10,0],[1190,13,1191,13,0],[1191,13,1191,14,0],[1191,14,1192,17,0],[1192,17,1192,77,0],[1192,77,1193,17,0],[1193,17,1193,39,0],[1193,39,1194,13,0],[1194,13,1194,14,0],[1194,14,1194,16,0],[1196,13,1196,39,0],[1197,9,1197,10,0],[1200,9,1200,10,0],[1201,13,1201,76,0],[1202,17,1202,33,0],[1204,13,1204,92,0],[1205,9,1205,10,0],[1243,9,1243,10,0],[1244,13,1245,13,0],[1245,13,1245,14,0],[1245,14,1246,17,0],[1246,17,1246,41,0],[1246,41,1247,17,0],[1247,17,1247,54,0],[1247,54,1248,13,0],[1248,13,1248,14,0],[1248,14,1248,16,0],[1249,13,1249,39,0],[1250,9,1250,10,0],[1253,9,1253,10,0],[1254,13,1254,56,0],[1254,56,1254,68,0],[1254,68,1254,81,0],[1255,13,1255,39,0],[1256,9,1256,10,0]]);
+    </script>
+  </body>
+</html>

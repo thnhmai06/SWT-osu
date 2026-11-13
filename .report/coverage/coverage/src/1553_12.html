@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapLeaderboardScore.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Backgrounds;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Leaderboards;
+using osu.Game.Overlays;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Scoring;
+using osu.Game.Users;
+using osu.Game.Users.Drawables;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+using CommonStrings = osu.Game.Localisation.CommonStrings;
+
+namespace osu.Game.Screens.Select
+{
+    public sealed partial class BeatmapLeaderboardScore : OsuClickableContainer, IHasContextMenu, IHasCustomTooltip&lt;ScoreInfo&gt;
+    {
+        public const int HEIGHT = 50;
+
+        public readonly ScoreInfo Score;
+
+        public Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; SelectedMods = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;();
+
+        /// &lt;summary&gt;
+        /// A function determining whether each mod in the score can be selected.
+        /// A return value of &lt;see langword=&quot;true&quot;/&gt; means that the mod can be selected in the current context.
+        /// A return value of &lt;see langword=&quot;false&quot;/&gt; means that the mod cannot be selected in the current context.
+        /// &lt;/summary&gt;
+        public Func&lt;Mod, bool&gt; IsValidMod { get; set; } = _ =&gt; true;
+
+        public int? Rank { get; init; }
+        public HighlightType? Highlight { get; init; }
+        public Action&lt;ScoreInfo&gt;? ShowReplay { get; init; }
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private ScoreManager scoreManager { get; set; } = null!;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        private const float expanded_right_content_width = 200;
+        private const float grade_width = 35;
+        private const float username_min_width = 120;
+        private const float statistics_regular_min_width = 165;
+        private const float statistics_compact_min_width = 90;
+        private const float rank_label_width = 40;
+
+        private const int corner_radius = 10;
+        private const int transition_duration = 200;
+
+        private static readonly Color4 personal_best_gradient_left = Color4Extensions.FromHex(&quot;#66FFCC&quot;);
+        private static readonly Color4 personal_best_gradient_right = Color4Extensions.FromHex(&quot;#51A388&quot;);
+
+        private Colour4 foregroundColour;
+        private Colour4 backgroundColour;
+        private ColourInfo totalScoreBackgroundGradient;
+
+        private IBindable&lt;ScoringMode&gt; scoringMode { get; set; } = null!;
+
+        private Box background = null!;
+        private Box foreground = null!;
+
+        private ClickableAvatar innerAvatar = null!;
+
+        private Container centreContent = null!;
+        private Container rightContent = null!;
+
+        private FillFlowContainer&lt;Drawable&gt; modsContainer = null!;
+
+        private Box totalScoreBackground = null!;
+
+        private FillFlowContainer statisticsContainer = null!;
+        private Container highlightGradient = null!;
+        private Container rankLabelStandalone = null!;
+        private Container rankLabelOverlay = null!;
+
+        private readonly bool sheared;
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+        {
+            var inputRectangle = DrawRectangle;
+
+            inputRectangle = inputRectangle.Inflate(new MarginPadding { Vertical = BeatmapLeaderboardWedge.SPACING_BETWEEN_SCORES / 2 });
+
+            return inputRectangle.Contains(ToLocalSpace(screenSpacePos));
+        }
+
+        public BeatmapLeaderboardScore(ScoreInfo score, bool sheared = true)
+        {
+            Score = score;
+
+            this.sheared = sheared;
+
+            Shear = sheared ? OsuGame.SHEAR : Vector2.Zero;
+            RelativeSizeAxes = Axes.X;
+            Height = HEIGHT;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            foregroundColour = colourProvider.Background5;
+            backgroundColour = colourProvider.Background3;
+            totalScoreBackgroundGradient = ColourInfo.GradientHorizontal(backgroundColour.Opacity(0), backgroundColour);
+
+            Child = new Container
+            {
+                Masking = true,
+                CornerRadius = corner_radius,
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    background = new Box
+                    {
+                        Alpha = 0.4f,
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = backgroundColour
+                    },
+                    rankLabelStandalone = new Container
+                    {
+                        Width = rank_label_width,
+                        RelativeSizeAxes = Axes.Y,
+                        Children = new Drawable[]
+                        {
+                            highlightGradient = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Padding = new MarginPadding { Right = -10f },
+                                Alpha = Highlight != null ? 1 : 0,
+                                Colour = getHighlightColour(Highlight),
+                                Child = new Box { RelativeSizeAxes = Axes.Both },
+                            },
+                            new RankLabel(Rank, sheared, darkText: Highlight == HighlightType.Own)
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            }
+                        },
+                    },
+                    centreContent = new Container
+                    {
+                        Name = @&quot;Centre container&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        Child = new Container
+                        {
+                            Masking = true,
+                            CornerRadius = corner_radius,
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                foreground = new Box
+                                {
+                                    Alpha = 0.4f,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = foregroundColour
+                                },
+                                new UserCoverBackground
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    User = Score.User,
+                                    Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                    Anchor = Anchor.BottomLeft,
+                                    Origin = Anchor.BottomLeft,
+                                    Colour = ColourInfo.GradientHorizontal(Colour4.White.Opacity(0.5f), Colour4.FromHex(@&quot;222A27&quot;).Opacity(1)),
+                                },
+                                new GridContainer
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    ColumnDimensions = new[]
+                                    {
+                                        new Dimension(GridSizeMode.AutoSize),
+                                        new Dimension(),
+                                        new Dimension(GridSizeMode.AutoSize),
+                                    },
+                                    Content = new[]
+                                    {
+                                        new Drawable[]
+                                        {
+                                            new Container
+                                            {
+                                                AutoSizeAxes = Axes.Both,
+                                                CornerRadius = corner_radius,
+                                                Masking = true,
+                                                Children = new Drawable[]
+                                                {
+                                                    new DelayedLoadWrapper(innerAvatar = new ClickableAvatar(Score.User)
+                                                    {
+                                                        Anchor = Anchor.Centre,
+                                                        Origin = Anchor.Centre,
+                                                        Scale = new Vector2(1.1f),
+                                                        Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                        RelativeSizeAxes = Axes.Both,
+                                                    })
+                                                    {
+                                                        RelativeSizeAxes = Axes.None,
+                                                        Size = new Vector2(HEIGHT)
+                                                    },
+                                                    rankLabelOverlay = new Container
+                                                    {
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        Alpha = 0,
+                                                        Children = new Drawable[]
+                                                        {
+                                                            new Box
+                                                            {
+                                                                RelativeSizeAxes = Axes.Both,
+                                                                Colour = Colour4.Black.Opacity(0.5f),
+                                                            },
+                                                            new RankLabel(Rank, sheared, false)
+                                                            {
+                                                                AutoSizeAxes = Axes.Both,
+                                                                Anchor = Anchor.Centre,
+                                                                Origin = Anchor.Centre,
+                                                            },
+                                                        }
+                                                    }
+                                                },
+                                            },
+                                            new FillFlowContainer
+                                            {
+                                                Anchor = Anchor.CentreLeft,
+                                                Origin = Anchor.CentreLeft,
+                                                RelativeSizeAxes = Axes.X,
+                                                AutoSizeAxes = Axes.Y,
+                                                Direction = FillDirection.Vertical,
+                                                Padding = new MarginPadding { Horizontal = corner_radius },
+                                                Children = new Drawable[]
+                                                {
+                                                    new FillFlowContainer
+                                                    {
+                                                        Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                        Direction = FillDirection.Horizontal,
+                                                        Spacing = new Vector2(5),
+                                                        AutoSizeAxes = Axes.Both,
+                                                        Masking = true,
+                                                        Children = new Drawable[]
+                                                        {
+                                                            new UpdateableFlag(Score.User.CountryCode)
+                                                            {
+                                                                Anchor = Anchor.CentreLeft,
+                                                                Origin = Anchor.CentreLeft,
+                                                                Size = new Vector2(20, 14),
+                                                            },
+                                                            new UpdateableTeamFlag(Score.User.Team)
+                                                            {
+                                                                Anchor = Anchor.CentreLeft,
+                                                                Origin = Anchor.CentreLeft,
+                                                                Size = new Vector2(30, 15),
+                                                            },
+                                                            new DateLabel(Score.Date)
+                                                            {
+                                                                Anchor = Anchor.CentreLeft,
+                                                                Origin = Anchor.CentreLeft,
+                                                                Colour = colourProvider.Content2,
+                                                                UseFullGlyphHeight = false,
+                                                            }
+                                                        }
+                                                    },
+                                                    new TruncatingSpriteText
+                                                    {
+                                                        RelativeSizeAxes = Axes.X,
+                                                        Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                        Text = Score.User.Username,
+                                                        Font = OsuFont.Style.Heading2,
+                                                    }
+                                                }
+                                            },
+                                            new Container
+                                            {
+                                                AutoSizeAxes = Axes.Both,
+                                                Anchor = Anchor.CentreRight,
+                                                Origin = Anchor.CentreRight,
+                                                Child = statisticsContainer = new FillFlowContainer
+                                                {
+                                                    Name = @&quot;Statistics container&quot;,
+                                                    Padding = new MarginPadding { Right = 10 },
+                                                    Spacing = new Vector2(20, 0),
+                                                    Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                    Anchor = Anchor.CentreRight,
+                                                    Origin = Anchor.CentreRight,
+                                                    AutoSizeAxes = Axes.Both,
+                                                    Direction = FillDirection.Horizontal,
+                                                    Children = new Drawable[]
+                                                    {
+                                                        new ScoreComponentLabel(BeatmapsetsStrings.ShowScoreboardHeadersCombo.ToUpper(), $&quot;{Score.MaxCombo.ToString()}x&quot;,
+                                                            Score.MaxCombo == Score.GetMaximumAchievableCombo(), 60),
+                                                        new ScoreComponentLabel(BeatmapsetsStrings.ShowScoreboardHeadersAccuracy.ToUpper(), Score.DisplayAccuracy, Score.Accuracy == 1,
+                                                            55),
+                                                    },
+                                                    Alpha = 0,
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            },
+                        },
+                    },
+                    rightContent = new Container
+                    {
+                        Anchor = Anchor.TopRight,
+                        Origin = Anchor.TopRight,
+                        Name = @&quot;Right content&quot;,
+                        RelativeSizeAxes = Axes.Y,
+                        Child = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Anchor = Anchor.TopRight,
+                            Origin = Anchor.TopRight,
+                            Children = new Drawable[]
+                            {
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Padding = new MarginPadding { Right = grade_width },
+                                    Child = new Box
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Colour = ColourInfo.GradientHorizontal(backgroundColour.Opacity(0), OsuColour.ForRank(Score.Rank)),
+                                    },
+                                },
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Y,
+                                    Width = grade_width,
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    Colour = OsuColour.ForRank(Score.Rank),
+                                },
+                                new TrianglesV2
+                                {
+                                    Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    SpawnRatio = 2,
+                                    Velocity = 0.7f,
+                                    Colour = ColourInfo.GradientHorizontal(backgroundColour.Opacity(0), OsuColour.ForRank(Score.Rank).Darken(0.2f)),
+                                },
+                                new Container
+                                {
+                                    Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                    Anchor = Anchor.CentreRight,
+                                    Origin = Anchor.CentreRight,
+                                    RelativeSizeAxes = Axes.Y,
+                                    Width = grade_width,
+                                    Child = new OsuSpriteText
+                                    {
+                                        Anchor = Anchor.Centre,
+                                        Origin = Anchor.Centre,
+                                        Spacing = new Vector2(-2),
+                                        Colour = DrawableRank.GetRankLetterColour(Score.Rank),
+                                        Font = OsuFont.Numeric.With(size: 14),
+                                        Text = DrawableRank.GetRankLetter(Score.Rank),
+                                        ShadowColour = Color4.Black.Opacity(0.3f),
+                                        ShadowOffset = new Vector2(0, 0.08f),
+                                        Shadow = true,
+                                        UseFullGlyphHeight = false,
+                                    },
+                                },
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Anchor = Anchor.CentreLeft,
+                                    Origin = Anchor.CentreLeft,
+                                    Padding = new MarginPadding { Right = grade_width },
+                                    Child = new Container
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Masking = true,
+                                        CornerRadius = corner_radius,
+                                        Children = new Drawable[]
+                                        {
+                                            totalScoreBackground = new Box
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Colour = totalScoreBackgroundGradient,
+                                            },
+                                            new Box
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Colour = ColourInfo.GradientHorizontal(backgroundColour.Opacity(0), OsuColour.ForRank(Score.Rank).Opacity(0.5f)),
+                                            },
+                                            new FillFlowContainer
+                                            {
+                                                AutoSizeAxes = Axes.Both,
+                                                Anchor = Anchor.CentreRight,
+                                                Origin = Anchor.CentreRight,
+                                                Direction = FillDirection.Vertical,
+                                                Padding = new MarginPadding { Horizontal = corner_radius },
+                                                Spacing = new Vector2(0f, -2f),
+                                                Children = new Drawable[]
+                                                {
+                                                    new OsuSpriteText
+                                                    {
+                                                        Anchor = Anchor.TopRight,
+                                                        Origin = Anchor.TopRight,
+                                                        UseFullGlyphHeight = false,
+                                                        Current = scoreManager.GetBindableTotalScoreString(Score),
+                                                        Spacing = new Vector2(-1.5f),
+                                                        Font = OsuFont.Style.Subtitle.With(weight: FontWeight.Light, fixedWidth: true),
+                                                        Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                    },
+                                                    modsContainer = new FillFlowContainer&lt;Drawable&gt;
+                                                    {
+                                                        Anchor = Anchor.TopRight,
+                                                        Origin = Anchor.TopRight,
+                                                        AutoSizeAxes = Axes.Both,
+                                                        Direction = FillDirection.Horizontal,
+                                                        Spacing = new Vector2(-10, 0),
+                                                        Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
+            };
+            innerAvatar.OnLoadComplete += d =&gt; d.FadeInFromZero(200);
+        }
+
+        private ColourInfo getHighlightColour(HighlightType? highlightType, float lightenAmount = 0)
+        {
+            switch (highlightType)
+            {
+                case HighlightType.Own:
+                    return ColourInfo.GradientHorizontal(personal_best_gradient_left.Lighten(lightenAmount), personal_best_gradient_right.Lighten(lightenAmount));
+
+                case HighlightType.Friend:
+                    return ColourInfo.GradientHorizontal(colours.Pink1.Lighten(lightenAmount), colours.Pink3.Lighten(lightenAmount));
+
+                default:
+                    return Colour4.White;
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            scoringMode = config.GetBindable&lt;ScoringMode&gt;(OsuSetting.ScoreDisplayMode);
+            scoringMode.BindValueChanged(s =&gt;
+            {
+                switch (s.NewValue)
+                {
+                    case ScoringMode.Standardised:
+                        rightContent.Width = 170;
+                        break;
+
+                    case ScoringMode.Classic:
+                        rightContent.Width = expanded_right_content_width;
+                        break;
+                }
+
+                updateModDisplay();
+            }, true);
+        }
+
+        private void updateModDisplay()
+        {
+            if (Score.Mods.Length &gt; 0)
+            {
+                modsContainer.Padding = new MarginPadding { Top = 4f };
+                modsContainer.ChildrenEnumerable = Score.Mods.AsOrdered().Select(mod =&gt; new ModIcon(mod)
+                {
+                    Scale = new Vector2(0.3f),
+                    // trim mod icon height down to its true height for alignment purposes.
+                    Height = ModIcon.MOD_ICON_SIZE.Y * 3 / 4f,
+                });
+            }
+        }
+
+        private (CaseTransformableString, LocalisableString DisplayAccuracy)[] getStatistics(ScoreInfo model) =&gt; new[]
+        {
+            (BeatmapsetsStrings.ShowScoreboardHeadersCombo.ToUpper(), model.MaxCombo.ToString().Insert(model.MaxCombo.ToString().Length, &quot;x&quot;)),
+            (BeatmapsetsStrings.ShowScoreboardHeadersAccuracy.ToUpper(), model.DisplayAccuracy),
+        };
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            updateState();
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            updateState();
+            base.OnHoverLost(e);
+        }
+
+        private void updateState()
+        {
+            var lightenedGradient = ColourInfo.GradientHorizontal(backgroundColour.Opacity(0).Lighten(0.2f), backgroundColour.Lighten(0.2f));
+
+            foreground.FadeColour(IsHovered ? foregroundColour.Lighten(0.2f) : foregroundColour, transition_duration, Easing.OutQuint);
+            background.FadeColour(IsHovered ? backgroundColour.Lighten(0.2f) : backgroundColour, transition_duration, Easing.OutQuint);
+            totalScoreBackground.FadeColour(IsHovered ? lightenedGradient : totalScoreBackgroundGradient, transition_duration, Easing.OutQuint);
+            highlightGradient.FadeColour(getHighlightColour(Highlight, IsHovered ? 0.2f : 0), transition_duration, Easing.OutQuint);
+
+            if (IsHovered &amp;&amp; currentMode != DisplayMode.Full)
+                rankLabelOverlay.FadeIn(transition_duration, Easing.OutQuint);
+            else
+                rankLabelOverlay.FadeOut(transition_duration, Easing.OutQuint);
+        }
+
+        private DisplayMode? currentMode;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            DisplayMode mode = getCurrentDisplayMode();
+
+            if (currentMode != mode)
+                updateDisplayMode(mode);
+
+            centreContent.Padding = new MarginPadding
+            {
+                Left = rankLabelStandalone.DrawWidth,
+                Right = rightContent.DrawWidth,
+            };
+        }
+
+        private void updateDisplayMode(DisplayMode mode)
+        {
+            double duration = currentMode == null ? 0 : transition_duration;
+            if (mode &gt;= DisplayMode.Full)
+                rankLabelStandalone.FadeIn(duration, Easing.OutQuint).ResizeWidthTo(rank_label_width, duration, Easing.OutQuint);
+            else
+                rankLabelStandalone.FadeOut(duration, Easing.OutQuint).ResizeWidthTo(0, duration, Easing.OutQuint);
+
+            if (mode &gt;= DisplayMode.Regular)
+            {
+                statisticsContainer.FadeIn(duration, Easing.OutQuint).MoveToX(0, duration, Easing.OutQuint);
+                statisticsContainer.Direction = FillDirection.Horizontal;
+                statisticsContainer.ScaleTo(1, duration, Easing.OutQuint);
+            }
+            else if (mode &gt;= DisplayMode.Compact)
+            {
+                statisticsContainer.FadeIn(duration, Easing.OutQuint).MoveToX(0, duration, Easing.OutQuint);
+                statisticsContainer.Direction = FillDirection.Vertical;
+                statisticsContainer.ScaleTo(0.8f, duration, Easing.OutQuint);
+            }
+            else
+                statisticsContainer.FadeOut(duration, Easing.OutQuint).MoveToX(statisticsContainer.DrawWidth, duration, Easing.OutQuint);
+
+            currentMode = mode;
+        }
+
+        private DisplayMode getCurrentDisplayMode()
+        {
+            if (DrawWidth &gt;= username_min_width + statistics_regular_min_width + expanded_right_content_width + rank_label_width)
+                return DisplayMode.Full;
+
+            if (DrawWidth &gt;= username_min_width + statistics_regular_min_width + expanded_right_content_width)
+                return DisplayMode.Regular;
+
+            if (DrawWidth &gt;= username_min_width + statistics_compact_min_width + expanded_right_content_width)
+                return DisplayMode.Compact;
+
+            return DisplayMode.Minimal;
+        }
+
+        ITooltip&lt;ScoreInfo&gt; IHasCustomTooltip&lt;ScoreInfo&gt;.GetCustomTooltip() =&gt; new LeaderboardScoreTooltip(colourProvider);
+
+        ScoreInfo IHasCustomTooltip&lt;ScoreInfo&gt;.TooltipContent =&gt; Score;
+
+        MenuItem[] IHasContextMenu.ContextMenuItems
+        {
+            get
+            {
+                List&lt;MenuItem&gt; items = new List&lt;MenuItem&gt;();
+
+                // system mods should never be copied across regardless of anything.
+                var copyableMods = Score.Mods.Where(m =&gt; IsValidMod.Invoke(m) &amp;&amp; m.Type != ModType.System).ToArray();
+
+                if (copyableMods.Length &gt; 0)
+                    items.Add(new OsuMenuItem(SongSelectStrings.UseTheseMods, MenuItemType.Highlighted, () =&gt; SelectedMods.Value = copyableMods));
+
+                if (Score.OnlineID &gt; 0)
+                    items.Add(new OsuMenuItem(CommonStrings.CopyLink, MenuItemType.Standard, () =&gt; game?.CopyToClipboard($@&quot;{api.Endpoints.WebsiteUrl}/scores/{Score.OnlineID}&quot;)));
+
+                if (Score.Files.Count &lt;= 0) return items.ToArray();
+
+                if (items.Count &gt; 0)
+                    items.Add(new OsuMenuItemSpacer());
+
+                if (ShowReplay != null)
+                    items.Add(new OsuMenuItem(SongSelectStrings.WatchReplay, MenuItemType.Standard, () =&gt; ShowReplay.Invoke(Score)));
+                items.Add(new OsuMenuItem(CommonStrings.Export, MenuItemType.Standard, () =&gt; scoreManager.Export(Score)));
+                items.Add(new OsuMenuItem(Resources.Localisation.Web.CommonStrings.ButtonsDelete, MenuItemType.Destructive, () =&gt; dialogOverlay?.Push(new LocalScoreDeleteDialog(Score))));
+
+                return items.ToArray();
+            }
+        }
+
+        private enum DisplayMode
+        {
+            Minimal,
+            Compact,
+            Regular,
+            Full
+        }
+
+        private partial class DateLabel : DrawableDate
+        {
+            public DateLabel(DateTimeOffset date)
+                : base(date)
+            {
+                Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold);
+            }
+
+            protected override LocalisableString Format() =&gt; Date.ToShortRelativeTime(TimeSpan.FromSeconds(30));
+        }
+
+        private partial class ScoreComponentLabel : Container
+        {
+            private readonly LocalisableString name;
+            private readonly LocalisableString value;
+            private readonly bool perfect;
+            private readonly float minWidth;
+
+            private FillFlowContainer content = null!;
+            public override bool Contains(Vector2 screenSpacePos) =&gt; content.Contains(screenSpacePos);
+
+            public ScoreComponentLabel(LocalisableString name, LocalisableString value, bool perfect, float minWidth)
+            {
+                this.name = name;
+                this.value = value;
+                this.perfect = perfect;
+                this.minWidth = minWidth;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, OverlayColourProvider colourProvider)
+            {
+                AutoSizeAxes = Axes.Both;
+                Child = content = new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Children = new[]
+                    {
+                        new OsuSpriteText
+                        {
+                            Colour = colourProvider.Content2,
+                            Text = name,
+                            Font = OsuFont.Style.Caption2.With(weight: FontWeight.SemiBold),
+                        },
+                        new OsuSpriteText
+                        {
+                            // We don&#39;t want the value setting the horizontal size, since it leads to wonky accuracy container length,
+                            // since the accuracy is sometimes longer than its name.
+                            BypassAutoSizeAxes = Axes.X,
+                            Text = value,
+                            Font = OsuFont.Style.Body,
+                            Colour = perfect ? colours.Lime1 : Color4.White,
+                        },
+                        Empty().With(d =&gt; d.Width = minWidth),
+                    }
+                };
+            }
+        }
+
+        private partial class RankLabel : Container, IHasTooltip
+        {
+            private readonly bool darkText;
+            private readonly OsuSpriteText text;
+
+            public RankLabel(int? rank, bool sheared, bool darkText)
+            {
+                this.darkText = darkText;
+                if (rank &gt;= 1000)
+                    TooltipText = $&quot;#{rank:N0}&quot;;
+
+                Child = text = new OsuSpriteText
+                {
+                    Shear = sheared ? -OsuGame.SHEAR : Vector2.Zero,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Font = OsuFont.Style.Heading2,
+                    Text = rank?.FormatRank().Insert(0, &quot;#&quot;) ?? &quot;-&quot;,
+                    Shadow = !darkText,
+                };
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OverlayColourProvider colourProvider)
+            {
+                text.Colour = darkText ? colourProvider.Background3 : colourProvider.Content1;
+            }
+
+            public LocalisableString TooltipText { get; }
+        }
+
+        public enum HighlightType
+        {
+            Own,
+            Friend,
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,9,50,95,0],[57,45,57,49,0],[57,50,57,54,0],[57,59,57,64,0],[57,64,57,68,0],[59,28,59,32,0],[59,33,59,38,0],[60,43,60,47,0],[60,48,60,53,0],[61,48,61,52,0],[61,53,61,58,0],[64,56,64,60,0],[64,61,64,65,0],[64,70,64,75,0],[67,37,67,41,0],[67,42,67,46,0],[67,51,67,56,0],[70,49,70,53,0],[70,54,70,58,0],[73,45,73,49,0],[73,50,73,54,0],[73,59,73,64,0],[76,43,76,47,0],[76,48,76,52,0],[76,57,76,62,0],[79,33,79,37,0],[79,38,79,42,0],[82,36,82,40,0],[82,41,82,45,0],[82,50,82,55,0],[94,9,94,106,0],[95,9,95,107,0],[101,54,101,58,0],[101,59,101,63,0],[101,68,101,73,0],[103,9,103,40,0],[104,9,104,40,0],[106,9,106,53,0],[108,9,108,49,0],[109,9,109,48,0],[111,9,111,67,0],[113,9,113,50,0],[115,9,115,63,0],[116,9,116,53,0],[117,9,117,55,0],[118,9,118,52,0],[123,9,123,10,0],[124,13,124,48,0],[126,13,126,138,0],[128,13,128,74,0],[129,9,129,10,0],[131,9,131,77,0],[132,9,132,10,0],[133,13,133,27,0],[135,13,135,36,0],[137,13,137,60,0],[138,13,138,39,0],[139,13,139,29,0],[140,9,140,10,0],[144,9,144,10,0],[145,13,145,59,0],[146,13,146,59,0],[147,13,147,121,0],[149,13,464,15,0],[465,13,465,48,0],[465,48,465,69,0],[465,69,465,70,0],[466,9,466,10,0],[469,9,469,10,0],[470,13,470,35,0],[473,21,473,163,0],[476,21,476,134,0],[479,21,479,42,0],[481,9,481,10,0],[484,9,484,10,0],[485,13,485,33,0],[487,13,487,88,0],[488,13,489,13,0],[489,13,489,14,0],[489,14,490,17,0],[490,17,490,36,0],[490,36,493,25,0],[493,25,493,50,0],[493,50,494,25,0],[494,25,494,31,0],[494,31,497,25,0],[497,25,497,75,0],[497,75,498,25,0],[498,25,498,31,0],[498,31,501,17,0],[501,17,501,36,0],[501,36,502,13,0],[502,13,502,14,0],[502,14,502,22,0],[503,9,503,10,0],[506,9,506,10,0],[507,13,507,39,0],[508,13,508,14,0],[509,17,509,72,0],[510,17,510,89,0],[510,89,515,18,0],[515,18,515,20,0],[516,13,516,14,0],[517,9,517,10,0],[519,114,523,10,0],[526,9,526,10,0],[527,13,527,27,0],[528,13,528,36,0],[529,9,529,10,0],[532,9,532,10,0],[533,13,533,27,0],[534,13,534,33,0],[535,9,535,10,0],[538,9,538,10,0],[539,13,539,142,0],[541,13,541,136,0],[542,13,542,136,0],[543,13,543,145,0],[544,13,544,133,0],[546,13,546,62,0],[547,17,547,79,0],[549,17,549,80,0],[550,9,550,10,0],[555,9,555,10,0],[556,13,556,27,0],[558,13,558,56,0],[560,13,560,37,0],[561,17,561,41,0],[563,13,567,15,0],[568,9,568,10,0],[571,9,571,10,0],[572,13,572,77,0],[573,13,573,42,0],[574,17,574,130,0],[576,17,576,116,0],[578,13,578,45,0],[579,13,579,14,0],[580,17,580,109,0],[581,17,581,74,0],[582,17,582,75,0],[583,13,583,14,0],[584,18,584,50,0],[585,13,585,14,0],[586,17,586,109,0],[587,17,587,72,0],[588,17,588,78,0],[589,13,589,14,0],[591,17,591,138,0],[593,13,593,32,0],[594,9,594,10,0],[597,9,597,10,0],[598,13,598,130,0],[599,17,599,41,0],[601,13,601,111,0],[602,17,602,44,0],[604,13,604,111,0],[605,17,605,44,0],[607,13,607,40,0],[608,9,608,10,0],[610,80,610,123,0],[612,66,612,71,0],[617,13,617,14,0],[618,17,618,61,0],[621,17,621,58,0],[621,58,621,106,0],[621,106,621,118,0],[623,17,623,45,0],[624,21,624,111,0],[624,111,624,144,0],[624,144,624,147,0],[626,17,626,40,0],[627,21,627,100,0],[627,100,627,177,0],[627,177,627,180,0],[629,17,629,44,0],[629,45,629,68,0],[631,17,631,37,0],[632,21,632,56,0],[634,17,634,40,0],[635,21,635,107,0],[635,107,635,131,0],[635,131,635,134,0],[636,17,636,94,0],[636,94,636,120,0],[636,120,636,123,0],[637,17,637,131,0],[637,131,637,185,0],[637,185,637,188,0],[639,17,639,40,0],[640,13,640,14,0],[654,19,654,29,0],[655,13,655,14,0],[656,17,656,81,0],[657,13,657,14,0],[659,62,659,112,0],[669,13,669,55,0],[670,70,670,102,0],[672,13,672,118,0],[673,13,673,14,0],[674,17,674,34,0],[675,17,675,36,0],[676,17,676,40,0],[677,17,677,42,0],[678,13,678,14,0],[682,13,682,14,0],[683,17,683,42,0],[684,17,705,43,0],[705,43,705,61,0],[705,61,707,19,0],[708,13,708,14,0],[716,13,716,69,0],[717,13,717,14,0],[718,17,718,42,0],[719,17,719,34,0],[720,21,720,49,0],[722,17,730,19,0],[731,13,731,14,0],[735,13,735,14,0],[736,17,736,95,0],[737,13,737,14,0],[739,52,739,56,0]]);
+    </script>
+  </body>
+</html>

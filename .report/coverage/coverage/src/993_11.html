@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/PolygonGenerationPopover.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.UI;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
+
+namespace osu.Game.Rulesets.Osu.Edit
+{
+    public partial class PolygonGenerationPopover : OsuPopover
+    {
+        private DependencyContainer dependencies = null!;
+
+        private FormSliderBar&lt;double&gt; distanceSnapInput { get; set; } = null!;
+        private FormSliderBar&lt;int&gt; offsetAngleInput { get; set; } = null!;
+        private FormSliderBar&lt;int&gt; repeatCountInput { get; set; } = null!;
+        private FormSliderBar&lt;int&gt; pointInput { get; set; } = null!;
+        private RoundedButton commitButton = null!;
+
+        private readonly List&lt;HitCircle&gt; insertedCircles = new List&lt;HitCircle&gt;();
+        private bool began;
+        private bool committed;
+
+        [Resolved]
+        private IBeatSnapProvider beatSnapProvider { get; set; } = null!;
+
+        [Resolved]
+        private EditorClock editorClock { get; set; } = null!;
+
+        [Resolved]
+        private EditorBeatmap editorBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private IEditorChangeHandler? changeHandler { get; set; }
+
+        [Resolved]
+        private HitObjectComposer composer { get; set; } = null!;
+
+        private PlacementStateManager? placementStateManager;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        {
+            return dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            AllowableAnchors = new[] { Anchor.CentreLeft, Anchor.CentreRight };
+
+            Child = new FillFlowContainer
+            {
+                Width = 220,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(5),
+                Children = new Drawable[]
+                {
+                    distanceSnapInput = new FormSliderBar&lt;double&gt;
+                    {
+                        Caption = &quot;Distance snap&quot;,
+                        Current = new BindableNumber&lt;double&gt;(1)
+                        {
+                            MinValue = 0.1,
+                            MaxValue = 6,
+                            Precision = 0.1,
+                            Value = ((OsuHitObjectComposer)composer).DistanceSnapProvider.DistanceSpacingMultiplier.Value,
+                        },
+                        TabbableContentContainer = this
+                    },
+                    offsetAngleInput = new FormSliderBar&lt;int&gt;
+                    {
+                        Caption = &quot;Offset angle&quot;,
+                        Current = new BindableNumber&lt;int&gt;
+                        {
+                            MinValue = 0,
+                            MaxValue = 180,
+                            Precision = 1
+                        },
+                        TabbableContentContainer = this
+                    },
+                    repeatCountInput = new FormSliderBar&lt;int&gt;
+                    {
+                        Caption = &quot;Repeats&quot;,
+                        Current = new BindableNumber&lt;int&gt;(1)
+                        {
+                            MinValue = 1,
+                            MaxValue = 10,
+                            Precision = 1
+                        },
+                        TabbableContentContainer = this
+                    },
+                    pointInput = new FormSliderBar&lt;int&gt;
+                    {
+                        Caption = &quot;Vertices&quot;,
+                        Current = new BindableNumber&lt;int&gt;(3)
+                        {
+                            MinValue = 3,
+                            MaxValue = 32,
+                            Precision = 1,
+                        },
+                        TabbableContentContainer = this
+                    },
+                    commitButton = new RoundedButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Text = &quot;Create&quot;,
+                        Action = commit
+                    }
+                }
+            };
+
+            // TODO: This is a pretty ugly dependency chain.
+            // We should look to rearrange things to avoid this altogether.
+            dependencies.CacheAs(composer.BlueprintContainer.SelectionHandler);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            changeHandler?.BeginChange();
+            began = true;
+
+            distanceSnapInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
+            offsetAngleInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
+            repeatCountInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
+            pointInput.Current.BindValueChanged(_ =&gt; Scheduler.AddOnce(tryCreatePolygon));
+            tryCreatePolygon();
+        }
+
+        private void tryCreatePolygon()
+        {
+            double startTime = beatSnapProvider.SnapTime(editorClock.CurrentTime);
+            TimingControlPoint timingPoint = editorBeatmap.ControlPointInfo.TimingPointAt(startTime);
+            double timeSpacing = timingPoint.BeatLength / editorBeatmap.BeatDivisor;
+            IHasSliderVelocity lastWithSliderVelocity = editorBeatmap.HitObjects.Where(ho =&gt; ho.GetEndTime() &lt;= startTime).OfType&lt;IHasSliderVelocity&gt;().LastOrDefault() ?? new Slider();
+            double velocity = OsuHitObject.BASE_SCORING_DISTANCE * editorBeatmap.Difficulty.SliderMultiplier
+                              / LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(lastWithSliderVelocity, timingPoint, OsuRuleset.SHORT_NAME);
+            double length = distanceSnapInput.Current.Value * velocity * timeSpacing;
+            float polygonRadius = (float)(length / (2 * Math.Sin(double.Pi / pointInput.Current.Value)));
+
+            int totalPoints = pointInput.Current.Value * repeatCountInput.Current.Value;
+
+            if (insertedCircles.Count &gt; totalPoints)
+            {
+                editorBeatmap.RemoveRange(insertedCircles.GetRange(totalPoints, insertedCircles.Count - totalPoints));
+                insertedCircles.RemoveRange(totalPoints, insertedCircles.Count - totalPoints);
+            }
+
+            var newlyAdded = new List&lt;HitCircle&gt;();
+
+            for (int i = 0; i &lt; totalPoints; ++i)
+            {
+                float angle = float.DegreesToRadians(offsetAngleInput.Current.Value) + (i + 1) * (2 * float.Pi / pointInput.Current.Value);
+                var position = OsuPlayfield.BASE_SIZE / 2 + new Vector2(polygonRadius * float.Cos(angle), polygonRadius * float.Sin(angle));
+
+                HitCircle circle;
+
+                if (i &lt; insertedCircles.Count)
+                {
+                    circle = insertedCircles[i];
+
+                    circle.Position = position;
+                    circle.StartTime = startTime;
+                }
+                else
+                {
+                    circle = new HitCircle
+                    {
+                        Position = position,
+                        StartTime = startTime,
+                    };
+
+                    newlyAdded.Add(circle);
+
+                    circle.Samples.Add(circle.CreateHitSampleInfo());
+                }
+
+                if (position.X &lt; 0 || position.Y &lt; 0 || position.X &gt; OsuPlayfield.BASE_SIZE.X || position.Y &gt; OsuPlayfield.BASE_SIZE.Y)
+                {
+                    commitButton.Enabled.Value = false;
+                    editorBeatmap.RemoveRange(insertedCircles);
+                    insertedCircles.Clear();
+                    return;
+                }
+
+                startTime = beatSnapProvider.SnapTime(startTime + timeSpacing);
+            }
+
+            insertedCircles.AddRange(newlyAdded);
+            editorBeatmap.AddRange(newlyAdded);
+
+            placementStateManager?.RemoveAndDisposeImmediately();
+            Content.Add(placementStateManager = new PlacementStateManager(insertedCircles.Cast&lt;HitObject&gt;().ToArray())
+            {
+                PerformBeatmapUpdates = true,
+            });
+
+            commitButton.Enabled.Value = true;
+        }
+
+        private void commit()
+        {
+            changeHandler?.EndChange();
+            committed = true;
+            Hide();
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            if (began &amp;&amp; !committed)
+            {
+                editorBeatmap.RemoveRange(insertedCircles);
+                changeHandler?.EndChange();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,9,27,58,0],[29,59,29,63,0],[29,64,29,68,0],[29,73,29,78,0],[30,55,30,59,0],[30,60,30,64,0],[30,69,30,74,0],[31,55,31,59,0],[31,60,31,64,0],[31,69,31,74,0],[32,49,32,53,0],[32,54,32,58,0],[32,63,32,68,0],[33,9,33,52,0],[35,9,35,82,0],[40,54,40,58,0],[40,59,40,63,0],[40,68,40,73,0],[43,43,43,47,0],[43,48,43,52,0],[43,57,43,62,0],[46,47,46,51,0],[46,52,46,56,0],[46,61,46,66,0],[49,55,49,59,0],[49,60,49,64,0],[52,46,52,50,0],[52,51,52,55,0],[52,60,52,65,0],[57,9,57,10,0],[58,13,58,97,0],[59,9,59,10,0],[63,9,63,10,0],[64,13,64,80,0],[66,13,125,15,0],[129,13,129,80,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,33,0],[136,13,136,42,0],[137,13,137,26,0],[139,13,139,61,0],[139,61,139,96,0],[139,96,139,98,0],[140,13,140,60,0],[140,60,140,95,0],[140,95,140,97,0],[141,13,141,60,0],[141,60,141,95,0],[141,95,141,97,0],[142,13,142,54,0],[142,54,142,89,0],[142,89,142,91,0],[143,13,143,32,0],[144,9,144,10,0],[147,9,147,10,0],[148,13,148,83,0],[149,13,149,102,0],[150,13,150,85,0],[151,13,151,94,0],[151,94,151,122,0],[151,122,151,185,0],[152,13,153,148,0],[154,13,154,86,0],[155,13,155,106,0],[157,13,157,89,0],[159,13,159,53,0],[160,13,160,14,0],[161,17,161,119,0],[162,17,162,95,0],[163,13,163,14,0],[165,13,165,52,0],[167,18,167,27,0],[167,29,167,44,0],[167,46,167,49,0],[168,13,168,14,0],[169,17,169,140,0],[170,17,170,141,0],[174,17,174,47,0],[175,17,175,18,0],[176,21,176,49,0],[178,21,178,48,0],[179,21,179,50,0],[180,17,180,18,0],[182,17,182,18,0],[183,21,187,23,0],[189,21,189,44,0],[191,21,191,70,0],[192,17,192,18,0],[194,17,194,136,0],[195,17,195,18,0],[196,21,196,56,0],[197,21,197,64,0],[198,21,198,45,0],[199,21,199,28,0],[202,17,202,80,0],[203,13,203,14,0],[205,13,205,50,0],[206,13,206,48,0],[208,13,208,66,0],[209,13,212,16,0],[214,13,214,47,0],[215,9,215,10,0],[218,9,218,10,0],[219,13,219,40,0],[220,13,220,30,0],[221,13,221,20,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,27,0],[228,13,228,37,0],[229,13,229,14,0],[230,17,230,60,0],[231,17,231,44,0],[232,13,232,14,0],[233,9,233,10,0]]);
+    </script>
+  </body>
+</html>

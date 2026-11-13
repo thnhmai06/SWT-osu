@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Timing/SliderVelocityAdjustmentControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Screens.Edit.Components.TernaryButtons;
+using osuTK;
+using osuTK.Input;
+using CommonStrings = osu.Game.Resources.Localisation.Web.CommonStrings;
+
+namespace osu.Game.Screens.Edit.Timing
+{
+    public partial class SliderVelocityAdjustmentControl : CompositeDrawable
+    {
+        public Bindable&lt;double&gt; Current { get; } = new BindableNumber&lt;double&gt;(1)
+        {
+            Precision = 0.01,
+            MinValue = 0.1,
+            MaxValue = 10
+        };
+
+        public BindableList&lt;HitObject&gt; ObjectsToAdjust { get; } = new BindableList&lt;HitObject&gt;();
+
+        public bool IsMultipleValues { get; private set; }
+
+        private bool applyingState;
+
+        private FormDiscreteAdjustmentControl&lt;double&gt; control = null!;
+        private FillFlowContainer presetsFlow = null!;
+        private RoundedButton addPresetButton = null!;
+
+        private readonly BindableList&lt;double&gt; presets = new BindableList&lt;double&gt;();
+
+        [Resolved]
+        private EditorBeatmap beatmap { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChild = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(5),
+                Children = new Drawable[]
+                {
+                    control = new FormDiscreteAdjustmentControl&lt;double&gt;(0.05)
+                    {
+                        Caption = &quot;Slider velocity&quot;,
+                        Current = Current,
+                    },
+                    presetsFlow = new FillFlowContainer
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Direction = FillDirection.Full,
+                        Spacing = new Vector2(5),
+                        Child = addPresetButton = new AddPresetButton
+                        {
+                            Width = 50,
+                            Height = 25,
+                            Text = &quot;+&quot;,
+                            Action = () =&gt; presets.Add(Current.Value),
+                        }
+                    }
+                }
+            };
+
+            presets.BindTo(beatmap.SliderVelocityPresets);
+            presetsFlow.SetLayoutPosition(addPresetButton, float.MaxValue);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            control.TextBox.Focused.BindValueChanged(focused =&gt;
+            {
+                if (focused.NewValue &amp;&amp; IsMultipleValues)
+                    control.TextBox.Text = string.Empty;
+            });
+
+            beatmap.TransactionEnded += updateState;
+            beatmap.BeatmapReprocessed += updateState;
+            ObjectsToAdjust.BindCollectionChanged((_, _) =&gt; updateState(), true);
+            presets.BindCollectionChanged((_, _) =&gt; updatePresets(), true);
+
+            Current.BindValueChanged(val =&gt;
+            {
+                applyVelocity(val.NewValue);
+                updateState();
+            });
+        }
+
+        private void updateState()
+        {
+            HashSet&lt;double&gt; velocities = ObjectsToAdjust.OfType&lt;IHasSliderVelocity&gt;().Select(point =&gt; Math.Round(point.SliderVelocityMultiplier, 2)).Distinct().ToHashSet();
+            IsMultipleValues = velocities.Count &gt; 1;
+
+            applyingState = true;
+
+            control.Current.Value = velocities.FirstOrDefault(defaultValue: control.Current.Value);
+
+            control.LabelFormat = IsMultipleValues
+                ? static _ =&gt; &quot;(multiple)&quot;
+                : v =&gt; LocalisableString.Interpolate($@&quot;{v:0.00}x&quot;);
+            control.TextBox.PlaceholderText = IsMultipleValues ? &quot;(multiple)&quot; : string.Empty;
+
+            foreach (var preset in presetsFlow.OfType&lt;SliderVelocityPresetTernaryButton&gt;())
+            {
+                if (velocities.Count &gt; 0 &amp;&amp; velocities.Contains(preset.Velocity))
+                    preset.Current.Value = IsMultipleValues ? TernaryState.Indeterminate : TernaryState.True;
+                else if (velocities.Count == 0 &amp;&amp; preset.Velocity == control.Current.Value)
+                    preset.Current.Value = TernaryState.True;
+                else
+                    preset.Current.Value = TernaryState.False;
+            }
+
+            addPresetButton.Enabled.Value = (velocities.Count == 0 &amp;&amp; !presets.Contains(Current.Value)) || (velocities.Count == 1 &amp;&amp; !presets.Contains(velocities.Single()));
+
+            applyingState = false;
+        }
+
+        private void updatePresets()
+        {
+            var remainingPresets = presets.ToHashSet();
+
+            foreach (var button in presetsFlow.OfType&lt;SliderVelocityPresetTernaryButton&gt;())
+            {
+                if (remainingPresets.Contains(button.Velocity))
+                    remainingPresets.Remove(button.Velocity);
+                else
+                    button.Expire();
+            }
+
+            foreach (double preset in remainingPresets)
+            {
+                var presetButton = new SliderVelocityPresetTernaryButton(preset)
+                {
+                    Description = default,
+                    OnDelete = v =&gt; presets.Remove(v),
+                };
+                presetButton.Current.BindValueChanged(val =&gt;
+                {
+                    if (val.NewValue != TernaryState.True)
+                        return;
+
+                    if (applyingState)
+                        return;
+
+                    if (val.NewValue == TernaryState.True)
+                        applyVelocity(preset);
+                    else
+                        updateState();
+                });
+
+                presetsFlow.Add(presetButton);
+                presetsFlow.SetLayoutPosition(presetButton, (float)preset);
+            }
+
+            updateState();
+        }
+
+        private void applyVelocity(double velocity)
+        {
+            if (applyingState)
+                return;
+
+            if (ObjectsToAdjust.Count == 0)
+            {
+                Current.Value = velocity;
+                return;
+            }
+
+            beatmap.BeginChange();
+
+            foreach (var h in ObjectsToAdjust)
+            {
+                if (h is IHasSliderVelocity sv)
+                {
+                    sv.SliderVelocityMultiplier = velocity;
+                    beatmap.Update(h);
+                }
+            }
+
+            beatmap.EndChange();
+        }
+
+        public bool TakeFocus()
+        {
+            if (IsMultipleValues)
+                control.TextBox.Text = string.Empty;
+            return GetContainingFocusManager()!.ChangeFocus(control.TextBox);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            if (beatmap.IsNotNull())
+            {
+                beatmap.TransactionEnded -= updateState;
+                beatmap.BeatmapReprocessed -= updateState;
+            }
+
+            base.Dispose(isDisposing);
+        }
+
+        internal partial class SliderVelocityPresetTernaryButton : DrawableTernaryButton, IHasContextMenu
+        {
+            public double Velocity { get; }
+            public Action&lt;double&gt;? OnDelete { get; init; }
+
+            public SliderVelocityPresetTernaryButton(double velocity)
+            {
+                Velocity = velocity;
+                CreateIcon = () =&gt; new Container
+                {
+                    Child = new OsuSpriteText
+                    {
+                        Text = LocalisableString.Format($@&quot;{velocity:0.00}x&quot;),
+                        Font = OsuFont.Style.Body.With(weight: FontWeight.Bold),
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    }
+                };
+                RelativeSizeAxes = Axes.None;
+                Width = 50;
+                Height = 25;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                Icon.Position = Vector2.Zero;
+                Icon.RelativeSizeAxes = Axes.Both;
+                Icon.Size = new Vector2(1);
+            }
+
+            protected override bool OnMouseDown(MouseDownEvent e)
+            {
+                if ((e.ShiftPressed &amp;&amp; e.Button == MouseButton.Right) || e.Button == MouseButton.Middle)
+                {
+                    OnDelete?.Invoke(Velocity);
+                    return true;
+                }
+
+                return base.OnMouseDown(e);
+            }
+
+            public MenuItem[] ContextMenuItems =&gt;
+            [
+                new OsuMenuItem(CommonStrings.ButtonsDelete, MenuItemType.Destructive, () =&gt; OnDelete?.Invoke(Velocity))
+            ];
+        }
+
+        private partial class AddPresetButton : RoundedButton
+        {
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Content.CornerRadius = 5;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,43,31,47,0],[31,52,36,10,0],[38,58,38,62,0],[38,67,38,96,0],[40,40,40,44,0],[40,45,40,57,0],[44,9,44,71,0],[45,9,45,55,0],[46,9,46,55,0],[48,9,48,84,0],[51,41,51,45,0],[51,46,51,50,0],[51,55,51,60,0],[55,9,55,10,0],[56,13,56,39,0],[57,13,57,35,0],[59,13,83,44,0],[83,44,83,70,0],[83,70,87,15,0],[89,13,89,59,0],[90,13,90,76,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,33,0],[97,13,98,13,0],[98,13,98,14,0],[98,14,99,17,0],[99,17,99,58,0],[99,58,100,21,0],[100,21,100,57,0],[100,57,101,13,0],[101,13,101,14,0],[101,14,101,16,0],[103,13,103,53,0],[104,13,104,55,0],[105,13,105,61,0],[105,61,105,74,0],[105,74,105,82,0],[106,13,106,53,0],[106,53,106,68,0],[106,68,106,76,0],[108,13,109,13,0],[109,13,109,14,0],[109,14,110,17,0],[110,17,110,45,0],[110,45,111,17,0],[111,17,111,31,0],[111,31,112,13,0],[112,13,112,14,0],[112,14,112,16,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,103,0],[117,103,117,148,0],[117,148,117,173,0],[118,13,118,53,0],[120,13,120,34,0],[122,13,122,100,0],[124,13,125,31,0],[125,31,125,43,0],[125,43,126,24,0],[126,24,126,68,0],[126,68,126,69,0],[127,13,127,94,0],[129,13,129,20,0],[129,22,129,32,0],[129,33,129,35,0],[129,36,129,91,0],[130,13,130,14,0],[131,17,131,82,0],[132,21,132,110,0],[133,22,133,92,0],[134,21,134,62,0],[136,21,136,63,0],[137,13,137,14,0],[139,13,139,174,0],[141,13,141,35,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,56,0],[148,13,148,20,0],[148,22,148,32,0],[148,33,148,35,0],[148,36,148,91,0],[149,13,149,14,0],[150,17,150,64,0],[151,21,151,62,0],[153,21,153,37,0],[154,13,154,14,0],[156,13,156,20,0],[156,22,156,35,0],[156,36,156,38,0],[156,39,156,55,0],[157,13,157,14,0],[158,17,161,37,0],[161,37,161,54,0],[161,54,162,19,0],[163,17,164,17,0],[164,17,164,18,0],[164,18,165,21,0],[165,21,165,59,0],[165,59,166,25,0],[166,25,166,32,0],[166,32,168,21,0],[168,21,168,39,0],[168,39,169,25,0],[169,25,169,32,0],[169,32,171,21,0],[171,21,171,59,0],[171,59,172,25,0],[172,25,172,47,0],[172,47,174,25,0],[174,25,174,39,0],[174,39,175,17,0],[175,17,175,18,0],[175,18,175,20,0],[177,17,177,47,0],[178,17,178,76,0],[179,13,179,14,0],[181,13,181,27,0],[182,9,182,10,0],[185,9,185,10,0],[186,13,186,31,0],[187,17,187,24,0],[189,13,189,44,0],[190,13,190,14,0],[191,17,191,42,0],[192,17,192,24,0],[195,13,195,35,0],[197,13,197,20,0],[197,22,197,27,0],[197,28,197,30,0],[197,31,197,46,0],[198,13,198,14,0],[199,17,199,48,0],[200,17,200,18,0],[201,21,201,60,0],[202,21,202,39,0],[203,17,203,18,0],[204,13,204,14,0],[206,13,206,33,0],[207,9,207,10,0],[210,9,210,10,0],[211,13,211,34,0],[212,17,212,53,0],[213,13,213,78,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,37,0],[219,13,219,14,0],[220,17,220,57,0],[221,17,221,59,0],[222,13,222,14,0],[224,13,224,39,0],[225,9,225,10,0],[229,38,229,42,0],[230,47,230,51,0],[230,52,230,57,0],[232,13,232,70,0],[233,13,233,14,0],[234,17,234,37,0],[235,17,235,36,0],[235,36,244,18,0],[244,18,244,19,0],[245,17,245,46,0],[246,17,246,28,0],[247,17,247,29,0],[248,13,248,14,0],[252,13,252,14,0],[253,17,253,46,0],[254,17,254,51,0],[255,17,255,44,0],[256,13,256,14,0],[259,13,259,14,0],[260,17,260,105,0],[261,17,261,18,0],[262,21,262,48,0],[263,21,263,33,0],[266,17,266,44,0],[267,13,267,14,0],[270,13,271,94,0],[271,94,271,120,0],[271,120,272,14,0],[278,13,278,14,0],[279,17,279,37,0],[281,17,281,42,0],[282,13,282,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Spectator/OnlineSpectatorClient.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.SignalR.Client;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Logging;
+using osu.Game.Online.API;
+using osu.Game.Online.Multiplayer;
+
+namespace osu.Game.Online.Spectator
+{
+    public partial class OnlineSpectatorClient : SpectatorClient
+    {
+        private readonly string endpoint;
+
+        private IHubClientConnector? connector;
+
+        public override IBindable&lt;bool&gt; IsConnected { get; } = new BindableBool();
+
+        private HubConnection? connection =&gt; connector?.CurrentConnection;
+
+        public OnlineSpectatorClient(EndpointConfiguration endpoints)
+        {
+            endpoint = endpoints.SpectatorUrl;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IAPIProvider api)
+        {
+            connector = api.GetHubConnector(nameof(SpectatorClient), endpoint);
+
+            if (connector != null)
+            {
+                connector.ConfigureConnection = connection =&gt;
+                {
+                    // until strong typed client support is added, each method must be manually bound
+                    // (see https://github.com/dotnet/aspnetcore/issues/15198)
+                    connection.On&lt;int, SpectatorState&gt;(nameof(ISpectatorClient.UserBeganPlaying), ((ISpectatorClient)this).UserBeganPlaying);
+                    connection.On&lt;int, FrameDataBundle&gt;(nameof(ISpectatorClient.UserSentFrames), ((ISpectatorClient)this).UserSentFrames);
+                    connection.On&lt;int, SpectatorState&gt;(nameof(ISpectatorClient.UserFinishedPlaying), ((ISpectatorClient)this).UserFinishedPlaying);
+                    connection.On&lt;int, long&gt;(nameof(ISpectatorClient.UserScoreProcessed), ((ISpectatorClient)this).UserScoreProcessed);
+                    connection.On&lt;SpectatorUser[]&gt;(nameof(ISpectatorClient.UserStartedWatching), ((ISpectatorClient)this).UserStartedWatching);
+                    connection.On&lt;int&gt;(nameof(ISpectatorClient.UserEndedWatching), ((ISpectatorClient)this).UserEndedWatching);
+                    connection.On(nameof(IStatefulUserHubClient.DisconnectRequested), ((IStatefulUserHubClient)this).DisconnectRequested);
+                    connection.On(nameof(IStatefulUserHubClient.ServerShuttingDown), ((IStatefulUserHubClient)this).ServerShuttingDown);
+                };
+
+                IsConnected.BindTo(connector.IsConnected);
+            }
+        }
+
+        protected override async Task&lt;bool&gt; BeginPlayingInternal(long? scoreToken, SpectatorState state)
+        {
+            if (!IsConnected.Value)
+                return false;
+
+            Debug.Assert(connection != null);
+
+            try
+            {
+                await connection.InvokeAsync(nameof(ISpectatorServer.BeginPlaySessionV2), scoreToken, state).ConfigureAwait(false);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                if (exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE)
+                {
+                    Debug.Assert(connector != null);
+
+                    await connector.Reconnect().ConfigureAwait(false);
+                    return await BeginPlayingInternal(scoreToken, state).ConfigureAwait(false);
+                }
+
+                // Exceptions can occur if, for instance, the locally played beatmap doesn&#39;t have a server-side counterpart.
+                // For now, let&#39;s ignore these so they don&#39;t cause unobserved exceptions to appear to the user (and sentry),
+                // but log to disk for diagnostic purposes.
+                Logger.Log($&quot;{nameof(OnlineSpectatorClient)}.{nameof(BeginPlayingInternal)} failed: {exception.Message}&quot;, LoggingTarget.Network);
+                return false;
+            }
+        }
+
+        protected override Task SendFramesInternal(long? scoreToken, FrameDataBundle bundle)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.SendAsync(nameof(ISpectatorServer.SendFrameDataV2), scoreToken, bundle);
+        }
+
+        protected override Task EndPlayingInternal(long? scoreToken, SpectatedUserState finalState)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(ISpectatorServer.EndPlaySessionV2), scoreToken, finalState);
+        }
+
+        protected override Task WatchUserInternal(int userId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(ISpectatorServer.StartWatchingUser), userId);
+        }
+
+        protected override Task StopWatchingUserInternal(int userId)
+        {
+            if (!IsConnected.Value)
+                return Task.CompletedTask;
+
+            Debug.Assert(connection != null);
+
+            return connection.InvokeAsync(nameof(ISpectatorServer.EndWatchingUser), userId);
+        }
+
+        public override async Task Reconnect()
+        {
+            if (connector != null)
+                await connector.Reconnect().ConfigureAwait(false);
+        }
+
+        protected override async Task DisconnectInternal()
+        {
+            if (connector != null)
+                await connector.Disconnect().ConfigureAwait(false);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,55,22,59,0],[22,64,22,82,0],[24,46,24,74,0],[26,9,26,70,0],[27,9,27,10,0],[28,13,28,47,0],[29,9,29,10,0],[33,9,33,10,0],[34,13,34,80,0],[36,13,36,35,0],[37,13,37,14,0],[38,17,39,17,0],[39,17,39,18,0],[39,18,42,21,0],[42,21,42,142,0],[42,142,43,21,0],[43,21,43,139,0],[43,139,44,21,0],[44,21,44,148,0],[44,148,45,21,0],[45,21,45,136,0],[45,136,46,21,0],[46,21,46,144,0],[46,144,47,21,0],[47,21,47,128,0],[47,128,48,21,0],[48,21,48,139,0],[48,139,49,21,0],[49,21,49,137,0],[49,137,50,17,0],[50,17,50,18,0],[50,18,50,19,0],[52,17,52,59,0],[53,13,53,14,0],[54,9,54,10,0],[57,9,57,10,0],[58,13,58,36,0],[59,17,59,30,0],[61,13,61,46,0],[64,13,64,14,0],[65,17,65,132,0],[66,17,66,29,0],[68,13,68,40,0],[69,13,69,14,0],[70,17,70,102,0],[71,17,71,18,0],[72,21,72,53,0],[74,21,74,71,0],[75,21,75,96,0],[81,17,81,146,0],[82,17,82,30,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,36,0],[89,17,89,43,0],[91,13,91,46,0],[93,13,93,103,0],[94,9,94,10,0],[97,9,97,10,0],[98,13,98,36,0],[99,17,99,43,0],[101,13,101,46,0],[103,13,103,110,0],[104,9,104,10,0],[107,9,107,10,0],[108,13,108,36,0],[109,17,109,43,0],[111,13,111,46,0],[113,13,113,95,0],[114,9,114,10,0],[117,9,117,10,0],[118,13,118,36,0],[119,17,119,43,0],[121,13,121,46,0],[123,13,123,93,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,35,0],[129,17,129,67,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,35,0],[135,17,135,68,0],[136,9,136,10,0]]);
+    </script>
+  </body>
+</html>

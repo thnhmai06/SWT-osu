@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/PanelBeatmapSet.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Drawables;
+using osu.Game.Collections;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osuTK;
+using osuTK.Graphics;
+using WebCommonStrings = osu.Game.Resources.Localisation.Web.CommonStrings;
+
+namespace osu.Game.Screens.Select
+{
+    public partial class PanelBeatmapSet : Panel
+    {
+        public const float HEIGHT = CarouselItem.DEFAULT_HEIGHT * 1.6f;
+
+        public Bindable&lt;HashSet&lt;BeatmapInfo&gt;?&gt; VisibleBeatmaps { get; } = new Bindable&lt;HashSet&lt;BeatmapInfo&gt;?&gt;();
+
+        private Box chevronBackground = null!;
+        private PanelSetBackground setBackground = null!;
+        private ScheduledDelegate? scheduledBackgroundRetrieval;
+
+        private OsuSpriteText titleText = null!;
+        private OsuSpriteText artistText = null!;
+        private Drawable chevronIcon = null!;
+        private PanelUpdateBeatmapButton updateButton = null!;
+        private BeatmapSetOnlineStatusPill statusPill = null!;
+        private SpreadDisplay spreadDisplay = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapSetOverlay? beatmapOverlay { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private ISongSelect? songSelect { get; set; }
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+        private GroupedBeatmapSet groupedBeatmapSet
+        {
+            get
+            {
+                Debug.Assert(Item != null);
+                return (GroupedBeatmapSet)Item!.Model;
+            }
+        }
+
+        public PanelBeatmapSet()
+        {
+            PanelXOffset = 20f;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Height = HEIGHT;
+
+            Icon = chevronIcon = new Container
+            {
+                Size = new Vector2(0, 22),
+                Child = new SpriteIcon
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Icon = FontAwesome.Solid.ChevronRight,
+                    Size = new Vector2(8),
+                    X = 1f,
+                    Colour = colourProvider.Background5,
+                },
+            };
+
+            Background = chevronBackground = new Box
+            {
+                RelativeSizeAxes = Axes.Both,
+                Colour = Color4.White,
+                Alpha = 0f,
+            };
+
+            Content.Children = new Drawable[]
+            {
+                setBackground = new PanelSetBackground(),
+                new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Padding = new MarginPadding { Top = 7.5f, Left = 15, Bottom = 13 },
+                    Children = new Drawable[]
+                    {
+                        titleText = new OsuSpriteText
+                        {
+                            Font = OsuFont.Style.Heading1.With(typeface: Typeface.TorusAlternate),
+                        },
+                        artistText = new OsuSpriteText
+                        {
+                            Font = OsuFont.Style.Body.With(weight: FontWeight.SemiBold),
+                        },
+                        new FillFlowContainer
+                        {
+                            Direction = FillDirection.Horizontal,
+                            AutoSizeAxes = Axes.Both,
+                            Margin = new MarginPadding { Top = 4f },
+                            Children = new Drawable[]
+                            {
+                                statusPill = new BeatmapSetOnlineStatusPill
+                                {
+                                    Origin = Anchor.CentreLeft,
+                                    Anchor = Anchor.CentreLeft,
+                                    TextSize = OsuFont.Style.Caption2.Size,
+                                    Margin = new MarginPadding { Right = 5f },
+                                    Animated = false,
+                                },
+                                updateButton = new PanelUpdateBeatmapButton
+                                {
+                                    Anchor = Anchor.CentreLeft,
+                                    Origin = Anchor.CentreLeft,
+                                    Margin = new MarginPadding { Right = 5f, Top = -2f },
+                                },
+                                spreadDisplay = new SpreadDisplay
+                                {
+                                    Origin = Anchor.CentreLeft,
+                                    Anchor = Anchor.CentreLeft,
+                                    VisibleBeatmaps = { BindTarget = VisibleBeatmaps },
+                                },
+                            },
+                        }
+                    }
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Expanded.BindValueChanged(_ =&gt; onExpanded(), true);
+            KeyboardSelected.BindValueChanged(k =&gt; KeyboardSelected.Value = k.NewValue, true);
+        }
+
+        private void onExpanded()
+        {
+            if (Expanded.Value)
+            {
+                chevronBackground.FadeIn(DURATION / 2, Easing.OutQuint);
+                chevronIcon.ResizeWidthTo(18, DURATION * 1.5f, Easing.OutElasticQuarter);
+                chevronIcon.FadeTo(1f, DURATION, Easing.OutQuint);
+            }
+            else
+            {
+                chevronBackground.FadeOut(DURATION, Easing.OutQuint);
+                chevronIcon.ResizeWidthTo(0f, DURATION, Easing.OutQuint);
+                chevronIcon.FadeTo(0f, DURATION, Easing.OutQuint);
+            }
+
+            spreadDisplay.Expanded.Value = Expanded.Value;
+        }
+
+        protected override void PrepareForUse()
+        {
+            base.PrepareForUse();
+
+            var beatmapSet = groupedBeatmapSet.BeatmapSet;
+
+            // Choice of background image matches BSS implementation (always uses the lowest `beatmap_id` from the set).
+            scheduledBackgroundRetrieval = Scheduler.AddDelayed(s =&gt; setBackground.Beatmap = beatmaps.GetWorkingBeatmap(s.Beatmaps.MinBy(b =&gt; b.OnlineID)), beatmapSet, 50);
+
+            titleText.Text = new RomanisableString(beatmapSet.Metadata.TitleUnicode, beatmapSet.Metadata.Title);
+            artistText.Text = new RomanisableString(beatmapSet.Metadata.ArtistUnicode, beatmapSet.Metadata.Artist);
+            updateButton.BeatmapSet = beatmapSet;
+            statusPill.Status = beatmapSet.Status;
+            spreadDisplay.BeatmapSet.Value = beatmapSet;
+        }
+
+        protected override void FreeAfterUse()
+        {
+            base.FreeAfterUse();
+
+            scheduledBackgroundRetrieval?.Cancel();
+            scheduledBackgroundRetrieval = null;
+            setBackground.Beatmap = null;
+            updateButton.BeatmapSet = null;
+            spreadDisplay.BeatmapSet.Value = null;
+        }
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private ManageCollectionsDialog? manageCollectionsDialog { get; set; }
+
+        public override MenuItem[] ContextMenuItems
+        {
+            get
+            {
+                if (Item == null)
+                    return Array.Empty&lt;MenuItem&gt;();
+
+                var beatmapSet = groupedBeatmapSet.BeatmapSet;
+
+                List&lt;MenuItem&gt; items = new List&lt;MenuItem&gt;();
+
+                if (Expanded.Value)
+                {
+                    if (songSelect is SoloSongSelect soloSongSelect)
+                    {
+                        // Assume the current set has one of its beatmaps selected since it is expanded.
+                        items.Add(new OsuMenuItem(ButtonSystemStrings.Edit.ToSentence(), MenuItemType.Standard, () =&gt; soloSongSelect.Edit(soloSongSelect.Beatmap.Value.BeatmapInfo))
+                        {
+                            Icon = FontAwesome.Solid.PencilAlt
+                        });
+                        items.Add(new OsuMenuItemSpacer());
+                    }
+                }
+                else
+                {
+                    items.Add(new OsuMenuItem(WebCommonStrings.ButtonsExpand.ToSentence(), MenuItemType.Highlighted, () =&gt; TriggerClick()));
+                    items.Add(new OsuMenuItemSpacer());
+                }
+
+                if (beatmapSet.OnlineID &gt; 0)
+                {
+                    items.Add(new OsuMenuItem(CommonStrings.Details, MenuItemType.Standard, () =&gt; beatmapOverlay?.FetchAndShowBeatmapSet(beatmapSet.OnlineID)));
+
+                    if (beatmapSet.GetOnlineURL(api, ruleset.Value) is string url)
+                        items.Add(new OsuMenuItem(CommonStrings.CopyLink, MenuItemType.Standard, () =&gt; game?.CopyToClipboard(url)));
+
+                    items.Add(new OsuMenuItemSpacer());
+                }
+
+                var collectionItems = realm.Realm.All&lt;BeatmapCollection&gt;()
+                                           .OrderBy(c =&gt; c.Name)
+                                           .AsEnumerable()
+                                           .Select(createCollectionMenuItem)
+                                           .ToList();
+
+                if (manageCollectionsDialog != null)
+                    collectionItems.Add(new OsuMenuItem(CommonStrings.Manage, MenuItemType.Standard, manageCollectionsDialog.Show));
+
+                items.Add(new OsuMenuItem(CommonStrings.Collections) { Items = collectionItems });
+
+                if (beatmapSet.Beatmaps.Any(b =&gt; b.Hidden))
+                    items.Add(new OsuMenuItem(SongSelectStrings.RestoreAllHidden, MenuItemType.Standard, () =&gt; songSelect?.RestoreAllHidden(beatmapSet)));
+
+                items.Add(new OsuMenuItem(CommonStrings.DeleteWithConfirmation, MenuItemType.Destructive, () =&gt; songSelect?.Delete(beatmapSet)));
+                return items.ToArray();
+            }
+        }
+
+        private MenuItem createCollectionMenuItem(BeatmapCollection collection)
+        {
+            var beatmapSet = groupedBeatmapSet.BeatmapSet;
+
+            TernaryState state;
+
+            int countExisting = beatmapSet.Beatmaps.Count(b =&gt; collection.BeatmapMD5Hashes.Contains(b.MD5Hash));
+
+            if (countExisting == beatmapSet.Beatmaps.Count)
+                state = TernaryState.True;
+            else if (countExisting &gt; 0)
+                state = TernaryState.Indeterminate;
+            else
+                state = TernaryState.False;
+
+            var liveCollection = collection.ToLive(realm);
+
+            return new TernaryStateToggleMenuItem(collection.Name, MenuItemType.Standard, s =&gt;
+            {
+                Task.Run(() =&gt; liveCollection.PerformWrite(c =&gt;
+                {
+                    foreach (var b in beatmapSet.Beatmaps)
+                    {
+                        switch (s)
+                        {
+                            case TernaryState.True:
+                                if (c.BeatmapMD5Hashes.Contains(b.MD5Hash))
+                                    continue;
+
+                                c.BeatmapMD5Hashes.Add(b.MD5Hash);
+                                break;
+
+                            case TernaryState.False:
+                                c.BeatmapMD5Hashes.Remove(b.MD5Hash);
+                                break;
+                        }
+                    }
+                }));
+            })
+            {
+                State = { Value = state }
+            };
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[41,66,41,70,0],[41,75,41,112,0],[43,9,43,47,0],[44,9,44,58,0],[47,9,47,49,0],[48,9,48,50,0],[49,9,49,46,0],[50,9,50,63,0],[51,9,51,63,0],[52,9,52,53,0],[55,56,55,60,0],[55,61,55,65,0],[55,70,55,75,0],[58,53,58,57,0],[58,58,58,62,0],[61,43,61,47,0],[61,48,61,52,0],[61,57,61,62,0],[64,43,64,47,0],[64,48,64,52,0],[67,33,67,37,0],[67,38,67,42,0],[70,36,70,40,0],[70,41,70,45,0],[70,50,70,55,0],[73,50,73,54,0],[73,55,73,59,0],[73,64,73,69,0],[78,13,78,14,0],[79,17,79,44,0],[80,17,80,55,0],[81,13,81,14,0],[84,9,84,33,0],[85,9,85,10,0],[86,13,86,32,0],[87,9,87,10,0],[91,9,91,10,0],[92,13,92,29,0],[94,13,106,15,0],[108,13,113,15,0],[115,13,166,15,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,33,0],[173,13,173,44,0],[173,44,173,56,0],[173,56,173,64,0],[174,13,174,52,0],[174,52,174,87,0],[174,87,174,95,0],[175,9,175,10,0],[178,9,178,10,0],[179,13,179,32,0],[180,13,180,14,0],[181,17,181,73,0],[182,17,182,90,0],[183,17,183,67,0],[184,13,184,14,0],[186,13,186,14,0],[187,17,187,70,0],[188,17,188,74,0],[189,17,189,67,0],[190,13,190,14,0],[192,13,192,59,0],[193,9,193,10,0],[196,9,196,10,0],[197,13,197,34,0],[199,13,199,59,0],[202,13,202,70,0],[202,70,202,143,0],[202,143,202,153,0],[202,153,202,155,0],[202,155,202,173,0],[204,13,204,113,0],[205,13,205,116,0],[206,13,206,50,0],[207,13,207,51,0],[208,13,208,57,0],[209,9,209,10,0],[212,9,212,10,0],[213,13,213,33,0],[215,13,215,52,0],[216,13,216,49,0],[217,13,217,42,0],[218,13,218,44,0],[219,13,219,51,0],[220,9,220,10,0],[223,37,223,41,0],[223,42,223,46,0],[223,51,223,56,0],[226,68,226,72,0],[226,73,226,77,0],[231,13,231,14,0],[232,17,232,34,0],[233,21,233,52,0],[235,17,235,63,0],[237,17,237,61,0],[239,17,239,36,0],[240,17,240,18,0],[241,21,241,69,0],[242,21,242,22,0],[244,25,244,119,0],[244,119,244,180,0],[244,180,247,28,0],[248,25,248,60,0],[249,21,249,22,0],[250,17,250,18,0],[252,17,252,18,0],[253,21,253,124,0],[253,124,253,138,0],[253,138,253,141,0],[254,21,254,56,0],[255,17,255,18,0],[257,17,257,45,0],[258,17,258,18,0],[259,21,259,99,0],[259,99,259,158,0],[259,158,259,161,0],[261,21,261,83,0],[262,25,262,104,0],[262,104,262,130,0],[262,130,262,133,0],[264,21,264,56,0],[265,17,265,18,0],[267,17,271,54,0],[273,17,273,53,0],[274,21,274,133,0],[276,17,276,99,0],[278,17,278,50,0],[278,50,278,58,0],[278,58,278,60,0],[279,21,279,112,0],[279,112,279,152,0],[279,152,279,155,0],[281,17,281,113,0],[281,113,281,143,0],[281,143,281,146,0],[282,17,282,40,0],[283,13,283,14,0],[287,9,287,10,0],[288,13,288,59,0],[292,13,292,64,0],[292,64,292,111,0],[292,111,292,113,0],[294,13,294,60,0],[295,17,295,43,0],[296,18,296,40,0],[297,17,297,52,0],[299,17,299,44,0],[301,13,301,59,0],[303,13,304,13,0],[304,13,304,14,0],[304,14,305,17,0],[305,17,305,32,0],[305,32,306,17,0],[306,17,306,18,0],[306,18,307,21,0],[307,21,307,28,0],[307,28,307,30,0],[307,30,307,35,0],[307,35,307,36,0],[307,36,307,38,0],[307,38,307,39,0],[307,39,307,58,0],[307,58,308,21,0],[308,21,308,22,0],[308,22,309,25,0],[309,25,309,35,0],[309,35,312,33,0],[312,33,312,76,0],[312,76,313,37,0],[313,37,313,46,0],[313,46,315,33,0],[315,33,315,67,0],[315,67,316,33,0],[316,33,316,39,0],[316,39,319,33,0],[319,33,319,70,0],[319,70,320,33,0],[320,33,320,39,0],[320,39,322,21,0],[322,21,322,22,0],[322,22,323,17,0],[323,17,323,18,0],[323,18,323,19,0],[323,19,323,21,0],[323,21,324,13,0],[324,13,324,14,0],[324,14,327,15,0],[328,9,328,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/API/APIAccess.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using Newtonsoft.Json.Linq;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.ExceptionExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Game.Configuration;
+using osu.Game.Localisation;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Notifications.WebSocket;
+using osu.Game.Overlays.Notifications;
+
+namespace osu.Game.Online.API
+{
+    public partial class APIAccess : CompositeComponent, IAPIProvider
+    {
+        private readonly OsuGameBase game;
+        private readonly OsuConfigManager config;
+
+        private readonly string versionHash;
+
+        private readonly OAuth authentication;
+
+        private readonly Queue&lt;APIRequest&gt; queue = new Queue&lt;APIRequest&gt;();
+
+        public EndpointConfiguration Endpoints { get; }
+
+        /// &lt;summary&gt;
+        /// The API response version.
+        /// See: https://osu.ppy.sh/docs/index.html#api-versions
+        /// &lt;/summary&gt;
+        public int APIVersion { get; }
+
+        public Exception LastLoginError { get; private set; }
+
+        public string ProvidedUsername { get; private set; }
+
+        public string ScoreProcessingNoticeUrl { get; private set; } = string.Empty;
+
+        public SessionVerificationMethod? SessionVerificationMethod { get; private set; }
+
+        public string SecondFactorCode { get; private set; }
+
+        private string password;
+
+        public IBindable&lt;APIUser&gt; LocalUser =&gt; localUserState.User;
+
+        public ILocalUserState LocalUserState =&gt; localUserState;
+        private readonly LocalUserState localUserState;
+
+        public INotificationsClient NotificationsClient { get; }
+
+        public Language Language =&gt; game.CurrentLanguage.Value;
+
+        protected bool HasLogin =&gt; authentication.Token.Value != null || (!string.IsNullOrEmpty(ProvidedUsername) &amp;&amp; !string.IsNullOrEmpty(password));
+
+        private readonly CancellationTokenSource cancellationToken = new CancellationTokenSource();
+        private readonly Logger log;
+
+        [CanBeNull]
+        public Action&lt;Notification&gt; PostNotification { get; set; }
+
+        public APIAccess(OsuGameBase game, OsuConfigManager config, EndpointConfiguration endpoints, string versionHash)
+        {
+            this.game = game;
+            this.config = config;
+            this.versionHash = versionHash;
+
+            if (game.IsDeployedBuild)
+                APIVersion = game.AssemblyVersion.Major * 10000 + game.AssemblyVersion.Minor;
+            else
+            {
+                var now = DateTimeOffset.Now;
+                APIVersion = now.Year * 10000 + now.Month * 100 + now.Day;
+            }
+
+            Endpoints = endpoints;
+            NotificationsClient = setUpNotificationsClient();
+
+            authentication = new OAuth(endpoints.APIClientID, endpoints.APIClientSecret, Endpoints.APIUrl);
+
+            log = Logger.GetLogger(LoggingTarget.Network);
+            log.Add($@&quot;API endpoint root: {Endpoints.APIUrl}&quot;);
+            log.Add($@&quot;API request version: {APIVersion}&quot;);
+
+            ProvidedUsername = config.Get&lt;string&gt;(OsuSetting.Username);
+
+            authentication.TokenString = config.Get&lt;string&gt;(OsuSetting.Token);
+            authentication.Token.ValueChanged += onTokenChanged;
+
+            AddInternal(localUserState = new LocalUserState(this, config));
+
+            if (HasLogin)
+            {
+                // Early call to ensure the local user / &quot;logged in&quot; state is correct immediately.
+                localUserState.SetPlaceholderLocalUser(ProvidedUsername);
+
+                // This is required so that Queue() requests during startup sequence don&#39;t fail due to &quot;not logged in&quot;.
+                state.Value = APIState.Connecting;
+            }
+
+            var thread = new Thread(run)
+            {
+                Name = &quot;APIAccess&quot;,
+                IsBackground = true
+            };
+
+            state.BindValueChanged(val =&gt;
+            {
+                // assume that any change from a failing state means that the previously set outage message is no longer valid.
+                if (val.NewValue != APIState.Failing)
+                    userFacingOutageMessage.Value = null;
+            });
+
+            thread.Start();
+        }
+
+        private WebSocketNotificationsClientConnector setUpNotificationsClient()
+        {
+            var connector = new WebSocketNotificationsClientConnector(this);
+
+            connector.MessageReceived += msg =&gt;
+            {
+                switch (msg.Event)
+                {
+                    case @&quot;verified&quot;:
+                        if (state.Value == APIState.RequiresSecondFactorAuth)
+                            state.Value = APIState.Online;
+                        break;
+
+                    case @&quot;logout&quot;:
+                        if (state.Value == APIState.Online)
+                            Logout();
+
+                        break;
+                }
+            };
+
+            return connector;
+        }
+
+        private void onTokenChanged(ValueChangedEvent&lt;OAuthToken&gt; e) =&gt; config.SetValue(OsuSetting.Token, config.Get&lt;bool&gt;(OsuSetting.SavePassword) ? authentication.TokenString : string.Empty);
+
+        void IAPIProvider.Schedule(Action action) =&gt; base.Schedule(action);
+
+        public string AccessToken =&gt; authentication.RequestAccessToken();
+
+        public Guid SessionIdentifier { get; } = Guid.NewGuid();
+
+        /// &lt;summary&gt;
+        /// Number of consecutive requests which failed due to network issues.
+        /// &lt;/summary&gt;
+        private int failureCount;
+
+        private readonly Stopwatch livenessStopwatch = new Stopwatch();
+
+        /// &lt;summary&gt;
+        /// The main API thread loop, which will continue to run until the game is shut down.
+        /// &lt;/summary&gt;
+        private void run()
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (state.Value == APIState.Failing)
+                {
+                    log.Add($@&quot;{nameof(APIAccess)} is in a failing state, waiting a bit before we try again...&quot;);
+                    Thread.Sleep(5000);
+
+                    // if the liveness probe actively returns a failure state, there&#39;s no need to be retrying anything
+                    if (!probeLiveness(out _))
+                        continue;
+
+                    // In any other circumstance, let&#39;s attempt the full reconnection flow.
+                }
+
+                // Ensure that we have valid credentials.
+                // If not, setting the offline state will allow the game to prompt the user to provide new credentials.
+                if (!HasLogin)
+                {
+                    state.Value = APIState.Offline;
+                    Thread.Sleep(50);
+                    continue;
+                }
+
+                Debug.Assert(HasLogin);
+
+                // Ensure that we are in an online state. If not, attempt to connect.
+                if (state.Value != APIState.Online)
+                {
+                    attemptConnect();
+
+                    if (state.Value != APIState.Online)
+                    {
+                        Thread.Sleep(50);
+                        continue;
+                    }
+                }
+
+                // hard bail if we can&#39;t get a valid access token.
+                if (authentication.RequestAccessToken() == null)
+                {
+                    Logout();
+                    continue;
+                }
+
+                if (livenessStopwatch.Elapsed.TotalMinutes &gt;= 1)
+                {
+                    bool alive = probeLiveness(out string reason);
+
+                    if (!alive)
+                    {
+                        triggerOutage(reason);
+                        livenessStopwatch.Stop();
+                        continue;
+                    }
+
+                    livenessStopwatch.Restart();
+                }
+
+                processQueuedRequests();
+                Thread.Sleep(50);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Query the liveness probe to check whether to transition to / remain in &lt;see cref=&quot;APIState.Failing&quot;/&gt; state.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;
+        /// &lt;see langword=&quot;true&quot;/&gt; if the liveness probe is disabled, returns that online functions are available, returns an unknown response, or cannot be reached.
+        /// &lt;see langword=&quot;false&quot;/&gt; if the liveness probe explicitly returns that online functions are not available. A user-facing message may be returned via &lt;paramref name=&quot;reason&quot;/&gt;.
+        /// &lt;/returns&gt;
+        private bool probeLiveness([CanBeNull] out string reason)
+        {
+            if (Endpoints.LivenessProbeUrl == null)
+            {
+                reason = null;
+                return true;
+            }
+
+            var req = new OsuJsonWebRequest&lt;LivenessProbeResponse&gt;(Endpoints.LivenessProbeUrl);
+
+            try
+            {
+                req.Perform();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Liveness probe failed: {ex}&quot;, LoggingTarget.Network);
+                reason = null;
+                return true;
+            }
+
+            if (req.Aborted || req.ResponseObject == null)
+            {
+                reason = null;
+                return true;
+            }
+
+            reason = req.ResponseObject.Reason;
+            return req.ResponseObject.Status != LivenessProbeResponse.LivenessStatus.Down;
+        }
+
+        private void triggerOutage(string reason)
+        {
+            state.Value = APIState.Failing;
+            string userFacingMessage = reason ?? &quot;Online functionality is not available due to an outage. Sorry for the inconvenience.&quot;;
+
+            userFacingOutageMessage.Value = userFacingMessage;
+
+            Schedule(() =&gt;
+            {
+                if (PostNotification != null)
+                    PostNotification?.Invoke(new OutageNotification(userFacingMessage));
+                else
+                    log.Add(userFacingMessage, LogLevel.Important);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Dequeue from the queue and run each request synchronously until the queue is empty.
+        /// &lt;/summary&gt;
+        private void processQueuedRequests()
+        {
+            while (true)
+            {
+                APIRequest req;
+
+                lock (queue)
+                {
+                    if (queue.Count == 0) return;
+
+                    req = queue.Dequeue();
+                }
+
+                handleRequest(req);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// From a non-connected state, perform a full connection flow, obtaining OAuth tokens and populating the local user and friends.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This method takes control of &lt;see cref=&quot;state&quot;/&gt; and transitions from &lt;see cref=&quot;APIState.Connecting&quot;/&gt; to either
+        /// - &lt;see cref=&quot;APIState.RequiresSecondFactorAuth&quot;/&gt; (pending 2fa)
+        /// - &lt;see cref=&quot;APIState.Online&quot;/&gt;  (successful connection)
+        /// - &lt;see cref=&quot;APIState.Failing&quot;/&gt; (failed connection but retrying)
+        /// - &lt;see cref=&quot;APIState.Offline&quot;/&gt; (failed and can&#39;t retry, clear credentials and require user interaction)
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;Whether the connection attempt was successful.&lt;/returns&gt;
+        private void attemptConnect()
+        {
+            if (LocalUser.IsDefault)
+                Scheduler.Add(localUserState.SetPlaceholderLocalUser, ProvidedUsername, false);
+
+            // save the username at this point, if the user requested for it to be.
+            config.SetValue(OsuSetting.Username, config.Get&lt;bool&gt;(OsuSetting.SaveUsername) ? ProvidedUsername : string.Empty);
+
+            // only check the liveness probe when actually connecting, and not when waiting for the second factor.
+            // `attemptConnect()` runs on a tight 50ms loop while waiting for the second factor,
+            // so probing during that time would result in a lot of traffic hitting the probe.
+            if (state.Value != APIState.RequiresSecondFactorAuth &amp;&amp; !probeLiveness(out string reason))
+            {
+                triggerOutage(reason);
+                return;
+            }
+
+            if (!authentication.HasValidAccessToken)
+            {
+                state.Value = APIState.Connecting;
+                LastLoginError = null;
+
+                try
+                {
+                    authentication.AuthenticateWithLogin(ProvidedUsername, password);
+                }
+                catch (WebRequestFlushedException)
+                {
+                    return;
+                }
+                catch (Exception e)
+                {
+                    //todo: this fails even on network-related issues. we should probably handle those differently.
+                    LastLoginError = e;
+                    log.Add($@&quot;Login failed for username {ProvidedUsername} ({LastLoginError.Message})!&quot;);
+
+                    Logout();
+                    return;
+                }
+            }
+
+            switch (state.Value)
+            {
+                case APIState.RequiresSecondFactorAuth:
+                {
+                    if (string.IsNullOrEmpty(SecondFactorCode))
+                        return;
+
+                    state.Value = APIState.Connecting;
+                    LastLoginError = null;
+
+                    var verificationRequest = new VerifySessionRequest(SecondFactorCode);
+
+                    verificationRequest.Success += () =&gt; state.Value = APIState.Online;
+                    verificationRequest.Failure += ex =&gt;
+                    {
+                        state.Value = APIState.RequiresSecondFactorAuth;
+
+                        if (verificationRequest.RequiredVerificationMethod != null)
+                        {
+                            SessionVerificationMethod = verificationRequest.RequiredVerificationMethod;
+                            LastLoginError = new APIException($&quot;Must use {SessionVerificationMethod.GetDescription().ToLowerInvariant()} to complete verification.&quot;, ex);
+                        }
+                        else
+                        {
+                            LastLoginError = ex;
+                        }
+
+                        SecondFactorCode = null;
+                    };
+
+                    if (!handleRequest(verificationRequest))
+                    {
+                        state.Value = APIState.Failing;
+                        return;
+                    }
+
+                    if (state.Value != APIState.Online)
+                        return;
+
+                    break;
+                }
+
+                default:
+                {
+                    var userReq = new GetMeRequest();
+
+                    userReq.Failure += ex =&gt;
+                    {
+                        if (ex is APIException apiException &amp;&amp; apiException.StatusCode &lt; HttpStatusCode.InternalServerError)
+                        {
+                            LastLoginError = ex;
+                            log.Add($@&quot;Login failed for username {ProvidedUsername} on user retrieval ({LastLoginError.Message})!&quot;);
+                            Logout();
+                        }
+                        else if (ex is WebException webException &amp;&amp; webException.Message == @&quot;Unauthorized&quot;)
+                        {
+                            log.Add(@&quot;Login no longer valid&quot;);
+                            Logout();
+                        }
+                        else if (ex is not WebRequestFlushedException)
+                        {
+                            state.Value = APIState.Failing;
+                        }
+                    };
+
+                    userReq.Success += me =&gt;
+                    {
+                        Debug.Assert(ThreadSafety.IsUpdateThread);
+
+                        localUserState.SetLocalUser(me);
+                        ScoreProcessingNoticeUrl = me.ScoreProcessingNoticeUrl;
+                        SessionVerificationMethod = me.SessionVerificationMethod;
+                        state.Value = SessionVerificationMethod == null ? APIState.Online : APIState.RequiresSecondFactorAuth;
+                        livenessStopwatch.Restart();
+                        failureCount = 0;
+                    };
+
+                    if (!handleRequest(userReq))
+                    {
+                        state.Value = APIState.Failing;
+                        return;
+                    }
+
+                    break;
+                }
+            }
+
+            // The Success callback event is fired on the main thread, so we should wait for that to run before proceeding.
+            // Without this, we will end up circulating this Connecting loop multiple times and queueing up many web requests
+            // before actually going online.
+            while (State.Value == APIState.Connecting &amp;&amp; !cancellationToken.IsCancellationRequested)
+                Thread.Sleep(500);
+        }
+
+        public void Perform(APIRequest request)
+        {
+            try
+            {
+                request.AttachAPI(this);
+                request.Perform();
+            }
+            catch (Exception e)
+            {
+                // todo: fix exception handling
+                request.Fail(e);
+            }
+        }
+
+        public Task PerformAsync(APIRequest request) =&gt;
+            Task.Factory.StartNew(() =&gt; Perform(request), TaskCreationOptions.LongRunning);
+
+        public void Login(string username, string password)
+        {
+            Debug.Assert(State.Value == APIState.Offline);
+
+            ProvidedUsername = username;
+            this.password = password;
+        }
+
+        public void AuthenticateSecondFactor(string code)
+        {
+            Debug.Assert(State.Value == APIState.RequiresSecondFactorAuth);
+
+            SecondFactorCode = code;
+        }
+
+        public IHubClientConnector GetHubConnector(string clientName, string endpoint) =&gt;
+            new HubClientConnector(clientName, endpoint, this, versionHash);
+
+        public IChatClient GetChatClient() =&gt; new WebSocketChatClient(this);
+
+        public RegistrationRequest.RegistrationRequestErrors CreateAccount(string email, string username, string password)
+        {
+            Debug.Assert(State.Value == APIState.Offline);
+
+            var req = new RegistrationRequest
+            {
+                Url = $@&quot;{Endpoints.APIUrl}/users&quot;,
+                Method = HttpMethod.Post,
+                Username = username,
+                Email = email,
+                Password = password
+            };
+
+            try
+            {
+                req.Perform();
+            }
+            catch (Exception e)
+            {
+                try
+                {
+                    return JObject.Parse(req.GetResponseString().AsNonNull()).SelectToken(@&quot;form_error&quot;, true).AsNonNull().ToObject&lt;RegistrationRequest.RegistrationRequestErrors&gt;();
+                }
+                catch
+                {
+                    try
+                    {
+                        // attempt to parse a non-form error message
+                        var response = JObject.Parse(req.GetResponseString().AsNonNull());
+
+                        string redirect = (string)response.SelectToken(@&quot;url&quot;, false);
+                        string message = (string)response.SelectToken(@&quot;error&quot;, false);
+
+                        if (!string.IsNullOrEmpty(redirect) || !string.IsNullOrEmpty(message))
+                        {
+                            return new RegistrationRequest.RegistrationRequestErrors
+                            {
+                                Redirect = redirect,
+                                Message = message,
+                            };
+                        }
+
+                        // if we couldn&#39;t deserialize the error message let&#39;s throw the original exception outwards.
+                        e.Rethrow();
+                    }
+                    catch
+                    {
+                        // if we couldn&#39;t deserialize the error message let&#39;s throw the original exception outwards.
+                        e.Rethrow();
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// &lt;summary&gt;
+        /// Handle a single API request.
+        /// Ensures all exceptions are caught and dealt with correctly.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;req&quot;&gt;The request.&lt;/param&gt;
+        /// &lt;returns&gt;true if the request succeeded.&lt;/returns&gt;
+        private bool handleRequest(APIRequest req)
+        {
+            try
+            {
+                req.AttachAPI(this);
+                req.Perform();
+
+                if (req.CompletionState != APIRequestCompletionState.Completed)
+                    return false;
+
+                // Reset failure count if this request succeeded.
+                failureCount = 0;
+                return true;
+            }
+            catch (HttpRequestException re)
+            {
+                log.Add($&quot;{nameof(HttpRequestException)} while performing request {req}: {re.Message}&quot;);
+                handleFailure();
+                return false;
+            }
+            catch (SocketException se)
+            {
+                log.Add($&quot;{nameof(SocketException)} while performing request {req}: {se.Message}&quot;);
+                handleFailure();
+                return false;
+            }
+            catch (WebException we)
+            {
+                log.Add($&quot;{nameof(WebException)} while performing request {req}: {we.Message}&quot;);
+                handleWebException(we);
+                return false;
+            }
+            catch (WebRequestFlushedException wrf)
+            {
+                log.Add(wrf.Message);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, &quot;Error occurred while handling an API request.&quot;);
+                return false;
+            }
+        }
+
+        private readonly Bindable&lt;APIState&gt; state = new Bindable&lt;APIState&gt;();
+
+        /// &lt;summary&gt;
+        /// The current connectivity state of the API.
+        /// &lt;/summary&gt;
+        public IBindable&lt;APIState&gt; State =&gt; state;
+
+        public IBindable&lt;string&gt; UserFacingOutageMessage =&gt; userFacingOutageMessage;
+
+        private readonly Bindable&lt;string&gt; userFacingOutageMessage = new Bindable&lt;string&gt;(string.Empty);
+
+        private void handleWebException(WebException we)
+        {
+            HttpStatusCode statusCode = (we.Response as HttpWebResponse)?.StatusCode
+                                        ?? (we.Status == WebExceptionStatus.UnknownError ? HttpStatusCode.NotAcceptable : HttpStatusCode.RequestTimeout);
+
+            // special cases for un-typed but useful message responses.
+            switch (we.Message)
+            {
+                case &quot;Unauthorized&quot;:
+                case &quot;Forbidden&quot;:
+                    statusCode = HttpStatusCode.Unauthorized;
+                    break;
+            }
+
+            switch (statusCode)
+            {
+                case HttpStatusCode.Unauthorized:
+                    Logout();
+                    break;
+
+                case HttpStatusCode.RequestTimeout:
+                    handleFailure();
+                    break;
+            }
+        }
+
+        private void handleFailure()
+        {
+            failureCount++;
+            log.Add($@&quot;API failure count is now {failureCount}&quot;);
+
+            if (failureCount &gt;= 3)
+            {
+                state.Value = APIState.Failing;
+                flushQueue();
+            }
+        }
+
+        public bool IsLoggedIn =&gt; State.Value &gt; APIState.Offline;
+
+        public void Queue(APIRequest request)
+        {
+            lock (queue)
+            {
+                request.AttachAPI(this);
+
+                if (state.Value == APIState.Offline)
+                {
+                    request.Fail(new WebException(@&quot;User not logged in&quot;));
+                    return;
+                }
+
+                queue.Enqueue(request);
+            }
+        }
+
+        private void flushQueue(bool failOldRequests = true)
+        {
+            lock (queue)
+            {
+                var oldQueueRequests = queue.ToArray();
+
+                queue.Clear();
+
+                if (failOldRequests)
+                {
+                    foreach (var req in oldQueueRequests)
+                        req.Fail(new WebRequestFlushedException(state.Value));
+                }
+            }
+        }
+
+        public void Logout()
+        {
+            password = null;
+            SecondFactorCode = null;
+            authentication.Clear();
+
+            localUserState.ClearLocalUser();
+
+            state.Value = APIState.Offline;
+            flushQueue();
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            flushQueue();
+            cancellationToken.Cancel();
+        }
+
+        internal class WebRequestFlushedException : Exception
+        {
+            public WebRequestFlushedException(APIState state)
+                : base($@&quot;Request failed from flush operation (state {state})&quot;)
+            {
+            }
+        }
+    }
+
+    internal class GuestUser : APIUser
+    {
+        public GuestUser()
+        {
+            Username = @&quot;Guest&quot;;
+            Id = SYSTEM_USER_ID;
+        }
+    }
+
+    public enum APIState
+    {
+        /// &lt;summary&gt;
+        /// We cannot login (not enough credentials).
+        /// &lt;/summary&gt;
+        Offline,
+
+        /// &lt;summary&gt;
+        /// We are having connectivity issues.
+        /// &lt;/summary&gt;
+        Failing,
+
+        /// &lt;summary&gt;
+        /// Waiting on second factor authentication.
+        /// &lt;/summary&gt;
+        RequiresSecondFactorAuth,
+
+        /// &lt;summary&gt;
+        /// We are in the process of (re-)connecting.
+        /// &lt;/summary&gt;
+        Connecting,
+
+        /// &lt;summary&gt;
+        /// We are online.
+        /// &lt;/summary&gt;
+        Online
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,9,42,76,0],[44,50,44,54,0],[50,33,50,37,0],[52,43,52,47,0],[52,48,52,60,0],[54,42,54,46,0],[54,47,54,59,0],[56,50,56,54,0],[56,55,56,67,0],[56,72,56,84,0],[58,71,58,75,0],[58,76,58,88,0],[60,42,60,46,0],[60,47,60,59,0],[64,48,64,67,0],[66,50,66,64,0],[69,59,69,63,0],[71,37,71,63,0],[73,36,73,150,0],[75,9,75,100,0],[79,56,79,60,0],[79,61,79,65,0],[81,9,81,121,0],[82,9,82,10,0],[83,13,83,30,0],[84,13,84,34,0],[85,13,85,44,0],[87,13,87,38,0],[88,17,88,94,0],[90,13,90,14,0],[91,17,91,46,0],[92,17,92,75,0],[93,13,93,14,0],[95,13,95,35,0],[96,13,96,62,0],[98,13,98,108,0],[100,13,100,59,0],[101,13,101,64,0],[102,13,102,60,0],[104,13,104,72,0],[106,13,106,79,0],[107,13,107,65,0],[109,13,109,76,0],[111,13,111,26,0],[112,13,112,14,0],[114,17,114,74,0],[117,17,117,51,0],[118,13,118,14,0],[120,13,124,15,0],[126,13,127,13,0],[127,13,127,14,0],[127,14,129,17,0],[129,17,129,54,0],[129,54,130,21,0],[130,21,130,58,0],[130,58,131,13,0],[131,13,131,14,0],[131,14,131,16,0],[133,13,133,28,0],[134,9,134,10,0],[137,9,137,10,0],[138,13,138,77,0],[140,13,141,13,0],[141,13,141,14,0],[141,14,142,17,0],[142,17,142,35,0],[142,35,145,25,0],[145,25,145,78,0],[145,78,146,29,0],[146,29,146,59,0],[146,59,147,25,0],[147,25,147,31,0],[147,31,150,25,0],[150,25,150,60,0],[150,60,151,29,0],[151,29,151,38,0],[151,38,153,25,0],[153,25,153,31,0],[153,31,155,13,0],[155,13,155,14,0],[155,14,155,15,0],[157,13,157,30,0],[158,9,158,10,0],[160,73,160,193,0],[162,54,162,75,0],[164,38,164,73,0],[166,41,166,45,0],[166,50,166,64,0],[173,9,173,72,0],[179,9,179,10,0],[180,13,180,63,0],[181,13,181,14,0],[182,17,182,53,0],[183,17,183,18,0],[184,21,184,114,0],[185,21,185,40,0],[188,21,188,47,0],[189,25,189,34,0],[192,17,192,18,0],[196,17,196,31,0],[197,17,197,18,0],[198,21,198,52,0],[199,21,199,38,0],[200,21,200,30,0],[203,17,203,40,0],[206,17,206,52,0],[207,17,207,18,0],[208,21,208,38,0],[210,21,210,56,0],[211,21,211,22,0],[212,25,212,42,0],[213,25,213,34,0],[215,17,215,18,0],[218,17,218,65,0],[219,17,219,18,0],[220,21,220,30,0],[221,21,221,30,0],[224,17,224,65,0],[225,17,225,18,0],[226,21,226,67,0],[228,21,228,32,0],[229,21,229,22,0],[230,25,230,47,0],[231,25,231,50,0],[232,25,232,34,0],[235,21,235,49,0],[236,17,236,18,0],[238,17,238,41,0],[239,17,239,34,0],[240,13,240,14,0],[241,9,241,10,0],[251,9,251,10,0],[252,13,252,52,0],[253,13,253,14,0],[254,17,254,31,0],[255,17,255,29,0],[258,13,258,96,0],[261,13,261,14,0],[262,17,262,31,0],[263,13,263,14,0],[264,13,264,33,0],[265,13,265,14,0],[266,17,266,83,0],[267,17,267,31,0],[268,17,268,29,0],[271,13,271,59,0],[272,13,272,14,0],[273,17,273,31,0],[274,17,274,29,0],[277,13,277,48,0],[278,13,278,91,0],[279,9,279,10,0],[282,9,282,10,0],[283,13,283,44,0],[284,13,284,137,0],[286,13,286,63,0],[288,13,289,13,0],[289,13,289,14,0],[289,14,290,17,0],[290,17,290,46,0],[290,46,291,21,0],[291,21,291,89,0],[291,89,293,21,0],[293,21,293,68,0],[293,68,294,13,0],[294,13,294,14,0],[294,14,294,16,0],[295,9,295,10,0],[301,9,301,10,0],[302,13,302,25,0],[303,13,303,14,0],[306,17,306,29,0],[307,17,307,18,0],[308,21,308,42,0],[308,43,308,50,0],[310,21,310,43,0],[311,17,311,18,0],[313,17,313,36,0],[314,13,314,14,0],[315,9,315,10,0],[329,9,329,10,0],[330,13,330,37,0],[331,17,331,96,0],[334,13,334,127,0],[339,13,339,103,0],[340,13,340,14,0],[341,17,341,39,0],[342,17,342,24,0],[345,13,345,53,0],[346,13,346,14,0],[347,17,347,51,0],[348,17,348,39,0],[351,17,351,18,0],[352,21,352,86,0],[353,17,353,18,0],[354,17,354,51,0],[355,17,355,18,0],[356,21,356,28,0],[358,17,358,36,0],[359,17,359,18,0],[361,21,361,40,0],[362,21,362,107,0],[364,21,364,30,0],[365,21,365,28,0],[367,13,367,14,0],[369,13,369,33,0],[372,17,372,18,0],[373,21,373,64,0],[374,25,374,32,0],[376,21,376,55,0],[377,21,377,43,0],[379,21,379,90,0],[381,21,381,58,0],[381,58,381,87,0],[381,87,381,88,0],[382,21,383,21,0],[383,21,383,22,0],[383,22,384,25,0],[384,25,384,73,0],[384,73,386,25,0],[386,25,386,84,0],[386,84,387,25,0],[387,25,387,26,0],[387,26,388,29,0],[388,29,388,104,0],[388,104,389,29,0],[389,29,389,170,0],[389,170,390,25,0],[390,25,390,26,0],[390,26,392,25,0],[392,25,392,26,0],[392,26,393,29,0],[393,29,393,49,0],[393,49,394,25,0],[394,25,394,26,0],[394,26,396,25,0],[396,25,396,49,0],[396,49,397,21,0],[397,21,397,22,0],[397,22,397,23,0],[399,21,399,61,0],[400,21,400,22,0],[401,25,401,56,0],[402,25,402,32,0],[405,21,405,56,0],[406,25,406,32,0],[408,21,408,27,0],[412,17,412,18,0],[413,21,413,54,0],[415,21,416,21,0],[416,21,416,22,0],[416,22,417,25,0],[417,25,417,125,0],[417,125,418,25,0],[418,25,418,26,0],[418,26,419,29,0],[419,29,419,49,0],[419,49,420,29,0],[420,29,420,133,0],[420,133,421,29,0],[421,29,421,38,0],[421,38,422,25,0],[422,25,422,26,0],[422,26,423,30,0],[423,30,423,109,0],[423,109,424,25,0],[424,25,424,26,0],[424,26,425,29,0],[425,29,425,63,0],[425,63,426,29,0],[426,29,426,38,0],[426,38,427,25,0],[427,25,427,26,0],[427,26,428,30,0],[428,30,428,71,0],[428,71,429,25,0],[429,25,429,26,0],[429,26,430,29,0],[430,29,430,60,0],[430,60,431,25,0],[431,25,431,26,0],[431,26,432,21,0],[432,21,432,22,0],[432,22,432,23,0],[434,21,435,21,0],[435,21,435,22,0],[435,22,436,25,0],[436,25,436,67,0],[436,67,438,25,0],[438,25,438,57,0],[438,57,439,25,0],[439,25,439,80,0],[439,80,440,25,0],[440,25,440,82,0],[440,82,441,25,0],[441,25,441,127,0],[441,127,442,25,0],[442,25,442,53,0],[442,53,443,25,0],[443,25,443,42,0],[443,42,444,21,0],[444,21,444,22,0],[444,22,444,23,0],[446,21,446,49,0],[447,21,447,22,0],[448,25,448,56,0],[449,25,449,32,0],[452,21,452,27,0],[459,13,459,101,0],[460,17,460,35,0],[461,9,461,10,0],[464,9,464,10,0],[466,13,466,14,0],[467,17,467,41,0],[468,17,468,35,0],[469,13,469,14,0],[470,13,470,32,0],[471,13,471,14,0],[473,17,473,33,0],[474,13,474,14,0],[475,9,475,10,0],[478,13,478,41,0],[478,41,478,57,0],[478,57,478,91,0],[481,9,481,10,0],[482,13,482,59,0],[484,13,484,41,0],[485,13,485,38,0],[486,9,486,10,0],[489,9,489,10,0],[490,13,490,76,0],[492,13,492,37,0],[493,9,493,10,0],[496,13,496,76,0],[498,47,498,76,0],[501,9,501,10,0],[502,13,502,59,0],[504,13,511,15,0],[514,13,514,14,0],[515,17,515,31,0],[516,13,516,14,0],[517,13,517,32,0],[518,13,518,14,0],[520,17,520,18,0],[521,21,521,182,0],[523,17,523,22,0],[524,17,524,18,0],[526,21,526,22,0],[528,25,528,91,0],[530,25,530,87,0],[531,25,531,88,0],[533,25,533,95,0],[534,25,534,26,0],[535,29,539,31,0],[543,25,543,37,0],[544,21,544,22,0],[545,21,545,26,0],[546,21,546,22,0],[548,25,548,37,0],[549,21,549,22,0],[550,17,550,18,0],[551,13,551,14,0],[553,13,553,25,0],[554,9,554,10,0],[563,9,563,10,0],[565,13,565,14,0],[566,17,566,37,0],[567,17,567,31,0],[569,17,569,80,0],[570,21,570,34,0],[573,17,573,34,0],[574,17,574,29,0],[576,13,576,44,0],[577,13,577,14,0],[578,17,578,105,0],[579,17,579,33,0],[580,17,580,30,0],[582,13,582,39,0],[583,13,583,14,0],[584,17,584,100,0],[585,17,585,33,0],[586,17,586,30,0],[588,13,588,36,0],[589,13,589,14,0],[590,17,590,97,0],[591,17,591,40,0],[592,17,592,30,0],[594,13,594,51,0],[595,13,595,14,0],[596,17,596,38,0],[597,17,597,30,0],[599,13,599,33,0],[600,13,600,14,0],[601,17,601,83,0],[602,17,602,30,0],[604,9,604,10,0],[606,9,606,78,0],[611,45,611,50,0],[613,61,613,84,0],[615,9,615,104,0],[618,9,618,10,0],[619,13,620,154,0],[623,13,623,32,0],[627,21,627,62,0],[628,21,628,27,0],[631,13,631,32,0],[634,21,634,30,0],[635,21,635,27,0],[638,21,638,37,0],[639,21,639,27,0],[641,9,641,10,0],[644,9,644,10,0],[645,13,645,28,0],[646,13,646,66,0],[648,13,648,35,0],[649,13,649,14,0],[650,17,650,48,0],[651,17,651,30,0],[652,13,652,14,0],[653,9,653,10,0],[655,35,655,65,0],[658,9,658,10,0],[659,13,659,25,0],[660,13,660,14,0],[661,17,661,41,0],[663,17,663,53,0],[664,17,664,18,0],[665,21,665,75,0],[666,21,666,28,0],[669,17,669,40,0],[670,13,670,14,0],[671,9,671,10,0],[674,9,674,10,0],[675,13,675,25,0],[676,13,676,14,0],[677,17,677,56,0],[679,17,679,31,0],[681,17,681,37,0],[682,17,682,18,0],[683,21,683,28,0],[683,30,683,37,0],[683,38,683,40,0],[683,41,683,57,0],[684,25,684,79,0],[685,17,685,18,0],[686,13,686,14,0],[687,9,687,10,0],[690,9,690,10,0],[691,13,691,29,0],[692,13,692,37,0],[693,13,693,36,0],[695,13,695,45,0],[697,13,697,44,0],[698,13,698,26,0],[699,9,699,10,0],[702,9,702,10,0],[703,13,703,39,0],[705,13,705,26,0],[706,13,706,40,0],[707,9,707,10,0],[712,19,712,80,0],[713,13,713,14,0],[714,13,714,14,0],[720,9,720,27,0],[721,9,721,10,0],[722,13,722,33,0],[723,13,723,33,0],[724,9,724,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Mods/BeatmapAttributesDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Drawables;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Utils;
+
+namespace osu.Game.Overlays.Mods
+{
+    /// &lt;summary&gt;
+    /// On the mod select overlay, this provides a local updating view of BPM, star rating and other
+    /// difficulty attributes so the user can have a better insight into what mods are changing.
+    /// &lt;/summary&gt;
+    public partial class BeatmapAttributesDisplay : ModFooterInformationDisplay
+    {
+        private StarRatingDisplay starRatingDisplay = null!;
+        private BPMDisplay bpmDisplay = null!;
+
+        public Bindable&lt;IBeatmapInfo?&gt; BeatmapInfo { get; } = new Bindable&lt;IBeatmapInfo?&gt;();
+
+        public Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; Mods { get; } = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;();
+
+        public BindableBool Collapsed { get; } = new BindableBool(true);
+
+        private ModSettingChangeTracker? modSettingChangeTracker;
+
+        [Resolved]
+        private BeatmapDifficultyCache difficultyCache { get; set; } = null!;
+
+        [Resolved]
+        private OsuGameBase game { get; set; } = null!;
+
+        protected IBindable&lt;RulesetInfo&gt; GameRuleset = null!;
+
+        private CancellationTokenSource? cancellationSource;
+        private IBindable&lt;StarDifficulty&gt; starDifficulty = null!;
+
+        private const float transition_duration = 250;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            LeftContent.AddRange(new Drawable[]
+            {
+                starRatingDisplay = new StarRatingDisplay(default, animated: true)
+                {
+                    Origin = Anchor.CentreLeft,
+                    Anchor = Anchor.CentreLeft,
+                    Shear = -OsuGame.SHEAR,
+                },
+                bpmDisplay = new BPMDisplay
+                {
+                    Origin = Anchor.CentreLeft,
+                    Anchor = Anchor.CentreLeft,
+                    Shear = -OsuGame.SHEAR,
+                    AutoSizeAxes = Axes.Y,
+                    Width = 75,
+                }
+            });
+
+            RightContent.Alpha = 0;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Mods.BindValueChanged(_ =&gt;
+            {
+                modSettingChangeTracker?.Dispose();
+                modSettingChangeTracker = new ModSettingChangeTracker(Mods.Value);
+                modSettingChangeTracker.SettingChanged += _ =&gt; updateValues();
+                updateValues();
+            }, true);
+
+            Collapsed.BindValueChanged(_ =&gt;
+            {
+                // Only start autosize animations on first collapse toggle. This avoids an ugly initial presentation.
+                startAnimating();
+                updateCollapsedState();
+            });
+
+            GameRuleset = game.Ruleset.GetBoundCopy();
+            GameRuleset.BindValueChanged(_ =&gt; updateValues());
+
+            BeatmapInfo.BindValueChanged(_ =&gt;
+            {
+                updateStarDifficultyBindable();
+                updateValues();
+            }, true);
+
+            updateCollapsedState();
+        }
+
+        private void updateStarDifficultyBindable()
+        {
+            cancellationSource?.Cancel();
+
+            if (BeatmapInfo.Value == null)
+                return;
+
+            starDifficulty = difficultyCache.GetBindableDifficulty(BeatmapInfo.Value, (cancellationSource = new CancellationTokenSource()).Token);
+            starDifficulty.BindValueChanged(s =&gt;
+            {
+                starRatingDisplay.Current.Value = s.NewValue;
+
+                if (!starRatingDisplay.IsPresent)
+                    starRatingDisplay.FinishTransforms(true);
+            });
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            startAnimating();
+            updateCollapsedState();
+            return true;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            updateCollapsedState();
+            base.OnHoverLost(e);
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e) =&gt; true;
+
+        protected override bool OnClick(ClickEvent e) =&gt; true;
+
+        private void startAnimating()
+        {
+            LeftContent.AutoSizeEasing = Content.AutoSizeEasing = Easing.OutQuint;
+            LeftContent.AutoSizeDuration = Content.AutoSizeDuration = transition_duration;
+        }
+
+        private void updateValues() =&gt; Scheduler.AddOnce(() =&gt;
+        {
+            if (BeatmapInfo.Value == null)
+                return;
+
+            double rate = ModUtils.CalculateRateWithMods(Mods.Value);
+
+            bpmDisplay.Current.Value = FormatUtils.RoundBPM(BeatmapInfo.Value.BPM, rate);
+
+            Ruleset ruleset = GameRuleset.Value.CreateInstance();
+            var displayAttributes = ruleset.GetBeatmapAttributesForDisplay(BeatmapInfo.Value, Mods.Value).ToList();
+
+            // if there are not enough attribute displays, make more
+            for (int i = RightContent.Count; i &lt; displayAttributes.Count; i++)
+                RightContent.Add(new VerticalAttributeDisplay { Shear = -OsuGame.SHEAR });
+
+            // populate all attribute displays that need to be visible...
+            for (int i = 0; i &lt; displayAttributes.Count; i++)
+            {
+                var attribute = displayAttributes[i];
+                var display = (VerticalAttributeDisplay)RightContent[i];
+                display.SetAttribute(attribute);
+            }
+
+            // and hide any extra ones
+            for (int i = displayAttributes.Count; i &lt; RightContent.Count; i++)
+                ((VerticalAttributeDisplay)RightContent[i]).SetAttribute(null);
+        });
+
+        private void updateCollapsedState()
+        {
+            RightContent.FadeTo(Collapsed.Value &amp;&amp; !IsHovered ? 0 : 1, transition_duration, Easing.OutQuint);
+        }
+
+        public partial class BPMDisplay : RollingCounter&lt;int&gt;
+        {
+            protected override double RollingDuration =&gt; 250;
+
+            protected override LocalisableString FormatCount(int count) =&gt; count.ToLocalisableString(&quot;0 BPM&quot;);
+
+            protected override OsuSpriteText CreateSpriteText() =&gt; new OsuSpriteText
+            {
+                Anchor = Anchor.CentreRight,
+                Origin = Anchor.CentreRight,
+                Font = OsuFont.Default.With(size: 20, weight: FontWeight.SemiBold),
+                UseFullGlyphHeight = false,
+            };
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,9,31,61,0],[32,9,32,47,0],[34,54,34,58,0],[34,63,34,92,0],[36,52,36,56,0],[36,61,36,95,0],[38,41,38,45,0],[38,50,38,72,0],[43,58,43,62,0],[43,63,43,67,0],[43,72,43,77,0],[46,36,46,40,0],[46,41,46,45,0],[46,50,46,55,0],[48,9,48,62,0],[51,9,51,66,0],[57,9,57,10,0],[58,13,74,16,0],[76,13,76,36,0],[77,9,77,10,0],[80,9,80,10,0],[81,13,81,33,0],[83,13,84,13,0],[84,13,84,14,0],[84,14,85,17,0],[85,17,85,52,0],[85,52,86,17,0],[86,17,86,83,0],[86,83,87,17,0],[87,17,87,64,0],[87,64,87,78,0],[87,78,87,79,0],[87,79,88,17,0],[88,17,88,32,0],[88,32,89,13,0],[89,13,89,14,0],[89,14,89,22,0],[91,13,92,13,0],[92,13,92,14,0],[92,14,94,17,0],[94,17,94,34,0],[94,34,95,17,0],[95,17,95,40,0],[95,40,96,13,0],[96,13,96,14,0],[96,14,96,16,0],[98,13,98,55,0],[99,13,99,47,0],[99,47,99,61,0],[99,61,99,63,0],[101,13,102,13,0],[102,13,102,14,0],[102,14,103,17,0],[103,17,103,48,0],[103,48,104,17,0],[104,17,104,32,0],[104,32,105,13,0],[105,13,105,14,0],[105,14,105,22,0],[107,13,107,36,0],[108,9,108,10,0],[111,9,111,10,0],[112,13,112,42,0],[114,13,114,43,0],[115,17,115,24,0],[117,13,117,147,0],[118,13,119,13,0],[119,13,119,14,0],[119,14,120,17,0],[120,17,120,62,0],[120,62,122,17,0],[122,17,122,50,0],[122,50,123,21,0],[123,21,123,62,0],[123,62,124,13,0],[124,13,124,14,0],[124,14,124,16,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,30,0],[130,13,130,36,0],[131,13,131,25,0],[132,9,132,10,0],[135,9,135,10,0],[136,13,136,36,0],[137,13,137,33,0],[138,9,138,10,0],[140,66,140,70,0],[142,58,142,62,0],[145,9,145,10,0],[146,13,146,83,0],[147,13,147,91,0],[148,9,148,10,0],[150,40,151,9,0],[151,9,151,10,0],[151,10,152,13,0],[152,13,152,43,0],[152,43,153,17,0],[153,17,153,24,0],[153,24,155,13,0],[155,13,155,70,0],[155,70,157,13,0],[157,13,157,90,0],[157,90,159,13,0],[159,13,159,66,0],[159,66,160,13,0],[160,13,160,116,0],[160,116,163,18,0],[163,18,163,44,0],[163,44,163,46,0],[163,46,163,73,0],[163,73,163,75,0],[163,75,163,78,0],[163,78,164,17,0],[164,17,164,91,0],[164,91,167,18,0],[167,18,167,27,0],[167,27,167,29,0],[167,29,167,56,0],[167,56,167,58,0],[167,58,167,61,0],[167,61,168,13,0],[168,13,168,14,0],[168,14,169,17,0],[169,17,169,54,0],[169,54,170,17,0],[170,17,170,73,0],[170,73,171,17,0],[171,17,171,49,0],[171,49,172,13,0],[172,13,172,14,0],[172,14,175,18,0],[175,18,175,49,0],[175,49,175,51,0],[175,51,175,73,0],[175,73,175,75,0],[175,75,175,78,0],[175,78,176,17,0],[176,17,176,80,0],[176,80,177,9,0],[177,9,177,10,0],[177,10,177,11,0],[180,9,180,10,0],[181,13,181,110,0],[182,9,182,10,0],[186,58,186,61,0],[188,76,188,110,0],[190,68,196,14,0]]);
+    </script>
+  </body>
+</html>

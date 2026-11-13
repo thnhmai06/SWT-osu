@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/FilterQueryParser.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using osu.Framework.Logging;
+using osu.Game.Screens.Select.Filter;
+
+namespace osu.Game.Screens.Select
+{
+    /// &lt;summary&gt;
+    /// Utility class used for parsing song select filter queries entered via the search box.
+    /// &lt;/summary&gt;
+    public static class FilterQueryParser
+    {
+        private static readonly Regex query_syntax_regex = new Regex(
+            @&quot;\b(?&lt;key&gt;\w+)(?&lt;op&gt;(!?(:|=)|(&gt;|&lt;)(:|=)?))(?&lt;value&gt;(&quot;&quot;.*?&quot;&quot;[!]?)|(\S*))&quot;,
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        internal static void ApplyQueries(FilterCriteria criteria, string query)
+        {
+            try
+            {
+                foreach (Match match in query_syntax_regex.Matches(query))
+                {
+                    string key = match.Groups[&quot;key&quot;].Value.ToLowerInvariant();
+                    var op = parseOperator(match.Groups[&quot;op&quot;].Value);
+                    string value = match.Groups[&quot;value&quot;].Value;
+
+                    if (tryParseKeywordCriteria(criteria, key, value, op))
+                        query = query.Replace(match.ToString(), &quot;&quot;);
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Log($&quot;Failed to parse query ({e.Message})&quot;, level: LogLevel.Important);
+            }
+
+            criteria.SearchText = query;
+        }
+
+        private static bool tryParseKeywordCriteria(FilterCriteria criteria, string key, string value, Operator op)
+        {
+            switch (key)
+            {
+                case &quot;star&quot;:
+                case &quot;stars&quot;:
+                case &quot;sr&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.StarDifficulty, op, value, 0);
+
+                case &quot;ar&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.ApproachRate, op, value);
+
+                case &quot;dr&quot;:
+                case &quot;hp&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.DrainRate, op, value);
+
+                case &quot;cs&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.CircleSize, op, value);
+
+                case &quot;od&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.OverallDifficulty, op, value);
+
+                case &quot;bpm&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.BPM, op, value, 0.5f);
+
+                case &quot;length&quot;:
+                    return tryUpdateLengthRange(criteria, op, value);
+
+                case &quot;lastplayed&quot;:
+                    return tryUpdateDateAgoRange(ref criteria.LastPlayed, op, value);
+
+                case &quot;ranked&quot;:
+                    return tryUpdateRankedDateRange(ref criteria.DateRanked, op, value);
+
+                case &quot;created&quot;:
+                case &quot;submitted&quot;:
+                    return tryUpdateRankedDateRange(ref criteria.DateSubmitted, op, value);
+
+                case &quot;played&quot;:
+                    if (!tryParseBool(value, out bool played))
+                        return false;
+
+                    // Unplayed beatmaps are filtered on DateTimeOffset.MinValue.
+                    if (op == Operator.NotEqual)
+                        played = !played;
+
+                    if (played)
+                    {
+                        criteria.LastPlayed.Min = DateTimeOffset.MinValue;
+                        criteria.LastPlayed.Max = DateTimeOffset.MaxValue;
+                        criteria.LastPlayed.IsLowerInclusive = false;
+                    }
+                    else
+                    {
+                        criteria.LastPlayed.Min = DateTimeOffset.MinValue;
+                        criteria.LastPlayed.Max = DateTimeOffset.MinValue;
+                        criteria.LastPlayed.IsLowerInclusive = true;
+                        criteria.LastPlayed.IsUpperInclusive = true;
+                    }
+
+                    return true;
+
+                case &quot;divisor&quot;:
+                    return TryUpdateCriteriaRange(ref criteria.BeatDivisor, op, value, tryParseInt);
+
+                case &quot;status&quot;:
+                    return TryUpdateCriteriaSet(ref criteria.OnlineStatus, op, value);
+
+                case &quot;creator&quot;:
+                case &quot;author&quot;:
+                case &quot;mapper&quot;:
+                    return TryUpdateCriteriaText(ref criteria.Creator, op, value);
+
+                case &quot;artist&quot;:
+                    return TryUpdateCriteriaText(ref criteria.Artist, op, value);
+
+                case &quot;title&quot;:
+                    return TryUpdateCriteriaText(ref criteria.Title, op, value);
+
+                case &quot;diff&quot;:
+                    return TryUpdateCriteriaText(ref criteria.DifficultyName, op, value);
+
+                case &quot;source&quot;:
+                    return TryUpdateCriteriaText(ref criteria.Source, op, value);
+
+                case &quot;tag&quot;:
+                    var tagFilter = new FilterCriteria.OptionalTextFilter();
+                    TryUpdateCriteriaText(ref tagFilter, op, value);
+                    criteria.UserTags.Add(tagFilter);
+                    return true;
+
+                default:
+                    return criteria.RulesetCriteria?.TryParseCustomKeywordCriteria(key, op, value) ?? false;
+            }
+        }
+
+        private static Operator parseOperator(string value)
+        {
+            switch (value)
+            {
+                case &quot;=&quot;:
+                case &quot;:&quot;:
+                    return Operator.Equal;
+
+                case &quot;!=&quot;:
+                case &quot;!:&quot;:
+                    return Operator.NotEqual;
+
+                case &quot;&lt;&quot;:
+                    return Operator.Less;
+
+                case &quot;&lt;=&quot;:
+                case &quot;&lt;:&quot;:
+                    return Operator.LessOrEqual;
+
+                case &quot;&gt;&quot;:
+                    return Operator.Greater;
+
+                case &quot;&gt;=&quot;:
+                case &quot;&gt;:&quot;:
+                    return Operator.GreaterOrEqual;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), $&quot;Unsupported operator {value}&quot;);
+            }
+        }
+
+        private static int getLengthScale(string value) =&gt;
+            value.EndsWith(&quot;ms&quot;, StringComparison.Ordinal) ? 1 :
+            value.EndsWith(&#39;s&#39;) ? 1000 :
+            value.EndsWith(&#39;m&#39;) ? 60000 :
+            value.EndsWith(&#39;h&#39;) ? 3600000 : 1000;
+
+        private static bool tryParseFloatWithPoint(string value, out float result) =&gt;
+            float.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out result);
+
+        private static bool tryParseDoubleWithPoint(string value, out double result) =&gt;
+            double.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out result);
+
+        private static bool tryParseInt(string value, out int result) =&gt;
+            int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result);
+
+        private static bool tryParseBool(string value, out bool result)
+        {
+            switch (value)
+            {
+                case &quot;1&quot;:
+                case &quot;yes&quot;:
+                    result = true;
+                    return true;
+
+                case &quot;0&quot;:
+                case &quot;no&quot;:
+                    result = false;
+                    return true;
+
+                default:
+                    return bool.TryParse(value, out result);
+            }
+        }
+
+        private static bool tryParseEnum&lt;TEnum&gt;(string value, out TEnum result) where TEnum : struct
+        {
+            // First try an exact match.
+            if (Enum.TryParse(value, true, out result))
+                return true;
+
+            // Then try a prefix match.
+            string? prefixMatch = Enum.GetNames(typeof(TEnum)).FirstOrDefault(name =&gt; name.StartsWith(value, true, CultureInfo.InvariantCulture));
+
+            if (prefixMatch == null)
+                return false;
+
+            return Enum.TryParse(prefixMatch, true, out result);
+        }
+
+        private static GroupCollection? tryMatchRegex(string value, string regex)
+        {
+            try
+            {
+                Match matches = Regex.Match(value, regex);
+                if (matches.Success)
+                    return matches.Groups;
+            }
+            catch (Exception e)
+            {
+                Logger.Log($&quot;Failed to parse query ({e.Message})&quot;, level: LogLevel.Important);
+            }
+
+            return null;
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to parse a keyword filter with the specified &lt;paramref name=&quot;op&quot;/&gt; and textual &lt;paramref name=&quot;value&quot;/&gt;.
+        /// If the value indicates a valid textual filter, the function returns &lt;c&gt;true&lt;/c&gt; and the resulting data is stored into
+        /// &lt;paramref name=&quot;textFilter&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;textFilter&quot;&gt;The &lt;see cref=&quot;FilterCriteria.OptionalTextFilter&quot;/&gt; to store the parsed data into, if successful.&lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;
+        /// The operator for the keyword filter.
+        /// Only &lt;see cref=&quot;Operator.Equal&quot;/&gt; is valid for textual filters.
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;value&quot;&gt;The value of the keyword filter.&lt;/param&gt;
+        public static bool TryUpdateCriteriaText(ref FilterCriteria.OptionalTextFilter textFilter, Operator op, string value)
+        {
+            switch (op)
+            {
+                case Operator.NotEqual:
+                    textFilter.ExcludeTerm = true;
+                    goto case Operator.Equal;
+
+                case Operator.Equal:
+                    textFilter.SearchTerm = value;
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to parse a keyword filter of type &lt;see cref=&quot;float&quot;/&gt;
+        /// from the specified &lt;paramref name=&quot;op&quot;/&gt; and &lt;paramref name=&quot;val&quot;/&gt;.
+        /// If &lt;paramref name=&quot;val&quot;/&gt; can be parsed as a &lt;see cref=&quot;float&quot;/&gt;, the function returns &lt;c&gt;true&lt;/c&gt;
+        /// and the resulting range constraint is stored into &lt;paramref name=&quot;range&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;range&quot;&gt;
+        /// The &lt;see cref=&quot;float&quot;/&gt;-typed &lt;see cref=&quot;FilterCriteria.OptionalRange{T}&quot;/&gt;
+        /// to store the parsed data into, if successful.
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;The operator for the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;val&quot;&gt;The value of the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;tolerance&quot;&gt;Allowed tolerance of the parsed range boundary value.&lt;/param&gt;
+        public static bool TryUpdateCriteriaRange(ref FilterCriteria.OptionalRange&lt;float&gt; range, Operator op, string val, float tolerance = 0.05f)
+            =&gt; tryParseFloatWithPoint(val, out float value) &amp;&amp; tryUpdateCriteriaRange(ref range, op, value, tolerance);
+
+        private static bool tryUpdateCriteriaRange(ref FilterCriteria.OptionalRange&lt;float&gt; range, Operator op, float value, float tolerance = 0.05f)
+        {
+            range.InvertRange = false;
+
+            switch (op)
+            {
+                default:
+                    return false;
+
+                case Operator.NotEqual:
+                    range.InvertRange = true;
+                    goto case Operator.Equal;
+
+                case Operator.Equal:
+                    range.Min = value - tolerance;
+                    range.Max = value + tolerance;
+                    if (tolerance == 0)
+                        range.IsLowerInclusive = range.IsUpperInclusive = true;
+                    break;
+
+                case Operator.Greater:
+                    range.Min = value + tolerance;
+                    break;
+
+                case Operator.GreaterOrEqual:
+                    range.Min = value - tolerance;
+                    break;
+
+                case Operator.Less:
+                    range.Max = value - tolerance;
+                    break;
+
+                case Operator.LessOrEqual:
+                    range.Max = value + tolerance;
+                    break;
+            }
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to parse a keyword filter of type &lt;see cref=&quot;double&quot;/&gt;
+        /// from the specified &lt;paramref name=&quot;op&quot;/&gt; and &lt;paramref name=&quot;val&quot;/&gt;.
+        /// If &lt;paramref name=&quot;val&quot;/&gt; can be parsed as a &lt;see cref=&quot;double&quot;/&gt;, the function returns &lt;c&gt;true&lt;/c&gt;
+        /// and the resulting range constraint is stored into &lt;paramref name=&quot;range&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;range&quot;&gt;
+        /// The &lt;see cref=&quot;double&quot;/&gt;-typed &lt;see cref=&quot;FilterCriteria.OptionalRange{T}&quot;/&gt;
+        /// to store the parsed data into, if successful.
+        /// &lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;The operator for the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;val&quot;&gt;The value of the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;tolerance&quot;&gt;Allowed tolerance of the parsed range boundary value.&lt;/param&gt;
+        public static bool TryUpdateCriteriaRange(ref FilterCriteria.OptionalRange&lt;double&gt; range, Operator op, string val, double tolerance = 0.05)
+            =&gt; tryParseDoubleWithPoint(val, out double value) &amp;&amp; tryUpdateCriteriaRange(ref range, op, value, tolerance);
+
+        private static bool tryUpdateCriteriaRange(ref FilterCriteria.OptionalRange&lt;double&gt; range, Operator op, double value, double tolerance = 0.05)
+        {
+            range.InvertRange = false;
+
+            switch (op)
+            {
+                default:
+                    return false;
+
+                case Operator.NotEqual:
+                    range.InvertRange = true;
+                    goto case Operator.Equal;
+
+                case Operator.Equal:
+                    range.Min = value - tolerance;
+                    range.Max = value + tolerance;
+                    if (tolerance == 0)
+                        range.IsLowerInclusive = range.IsUpperInclusive = true;
+                    break;
+
+                case Operator.Greater:
+                    range.Min = value + tolerance;
+                    break;
+
+                case Operator.GreaterOrEqual:
+                    range.Min = value - tolerance;
+                    if (tolerance == 0)
+                        range.IsLowerInclusive = true;
+                    break;
+
+                case Operator.Less:
+                    range.Max = value - tolerance;
+                    break;
+
+                case Operator.LessOrEqual:
+                    range.Max = value + tolerance;
+                    if (tolerance == 0)
+                        range.IsUpperInclusive = true;
+                    break;
+            }
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Used to determine whether the string value &lt;paramref name=&quot;val&quot;/&gt; can be converted to type &lt;typeparamref name=&quot;T&quot;/&gt;.
+        /// If conversion can be performed, the delegate returns &lt;c&gt;true&lt;/c&gt;
+        /// and the conversion result is returned in the &lt;c&gt;out&lt;/c&gt; parameter &lt;paramref name=&quot;parsed&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;val&quot;&gt;The string value to attempt parsing for.&lt;/param&gt;
+        /// &lt;param name=&quot;parsed&quot;&gt;The parsed value, if conversion is possible.&lt;/param&gt;
+        public delegate bool TryParseFunction&lt;T&gt;(string val, out T parsed);
+
+        /// &lt;summary&gt;
+        /// Attempts to parse a keyword filter of type &lt;typeparamref name=&quot;T&quot;/&gt;,
+        /// from the specified &lt;paramref name=&quot;op&quot;/&gt; and &lt;paramref name=&quot;val&quot;/&gt;.
+        /// If &lt;paramref name=&quot;val&quot;/&gt; can be parsed into &lt;typeparamref name=&quot;T&quot;/&gt; using &lt;paramref name=&quot;parseFunction&quot;/&gt;, the function returns &lt;c&gt;true&lt;/c&gt;
+        /// and the resulting range constraint is stored into &lt;paramref name=&quot;range&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;range&quot;&gt;The &lt;see cref=&quot;FilterCriteria.OptionalRange{T}&quot;/&gt; to store the parsed data into, if successful.&lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;The operator for the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;val&quot;&gt;The value of the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;parseFunction&quot;&gt;Function used to determine if &lt;paramref name=&quot;val&quot;/&gt; can be converted to type &lt;typeparamref name=&quot;T&quot;/&gt;.&lt;/param&gt;
+        public static bool TryUpdateCriteriaRange&lt;T&gt;(ref FilterCriteria.OptionalRange&lt;T&gt; range, Operator op, string val, TryParseFunction&lt;T&gt; parseFunction)
+            where T : struct
+            =&gt; parseFunction.Invoke(val, out var converted) &amp;&amp; tryUpdateCriteriaRange(ref range, op, converted);
+
+        /// &lt;summary&gt;
+        /// Attempts to parse a keyword filter of type &lt;typeparamref name=&quot;T&quot;/&gt;,
+        /// from the specified &lt;paramref name=&quot;op&quot;/&gt; and &lt;paramref name=&quot;filterValue&quot;/&gt;.
+        /// If &lt;paramref name=&quot;filterValue&quot;/&gt; can be parsed successfully, the function returns &lt;c&gt;true&lt;/c&gt;
+        /// and the resulting range constraint is stored into the &lt;paramref name=&quot;range&quot;/&gt;&#39;s expected values.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;range&quot;&gt;The &lt;see cref=&quot;FilterCriteria.OptionalSet{T}&quot;/&gt; to store the parsed data into, if successful.&lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;The operator for the keyword filter.&lt;/param&gt;
+        /// &lt;param name=&quot;filterValue&quot;&gt;The value of the keyword filter.&lt;/param&gt;
+        public static bool TryUpdateCriteriaSet&lt;T&gt;(ref FilterCriteria.OptionalSet&lt;T&gt; range, Operator op, string filterValue)
+            where T : struct, Enum
+        {
+            var matchingValues = new HashSet&lt;T&gt;();
+
+            if (filterValue.Contains(&#39;,&#39;))
+            {
+                string[] splitValues = filterValue.Split(&#39;,&#39;, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                HashSet&lt;T&gt; parsedValues = new HashSet&lt;T&gt;();
+
+                foreach (string splitValue in splitValues)
+                {
+                    if (!tryParseEnum&lt;T&gt;(splitValue, out var parsedValue))
+                        return false;
+
+                    parsedValues.Add(parsedValue);
+                }
+
+                if (op == Operator.Equal)
+                {
+                    matchingValues.UnionWith(parsedValues);
+                }
+                else if (op == Operator.NotEqual)
+                {
+                    matchingValues.UnionWith(Enum.GetValues&lt;T&gt;());
+                    matchingValues.ExceptWith(parsedValues);
+                }
+                else
+                    return false;
+            }
+            else
+            {
+                if (!tryParseEnum&lt;T&gt;(filterValue, out var pivotValue))
+                    return false;
+
+                var allDefinedValues = Enum.GetValues&lt;T&gt;();
+
+                foreach (var val in allDefinedValues)
+                {
+                    int compareResult = Comparer&lt;T&gt;.Default.Compare(val, pivotValue);
+
+                    switch (op)
+                    {
+                        case Operator.Less:
+                            if (compareResult &lt; 0) matchingValues.Add(val);
+                            break;
+
+                        case Operator.LessOrEqual:
+                            if (compareResult &lt;= 0) matchingValues.Add(val);
+                            break;
+
+                        case Operator.Equal:
+                            if (compareResult == 0) matchingValues.Add(val);
+                            break;
+
+                        case Operator.GreaterOrEqual:
+                            if (compareResult &gt;= 0) matchingValues.Add(val);
+                            break;
+
+                        case Operator.Greater:
+                            if (compareResult &gt; 0) matchingValues.Add(val);
+                            break;
+
+                        case Operator.NotEqual:
+                            if (compareResult != 0) matchingValues.Add(val);
+                            break;
+
+                        default:
+                            return false;
+                    }
+                }
+            }
+
+            range.Values.IntersectWith(matchingValues);
+            return true;
+        }
+
+        private static bool tryUpdateCriteriaRange&lt;T&gt;(ref FilterCriteria.OptionalRange&lt;T&gt; range, Operator op, T value)
+            where T : struct
+        {
+            switch (op)
+            {
+                default:
+                    return false;
+
+                case Operator.NotEqual:
+                    range.InvertRange = true;
+                    goto case Operator.Equal;
+
+                case Operator.Equal:
+                    range.IsLowerInclusive = range.IsUpperInclusive = true;
+                    range.Min = value;
+                    range.Max = value;
+                    break;
+
+                case Operator.Greater:
+                    range.IsLowerInclusive = false;
+                    range.Min = value;
+                    break;
+
+                case Operator.GreaterOrEqual:
+                    range.IsLowerInclusive = true;
+                    range.Min = value;
+                    break;
+
+                case Operator.Less:
+                    range.IsUpperInclusive = false;
+                    range.Max = value;
+                    break;
+
+                case Operator.LessOrEqual:
+                    range.IsUpperInclusive = true;
+                    range.Max = value;
+                    break;
+            }
+
+            return true;
+        }
+
+        private static bool tryUpdateLengthRange(FilterCriteria criteria, Operator op, string val)
+        {
+            List&lt;string&gt; parts = new List&lt;string&gt;();
+
+            GroupCollection? match = null;
+
+            match ??= tryMatchRegex(val, @&quot;^((?&lt;hours&gt;\d+):)?(?&lt;minutes&gt;\d+):(?&lt;seconds&gt;\d+)$&quot;);
+            match ??= tryMatchRegex(val, @&quot;^((?&lt;hours&gt;\d+(\.\d+)?)h)?((?&lt;minutes&gt;\d+(\.\d+)?)m)?((?&lt;seconds&gt;\d+(\.\d+)?)s)?$&quot;);
+            match ??= tryMatchRegex(val, @&quot;^(?&lt;seconds&gt;\d+(\.\d+)?)$&quot;);
+
+            if (match == null)
+                return false;
+
+            if (match[&quot;seconds&quot;].Success)
+                parts.Add(match[&quot;seconds&quot;].Value + &quot;s&quot;);
+            if (match[&quot;minutes&quot;].Success)
+                parts.Add(match[&quot;minutes&quot;].Value + &quot;m&quot;);
+            if (match[&quot;hours&quot;].Success)
+                parts.Add(match[&quot;hours&quot;].Value + &quot;h&quot;);
+
+            double totalLength = 0;
+            int minScale = 3600000;
+
+            for (int i = 0; i &lt; parts.Count; i++)
+            {
+                string part = parts[i];
+                string partNoUnit = part.TrimEnd(&#39;m&#39;, &#39;s&#39;, &#39;h&#39;);
+                if (!tryParseDoubleWithPoint(partNoUnit, out double length))
+                    return false;
+
+                if (i != parts.Count - 1 &amp;&amp; length &gt;= 60)
+                    return false;
+                if (i != 0 &amp;&amp; partNoUnit.Contains(&#39;.&#39;))
+                    return false;
+
+                int scale = getLengthScale(part);
+                totalLength += length * scale;
+                minScale = Math.Min(minScale, scale);
+            }
+
+            return tryUpdateCriteriaRange(ref criteria.Length, op, totalLength, minScale / 2.0);
+        }
+
+        /// &lt;summary&gt;
+        /// This function is intended for parsing &quot;days / months / years ago&quot; type filters.
+        /// &lt;/summary&gt;
+        private static bool tryUpdateDateAgoRange(ref FilterCriteria.OptionalRange&lt;DateTimeOffset&gt; dateRange, Operator op, string val)
+        {
+            switch (op)
+            {
+                case Operator.NotEqual:
+                case Operator.Equal:
+                    // an equality or inequality filter is difficult to define for support here.
+                    // if &quot;3 months 2 days ago&quot; means a single concrete time instant, such a filter is basically useless.
+                    // if it means a range of 24 hours, then that is annoying to write and also comes with its own implications
+                    // (does it mean &quot;time instant 3 months 2 days ago, within 12 hours of tolerance either direction&quot;?
+                    // does it mean &quot;the full calendar day, from midnight to midnight, 3 months 2 days ago&quot;?)
+                    // as such, for simplicity, just refuse to support this.
+                    // same applies to inequality, but instead 24 hours would be need to be left out
+                    return false;
+
+                // for the remaining operators, since the value provided to this function is an &quot;ago&quot; type value
+                // (as in, referring to some amount of time back),
+                // we&#39;ll want to flip the operator, such that `&gt;5d` means &quot;more than five days ago&quot;, as in &quot;*before* five days ago&quot;,
+                // as intended by the user.
+                case Operator.Less:
+                    op = Operator.Greater;
+                    break;
+
+                case Operator.LessOrEqual:
+                    op = Operator.GreaterOrEqual;
+                    break;
+
+                case Operator.Greater:
+                    op = Operator.Less;
+                    break;
+
+                case Operator.GreaterOrEqual:
+                    op = Operator.LessOrEqual;
+                    break;
+            }
+
+            GroupCollection? match = null;
+
+            match ??= tryMatchRegex(val, @&quot;^((?&lt;years&gt;\d+)y)?((?&lt;months&gt;\d+)M)?((?&lt;days&gt;\d+(\.\d+)?)d)?((?&lt;hours&gt;\d+(\.\d+)?)h)?((?&lt;minutes&gt;\d+(\.\d+)?)m)?((?&lt;seconds&gt;\d+(\.\d+)?)s)?$&quot;);
+            match ??= tryMatchRegex(val, @&quot;^(?&lt;days&gt;\d+(\.\d+)?)$&quot;);
+
+            if (match == null)
+                return false;
+
+            DateTimeOffset? dateTimeOffset = null;
+            DateTimeOffset now = DateTimeOffset.Now;
+
+            try
+            {
+                List&lt;string&gt; keys = new List&lt;string&gt; { @&quot;seconds&quot;, @&quot;minutes&quot;, @&quot;hours&quot;, @&quot;days&quot;, @&quot;months&quot;, @&quot;years&quot; };
+
+                foreach (string key in keys)
+                {
+                    if (!match.TryGetValue(key, out var group) || !group.Success)
+                        continue;
+
+                    if (group.Success)
+                    {
+                        if (!tryParseDoubleWithPoint(group.Value, out double length))
+                            return false;
+
+                        switch (key)
+                        {
+                            case @&quot;seconds&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddSeconds(-length);
+                                break;
+
+                            case @&quot;minutes&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddMinutes(-length);
+                                break;
+
+                            case @&quot;hours&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddHours(-length);
+                                break;
+
+                            case @&quot;days&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddDays(-length);
+                                break;
+
+                            case @&quot;months&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddMonths(-(int)length);
+                                break;
+
+                            case @&quot;years&quot;:
+                                dateTimeOffset = (dateTimeOffset ?? now).AddYears(-(int)length);
+                                break;
+                        }
+                    }
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                dateTimeOffset = DateTimeOffset.MinValue.AddMilliseconds(1);
+            }
+
+            if (!dateTimeOffset.HasValue)
+                return false;
+
+            return tryUpdateCriteriaRange(ref dateRange, op, dateTimeOffset.Value);
+        }
+
+        /// &lt;summary&gt;
+        /// Helper function for building a UTC date from only the year, month and day.
+        /// UTC is used to keep consistent search results with osu!web.
+        /// &lt;/summary&gt;
+        private static DateTimeOffset dateTimeOffsetFromDateOnly(int year, int month, int day) =&gt;
+            new DateTimeOffset(year, month, day, 0, 0, 0, TimeSpan.Zero);
+
+        /// &lt;summary&gt;
+        /// Parses a string containing a ranked or submitted date filter.
+        /// Returns a boolean depending on whether parsing was successful or not.
+        /// Accepted dates are in the formats `yyyy`, `yyyy-mm` and `yyyy-mm-dd`.
+        /// Leading zeros are accepted. Numbers can be separated by `-`, `/`, or `.`
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;dateRange&quot;&gt;The &lt;see cref=&quot;FilterCriteria.OptionalRange{DateTimeOffset}&quot;/&gt; to store the parsed data into, if successful.&lt;/param&gt;
+        /// &lt;param name=&quot;op&quot;&gt;The operator of the filtering query&lt;/param&gt;
+        /// &lt;param name=&quot;val&quot;&gt;The string value to attempt parsing for.&lt;/param&gt;
+        private static bool tryUpdateRankedDateRange(ref FilterCriteria.OptionalRange&lt;DateTimeOffset&gt; dateRange, Operator op, string val)
+        {
+            GroupCollection? match = tryMatchRegex(val, @&quot;^(?&lt;year&gt;\d+)([-/.](?&lt;month&gt;\d+)([-/.](?&lt;day&gt;\d+))?)?$&quot;);
+
+            if (match == null)
+                return false;
+
+            int? year = null;
+            int? month = null;
+            int? day = null;
+
+            List&lt;string&gt; keys = new List&lt;string&gt; { @&quot;year&quot;, @&quot;month&quot;, @&quot;day&quot; };
+
+            foreach (string key in keys)
+            {
+                if (!match.TryGetValue(key, out var group) || !group.Success)
+                    continue;
+
+                if (group.Success)
+                {
+                    if (!tryParseDoubleWithPoint(group.Value, out double value))
+                        return false;
+
+                    switch (key)
+                    {
+                        case @&quot;year&quot;:
+                            year = (int)value;
+                            break;
+
+                        case @&quot;month&quot;:
+                            month = (int)value;
+                            break;
+
+                        case @&quot;day&quot;:
+                            day = (int)value;
+                            break;
+                    }
+                }
+            }
+
+            if (year == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                DateTimeOffset dateTimeOffset;
+                dateRange.InvertRange = false;
+
+                switch (op)
+                {
+                    case Operator.Less:
+                        month ??= 1;
+                        day ??= 1;
+
+                        dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value);
+                        return tryUpdateCriteriaRange(ref dateRange, op, dateTimeOffset);
+
+                    case Operator.LessOrEqual:
+                        if (month == null)
+                        {
+                            month = 1;
+                            day = 1;
+                            dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddYears(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.Less, dateTimeOffset);
+                        }
+
+                        if (day == null)
+                        {
+                            day = 1;
+                            dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddMonths(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.Less, dateTimeOffset);
+                        }
+
+                        dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddDays(1);
+                        return tryUpdateCriteriaRange(ref dateRange, Operator.Less, dateTimeOffset);
+
+                    case Operator.GreaterOrEqual:
+                        month ??= 1;
+                        day ??= 1;
+
+                        dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value);
+                        return tryUpdateCriteriaRange(ref dateRange, op, dateTimeOffset);
+
+                    case Operator.Greater:
+                        if (month == null)
+                        {
+                            month = 1;
+                            day = 1;
+                            dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddYears(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, dateTimeOffset);
+                        }
+
+                        if (day == null)
+                        {
+                            day = 1;
+                            dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddMonths(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, dateTimeOffset);
+                        }
+
+                        dateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddDays(1);
+                        return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, dateTimeOffset);
+
+                    case Operator.NotEqual:
+
+                        dateRange.InvertRange = true;
+                        goto case Operator.Equal;
+
+                    case Operator.Equal:
+
+                        DateTimeOffset minDateTimeOffset;
+                        DateTimeOffset maxDateTimeOffset;
+
+                        if (month == null)
+                        {
+                            month = 1;
+                            day = 1;
+                            minDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value);
+                            maxDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddYears(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, minDateTimeOffset)
+                                   &amp;&amp; tryUpdateCriteriaRange(ref dateRange, Operator.Less, maxDateTimeOffset);
+                        }
+
+                        if (day == null)
+                        {
+                            day = 1;
+                            minDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value);
+                            maxDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddMonths(1);
+                            return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, minDateTimeOffset)
+                                   &amp;&amp; tryUpdateCriteriaRange(ref dateRange, Operator.Less, maxDateTimeOffset);
+                        }
+
+                        minDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value);
+                        maxDateTimeOffset = dateTimeOffsetFromDateOnly(year.Value, month.Value, day.Value).AddDays(1);
+                        return tryUpdateCriteriaRange(ref dateRange, Operator.GreaterOrEqual, minDateTimeOffset)
+                               &amp;&amp; tryUpdateCriteriaRange(ref dateRange, Operator.Less, maxDateTimeOffset);
+
+                    default:
+                        return false;
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[19,9,21,62,1],[24,9,24,10,1],[26,13,26,14,1],[27,17,27,24,1],[27,26,27,37,1],[27,38,27,40,1],[27,41,27,74,1],[28,17,28,18,1],[29,21,29,79,1],[30,21,30,70,1],[31,21,31,64,1],[33,21,33,75,1],[34,25,34,69,1],[35,17,35,18,1],[36,13,36,14,1],[37,13,37,32,0],[38,13,38,14,0],[39,17,39,95,0],[40,13,40,14,0],[42,13,42,41,1],[43,9,43,10,1],[46,9,46,10,1],[47,13,47,25,1],[52,21,52,94,1],[55,21,55,89,1],[59,21,59,86,1],[62,21,62,87,1],[65,21,65,94,1],[68,21,68,86,1],[71,21,71,70,1],[74,21,74,86,1],[77,21,77,89,1],[81,21,81,92,1],[84,21,84,63,1],[85,25,85,38,1],[88,21,88,49,1],[89,25,89,42,1],[91,21,91,32,1],[92,21,92,22,1],[93,25,93,75,1],[94,25,94,75,1],[95,25,95,70,1],[96,21,96,22,1],[98,21,98,22,1],[99,25,99,75,1],[100,25,100,75,1],[101,25,101,69,1],[102,25,102,69,1],[103,21,103,22,1],[105,21,105,33,1],[108,21,108,101,1],[111,21,111,87,1],[116,21,116,83,1],[119,21,119,82,1],[122,21,122,81,1],[125,21,125,90,1],[128,21,128,82,1],[131,21,131,77,1],[132,21,132,69,1],[133,21,133,54,1],[134,21,134,33,1],[137,21,137,109,1],[139,9,139,10,1],[142,9,142,10,1],[143,13,143,27,1],[147,21,147,43,1],[151,21,151,46,1],[154,21,154,42,1],[158,21,158,49,1],[161,21,161,45,1],[165,21,165,52,1],[168,21,168,107,0],[170,9,170,10,1],[173,13,176,49,1],[179,13,179,108,1],[182,13,182,109,1],[185,13,185,93,1],[188,9,188,10,1],[189,13,189,27,1],[193,21,193,35,1],[194,21,194,33,1],[198,21,198,36,1],[199,21,199,33,1],[202,21,202,61,1],[204,9,204,10,1],[207,9,207,10,1],[209,13,209,56,1],[210,17,210,29,1],[213,13,213,87,1],[213,87,213,145,1],[213,145,213,147,1],[215,13,215,37,1],[216,17,216,30,1],[218,13,218,65,1],[219,9,219,10,1],[222,9,222,10,1],[224,13,224,14,1],[225,17,225,59,1],[226,17,226,37,1],[227,21,227,43,1],[228,13,228,14,1],[229,13,229,32,0],[230,13,230,14,0],[231,17,231,95,0],[232,13,232,14,0],[234,13,234,25,1],[235,9,235,10,1],[249,9,249,10,1],[250,13,250,24,1],[253,21,253,51,1],[254,21,254,46,1],[257,21,257,51,1],[258,21,258,33,1],[261,21,261,34,1],[263,9,263,10,1],[279,16,279,119,1],[282,9,282,10,1],[283,13,283,39,1],[285,13,285,24,1],[288,21,288,34,1],[291,21,291,46,0],[292,21,292,46,0],[295,21,295,51,1],[296,21,296,51,1],[297,21,297,40,1],[298,25,298,80,0],[299,21,299,27,1],[302,21,302,51,0],[303,21,303,27,0],[306,21,306,51,1],[307,21,307,27,1],[310,21,310,51,1],[311,21,311,27,1],[314,21,314,51,1],[315,21,315,27,1],[318,13,318,25,1],[319,9,319,10,1],[335,16,335,121,1],[338,9,338,10,1],[339,13,339,39,1],[341,13,341,24,1],[344,21,344,34,1],[347,21,347,46,1],[348,21,348,46,1],[351,21,351,51,1],[352,21,352,51,1],[353,21,353,40,1],[354,25,354,80,1],[355,21,355,27,1],[358,21,358,51,1],[359,21,359,27,1],[362,21,362,51,1],[363,21,363,40,1],[364,25,364,55,1],[365,21,365,27,1],[368,21,368,51,1],[369,21,369,27,1],[372,21,372,51,1],[373,21,373,40,1],[374,25,374,55,1],[375,21,375,27,1],[378,13,378,25,1],[379,9,379,10,1],[402,16,402,112,1],[415,9,415,10,1],[416,13,416,51,1],[418,13,418,43,1],[419,13,419,14,1],[420,17,420,135,1],[421,17,421,60,1],[423,17,423,24,1],[423,26,423,43,1],[423,44,423,46,1],[423,47,423,58,1],[424,17,424,18,1],[425,21,425,75,1],[426,25,426,38,1],[428,21,428,51,1],[429,17,429,18,1],[431,17,431,42,1],[432,17,432,18,1],[433,21,433,60,1],[434,17,434,18,1],[435,22,435,50,1],[436,17,436,18,1],[437,21,437,67,1],[438,21,438,61,1],[439,17,439,18,1],[441,21,441,34,1],[442,13,442,14,1],[444,13,444,14,1],[445,17,445,71,1],[446,21,446,34,1],[448,17,448,60,1],[450,17,450,24,1],[450,26,450,33,1],[450,34,450,36,1],[450,37,450,53,1],[451,17,451,18,1],[452,21,452,86,1],[454,21,454,32,1],[457,29,457,51,1],[457,52,457,76,1],[458,29,458,35,1],[461,29,461,52,1],[461,53,461,77,1],[462,29,462,35,1],[465,29,465,52,1],[465,53,465,77,1],[466,29,466,35,1],[469,29,469,52,1],[469,53,469,77,1],[470,29,470,35,1],[473,29,473,51,1],[473,52,473,76,1],[474,29,474,35,1],[477,29,477,52,1],[477,53,477,77,1],[478,29,478,35,1],[481,29,481,42,1],[483,17,483,18,1],[484,13,484,14,1],[486,13,486,56,1],[487,13,487,25,1],[488,9,488,10,1],[492,9,492,10,1],[493,13,493,24,1],[496,21,496,34,1],[499,21,499,46,1],[500,21,500,46,1],[503,21,503,76,1],[504,21,504,39,1],[505,21,505,39,1],[506,21,506,27,1],[509,21,509,52,1],[510,21,510,39,1],[511,21,511,27,1],[514,21,514,51,1],[515,21,515,39,1],[516,21,516,27,1],[519,21,519,52,1],[520,21,520,39,1],[521,21,521,27,1],[524,21,524,51,1],[525,21,525,39,1],[526,21,526,27,1],[529,13,529,25,1],[530,9,530,10,1],[533,9,533,10,1],[534,13,534,53,1],[536,13,536,43,1],[538,13,538,97,1],[539,13,539,128,1],[540,13,540,72,1],[542,13,542,31,1],[543,17,543,30,1],[545,13,545,42,1],[546,17,546,57,1],[547,13,547,42,1],[548,17,548,57,1],[549,13,549,40,1],[550,17,550,55,1],[552,13,552,36,1],[553,13,553,36,1],[555,18,555,27,1],[555,29,555,44,1],[555,46,555,49,1],[556,13,556,14,1],[557,17,557,40,1],[558,17,558,65,1],[559,17,559,77,1],[560,21,560,34,0],[562,17,562,58,1],[563,21,563,34,1],[564,17,564,56,1],[565,21,565,34,1],[567,17,567,50,1],[568,17,568,47,1],[569,17,569,54,1],[570,13,570,14,1],[572,13,572,97,1],[573,9,573,10,1],[579,9,579,10,1],[580,13,580,24,1],[591,21,591,34,1],[598,21,598,43,1],[599,21,599,27,1],[602,21,602,50,1],[603,21,603,27,1],[606,21,606,40,1],[607,21,607,27,1],[610,21,610,47,1],[611,21,611,27,1],[614,13,614,43,1],[616,13,616,187,1],[617,13,617,69,1],[619,13,619,31,1],[620,17,620,30,1],[622,13,622,51,1],[623,13,623,53,1],[626,13,626,14,1],[627,17,627,121,1],[629,17,629,24,1],[629,26,629,36,1],[629,37,629,39,1],[629,40,629,44,1],[630,17,630,18,1],[631,21,631,82,1],[632,25,632,34,1],[634,21,634,39,1],[635,21,635,22,1],[636,25,636,86,1],[637,29,637,42,0],[639,25,639,37,1],[642,33,642,94,1],[643,33,643,39,1],[646,33,646,94,1],[647,33,647,39,1],[650,33,650,92,1],[651,33,651,39,1],[654,33,654,91,1],[655,33,655,39,1],[658,33,658,98,1],[659,33,659,39,1],[662,33,662,97,1],[663,33,663,39,1],[665,21,665,22,1],[666,17,666,18,1],[667,13,667,14,1],[668,13,668,48,1],[669,13,669,14,1],[670,17,670,77,1],[671,13,671,14,1],[673,13,673,42,1],[674,17,674,30,1],[676,13,676,84,1],[677,9,677,10,1],[684,13,684,73,1],[696,9,696,10,1],[697,13,697,116,1],[699,13,699,31,1],[700,17,700,30,1],[702,13,702,30,1],[703,13,703,31,1],[704,13,704,29,1],[706,13,706,80,1],[708,13,708,20,1],[708,22,708,32,1],[708,33,708,35,1],[708,36,708,40,1],[709,13,709,14,1],[710,17,710,78,1],[711,21,711,30,1],[713,17,713,35,1],[714,17,714,18,1],[715,21,715,81,1],[716,25,716,38,0],[718,21,718,33,1],[721,29,721,47,1],[722,29,722,35,1],[725,29,725,48,1],[726,29,726,35,1],[729,29,729,46,1],[730,29,730,35,1],[732,17,732,18,1],[733,13,733,14,1],[735,13,735,30,1],[736,13,736,14,0],[737,17,737,30,0],[741,13,741,14,1],[743,17,743,47,1],[745,17,745,28,1],[748,25,748,37,1],[749,25,749,35,1],[751,25,751,105,1],[752,25,752,90,1],[755,25,755,43,1],[756,25,756,26,1],[757,29,757,39,1],[758,29,758,37,1],[759,29,759,121,1],[760,29,760,105,1],[763,25,763,41,1],[764,25,764,26,1],[765,29,765,37,1],[766,29,766,122,1],[767,29,767,105,1],[770,25,770,116,1],[771,25,771,101,1],[774,25,774,37,1],[775,25,775,35,1],[777,25,777,105,1],[778,25,778,90,1],[781,25,781,43,1],[782,25,782,26,1],[783,29,783,39,1],[784,29,784,37,1],[785,29,785,121,1],[786,29,786,115,1],[789,25,789,41,1],[790,25,790,26,1],[791,29,791,37,1],[792,29,792,122,1],[793,29,793,115,1],[796,25,796,116,1],[797,25,797,111,1],[801,25,801,54,1],[802,25,802,50,1],[809,25,809,43,1],[810,25,810,26,1],[811,29,811,39,1],[812,29,812,37,1],[813,29,813,112,1],[814,29,814,124,1],[815,29,816,111,1],[819,25,819,41,1],[820,25,820,26,1],[821,29,821,37,1],[822,29,822,112,1],[823,29,823,125,1],[824,29,825,111,1],[828,25,828,108,1],[829,25,829,119,1],[830,25,831,107,1],[834,25,834,38,0],[837,13,837,48,1],[838,13,838,14,1],[839,17,839,30,1],[841,9,841,10,1]]);
+    </script>
+  </body>
+</html>

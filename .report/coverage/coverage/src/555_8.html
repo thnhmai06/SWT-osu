@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Mania/UI/DrawableManiaRuleset.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Input;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Input.Handlers;
+using osu.Game.Replays;
+using osu.Game.Rulesets.Mania.Beatmaps;
+using osu.Game.Rulesets.Mania.Configuration;
+using osu.Game.Rulesets.Mania.Objects;
+using osu.Game.Rulesets.Mania.Replays;
+using osu.Game.Rulesets.Mania.Skinning;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.UI;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
+using osu.Game.Skinning;
+
+namespace osu.Game.Rulesets.Mania.UI
+{
+    public partial class DrawableManiaRuleset : DrawableScrollingRuleset&lt;ManiaHitObject&gt;
+    {
+        /// &lt;summary&gt;
+        /// The minimum time range. This occurs at a &lt;see cref=&quot;ManiaRulesetSetting.ScrollSpeed&quot;/&gt; of 40.
+        /// &lt;/summary&gt;
+        public const double MIN_TIME_RANGE = 290;
+
+        /// &lt;summary&gt;
+        /// The maximum time range. This occurs with a &lt;see cref=&quot;ManiaRulesetSetting.ScrollSpeed&quot;/&gt; of 1.
+        /// &lt;/summary&gt;
+        public const double MAX_TIME_RANGE = 11485;
+
+        public new ManiaPlayfield Playfield =&gt; (ManiaPlayfield)base.Playfield;
+
+        public new ManiaBeatmap Beatmap =&gt; (ManiaBeatmap)base.Beatmap;
+
+        public IEnumerable&lt;BarLine&gt; BarLines;
+
+        public override bool RequiresPortraitOrientation =&gt; Beatmap.Stages.Count == 1 &amp;&amp; mobileLayout.Value == ManiaMobileLayout.Portrait;
+
+        protected override bool RelativeScaleBeatLengths =&gt; true;
+
+        protected new ManiaRulesetConfigManager Config =&gt; (ManiaRulesetConfigManager)base.Config;
+
+        private readonly Bindable&lt;ManiaScrollingDirection&gt; configDirection = new Bindable&lt;ManiaScrollingDirection&gt;();
+        private readonly BindableDouble configScrollSpeed = new BindableDouble();
+        private readonly Bindable&lt;ManiaMobileLayout&gt; mobileLayout = new Bindable&lt;ManiaMobileLayout&gt;();
+        private readonly Bindable&lt;bool&gt; touchOverlay = new Bindable&lt;bool&gt;();
+
+        public double TargetTimeRange { get; protected set; }
+
+        // Stores the current speed adjustment active in gameplay.
+        private readonly Track speedAdjustmentTrack = new TrackVirtual(0);
+
+        private ISkinSource currentSkin = null!;
+
+        public DrawableManiaRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt;? mods = null)
+            : base(ruleset, beatmap, mods)
+        {
+            BarLines = new BarLineGenerator&lt;BarLine&gt;(Beatmap).BarLines;
+
+            TimeRange.MinValue = 1;
+            TimeRange.MaxValue = MAX_TIME_RANGE;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(ISkinSource source)
+        {
+            currentSkin = source;
+            currentSkin.SourceChanged += onSkinChange;
+            skinChanged();
+
+            foreach (var mod in Mods.OfType&lt;IApplicableToTrack&gt;())
+                mod.ApplyToTrack(speedAdjustmentTrack);
+
+            bool isForCurrentRuleset = Beatmap.BeatmapInfo.Ruleset.Equals(Ruleset.RulesetInfo);
+
+            foreach (var p in ControlPoints)
+            {
+                // Mania doesn&#39;t care about global velocity
+                p.Velocity = 1;
+                p.BaseBeatLength *= Beatmap.Difficulty.SliderMultiplier;
+
+                // For non-mania beatmap, speed changes should only happen through timing points
+                if (!isForCurrentRuleset)
+                    p.EffectPoint = new EffectControlPoint();
+            }
+
+            BarLines.ForEach(Playfield.Add);
+
+            Config.BindWith(ManiaRulesetSetting.ScrollDirection, configDirection);
+            configDirection.BindValueChanged(direction =&gt; Direction.Value = (ScrollingDirection)direction.NewValue, true);
+
+            Config.BindWith(ManiaRulesetSetting.ScrollSpeed, configScrollSpeed);
+            configScrollSpeed.BindValueChanged(speed =&gt;
+            {
+                if (!AllowScrollSpeedAdjustment)
+                    return;
+
+                TargetTimeRange = ComputeScrollTime(speed.NewValue);
+            });
+
+            TimeRange.Value = TargetTimeRange = ComputeScrollTime(configScrollSpeed.Value);
+
+            Config.BindWith(ManiaRulesetSetting.MobileLayout, mobileLayout);
+            mobileLayout.BindValueChanged(_ =&gt; updateMobileLayout(), true);
+
+            Config.BindWith(ManiaRulesetSetting.TouchOverlay, touchOverlay);
+            touchOverlay.BindValueChanged(_ =&gt; updateMobileLayout(), true);
+        }
+
+        private ManiaTouchInputArea? touchInputArea;
+
+        private void updateMobileLayout()
+        {
+            if (touchOverlay.Value)
+                KeyBindingInputManager.Add(touchInputArea = new ManiaTouchInputArea(this));
+            else
+            {
+                if (touchInputArea != null)
+                    KeyBindingInputManager.Remove(touchInputArea, true);
+
+                touchInputArea = null;
+            }
+        }
+
+        protected override void AdjustScrollSpeed(int amount) =&gt; configScrollSpeed.Value += amount;
+
+        protected override void Update()
+        {
+            base.Update();
+            updateTimeRange();
+        }
+
+        private ScheduledDelegate? pendingSkinChange;
+        private float hitPosition;
+
+        private void onSkinChange()
+        {
+            // schedule required to avoid calls after disposed.
+            // note that this has the side-effect of components only performing a skin change when they are alive.
+            pendingSkinChange?.Cancel();
+            pendingSkinChange = Scheduler.Add(skinChanged);
+        }
+
+        private void skinChanged()
+        {
+            hitPosition = currentSkin.GetConfig&lt;ManiaSkinConfigurationLookup, float&gt;(
+                              new ManiaSkinConfigurationLookup(LegacyManiaSkinConfigurationLookups.HitPosition))?.Value
+                          ?? Stage.HIT_TARGET_POSITION;
+
+            pendingSkinChange = null;
+        }
+
+        private void updateTimeRange()
+        {
+            const float length_to_default_hit_position = 768 - LegacyManiaSkinConfiguration.DEFAULT_HIT_POSITION;
+            float lengthToHitPosition = 768 - hitPosition;
+
+            // This scaling factor preserves the scroll speed as the scroll length varies from changes to the hit position.
+            float scale = lengthToHitPosition / length_to_default_hit_position;
+
+            TimeRange.Value = TargetTimeRange * speedAdjustmentTrack.AggregateTempo.Value * speedAdjustmentTrack.AggregateFrequency.Value * scale;
+        }
+
+        /// &lt;summary&gt;
+        /// Computes a scroll time (in milliseconds) from a scroll speed in the range of 1-40.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scrollSpeed&quot;&gt;The scroll speed.&lt;/param&gt;
+        /// &lt;returns&gt;The scroll time.&lt;/returns&gt;
+        public static double ComputeScrollTime(double scrollSpeed) =&gt; MAX_TIME_RANGE / scrollSpeed;
+
+        public override PlayfieldAdjustmentContainer CreatePlayfieldAdjustmentContainer() =&gt; new ManiaPlayfieldAdjustmentContainer(this);
+
+        protected override Playfield CreatePlayfield() =&gt; new ManiaPlayfield(Beatmap.Stages);
+
+        public override int Variant =&gt; (int)(Beatmap.Stages.Count == 1 ? PlayfieldType.Single : PlayfieldType.Dual) + Beatmap.TotalColumns;
+
+        protected override PassThroughInputManager CreateInputManager() =&gt; new ManiaInputManager(Ruleset.RulesetInfo, Variant);
+
+        public override DrawableHitObject&lt;ManiaHitObject&gt;? CreateDrawableRepresentation(ManiaHitObject h) =&gt; null;
+
+        protected override ReplayInputHandler CreateReplayInputHandler(Replay replay) =&gt; new ManiaFramedReplayInputHandler(replay);
+
+        protected override ReplayRecorder CreateReplayRecorder(Score score) =&gt; new ManiaReplayRecorder(score);
+
+        protected override ResumeOverlay CreateResumeOverlay() =&gt; new DelayedResumeOverlay();
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (currentSkin.IsNotNull())
+                currentSkin.SourceChanged -= onSkinChange;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[45,48,45,78,0],[47,44,47,70,0],[51,61,51,138,0],[53,61,53,65,0],[55,59,55,97,0],[57,9,57,118,0],[58,9,58,82,0],[59,9,59,103,0],[60,9,60,77,0],[62,41,62,45,0],[62,46,62,60,0],[65,9,65,75,0],[67,9,67,49,0],[70,15,70,43,0],[71,9,71,10,0],[72,13,72,72,0],[74,13,74,36,0],[75,13,75,49,0],[76,9,76,10,0],[80,9,80,10,0],[81,13,81,34,0],[82,13,82,55,0],[83,13,83,27,0],[85,13,85,20,0],[85,22,85,29,0],[85,30,85,32,0],[85,33,85,66,0],[86,17,86,56,0],[88,13,88,96,0],[90,13,90,20,0],[90,22,90,27,0],[90,28,90,30,0],[90,31,90,44,0],[91,13,91,14,0],[93,17,93,32,0],[94,17,94,73,0],[97,17,97,42,0],[98,21,98,62,0],[99,13,99,14,0],[101,13,101,45,0],[103,13,103,83,0],[104,13,104,59,0],[104,59,104,115,0],[104,115,104,123,0],[106,13,106,81,0],[107,13,108,13,0],[108,13,108,14,0],[108,14,109,17,0],[109,17,109,49,0],[109,49,110,21,0],[110,21,110,28,0],[110,28,112,17,0],[112,17,112,69,0],[112,69,113,13,0],[113,13,113,14,0],[113,14,113,16,0],[115,13,115,92,0],[117,13,117,77,0],[118,13,118,48,0],[118,48,118,68,0],[118,68,118,76,0],[120,13,120,77,0],[121,13,121,48,0],[121,48,121,68,0],[121,68,121,76,0],[122,9,122,10,0],[127,9,127,10,0],[128,13,128,36,0],[129,17,129,92,0],[131,13,131,14,0],[132,17,132,44,0],[133,21,133,73,0],[135,17,135,39,0],[136,13,136,14,0],[137,9,137,10,0],[139,66,139,99,0],[142,9,142,10,0],[143,13,143,27,0],[144,13,144,31,0],[145,9,145,10,0],[151,9,151,10,0],[154,13,154,41,0],[155,13,155,60,0],[156,9,156,10,0],[159,9,159,10,0],[160,13,162,56,0],[164,13,164,38,0],[165,9,165,10,0],[168,9,168,10,0],[170,13,170,59,0],[173,13,173,80,0],[175,13,175,147,0],[176,9,176,10,0],[183,71,183,99,0],[185,94,185,137,0],[187,59,187,93,0],[189,40,189,139,0],[191,76,191,127,0],[193,110,193,114,0],[195,90,195,131,0],[197,80,197,110,0],[199,67,199,93,0],[202,9,202,10,0],[203,13,203,39,0],[205,13,205,41,0],[206,17,206,59,0],[207,9,207,10,0]]);
+    </script>
+  </body>
+</html>

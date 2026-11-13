@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Setup/MetadataSection.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Input;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osu.Game.Resources.Localisation.Web;
+
+namespace osu.Game.Screens.Edit.Setup
+{
+    public partial class MetadataSection : SetupSection
+    {
+        protected FormTextBox ArtistTextBox = null!;
+        protected FormTextBox RomanisedArtistTextBox = null!;
+
+        protected FormTextBox TitleTextBox = null!;
+        protected FormTextBox RomanisedTitleTextBox = null!;
+
+        private FormTextBox creatorTextBox = null!;
+        private FormTextBox difficultyTextBox = null!;
+        private FormTextBox sourceTextBox = null!;
+        private FormTextBox tagsTextBox = null!;
+
+        private bool reloading;
+        private bool dirty;
+
+        public override LocalisableString Title =&gt; EditorSetupStrings.MetadataHeader;
+
+        [Resolved]
+        private Editor? editor { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; working { get; set; } = null!;
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(SetupScreen? setupScreen)
+        {
+            Children = new Drawable[]
+            {
+                ArtistTextBox = createTextBox&lt;FormTextBox&gt;(EditorSetupStrings.Artist),
+                RomanisedArtistTextBox = createTextBox&lt;FormRomanisedTextBox&gt;(EditorSetupStrings.RomanisedArtist),
+                TitleTextBox = createTextBox&lt;FormTextBox&gt;(EditorSetupStrings.Title),
+                RomanisedTitleTextBox = createTextBox&lt;FormRomanisedTextBox&gt;(EditorSetupStrings.RomanisedTitle),
+                creatorTextBox = createTextBox&lt;FormTextBox&gt;(EditorSetupStrings.Creator),
+                difficultyTextBox = createTextBox&lt;FormTextBox&gt;(EditorSetupStrings.DifficultyName),
+                sourceTextBox = createTextBox&lt;FormTextBox&gt;(BeatmapsetsStrings.ShowInfoSource),
+                tagsTextBox = createTextBox&lt;FormTextBox&gt;(BeatmapsetsStrings.ShowInfoMapperTags),
+                new RoundedButton
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Text = EditorSetupStrings.SyncMetadataWithAllDifficulties,
+                    TooltipText = EditorSetupStrings.SyncMetadataWithAllDifficultiesTooltip,
+                    Margin = new MarginPadding { Top = 10 },
+                    Action = () =&gt; dialogOverlay?.Push(new SyncMetadataConfirmationDialog(syncMetadataToAllOtherDifficulties)),
+                    Enabled = { Value = working.Value.BeatmapSetInfo.Beatmaps.Count &gt; 1 }
+                }
+            };
+
+            setupScreen?.MetadataChanged += reloadMetadata;
+
+            reloadMetadata();
+        }
+
+        private void syncMetadataToAllOtherDifficulties()
+        {
+            if (working.Value.BeatmapSetInfo.Beatmaps.Count &lt;= 1)
+                return;
+
+            applyMetadata();
+
+            var set = working.Value.BeatmapSetInfo;
+            var current = Beatmap.BeatmapInfo;
+            var source = Beatmap.Metadata;
+
+            foreach (var b in set.Beatmaps)
+            {
+                if (b.Equals(current))
+                    continue;
+
+                b.Metadata.ArtistUnicode = source.ArtistUnicode;
+                b.Metadata.Artist = source.Artist;
+                b.Metadata.TitleUnicode = source.TitleUnicode;
+                b.Metadata.Title = source.Title;
+                b.Metadata.Source = source.Source;
+                b.Metadata.Tags = source.Tags;
+
+                try
+                {
+                    var targetWorking = beatmaps.GetWorkingBeatmap(b);
+                    beatmaps.Save(b, targetWorking.GetPlayableBeatmap(b.Ruleset), targetWorking.GetSkin(), targetWorking.Storyboard);
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, $@&quot;Failed to sync metadata to {b.GetDisplayTitle()}&quot;);
+                    return;
+                }
+            }
+
+            // Persist the current difficulty and align with how resource changes re-save the current beatmap.
+            // The reload is a crude measure to ensure places like the verify tab do not continue showing problems with mismatching metadata.
+            editor?.SaveAndReload(withDialog: false);
+        }
+
+        private TTextBox createTextBox&lt;TTextBox&gt;(LocalisableString label)
+            where TTextBox : FormTextBox, new()
+            =&gt; new TTextBox
+            {
+                Caption = label,
+                TabbableContentContainer = this
+            };
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (string.IsNullOrEmpty(ArtistTextBox.Current.Value))
+                ScheduleAfterChildren(() =&gt; GetContainingFocusManager()!.ChangeFocus(ArtistTextBox));
+
+            ArtistTextBox.Current.BindValueChanged(artist =&gt; transferIfRomanised(artist.NewValue, RomanisedArtistTextBox));
+            TitleTextBox.Current.BindValueChanged(title =&gt; transferIfRomanised(title.NewValue, RomanisedTitleTextBox));
+
+            foreach (var item in Children.OfType&lt;FormTextBox&gt;())
+            {
+                // Apply immediately on any change to ensure that if the user hits Ctrl+S after making a change (without committing)
+                // it will still apply to the beatmap.
+                item.Current.BindValueChanged(_ =&gt; applyMetadata());
+                item.OnCommit += (_, newText) =&gt;
+                {
+                    if (newText &amp;&amp; dirty)
+                        Beatmap.SaveState();
+                };
+            }
+
+            if (editor != null)
+                editor.Saved += () =&gt; dirty = false;
+
+            updateReadOnlyState();
+        }
+
+        private void transferIfRomanised(string value, FormTextBox target)
+        {
+            if (MetadataUtils.IsRomanised(value))
+                target.Current.Value = value;
+
+            updateReadOnlyState();
+        }
+
+        private void updateReadOnlyState()
+        {
+            RomanisedArtistTextBox.ReadOnly = MetadataUtils.IsRomanised(ArtistTextBox.Current.Value);
+            RomanisedTitleTextBox.ReadOnly = MetadataUtils.IsRomanised(TitleTextBox.Current.Value);
+        }
+
+        private void reloadMetadata()
+        {
+            reloading = true;
+
+            var metadata = Beatmap.Metadata;
+
+            RomanisedArtistTextBox.ReadOnly = false;
+            RomanisedTitleTextBox.ReadOnly = false;
+
+            ArtistTextBox.Current.Value = !string.IsNullOrEmpty(metadata.ArtistUnicode) ? metadata.ArtistUnicode : metadata.Artist;
+            RomanisedArtistTextBox.Current.Value = !string.IsNullOrEmpty(metadata.Artist) ? metadata.Artist : MetadataUtils.StripNonRomanisedCharacters(metadata.ArtistUnicode);
+            TitleTextBox.Current.Value = !string.IsNullOrEmpty(metadata.TitleUnicode) ? metadata.TitleUnicode : metadata.Title;
+            RomanisedTitleTextBox.Current.Value = !string.IsNullOrEmpty(metadata.Title) ? metadata.Title : MetadataUtils.StripNonRomanisedCharacters(metadata.TitleUnicode);
+            creatorTextBox.Current.Value = metadata.Author.Username;
+            difficultyTextBox.Current.Value = Beatmap.BeatmapInfo.DifficultyName;
+            sourceTextBox.Current.Value = metadata.Source;
+            tagsTextBox.Current.Value = metadata.Tags;
+
+            updateReadOnlyState();
+
+            reloading = false;
+        }
+
+        private void applyMetadata()
+        {
+            if (reloading)
+                return;
+
+            Beatmap.Metadata.ArtistUnicode = ArtistTextBox.Current.Value;
+            Beatmap.Metadata.Artist = RomanisedArtistTextBox.Current.Value;
+            Beatmap.Metadata.TitleUnicode = TitleTextBox.Current.Value;
+            Beatmap.Metadata.Title = RomanisedTitleTextBox.Current.Value;
+            Beatmap.Metadata.Author.Username = creatorTextBox.Current.Value;
+            Beatmap.BeatmapInfo.DifficultyName = difficultyTextBox.Current.Value;
+            Beatmap.Metadata.Source = sourceTextBox.Current.Value;
+            Beatmap.Metadata.Tags = tagsTextBox.Current.Value;
+
+            dirty = true;
+        }
+
+        private partial class FormRomanisedTextBox : FormTextBox
+        {
+            internal override InnerTextBox CreateTextBox() =&gt; new RomanisedTextBox();
+
+            private partial class RomanisedTextBox : InnerTextBox
+            {
+                public RomanisedTextBox()
+                {
+                    InputProperties = new TextInputProperties(TextInputType.Text, false);
+                }
+
+                protected override bool CanAddCharacter(char character)
+                    =&gt; MetadataUtils.IsRomanised(character);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,53,0],[23,9,23,62,0],[25,9,25,52,0],[26,9,26,61,0],[28,9,28,52,0],[29,9,29,55,0],[30,9,30,51,0],[31,9,31,49,0],[36,52,36,85,0],[39,34,39,38,0],[39,39,39,43,0],[42,43,42,47,0],[42,48,42,52,0],[42,57,42,62,0],[45,53,45,57,0],[45,58,45,62,0],[45,67,45,72,0],[48,49,48,53,0],[48,54,48,58,0],[52,9,52,10,0],[53,13,69,36,0],[69,36,69,127,0],[69,127,72,15,0],[74,13,74,60,0],[76,13,76,30,0],[77,9,77,10,0],[80,9,80,10,0],[81,13,81,66,0],[82,17,82,24,0],[84,13,84,29,0],[86,13,86,52,0],[87,13,87,47,0],[88,13,88,43,0],[90,13,90,20,0],[90,22,90,27,0],[90,28,90,30,0],[90,31,90,43,0],[91,13,91,14,0],[92,17,92,39,0],[93,21,93,30,0],[95,17,95,65,0],[96,17,96,51,0],[97,17,97,63,0],[98,17,98,49,0],[99,17,99,51,0],[100,17,100,47,0],[103,17,103,18,0],[104,21,104,71,0],[105,21,105,134,0],[106,17,106,18,0],[107,17,107,36,0],[108,17,108,18,0],[109,21,109,91,0],[110,21,110,28,0],[112,13,112,14,0],[116,13,116,54,0],[117,9,117,10,0],[121,16,125,14,0],[128,9,128,10,0],[129,13,129,33,0],[131,13,131,67,0],[132,17,132,45,0],[132,45,132,100,0],[132,100,132,102,0],[134,13,134,62,0],[134,62,134,122,0],[134,122,134,124,0],[135,13,135,60,0],[135,60,135,118,0],[135,118,135,120,0],[137,13,137,20,0],[137,22,137,30,0],[137,31,137,33,0],[137,34,137,64,0],[138,13,138,14,0],[141,17,141,52,0],[141,52,141,67,0],[141,67,141,69,0],[142,17,143,17,0],[143,17,143,18,0],[143,18,144,21,0],[144,21,144,42,0],[144,42,145,25,0],[145,25,145,45,0],[145,45,146,17,0],[146,17,146,18,0],[146,18,146,19,0],[147,13,147,14,0],[149,13,149,32,0],[150,17,150,39,0],[150,39,150,52,0],[150,52,150,53,0],[152,13,152,35,0],[153,9,153,10,0],[156,9,156,10,0],[157,13,157,50,0],[158,17,158,46,0],[160,13,160,35,0],[161,9,161,10,0],[164,9,164,10,0],[165,13,165,102,0],[166,13,166,100,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,30,0],[173,13,173,45,0],[175,13,175,53,0],[176,13,176,52,0],[178,13,178,132,0],[179,13,179,177,0],[180,13,180,128,0],[181,13,181,173,0],[182,13,182,69,0],[183,13,183,82,0],[184,13,184,59,0],[185,13,185,55,0],[187,13,187,35,0],[189,13,189,31,0],[190,9,190,10,0],[193,9,193,10,0],[194,13,194,27,0],[195,17,195,24,0],[197,13,197,74,0],[198,13,198,76,0],[199,13,199,72,0],[200,13,200,74,0],[201,13,201,77,0],[202,13,202,82,0],[203,13,203,67,0],[204,13,204,63,0],[206,13,206,26,0],[207,9,207,10,0],[211,63,211,85,0],[215,17,215,42,0],[216,17,216,18,0],[217,21,217,90,0],[218,17,218,18,0],[221,24,221,60,0]]);
+    </script>
+  </body>
+</html>

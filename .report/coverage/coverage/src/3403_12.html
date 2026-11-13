@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/UserInterface/BarGraph.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osuTK;
+using osu.Framework.Graphics;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Utils;
+using System;
+
+namespace osu.Game.Graphics.UserInterface
+{
+    public partial class BarGraph : Drawable
+    {
+        private const int resize_duration = 250;
+        private const Easing easing = Easing.InOutCubic;
+
+        /// &lt;summary&gt;
+        /// Manually sets the max value, if null &lt;see cref=&quot;Enumerable.Max(IEnumerable{float})&quot;/&gt; is instead used
+        /// &lt;/summary&gt;
+        public float? MaxValue { get; set; }
+
+        private BarDirection direction = BarDirection.BottomToTop;
+
+        public BarDirection Direction
+        {
+            get =&gt; direction;
+            set
+            {
+                if (direction == value)
+                    return;
+
+                direction = value;
+                Invalidate(Invalidation.DrawNode);
+            }
+        }
+
+        private readonly BarsInfo bars = new BarsInfo();
+
+        /// &lt;summary&gt;
+        /// A list of floats that defines the length of each &lt;see cref=&quot;Bar&quot;/&gt;
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;float&gt; Values
+        {
+            set
+            {
+                if (!value.Any())
+                {
+                    bars.Clear();
+                    Invalidate(Invalidation.DrawNode);
+                    return;
+                }
+
+                float maxLength = MaxValue ?? value.Max();
+
+                bars.SetLengths(value.Select(v =&gt; maxLength == 0 ? 0 : Math.Max(0f, v / maxLength)).ToArray());
+
+                animationStartTime = Clock.CurrentTime;
+                animationComplete = false;
+            }
+        }
+
+        private double animationStartTime;
+        private bool animationComplete;
+
+        private IShader shader = null!;
+        private Texture texture = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(IRenderer renderer, ShaderManager shaders)
+        {
+            texture = renderer.WhitePixel;
+            shader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!bars.Any)
+                return;
+
+            double currentTime = Clock.CurrentTime;
+
+            if (currentTime &lt; animationStartTime + resize_duration)
+            {
+                bars.Animate(animationStartTime, currentTime);
+                Invalidate(Invalidation.DrawNode);
+            }
+            else if (!animationComplete)
+            {
+                bars.FinishAnimation();
+                Invalidate(Invalidation.DrawNode);
+
+                animationComplete = true;
+            }
+        }
+
+        protected override DrawNode CreateDrawNode() =&gt; new BarGraphDrawNode(this);
+
+        private class BarGraphDrawNode : DrawNode
+        {
+            public new BarGraph Source =&gt; (BarGraph)base.Source;
+
+            public BarGraphDrawNode(BarGraph source)
+                : base(source)
+            {
+            }
+
+            private IShader shader = null!;
+            private Texture texture = null!;
+            private Vector2 drawSize;
+            private BarDirection direction;
+            private float barBreadth;
+
+            private readonly List&lt;float&gt; lengths = new List&lt;float&gt;();
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                shader = Source.shader;
+                texture = Source.texture;
+                drawSize = Source.DrawSize;
+                direction = Source.direction;
+                barBreadth = Source.bars.Breadth;
+
+                lengths.Clear();
+                lengths.AddRange(Source.bars.InstantaneousLengths);
+            }
+
+            protected override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                shader.Bind();
+
+                for (int i = 0; i &lt; lengths.Count; i++)
+                {
+                    float barHeight = drawSize.Y * ((direction == BarDirection.TopToBottom || direction == BarDirection.BottomToTop) ? lengths[i] : barBreadth);
+                    float barWidth = drawSize.X * ((direction == BarDirection.LeftToRight || direction == BarDirection.RightToLeft) ? lengths[i] : barBreadth);
+
+                    if (barHeight == 0 || barWidth == 0)
+                        continue;
+
+                    // Apply minimum sizing to hide the fact that we don&#39;t have fractional anti-aliasing.
+                    barHeight = Math.Max(barHeight, 1.5f);
+                    barWidth = Math.Max(barWidth, 1.5f);
+
+                    Vector2 topLeft;
+
+                    switch (direction)
+                    {
+                        default:
+                        case BarDirection.LeftToRight:
+                            topLeft = new Vector2(0, i * barHeight);
+                            break;
+
+                        case BarDirection.RightToLeft:
+                            topLeft = new Vector2(drawSize.X - barWidth, i * barHeight);
+                            break;
+
+                        case BarDirection.TopToBottom:
+                            topLeft = new Vector2(i * barWidth, 0);
+                            break;
+
+                        case BarDirection.BottomToTop:
+                            topLeft = new Vector2(i * barWidth, drawSize.Y - barHeight);
+                            break;
+                    }
+
+                    renderer.DrawQuad(
+                        texture,
+                        new Quad(
+                            Vector2Extensions.Transform(topLeft, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(topLeft + new Vector2(barWidth, 0), DrawInfo.Matrix),
+                            Vector2Extensions.Transform(topLeft + new Vector2(0, barHeight), DrawInfo.Matrix),
+                            Vector2Extensions.Transform(topLeft + new Vector2(barWidth, barHeight), DrawInfo.Matrix)
+                        ),
+                        DrawColourInfo.Colour);
+                }
+
+                shader.Unbind();
+            }
+        }
+
+        private class BarsInfo
+        {
+            public bool Any =&gt; Count &gt; 0;
+
+            public int Count { get; private set; }
+
+            public float Breadth { get; private set; }
+
+            public List&lt;float&gt; InstantaneousLengths { get; } = new List&lt;float&gt;();
+
+            private readonly List&lt;float&gt; initialLengths = new List&lt;float&gt;();
+            private readonly List&lt;float&gt; finalLengths = new List&lt;float&gt;();
+
+            public void Clear() =&gt; SetLengths(Array.Empty&lt;float&gt;());
+
+            public void SetLengths(float[] newLengths)
+            {
+                int newCount = newLengths.Length;
+
+                for (int i = 0; i &lt; newCount; i++)
+                {
+                    // If we have an old bar at this index - change it&#39;s length
+                    if (i &lt; Count)
+                    {
+                        initialLengths[i] = finalLengths[i];
+                        finalLengths[i] = newLengths[i];
+
+                        continue;
+                    }
+
+                    // If exceeded old bars count - add new one
+                    initialLengths.Add(0);
+                    finalLengths.Add(newLengths[i]);
+                    InstantaneousLengths.Add(0);
+                }
+
+                // Remove excessive bars
+                if (Count &gt; newCount)
+                {
+                    int barsToRemove = Count - newCount;
+
+                    initialLengths.RemoveRange(newCount, barsToRemove);
+                    finalLengths.RemoveRange(newCount, barsToRemove);
+                    InstantaneousLengths.RemoveRange(newCount, barsToRemove);
+                }
+
+                Count = newCount;
+                Breadth = Count == 0 ? 0 : (1f / Count);
+            }
+
+            public void Animate(double animationStartTime, double currentTime)
+            {
+                for (int i = 0; i &lt; Count; i++)
+                    InstantaneousLengths[i] = Interpolation.ValueAt(currentTime, initialLengths[i], finalLengths[i], animationStartTime, animationStartTime + resize_duration, easing);
+            }
+
+            public void FinishAnimation()
+            {
+                for (int i = 0; i &lt; Count; i++)
+                    InstantaneousLengths[i] = finalLengths[i];
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,34,26,38,0],[26,39,26,43,0],[28,9,28,67,0],[32,20,32,29,0],[34,13,34,14,0],[35,17,35,40,0],[36,21,36,28,0],[38,17,38,35,0],[39,17,39,51,0],[40,13,40,14,0],[43,9,43,57,0],[51,13,51,14,0],[52,17,52,34,0],[53,17,53,18,0],[54,21,54,34,0],[55,21,55,55,0],[56,21,56,28,0],[59,17,59,59,0],[61,17,61,51,0],[61,51,61,99,0],[61,99,61,112,0],[63,17,63,56,0],[64,17,64,43,0],[65,13,65,14,0],[71,9,71,40,0],[72,9,72,41,0],[76,9,76,10,0],[77,13,77,43,0],[78,13,78,103,0],[79,9,79,10,0],[82,9,82,10,0],[83,13,83,27,0],[85,13,85,27,0],[86,17,86,24,0],[88,13,88,52,0],[90,13,90,68,0],[91,13,91,14,0],[92,17,92,63,0],[93,17,93,51,0],[94,13,94,14,0],[95,18,95,41,0],[96,13,96,14,0],[97,17,97,40,0],[98,17,98,51,0],[100,17,100,42,0],[101,13,101,14,0],[102,9,102,10,0],[104,57,104,83,0],[108,43,108,64,0],[111,19,111,31,0],[112,13,112,14,0],[113,13,113,14,0],[115,13,115,44,0],[116,13,116,45,0],[121,13,121,70,0],[124,13,124,14,0],[125,17,125,35,0],[127,17,127,40,0],[128,17,128,42,0],[129,17,129,44,0],[130,17,130,46,0],[131,17,131,50,0],[133,17,133,33,0],[134,17,134,68,0],[135,13,135,14,0],[138,13,138,14,0],[139,17,139,37,0],[141,17,141,31,0],[143,22,143,31,0],[143,33,143,50,0],[143,52,143,55,0],[144,17,144,18,0],[145,21,145,161,0],[146,21,146,160,0],[148,21,148,57,0],[149,25,149,34,0],[152,21,152,59,0],[153,21,153,57,0],[157,21,157,39,0],[161,29,161,69,0],[162,29,162,35,0],[165,29,165,89,0],[166,29,166,35,0],[169,29,169,68,0],[170,29,170,35,0],[173,29,173,89,0],[174,29,174,35,0],[177,21,185,48,0],[186,17,186,18,0],[188,17,188,33,0],[189,13,189,14,0],[194,32,194,41,0],[196,32,196,36,0],[196,37,196,49,0],[198,36,198,40,0],[198,41,198,53,0],[200,55,200,59,0],[200,64,200,81,0],[202,13,202,77,0],[203,13,203,75,0],[205,36,205,68,0],[208,13,208,14,0],[209,17,209,50,0],[211,22,211,31,0],[211,33,211,45,0],[211,47,211,50,0],[212,17,212,18,0],[214,21,214,35,0],[215,21,215,22,0],[216,25,216,61,0],[217,25,217,57,0],[219,25,219,34,0],[223,21,223,43,0],[224,21,224,53,0],[225,21,225,49,0],[226,17,226,18,0],[229,17,229,38,0],[230,17,230,18,0],[231,21,231,57,0],[233,21,233,72,0],[234,21,234,70,0],[235,21,235,78,0],[236,17,236,18,0],[238,17,238,34,0],[239,17,239,57,0],[240,13,240,14,0],[243,13,243,14,0],[244,22,244,31,0],[244,33,244,42,0],[244,44,244,47,0],[245,21,245,184,0],[246,13,246,14,0],[249,13,249,14,0],[250,22,250,31,0],[250,33,250,42,0],[250,44,250,47,0],[251,21,251,63,0],[252,13,252,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Mania/Beatmaps/Patterns/Legacy/SliderPatternGenerator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Rulesets.Mania.Objects;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Utils;
+
+namespace osu.Game.Rulesets.Mania.Beatmaps.Patterns.Legacy
+{
+    /// &lt;summary&gt;
+    /// Converter for legacy &quot;Slider&quot; hit objects.
+    /// &lt;/summary&gt;
+    internal class SliderPatternGenerator : LegacyPatternGenerator
+    {
+        public readonly int StartTime;
+        public readonly int EndTime;
+        public readonly int SegmentDuration;
+        public readonly int SpanCount;
+
+        private PatternType convertType;
+
+        public SliderPatternGenerator(LegacyRandom random, HitObject hitObject, IBeatmap beatmap, int totalColumns, Pattern previousPattern)
+            : base(random, hitObject, beatmap, previousPattern, totalColumns)
+        {
+            convertType = PatternType.None;
+            if (!Beatmap.ControlPointInfo.EffectPointAt(hitObject.StartTime).KiaiMode)
+                convertType = PatternType.LowProbability;
+
+            var pathData = hitObject as IHasPath;
+            var repeatsData = hitObject as IHasRepeats;
+
+            Debug.Assert(pathData != null);
+
+            TimingControlPoint timingPoint = beatmap.ControlPointInfo.TimingPointAt(hitObject.StartTime);
+
+            double beatLength;
+
+            if (hitObject is IHasSliderVelocity hasSliderVelocity)
+                beatLength = LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(hasSliderVelocity, timingPoint, ManiaRuleset.SHORT_NAME);
+            else
+                beatLength = timingPoint.BeatLength;
+
+            SpanCount = repeatsData?.SpanCount() ?? 1;
+            StartTime = (int)Math.Round(hitObject.StartTime);
+
+            double distance = pathData.Path.ExpectedDistance.Value ?? 0;
+
+            // This matches stable&#39;s calculation.
+            EndTime = (int)Math.Floor(StartTime + distance * beatLength * SpanCount * 0.01 / beatmap.Difficulty.SliderMultiplier);
+
+            SegmentDuration = (EndTime - StartTime) / SpanCount;
+        }
+
+        public override IEnumerable&lt;Pattern&gt; Generate()
+        {
+            var originalPattern = generate();
+
+            if (originalPattern.HitObjects.Count() == 1)
+            {
+                yield return originalPattern;
+
+                yield break;
+            }
+
+            // We need to split the intermediate pattern into two new patterns:
+            // 1. A pattern containing all objects that do not end at our EndTime.
+            // 2. A pattern containing all objects that end at our EndTime. This will be used for further pattern generation.
+            var intermediatePattern = new Pattern();
+            var endTimePattern = new Pattern();
+
+            foreach (var obj in originalPattern.HitObjects)
+            {
+                if (EndTime != (int)Math.Round(obj.GetEndTime()))
+                    intermediatePattern.Add(obj);
+                else
+                    endTimePattern.Add(obj);
+            }
+
+            yield return intermediatePattern;
+            yield return endTimePattern;
+        }
+
+        private Pattern generate()
+        {
+            if (TotalColumns == 1)
+            {
+                var pattern = new Pattern();
+                addToPattern(pattern, 0, StartTime, EndTime);
+                return pattern;
+            }
+
+            if (SpanCount &gt; 1)
+            {
+                if (SegmentDuration &lt;= 90)
+                    return generateRandomHoldNotes(StartTime, 1);
+
+                if (SegmentDuration &lt;= 120)
+                {
+                    convertType |= PatternType.ForceNotStack;
+                    return generateRandomNotes(StartTime, SpanCount + 1);
+                }
+
+                if (SegmentDuration &lt;= 160)
+                    return generateStair(StartTime);
+
+                if (SegmentDuration &lt;= 200 &amp;&amp; ConversionDifficulty &gt; 3)
+                    return generateRandomMultipleNotes(StartTime);
+
+                double duration = EndTime - StartTime;
+                if (duration &gt;= 4000)
+                    return generateNRandomNotes(StartTime, 0.23, 0, 0);
+
+                if (SegmentDuration &gt; 400 &amp;&amp; SpanCount &lt; TotalColumns - 1 - RandomStart)
+                    return generateTiledHoldNotes(StartTime);
+
+                return generateHoldAndNormalNotes(StartTime);
+            }
+
+            if (SegmentDuration &lt;= 110)
+            {
+                if (PreviousPattern.ColumnWithObjects &lt; TotalColumns)
+                    convertType |= PatternType.ForceNotStack;
+                else
+                    convertType &amp;= ~PatternType.ForceNotStack;
+                return generateRandomNotes(StartTime, SegmentDuration &lt; 80 ? 1 : 2);
+            }
+
+            if (ConversionDifficulty &gt; 6.5)
+            {
+                if (convertType.HasFlag(PatternType.LowProbability))
+                    return generateNRandomNotes(StartTime, 0.78, 0.3, 0);
+
+                return generateNRandomNotes(StartTime, 0.85, 0.36, 0.03);
+            }
+
+            if (ConversionDifficulty &gt; 4)
+            {
+                if (convertType.HasFlag(PatternType.LowProbability))
+                    return generateNRandomNotes(StartTime, 0.43, 0.08, 0);
+
+                return generateNRandomNotes(StartTime, 0.56, 0.18, 0);
+            }
+
+            if (ConversionDifficulty &gt; 2.5)
+            {
+                if (convertType.HasFlag(PatternType.LowProbability))
+                    return generateNRandomNotes(StartTime, 0.3, 0, 0);
+
+                return generateNRandomNotes(StartTime, 0.37, 0.08, 0);
+            }
+
+            if (convertType.HasFlag(PatternType.LowProbability))
+                return generateNRandomNotes(StartTime, 0.17, 0, 0);
+
+            return generateNRandomNotes(StartTime, 0.27, 0, 0);
+        }
+
+        /// &lt;summary&gt;
+        /// Generates random hold notes that start at an span the same amount of rows.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;Start time of each hold note.&lt;/param&gt;
+        /// &lt;param name=&quot;noteCount&quot;&gt;Number of hold notes.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateRandomHoldNotes(int startTime, int noteCount)
+        {
+            // - - - -
+            // ■ - ■ ■
+            // □ - □ □
+            // ■ - ■ ■
+
+            var pattern = new Pattern();
+
+            int usableColumns = TotalColumns - RandomStart - PreviousPattern.ColumnWithObjects;
+            int nextColumn = GetRandomColumn();
+
+            for (int i = 0; i &lt; Math.Min(usableColumns, noteCount); i++)
+            {
+                // Find available column
+                nextColumn = FindAvailableColumn(nextColumn, pattern, PreviousPattern);
+                addToPattern(pattern, nextColumn, startTime, EndTime);
+            }
+
+            // This is can&#39;t be combined with the above loop due to RNG
+            for (int i = 0; i &lt; noteCount - usableColumns; i++)
+            {
+                nextColumn = FindAvailableColumn(nextColumn, pattern);
+                addToPattern(pattern, nextColumn, startTime, EndTime);
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates random notes, with one note per row and no stacking.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time.&lt;/param&gt;
+        /// &lt;param name=&quot;noteCount&quot;&gt;The number of notes.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateRandomNotes(int startTime, int noteCount)
+        {
+            // - - - -
+            // x - - -
+            // - - x -
+            // - - - x
+            // x - - -
+
+            var pattern = new Pattern();
+
+            int nextColumn = GetColumn((HitObject as IHasXPosition)?.X ?? 0, true);
+            if (convertType.HasFlag(PatternType.ForceNotStack) &amp;&amp; PreviousPattern.ColumnWithObjects &lt; TotalColumns)
+                nextColumn = FindAvailableColumn(nextColumn, PreviousPattern);
+
+            int lastColumn = nextColumn;
+
+            for (int i = 0; i &lt; noteCount; i++)
+            {
+                addToPattern(pattern, nextColumn, startTime, startTime);
+                nextColumn = FindAvailableColumn(nextColumn, validation: c =&gt; c != lastColumn);
+                lastColumn = nextColumn;
+                startTime += SegmentDuration;
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates a stair of notes, with one note per row.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateStair(int startTime)
+        {
+            // - - - -
+            // x - - -
+            // - x - -
+            // - - x -
+            // - - - x
+            // - - x -
+            // - x - -
+            // x - - -
+
+            var pattern = new Pattern();
+
+            int column = GetColumn((HitObject as IHasXPosition)?.X ?? 0, true);
+            bool increasing = Random.NextDouble() &gt; 0.5;
+
+            for (int i = 0; i &lt;= SpanCount; i++)
+            {
+                addToPattern(pattern, column, startTime, startTime);
+                startTime += SegmentDuration;
+
+                // Check if we&#39;re at the borders of the stage, and invert the pattern if so
+                if (increasing)
+                {
+                    if (column &gt;= TotalColumns - 1)
+                    {
+                        increasing = false;
+                        column--;
+                    }
+                    else
+                        column++;
+                }
+                else
+                {
+                    if (column &lt;= RandomStart)
+                    {
+                        increasing = true;
+                        column++;
+                    }
+                    else
+                        column--;
+                }
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates random notes with 1-2 notes per row and no stacking.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateRandomMultipleNotes(int startTime)
+        {
+            // - - - -
+            // x - - -
+            // - x x -
+            // - - - x
+            // x - x -
+
+            var pattern = new Pattern();
+
+            bool legacy = TotalColumns &gt;= 4 &amp;&amp; TotalColumns &lt;= 8;
+            int interval = Random.Next(1, TotalColumns - (legacy ? 1 : 0));
+
+            int nextColumn = GetColumn((HitObject as IHasXPosition)?.X ?? 0, true);
+
+            for (int i = 0; i &lt;= SpanCount; i++)
+            {
+                addToPattern(pattern, nextColumn, startTime, startTime);
+
+                nextColumn += interval;
+                if (nextColumn &gt;= TotalColumns - RandomStart)
+                    nextColumn = nextColumn - TotalColumns - RandomStart + (legacy ? 1 : 0);
+                nextColumn += RandomStart;
+
+                // If we&#39;re in 2K, let&#39;s not add many consecutive doubles
+                if (TotalColumns &gt; 2)
+                    addToPattern(pattern, nextColumn, startTime, startTime);
+
+                nextColumn = GetRandomColumn();
+                startTime += SegmentDuration;
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates random hold notes. The amount of hold notes generated is determined by probabilities.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The hold note start time.&lt;/param&gt;
+        /// &lt;param name=&quot;p2&quot;&gt;The probability required for 2 hold notes to be generated.&lt;/param&gt;
+        /// &lt;param name=&quot;p3&quot;&gt;The probability required for 3 hold notes to be generated.&lt;/param&gt;
+        /// &lt;param name=&quot;p4&quot;&gt;The probability required for 4 hold notes to be generated.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateNRandomNotes(int startTime, double p2, double p3, double p4)
+        {
+            // - - - -
+            // ■ - ■ ■
+            // □ - □ □
+            // ■ - ■ ■
+
+            switch (TotalColumns)
+            {
+                case 2:
+                    p2 = 0;
+                    p3 = 0;
+                    p4 = 0;
+                    break;
+
+                case 3:
+                    p2 = Math.Min(p2, 0.1);
+                    p3 = 0;
+                    p4 = 0;
+                    break;
+
+                case 4:
+                    p2 = Math.Min(p2, 0.3);
+                    p3 = Math.Min(p3, 0.04);
+                    p4 = 0;
+                    break;
+
+                case 5:
+                    p2 = Math.Min(p2, 0.34);
+                    p3 = Math.Min(p3, 0.1);
+                    p4 = Math.Min(p4, 0.03);
+                    break;
+            }
+
+            static bool isDoubleSample(HitSampleInfo sample) =&gt; sample.Name == HitSampleInfo.HIT_CLAP || sample.Name == HitSampleInfo.HIT_FINISH;
+
+            bool canGenerateTwoNotes = !convertType.HasFlag(PatternType.LowProbability);
+            canGenerateTwoNotes &amp;= HitObject.Samples.Any(isDoubleSample) || sampleInfoListAt(StartTime).Any(isDoubleSample);
+
+            if (canGenerateTwoNotes)
+                p2 = 1;
+
+            return generateRandomHoldNotes(startTime, GetRandomNoteCount(p2, p3, p4));
+        }
+
+        /// &lt;summary&gt;
+        /// Generates tiled hold notes. You can think of this as a stair of hold notes.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The first hold note start time.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateTiledHoldNotes(int startTime)
+        {
+            // - - - -
+            // ■ ■ ■ ■
+            // □ □ □ □
+            // □ □ □ □
+            // □ □ □ ■
+            // □ □ ■ -
+            // □ ■ - -
+            // ■ - - -
+
+            var pattern = new Pattern();
+
+            int columnRepeat = Math.Min(SpanCount, TotalColumns);
+
+            // Due to integer rounding, this is not guaranteed to be the same as EndTime (the class-level variable).
+            int endTime = startTime + SegmentDuration * SpanCount;
+
+            int nextColumn = GetColumn((HitObject as IHasXPosition)?.X ?? 0, true);
+            if (convertType.HasFlag(PatternType.ForceNotStack) &amp;&amp; PreviousPattern.ColumnWithObjects &lt; TotalColumns)
+                nextColumn = FindAvailableColumn(nextColumn, PreviousPattern);
+
+            for (int i = 0; i &lt; columnRepeat; i++)
+            {
+                nextColumn = FindAvailableColumn(nextColumn, pattern);
+                addToPattern(pattern, nextColumn, startTime, endTime);
+                startTime += SegmentDuration;
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Generates a hold note alongside normal notes.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time of notes.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Pattern&quot;/&gt; containing the hit objects.&lt;/returns&gt;
+        private Pattern generateHoldAndNormalNotes(int startTime)
+        {
+            // - - - -
+            // ■ x x -
+            // ■ - x x
+            // ■ x - x
+            // ■ - x x
+
+            var pattern = new Pattern();
+
+            int holdColumn = GetColumn((HitObject as IHasXPosition)?.X ?? 0, true);
+            if (convertType.HasFlag(PatternType.ForceNotStack) &amp;&amp; PreviousPattern.ColumnWithObjects &lt; TotalColumns)
+                holdColumn = FindAvailableColumn(holdColumn, PreviousPattern);
+
+            // Create the hold note
+            addToPattern(pattern, holdColumn, startTime, EndTime);
+
+            int nextColumn = GetRandomColumn();
+            int noteCount;
+            if (ConversionDifficulty &gt; 6.5)
+                noteCount = GetRandomNoteCount(0.63, 0);
+            else if (ConversionDifficulty &gt; 4)
+                noteCount = GetRandomNoteCount(TotalColumns &lt; 6 ? 0.12 : 0.45, 0);
+            else if (ConversionDifficulty &gt; 2.5)
+                noteCount = GetRandomNoteCount(TotalColumns &lt; 6 ? 0 : 0.24, 0);
+            else
+                noteCount = 0;
+            noteCount = Math.Min(TotalColumns - 1, noteCount);
+
+            bool ignoreHead = !sampleInfoListAt(startTime).Any(s =&gt; s.Name == HitSampleInfo.HIT_WHISTLE || s.Name == HitSampleInfo.HIT_FINISH || s.Name == HitSampleInfo.HIT_CLAP);
+
+            var rowPattern = new Pattern();
+
+            for (int i = 0; i &lt;= SpanCount; i++)
+            {
+                if (!(ignoreHead &amp;&amp; startTime == StartTime))
+                {
+                    for (int j = 0; j &lt; noteCount; j++)
+                    {
+                        nextColumn = FindAvailableColumn(nextColumn, validation: c =&gt; c != holdColumn, patterns: rowPattern);
+                        addToPattern(rowPattern, nextColumn, startTime, startTime);
+                    }
+                }
+
+                pattern.Add(rowPattern);
+                rowPattern.Clear();
+
+                startTime += SegmentDuration;
+            }
+
+            return pattern;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieves the sample info list at a point in time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to retrieve the sample info list from.&lt;/param&gt;
+        private IList&lt;HitSampleInfo&gt; sampleInfoListAt(int time) =&gt; nodeSamplesAt(time)?.First() ?? HitObject.Samples;
+
+        /// &lt;summary&gt;
+        /// Retrieves the list of node samples that occur at time greater than or equal to &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to retrieve node samples at.&lt;/param&gt;
+        private IList&lt;IList&lt;HitSampleInfo&gt;&gt;? nodeSamplesAt(int time)
+        {
+            if (HitObject is not IHasPathWithRepeats curveData)
+                return null;
+
+            int index = SegmentDuration == 0 ? 0 : (time - StartTime) / SegmentDuration;
+
+            // avoid slicing the list &amp; creating copies, if at all possible.
+            return index == 0 ? curveData.NodeSamples : curveData.NodeSamples.Skip(index).ToList();
+        }
+
+        /// &lt;summary&gt;
+        /// Constructs and adds a note to a pattern.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;pattern&quot;&gt;The pattern to add to.&lt;/param&gt;
+        /// &lt;param name=&quot;column&quot;&gt;The column to add the note to.&lt;/param&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The start time of the note.&lt;/param&gt;
+        /// &lt;param name=&quot;endTime&quot;&gt;The end time of the note (set to &lt;paramref name=&quot;startTime&quot;/&gt; for a non-hold note).&lt;/param&gt;
+        private void addToPattern(Pattern pattern, int column, int startTime, int endTime)
+        {
+            ManiaHitObject newObject;
+
+            if (startTime == endTime)
+            {
+                newObject = new Note
+                {
+                    StartTime = startTime,
+                    Samples = sampleInfoListAt(startTime),
+                    Column = column
+                };
+            }
+            else
+            {
+                newObject = new HoldNote
+                {
+                    StartTime = startTime,
+                    Duration = endTime - startTime,
+                    Column = column,
+                    Samples = HitObject.Samples,
+                    PlaySlidingSamples = true,
+                    NodeSamples = nodeSamplesAt(startTime)
+                };
+            }
+
+            pattern.Add(newObject);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,15,32,78,1],[33,9,33,10,1],[34,13,34,44,1],[35,13,35,87,1],[36,17,36,58,1],[38,13,38,50,1],[39,13,39,56,1],[41,13,41,44,1],[43,13,43,106,1],[47,13,47,67,1],[48,17,48,142,0],[50,17,50,53,1],[52,13,52,55,1],[53,13,53,62,1],[55,13,55,73,1],[58,13,58,131,1],[60,13,60,65,1],[61,9,61,10,1],[64,9,64,10,1],[65,13,65,46,1],[67,13,67,57,1],[68,13,68,14,1],[69,17,69,46,1],[71,17,71,29,1],[77,13,77,53,1],[78,13,78,48,1],[80,13,80,20,1],[80,22,80,29,1],[80,30,80,32,1],[80,33,80,59,1],[81,13,81,14,1],[82,17,82,66,1],[83,21,83,50,1],[85,21,85,45,1],[86,13,86,14,1],[88,13,88,46,1],[89,13,89,41,1],[90,9,90,10,1],[93,9,93,10,1],[94,13,94,35,1],[95,13,95,14,1],[96,17,96,45,1],[97,17,97,62,1],[98,17,98,32,1],[101,13,101,31,1],[102,13,102,14,1],[103,17,103,43,1],[104,21,104,66,1],[106,17,106,44,1],[107,17,107,18,1],[108,21,108,62,1],[109,21,109,74,1],[112,17,112,44,1],[113,21,113,53,1],[115,17,115,72,1],[116,21,116,67,1],[118,17,118,55,1],[119,17,119,38,1],[120,21,120,72,1],[122,17,122,89,1],[123,21,123,62,1],[125,17,125,62,1],[128,13,128,40,1],[129,13,129,14,1],[130,17,130,70,1],[131,21,131,62,1],[133,21,133,63,1],[134,17,134,85,1],[137,13,137,44,1],[138,13,138,14,1],[139,17,139,69,1],[140,21,140,74,1],[142,17,142,74,0],[145,13,145,42,1],[146,13,146,14,0],[147,17,147,69,0],[148,21,148,75,0],[150,17,150,71,0],[153,13,153,44,1],[154,13,154,14,0],[155,17,155,69,0],[156,21,156,71,0],[158,17,158,71,0],[161,13,161,65,1],[162,17,162,68,1],[164,13,164,64,0],[165,9,165,10,1],[174,9,174,10,1],[180,13,180,41,1],[182,13,182,96,1],[183,13,183,48,1],[185,18,185,27,1],[185,29,185,67,1],[185,69,185,72,1],[186,13,186,14,1],[188,17,188,88,1],[189,17,189,71,1],[190,13,190,14,1],[193,18,193,27,1],[193,29,193,58,1],[193,60,193,63,1],[194,13,194,14,1],[195,17,195,71,1],[196,17,196,71,1],[197,13,197,14,1],[199,13,199,28,1],[200,9,200,10,1],[209,9,209,10,1],[216,13,216,41,1],[218,13,218,84,1],[219,13,219,116,1],[220,17,220,79,1],[222,13,222,41,1],[224,18,224,27,1],[224,29,224,42,1],[224,44,224,47,1],[225,13,225,14,1],[226,17,226,73,1],[227,17,227,79,1],[227,79,227,94,1],[227,94,227,96,1],[228,17,228,41,1],[229,17,229,46,1],[230,13,230,14,1],[232,13,232,28,1],[233,9,233,10,1],[241,9,241,10,1],[251,13,251,41,1],[253,13,253,80,1],[254,13,254,57,1],[256,18,256,27,1],[256,29,256,43,1],[256,45,256,48,1],[257,13,257,14,1],[258,17,258,69,1],[259,17,259,46,1],[262,17,262,32,1],[263,17,263,18,1],[264,21,264,52,1],[265,21,265,22,1],[266,25,266,44,1],[267,25,267,34,1],[268,21,268,22,1],[270,25,270,34,1],[271,17,271,18,1],[273,17,273,18,1],[274,21,274,47,1],[275,21,275,22,1],[276,25,276,43,1],[277,25,277,34,1],[278,21,278,22,1],[280,25,280,34,1],[281,17,281,18,1],[282,13,282,14,1],[284,13,284,28,1],[285,9,285,10,1],[293,9,293,10,1],[300,13,300,41,1],[302,13,302,66,1],[303,13,303,76,1],[305,13,305,84,1],[307,18,307,27,1],[307,29,307,43,1],[307,45,307,48,1],[308,13,308,14,1],[309,17,309,73,1],[311,17,311,40,1],[312,17,312,62,1],[313,21,313,93,0],[314,17,314,43,1],[317,17,317,38,1],[318,21,318,77,1],[320,17,320,48,1],[321,17,321,46,1],[322,13,322,14,1],[324,13,324,28,1],[325,9,325,10,1],[336,9,336,10,1],[342,13,342,34,1],[345,21,345,28,0],[346,21,346,28,0],[347,21,347,28,0],[348,21,348,27,0],[351,21,351,44,0],[352,21,352,28,0],[353,21,353,28,0],[354,21,354,27,0],[357,21,357,44,1],[358,21,358,45,1],[359,21,359,28,1],[360,21,360,27,1],[363,21,363,45,0],[364,21,364,44,0],[365,21,365,45,0],[366,21,366,27,0],[369,65,369,145,0],[371,13,371,89,1],[372,13,372,125,1],[374,13,374,37,1],[375,17,375,24,0],[377,13,377,87,1],[378,9,378,10,1],[386,9,386,10,1],[396,13,396,41,1],[398,13,398,66,1],[401,13,401,67,1],[403,13,403,84,1],[404,13,404,116,1],[405,17,405,79,0],[407,18,407,27,1],[407,29,407,45,1],[407,47,407,50,1],[408,13,408,14,1],[409,17,409,71,1],[410,17,410,71,1],[411,17,411,46,1],[412,13,412,14,1],[414,13,414,28,1],[415,9,415,10,1],[423,9,423,10,1],[430,13,430,41,1],[432,13,432,84,1],[433,13,433,116,1],[434,17,434,79,0],[437,13,437,67,1],[439,13,439,48,1],[441,13,441,44,1],[442,17,442,57,1],[443,18,443,47,1],[444,17,444,83,0],[445,18,445,49,1],[446,17,446,80,0],[448,17,448,31,1],[449,13,449,63,1],[451,13,451,69,1],[451,69,451,178,0],[451,178,451,180,1],[453,13,453,44,1],[455,18,455,27,1],[455,29,455,43,1],[455,45,455,48,1],[456,13,456,14,1],[457,17,457,61,1],[458,17,458,18,1],[459,26,459,35,1],[459,37,459,50,1],[459,52,459,55,1],[460,21,460,22,1],[461,25,461,87,1],[461,87,461,102,1],[461,102,461,126,1],[462,25,462,84,1],[463,21,463,22,1],[464,17,464,18,1],[466,17,466,41,1],[467,17,467,36,1],[469,17,469,46,1],[470,13,470,14,1],[472,13,472,28,1],[473,9,473,10,1],[479,68,479,117,1],[486,9,486,10,1],[487,13,487,64,1],[488,17,488,29,1],[490,13,490,89,1],[493,13,493,100,1],[494,9,494,10,1],[504,9,504,10,1],[507,13,507,38,1],[508,13,508,14,1],[509,17,514,19,1],[515,13,515,14,1],[517,13,517,14,1],[518,17,526,19,1],[527,13,527,14,1],[529,13,529,36,1],[530,9,530,10,1]]);
+    </script>
+  </body>
+</html>

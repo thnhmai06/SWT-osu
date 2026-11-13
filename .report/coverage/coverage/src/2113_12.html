@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Submission/BeatmapSubmissionScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Development;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Drawables.Cards;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO.Archives;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Screens.Select;
+using osuTK;
+
+namespace osu.Game.Screens.Edit.Submission
+{
+    public partial class BeatmapSubmissionScreen : OsuScreen
+    {
+        private BeatmapSubmissionOverlay overlay = null!;
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        protected override bool InitialBackButtonVisibility =&gt; false;
+
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Aquamarine);
+
+        [Resolved]
+        private RealmAccess realmAccess { get; set; } = null!;
+
+        [Resolved]
+        private Storage storage { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private OsuConfigManager configManager { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Cached]
+        private BeatmapSubmissionSettings settings { get; } = new BeatmapSubmissionSettings();
+
+        private Container submissionProgress = null!;
+        private SubmissionStageProgress exportStep = null!;
+        private SubmissionStageProgress createSetStep = null!;
+        private SubmissionStageProgress uploadStep = null!;
+        private SubmissionStageProgress updateStep = null!;
+        private Container successContainer = null!;
+        private Container flashLayer = null!;
+
+        private uint? beatmapSetId;
+        private MemoryStream? beatmapPackageStream;
+
+        private ProgressNotification? exportProgressNotification;
+        private ProgressNotification? updateProgressNotification;
+
+        private Live&lt;BeatmapSetInfo&gt;? importedSet;
+
+        private Sample completedSample = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            AddRangeInternal(new Drawable[]
+            {
+                overlay = new BeatmapSubmissionOverlay(),
+                submissionProgress = new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    AutoSizeDuration = 400,
+                    AutoSizeEasing = Easing.OutQuint,
+                    Alpha = 0,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Width = 0.6f,
+                    Masking = true,
+                    CornerRadius = 10,
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colourProvider.Background5,
+                        },
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Padding = new MarginPadding(20),
+                            Spacing = new Vector2(5),
+                            Children = new Drawable[]
+                            {
+                                createSetStep = new SubmissionStageProgress
+                                {
+                                    StageDescription = BeatmapSubmissionStrings.Preparing,
+                                    StageIndex = 0,
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                },
+                                exportStep = new SubmissionStageProgress
+                                {
+                                    StageDescription = BeatmapSubmissionStrings.Exporting,
+                                    StageIndex = 1,
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                },
+                                uploadStep = new SubmissionStageProgress
+                                {
+                                    StageDescription = BeatmapSubmissionStrings.Uploading,
+                                    StageIndex = 2,
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                },
+                                updateStep = new SubmissionStageProgress
+                                {
+                                    StageDescription = BeatmapSubmissionStrings.Finishing,
+                                    StageIndex = 3,
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                },
+                                successContainer = new Container
+                                {
+                                    Padding = new MarginPadding(20),
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    AutoSizeAxes = Axes.Both,
+                                    CornerRadius = BeatmapCard.CORNER_RADIUS,
+                                    Child = flashLayer = new Container
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Masking = true,
+                                        CornerRadius = BeatmapCard.CORNER_RADIUS,
+                                        Depth = float.MinValue,
+                                        Alpha = 0,
+                                        Child = new Box
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+            });
+
+            overlay.State.BindValueChanged(_ =&gt;
+            {
+                if (overlay.State.Value == Visibility.Hidden)
+                {
+                    if (!overlay.Completed)
+                    {
+                        allowExit();
+                        this.Exit();
+                    }
+                    else
+                    {
+                        submissionProgress.FadeIn(200, Easing.OutQuint);
+                        createBeatmapSet();
+                    }
+                }
+            });
+
+            completedSample = audio.Samples.Get(@&quot;UI/bss-complete&quot;);
+
+            if (Beatmap.Value.BeatmapSetInfo.OnlineID &gt; 0)
+            {
+                var req = new GetBeatmapSetRequest(Beatmap.Value.BeatmapSetInfo.OnlineID);
+                api.Queue(req);
+                settings.LatestOnlineStateRequest = req;
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            configManager.BindWith(OsuSetting.EditorSubmissionNotifyOnDiscussionReplies, settings.NotifyOnDiscussionReplies);
+        }
+
+        private void createBeatmapSet()
+        {
+            bool beatmapHasOnlineId = Beatmap.Value.BeatmapSetInfo.OnlineID &gt; 0;
+
+            PutBeatmapSetRequest createRequest;
+
+            if (beatmapHasOnlineId)
+            {
+                createRequest = PutBeatmapSetRequest.UpdateExisting(
+                    (uint)Beatmap.Value.BeatmapSetInfo.OnlineID,
+                    Beatmap.Value.BeatmapSetInfo.Beatmaps.Where(b =&gt; b.OnlineID &gt; 0).Select(b =&gt; (uint)b.OnlineID).ToArray(),
+                    (uint)Beatmap.Value.BeatmapSetInfo.Beatmaps.Count(b =&gt; b.OnlineID &lt;= 0),
+                    settings);
+                log($&quot;Updating existing beatmap set (id:{createRequest.BeatmapSetID} beatmapsToKeep:[{string.Join(&quot;,&quot;, createRequest.BeatmapsToKeep)}] beatmapsToCreate:{createRequest.BeatmapsToCreate})&quot;);
+            }
+            else
+            {
+                createRequest = PutBeatmapSetRequest.CreateNew((uint)Beatmap.Value.BeatmapSetInfo.Beatmaps.Count, settings);
+                log($&quot;Creating new beatmap set (beatmapsToCreate:{createRequest.BeatmapsToCreate})&quot;);
+            }
+
+            createRequest.Success += async response =&gt;
+            {
+                createSetStep.SetCompleted();
+                beatmapSetId = response.BeatmapSetId;
+
+                // at this point the set has an assigned online ID.
+                // it&#39;s important to proactively store it to the realm database,
+                // so that in the event in further failures in the process, the online ID is not lost.
+                // losing it can incur creation of redundant new sets server-side, or even cause online ID confusion.
+                if (!beatmapHasOnlineId)
+                {
+                    await realmAccess.WriteAsync(r =&gt;
+                    {
+                        var refetchedSet = r.Find&lt;BeatmapSetInfo&gt;(Beatmap.Value.BeatmapSetInfo.ID);
+                        refetchedSet!.OnlineID = (int)beatmapSetId.Value;
+                    }).ConfigureAwait(true);
+                }
+
+                await createBeatmapPackage(response).ConfigureAwait(true);
+            };
+            createRequest.Failure += ex =&gt;
+            {
+                createSetStep.SetFailed(ex.Message);
+                log($&quot;Beatmap set creation/update failed: {ex}&quot;);
+                allowExit();
+            };
+
+            createSetStep.SetInProgress();
+            api.Queue(createRequest);
+        }
+
+        private async Task createBeatmapPackage(PutBeatmapSetResponse response)
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            exportStep.SetInProgress();
+
+            try
+            {
+                beatmapPackageStream = new MemoryStream();
+                exportProgressNotification = new ProgressNotification();
+
+                var legacyBeatmapExporter = new SubmissionBeatmapExporter(storage, response);
+
+                await legacyBeatmapExporter
+                      .ExportToStreamAsync(Beatmap.Value.BeatmapSetInfo.ToLive(realmAccess), beatmapPackageStream, exportProgressNotification)
+                      .ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                exportStep.SetFailed(ex.Message);
+                exportProgressNotification = null;
+                log($&quot;Export failed: {ex}&quot;);
+                allowExit();
+                return;
+            }
+
+            exportStep.SetCompleted();
+            exportProgressNotification = null;
+
+            await Task.Delay(200).ConfigureAwait(true);
+
+            if (response.Files.Count &gt; 0)
+                await patchBeatmapSet(response.Files).ConfigureAwait(true);
+            else
+                replaceBeatmapSet();
+        }
+
+        private async Task patchBeatmapSet(ICollection&lt;BeatmapSetFile&gt; onlineFiles)
+        {
+            Debug.Assert(beatmapSetId != null);
+            Debug.Assert(beatmapPackageStream != null);
+            log(&quot;Determining list of files to patch...&quot;);
+
+            var onlineFilesByFilename = onlineFiles.ToDictionary(f =&gt; f.Filename, f =&gt; f.SHA2Hash);
+
+            // disposing the `ArchiveReader` makes the underlying stream no longer readable which we don&#39;t want.
+            // make a local copy to defend against it.
+            using var archiveReader = new ZipArchiveReader(new MemoryStream(beatmapPackageStream.ToArray()));
+            var filesToUpdate = new HashSet&lt;string&gt;();
+
+            foreach (string filename in archiveReader.Filenames)
+            {
+                string localHash = archiveReader.GetStream(filename).ComputeSHA2Hash();
+
+                if (!onlineFilesByFilename.Remove(filename, out string? onlineHash))
+                {
+                    log($@&quot;new file: {filename}&quot;);
+                    filesToUpdate.Add(filename);
+                    continue;
+                }
+
+                if (!localHash.Equals(onlineHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    log($@&quot;changed file: {filename} (localHash:{localHash} onlineHash:{onlineHash})&quot;);
+                    filesToUpdate.Add(filename);
+                }
+            }
+
+            var changedFiles = new Dictionary&lt;string, byte[]&gt;();
+
+            foreach (string file in filesToUpdate)
+                changedFiles.Add(file, await archiveReader.GetStream(file).ReadAllBytesToArrayAsync().ConfigureAwait(true));
+
+            var patchRequest = new PatchBeatmapPackageRequest(beatmapSetId.Value);
+            patchRequest.FilesChanged.AddRange(changedFiles);
+            patchRequest.FilesDeleted.AddRange(onlineFilesByFilename.Keys);
+
+            foreach (string file in patchRequest.FilesDeleted)
+                log($@&quot;deleted file: {file}&quot;);
+
+            patchRequest.Success += uploadCompleted;
+            patchRequest.Failure += ex =&gt;
+            {
+                uploadStep.SetFailed(ex.Message);
+                log($&quot;Upload failed: {ex}&quot;);
+                allowExit();
+            };
+            patchRequest.Progressed += (current, total) =&gt; uploadStep.SetInProgress(total &gt; 0 ? (float)current / total : null);
+
+            api.Queue(patchRequest);
+            uploadStep.SetInProgress();
+        }
+
+        private void replaceBeatmapSet()
+        {
+            log(&quot;Peforming full package upload...&quot;);
+
+            Debug.Assert(beatmapSetId != null);
+            Debug.Assert(beatmapPackageStream != null);
+
+            var uploadRequest = new ReplaceBeatmapPackageRequest(beatmapSetId.Value, beatmapPackageStream.ToArray());
+
+            uploadRequest.Success += uploadCompleted;
+            uploadRequest.Failure += ex =&gt;
+            {
+                uploadStep.SetFailed(ex.Message);
+                log($&quot;Full package upload failed: {ex}&quot;);
+                allowExit();
+            };
+            uploadRequest.Progressed += (current, total) =&gt; uploadStep.SetInProgress((float)current / Math.Max(total, 1));
+
+            api.Queue(uploadRequest);
+            uploadStep.SetInProgress();
+        }
+
+        private void uploadCompleted()
+        {
+            uploadStep.SetCompleted();
+            updateLocalBeatmap().ConfigureAwait(true);
+        }
+
+        private async Task updateLocalBeatmap()
+        {
+            log(@&quot;Updating local beatmap set...&quot;);
+
+            Debug.Assert(beatmapSetId != null);
+            Debug.Assert(beatmapPackageStream != null);
+
+            updateStep.SetInProgress();
+            await Task.Delay(200).ConfigureAwait(true);
+
+            try
+            {
+                importedSet = await beatmaps.ImportAsUpdate(
+                    updateProgressNotification = new ProgressNotification(),
+                    new ImportTask(beatmapPackageStream, $&quot;{beatmapSetId}.osz&quot;),
+                    Beatmap.Value.BeatmapSetInfo).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                updateStep.SetFailed(ex.Message);
+                log($@&quot;Local update failed: {ex}&quot;);
+                allowExit();
+                return;
+            }
+
+            updateStep.SetCompleted();
+            showBeatmapCard();
+            allowExit();
+
+            if (configManager.Get&lt;bool&gt;(OsuSetting.EditorSubmissionLoadInBrowserAfterSubmission))
+            {
+                await Task.Delay(1000).ConfigureAwait(true);
+                game?.OpenUrlExternally($&quot;{api.Endpoints.WebsiteUrl}/beatmapsets/{beatmapSetId}&quot;);
+            }
+        }
+
+        private void showBeatmapCard()
+        {
+            Debug.Assert(beatmapSetId != null);
+
+            var getBeatmapSetRequest = new GetBeatmapSetRequest((int)beatmapSetId.Value);
+            getBeatmapSetRequest.Success += beatmapSet =&gt;
+            {
+                LoadComponentAsync(new BeatmapCardExtra(beatmapSet, false), loaded =&gt;
+                {
+                    successContainer.Add(loaded);
+                    flashLayer.FadeOutFromOne(2000, Easing.OutQuint);
+                });
+
+                completedSample.Play();
+            };
+
+            api.Queue(getBeatmapSetRequest);
+        }
+
+        private void allowExit()
+        {
+            BackButtonVisibility.Value = true;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (exportProgressNotification != null &amp;&amp; exportProgressNotification.Ongoing)
+                exportStep.SetInProgress(exportProgressNotification.Progress);
+
+            if (updateProgressNotification != null &amp;&amp; updateProgressNotification.Ongoing)
+                updateStep.SetInProgress(updateProgressNotification.Progress);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            // We probably want a method of cancelling in the future…
+            if (!BackButtonVisibility.Value)
+                return true;
+
+            if (importedSet != null)
+            {
+                game?.PerformFromScreen(s =&gt;
+                {
+                    if (s is OsuScreen osuScreen)
+                    {
+                        Debug.Assert(importedSet != null);
+                        var targetBeatmap = importedSet.Value.Beatmaps.FirstOrDefault(b =&gt; b.DifficultyName == Beatmap.Value.BeatmapInfo.DifficultyName)
+                                            ?? importedSet.Value.Beatmaps.First();
+                        osuScreen.Beatmap.Value = beatmaps.GetWorkingBeatmap(targetBeatmap);
+                    }
+
+                    s.Push(new EditorLoader());
+                }, [typeof(SongSelect)]);
+
+                return false;
+            }
+
+            return base.OnExiting(e);
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            overlay.Show();
+        }
+
+        private static void log(string message)
+            =&gt; Logger.Log($@&quot;[{nameof(BeatmapSubmissionScreen)}] {message}&quot;, LoggingTarget.Database);
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            beatmapPackageStream?.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,9,40,58,0],[42,71,42,75,0],[44,64,44,69,0],[47,9,47,123,0],[50,43,50,47,0],[50,48,50,52,0],[50,57,50,62,0],[53,35,53,39,0],[53,40,53,44,0],[53,49,53,54,0],[56,36,56,40,0],[56,41,56,45,0],[56,50,56,55,0],[59,50,59,54,0],[59,55,59,59,0],[59,64,59,69,0],[62,33,62,37,0],[62,38,62,42,0],[65,43,65,47,0],[65,48,65,52,0],[65,57,65,62,0],[68,54,68,58,0],[68,63,68,94,0],[70,9,70,54,0],[71,9,71,60,0],[72,9,72,63,0],[73,9,73,60,0],[74,9,74,60,0],[75,9,75,52,0],[76,9,76,46,0],[86,9,86,48,0],[90,9,90,10,0],[91,13,174,16,0],[176,13,177,13,0],[177,13,177,14,0],[177,14,178,17,0],[178,17,178,62,0],[178,62,179,17,0],[179,17,179,18,0],[179,18,180,21,0],[180,21,180,44,0],[180,44,181,21,0],[181,21,181,22,0],[181,22,182,25,0],[182,25,182,37,0],[182,37,183,25,0],[183,25,183,37,0],[183,37,184,21,0],[184,21,184,22,0],[184,22,186,21,0],[186,21,186,22,0],[186,22,187,25,0],[187,25,187,73,0],[187,73,188,25,0],[188,25,188,44,0],[188,44,189,21,0],[189,21,189,22,0],[189,22,190,17,0],[190,17,190,18,0],[190,18,191,13,0],[191,13,191,14,0],[191,14,191,16,0],[193,13,193,69,0],[195,13,195,59,0],[196,13,196,14,0],[197,17,197,91,0],[198,17,198,32,0],[199,17,199,57,0],[200,13,200,14,0],[201,9,201,10,0],[204,9,204,10,0],[205,13,205,33,0],[207,13,207,126,0],[208,9,208,10,0],[211,9,211,10,0],[212,13,212,81,0],[216,13,216,36,0],[217,13,217,14,0],[218,17,220,70,0],[220,70,220,84,0],[220,84,220,98,0],[220,98,220,114,0],[220,114,221,76,0],[221,76,221,91,0],[221,91,222,31,0],[223,17,223,205,0],[224,13,224,14,0],[226,13,226,14,0],[227,17,227,125,0],[228,17,228,102,0],[229,13,229,14,0],[231,13,232,13,0],[232,13,232,14,0],[232,14,233,17,0],[233,17,233,46,0],[233,46,234,17,0],[234,17,234,54,0],[234,54,240,17,0],[240,17,240,41,0],[240,41,241,17,0],[241,17,241,18,0],[241,18,242,21,0],[242,21,243,21,0],[243,21,243,22,0],[243,22,244,25,0],[244,25,244,100,0],[244,100,245,25,0],[245,25,245,74,0],[245,74,246,21,0],[246,21,246,22,0],[246,22,246,45,0],[246,45,247,17,0],[247,17,247,18,0],[247,18,249,17,0],[249,17,249,75,0],[249,75,250,13,0],[250,13,250,14,0],[250,14,250,15,0],[251,13,252,13,0],[252,13,252,14,0],[252,14,253,17,0],[253,17,253,53,0],[253,53,254,17,0],[254,17,254,66,0],[254,66,255,17,0],[255,17,255,29,0],[255,29,256,13,0],[256,13,256,14,0],[256,14,256,15,0],[258,13,258,43,0],[259,13,259,38,0],[260,9,260,10,0],[263,9,263,10,0],[264,13,264,55,0],[266,13,266,40,0],[269,13,269,14,0],[270,17,270,59,0],[271,17,271,73,0],[273,17,273,94,0],[275,17,277,45,0],[278,13,278,14,0],[279,13,279,33,0],[280,13,280,14,0],[281,17,281,50,0],[282,17,282,51,0],[283,17,283,45,0],[284,17,284,29,0],[285,17,285,24,0],[288,13,288,39,0],[289,13,289,47,0],[291,13,291,56,0],[293,13,293,42,0],[294,17,294,76,0],[296,17,296,37,0],[297,9,297,10,0],[300,9,300,10,0],[301,13,301,48,0],[302,13,302,56,0],[303,13,303,58,0],[305,13,305,71,0],[305,71,305,81,0],[305,81,305,88,0],[305,88,305,98,0],[305,98,305,100,0],[309,13,309,110,0],[310,13,310,55,0],[312,13,312,20,0],[312,22,312,37,0],[312,38,312,40,0],[312,41,312,64,0],[313,13,313,14,0],[314,17,314,88,0],[316,17,316,85,0],[317,17,317,18,0],[318,21,318,51,0],[319,21,319,49,0],[320,21,320,30,0],[323,17,323,87,0],[324,17,324,18,0],[325,21,325,103,0],[326,21,326,49,0],[327,17,327,18,0],[328,13,328,14,0],[330,13,330,65,0],[332,13,332,20,0],[332,22,332,33,0],[332,34,332,36,0],[332,37,332,50,0],[333,17,333,125,0],[335,13,335,83,0],[336,13,336,62,0],[337,13,337,76,0],[339,13,339,20,0],[339,22,339,33,0],[339,34,339,36,0],[339,37,339,62,0],[340,17,340,47,0],[342,13,342,53,0],[343,13,344,13,0],[344,13,344,14,0],[344,14,345,17,0],[345,17,345,50,0],[345,50,346,17,0],[346,17,346,45,0],[346,45,347,17,0],[347,17,347,29,0],[347,29,348,13,0],[348,13,348,14,0],[348,14,348,15,0],[349,13,349,60,0],[349,60,349,127,0],[349,127,349,128,0],[351,13,351,37,0],[352,13,352,40,0],[353,9,353,10,0],[356,9,356,10,0],[357,13,357,53,0],[359,13,359,48,0],[360,13,360,56,0],[362,13,362,118,0],[364,13,364,54,0],[365,13,366,13,0],[366,13,366,14,0],[366,14,367,17,0],[367,17,367,50,0],[367,50,368,17,0],[368,17,368,58,0],[368,58,369,17,0],[369,17,369,29,0],[369,29,370,13,0],[370,13,370,14,0],[370,14,370,15,0],[371,13,371,61,0],[371,61,371,122,0],[371,122,371,123,0],[373,13,373,38,0],[374,13,374,40,0],[375,9,375,10,0],[378,9,378,10,0],[379,13,379,39,0],[380,13,380,55,0],[381,9,381,10,0],[384,9,384,10,0],[385,13,385,51,0],[387,13,387,48,0],[388,13,388,56,0],[390,13,390,40,0],[391,13,391,56,0],[394,13,394,14,0],[395,17,398,72,0],[399,13,399,14,0],[400,13,400,33,0],[401,13,401,14,0],[402,17,402,50,0],[403,17,403,52,0],[404,17,404,29,0],[405,17,405,24,0],[408,13,408,39,0],[409,13,409,31,0],[410,13,410,25,0],[412,13,412,98,0],[413,13,413,14,0],[414,17,414,61,0],[415,17,415,99,0],[416,13,416,14,0],[417,9,417,10,0],[420,9,420,10,0],[421,13,421,48,0],[423,13,423,90,0],[424,13,425,13,0],[425,13,425,14,0],[425,14,426,17,0],[426,17,427,17,0],[427,17,427,18,0],[427,18,428,21,0],[428,21,428,50,0],[428,50,429,21,0],[429,21,429,70,0],[429,70,430,17,0],[430,17,430,18,0],[430,18,430,20,0],[430,20,432,17,0],[432,17,432,40,0],[432,40,433,13,0],[433,13,433,14,0],[433,14,433,15,0],[435,13,435,45,0],[436,9,436,10,0],[439,9,439,10,0],[440,13,440,47,0],[441,9,441,10,0],[444,9,444,10,0],[445,13,445,27,0],[447,13,447,90,0],[448,17,448,79,0],[450,13,450,90,0],[451,17,451,79,0],[452,9,452,10,0],[455,9,455,10,0],[457,13,457,45,0],[458,17,458,29,0],[460,13,460,37,0],[461,13,461,14,0],[462,17,463,17,0],[463,17,463,18,0],[463,18,464,21,0],[464,21,464,50,0],[464,50,465,21,0],[465,21,465,22,0],[465,22,466,25,0],[466,25,466,59,0],[466,59,467,25,0],[467,25,467,92,0],[467,92,467,152,0],[467,152,468,83,0],[468,83,469,25,0],[469,25,469,93,0],[469,93,470,21,0],[470,21,470,22,0],[470,22,472,21,0],[472,21,472,48,0],[472,48,473,17,0],[473,17,473,18,0],[473,18,473,42,0],[475,17,475,30,0],[478,13,478,38,0],[479,9,479,10,0],[482,9,482,10,0],[483,13,483,32,0],[485,13,485,28,0],[486,9,486,10,0],[489,16,489,101,0],[492,9,492,10,0],[493,13,493,39,0],[495,13,495,45,0],[496,9,496,10,0]]);
+    </script>
+  </body>
+</html>

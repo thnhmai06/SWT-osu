@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/Player.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Containers;
+using osu.Game.IO.Archives;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Scoring;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Screens.Ranking;
+using osu.Game.Skinning;
+using osu.Game.Users;
+using osu.Game.Utils;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play
+{
+    [Cached]
+    public abstract partial class Player : ScreenWithBeatmapBackground, ISamplePlaybackDisabler, ILocalUserPlayInfo
+    {
+        /// &lt;summary&gt;
+        /// The delay upon completion of the beatmap before displaying the results screen.
+        /// &lt;/summary&gt;
+        public const double RESULTS_DISPLAY_DELAY = 1000.0;
+
+        /// &lt;summary&gt;
+        /// Raised after &lt;see cref=&quot;StartGameplay&quot;/&gt; is called.
+        /// &lt;/summary&gt;
+        public event Action OnGameplayStarted;
+
+        public override bool AllowUserExit =&gt; false; // handled by HoldForMenuButton
+
+        /// &lt;summary&gt;
+        /// Raised after all gameplay has finished.
+        /// &lt;/summary&gt;
+        public event Action OnShowingResults;
+
+        protected override bool PlayExitSound =&gt; !isRestarting;
+
+        protected override UserActivity InitialActivity =&gt; new UserActivity.InSoloGame(Beatmap.Value.BeatmapInfo, Ruleset.Value);
+
+        public override float BackgroundParallaxAmount =&gt; 0.1f;
+
+        public override bool HideOverlaysOnEnter =&gt; true;
+
+        public override bool HideMenuCursorOnNonMouseInput =&gt; true;
+
+        public override bool RequiresPortraitOrientation
+        {
+            get
+            {
+                if (!LoadedBeatmapSuccessfully)
+                    return false;
+
+                return DrawableRuleset!.RequiresPortraitOrientation;
+            }
+        }
+
+        protected override OverlayActivation InitialOverlayActivationMode =&gt; OverlayActivation.UserTriggered;
+
+        // We are managing our own adjustments (see OnEntering/OnExiting).
+        public override bool? ApplyModTrackAdjustments =&gt; false;
+
+        private readonly IBindable&lt;bool&gt; gameActive = new Bindable&lt;bool&gt;(true);
+
+        private readonly Bindable&lt;bool&gt; samplePlaybackDisabled = new Bindable&lt;bool&gt;();
+
+        /// &lt;summary&gt;
+        /// Whether gameplay should pause when the game window focus is lost.
+        /// &lt;/summary&gt;
+        protected virtual bool PauseOnFocusLost =&gt; true;
+
+        public Action&lt;bool&gt; PrepareLoaderForRestart;
+
+        private bool isRestarting;
+        private bool skipExitTransition;
+
+        private readonly Bindable&lt;bool&gt; storyboardReplacesBackground = new Bindable&lt;bool&gt;();
+
+        public IBindable&lt;bool&gt; LocalUserPlaying =&gt; localUserPlaying;
+
+        private readonly Bindable&lt;bool&gt; localUserPlaying = new Bindable&lt;bool&gt;();
+        private readonly Bindable&lt;LocalUserPlayingState&gt; playingState = new Bindable&lt;LocalUserPlayingState&gt;();
+
+        public int RestartCount;
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;HUDOverlay&quot;/&gt; is currently visible.
+        /// &lt;/summary&gt;
+        public IBindable&lt;bool&gt; ShowingOverlayComponents = new Bindable&lt;bool&gt;();
+
+        /// &lt;summary&gt;
+        /// A flag which can be checked to decide whether we are in a state where settings that affect
+        /// game balance should be allowed to be applied at the current point in time.
+        /// &lt;/summary&gt;
+        public virtual bool AllowCriticalSettingsAdjustment { get; } = true;
+
+        // Should match PlayerLoader for consistency. Cached here for the rare case we push a Player
+        // without the loading screen (one such usage is the skin editor&#39;s scene library).
+        [Cached]
+        private OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Purple);
+
+        [Resolved]
+        private ScoreManager scoreManager { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        [Resolved]
+        private OsuGameBase game { get; set; }
+
+        public GameplayState GameplayState { get; private set; }
+
+        private Ruleset ruleset;
+
+        public BreakOverlay BreakOverlay;
+
+        private LetterboxOverlay letterboxOverlay;
+
+        /// &lt;summary&gt;
+        /// Whether the gameplay is currently in a break.
+        /// &lt;/summary&gt;
+        public readonly IBindable&lt;bool&gt; IsBreakTime = new BindableBool();
+
+        private BreakTracker breakTracker;
+
+        protected SkipOverlay SkipIntroOverlay { get; private set; }
+        private SkipOverlay skipOutroOverlay;
+
+        protected ScoreProcessor ScoreProcessor { get; private set; }
+
+        protected HealthProcessor HealthProcessor { get; private set; }
+
+        protected DrawableRuleset DrawableRuleset { get; private set; }
+
+        protected HUDOverlay HUDOverlay { get; private set; }
+
+        public bool LoadedBeatmapSuccessfully =&gt; DrawableRuleset?.Objects.Any() == true;
+
+        protected GameplayClockContainer GameplayClockContainer { get; private set; }
+
+        public DimmableStoryboard DimmableStoryboard { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether failing should be allowed.
+        /// By default, this checks whether all selected mods allow failing.
+        /// &lt;/summary&gt;
+        protected virtual bool CheckModsAllowFailure() =&gt; GameplayState.Mods.OfType&lt;IApplicableFailOverride&gt;().All(m =&gt; m.PerformFail());
+
+        public readonly PlayerConfiguration Configuration;
+
+        /// &lt;summary&gt;
+        /// The score for the current play session.
+        /// Available only after the player is loaded.
+        /// &lt;/summary&gt;
+        public Score Score { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Create a new player instance.
+        /// &lt;/summary&gt;
+        protected Player(PlayerConfiguration configuration = null)
+        {
+            Configuration = configuration ?? new PlayerConfiguration();
+        }
+
+        private ScreenSuspensionHandler screenSuspension;
+
+        private DependencyContainer dependencies;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+            =&gt; dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (!LoadedBeatmapSuccessfully)
+                return;
+
+            PrepareReplay();
+
+            ScoreProcessor.NewJudgement += _ =&gt; ScoreProcessor.PopulateScore(Score.ScoreInfo);
+            ScoreProcessor.OnResetFromReplayFrame += () =&gt; ScoreProcessor.PopulateScore(Score.ScoreInfo);
+
+            gameActive.BindValueChanged(_ =&gt; updatePauseOnFocusLostState(), true);
+        }
+
+        /// &lt;summary&gt;
+        /// Run any recording / playback setup for replays.
+        /// &lt;/summary&gt;
+        protected virtual void PrepareReplay()
+        {
+            DrawableRuleset.SetRecordTarget(Score);
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuConfigManager config, OsuGameBase game, CancellationToken cancellationToken)
+        {
+            var gameplayMods = Mods.Value.Select(m =&gt; m.DeepClone()).ToArray();
+
+            if (gameplayMods.Any(m =&gt; m is UnknownMod))
+            {
+                Logger.Log(&quot;Gameplay was started with an unknown mod applied.&quot;, level: LogLevel.Important);
+                return;
+            }
+
+            if (Beatmap.Value is DummyWorkingBeatmap)
+                return;
+
+            IBeatmap playableBeatmap = loadPlayableBeatmap(gameplayMods, cancellationToken);
+
+            if (playableBeatmap == null)
+                return;
+
+            if (!ModUtils.CheckModsBelongToRuleset(ruleset, gameplayMods))
+            {
+                Logger.Log($@&quot;Gameplay was started with a mod belonging to a ruleset different than &#39;{ruleset.Description}&#39;.&quot;, level: LogLevel.Important);
+                return;
+            }
+
+            if (game != null)
+                gameActive.BindTo(game.IsActive);
+
+            DrawableRuleset = ruleset.CreateDrawableRulesetWith(playableBeatmap, gameplayMods);
+            dependencies.CacheAs(DrawableRuleset);
+
+            if (DrawableRuleset is IDrawableScrollingRuleset scrollingRuleset)
+                dependencies.CacheAs(scrollingRuleset.ScrollingInfo);
+
+            ScoreProcessor = ruleset.CreateScoreProcessor();
+            ScoreProcessor.Mods.Value = gameplayMods;
+            ScoreProcessor.ApplyBeatmap(playableBeatmap);
+
+            dependencies.CacheAs(ScoreProcessor);
+
+            HealthProcessor = gameplayMods.OfType&lt;IApplicableHealthProcessor&gt;().FirstOrDefault()?.CreateHealthProcessor(playableBeatmap.HitObjects[0].StartTime);
+            HealthProcessor ??= ruleset.CreateHealthProcessor(playableBeatmap.HitObjects[0].StartTime);
+            HealthProcessor.ApplyBeatmap(playableBeatmap);
+
+            dependencies.CacheAs(HealthProcessor);
+
+            InternalChildren = new Drawable[]
+            {
+                GameplayClockContainer = CreateGameplayClockContainer(Beatmap.Value, DrawableRuleset.GameplayStartTime),
+            };
+
+            AddInternal(screenSuspension = new ScreenSuspensionHandler(GameplayClockContainer));
+
+            Score = CreateScore(playableBeatmap);
+
+            // ensure the score is in a consistent state with the current player.
+            Score.ScoreInfo.BeatmapInfo = Beatmap.Value.BeatmapInfo;
+            Score.ScoreInfo.BeatmapHash = Beatmap.Value.BeatmapInfo.Hash;
+            Score.ScoreInfo.Ruleset = ruleset.RulesetInfo;
+            Score.ScoreInfo.Mods = gameplayMods;
+
+            dependencies.CacheAs(GameplayState = new GameplayState(playableBeatmap, ruleset, gameplayMods, Score, ScoreProcessor, HealthProcessor, Beatmap.Value.Storyboard, PlayingState));
+
+            var rulesetSkinProvider = new RulesetSkinProvidingContainer(ruleset, playableBeatmap, Beatmap.Value.Skin);
+            config.BindWith(OsuSetting.BeatmapSkins, rulesetSkinProvider.BeatmapSkins);
+            config.BindWith(OsuSetting.BeatmapColours, rulesetSkinProvider.BeatmapColours);
+            config.BindWith(OsuSetting.BeatmapHitsounds, rulesetSkinProvider.BeatmapHitsounds);
+
+            GameplayClockContainer.Add(new GameplayScrollWheelHandling());
+
+            // needs to exist in frame stable content, but is used by underlay layers so make sure assigned early.
+            breakTracker = new BreakTracker(DrawableRuleset.GameplayStartTime, ScoreProcessor)
+            {
+                Breaks = Beatmap.Value.Beatmap.Breaks
+            };
+
+            // load the skinning hierarchy first.
+            // this is intentionally done in two stages to ensure things are in a loaded state before exposing the ruleset to skin sources.
+            GameplayClockContainer.Add(rulesetSkinProvider);
+
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            rulesetSkinProvider.AddRange(new Drawable[]
+            {
+                failAnimationContainer = new FailAnimationContainer(DrawableRuleset)
+                {
+                    OnComplete = onFailComplete,
+                    Children = new[]
+                    {
+                        // underlay and gameplay should have access to the skinning sources.
+                        createUnderlayComponents(Beatmap.Value),
+                        createGameplayComponents()
+                    }
+                },
+                FailOverlay = new FailOverlay
+                {
+                    SaveReplay = Configuration.AllowUserInteraction ? async () =&gt; await prepareAndImportScoreAsync(true).ConfigureAwait(false) : null,
+                    OnRetry = Configuration.AllowUserInteraction ? () =&gt; Restart() : null,
+                    OnQuit = () =&gt; PerformExitWithConfirmation(),
+                },
+            });
+
+            if (cancellationToken.IsCancellationRequested)
+                return;
+
+            GameplayClockContainer.Add(exitOverlay = new HotkeyExitOverlay
+            {
+                Depth = float.MinValue,
+                Action = () =&gt;
+                {
+                    if (!this.IsCurrentScreen()) return;
+
+                    PerformExit(skipTransition: true);
+                },
+            });
+
+            if (Configuration.AllowRestart)
+            {
+                GameplayClockContainer.Add(retryOverlay = new HotkeyRetryOverlay
+                {
+                    Depth = float.MinValue,
+                    Action = () =&gt;
+                    {
+                        if (!this.IsCurrentScreen()) return;
+
+                        Restart(true);
+                    },
+                });
+            }
+
+            dependencies.CacheAs(DrawableRuleset.FrameStableClock);
+            dependencies.CacheAs&lt;IGameplayClock&gt;(DrawableRuleset.FrameStableClock);
+
+            letterboxOverlay.Clock = DrawableRuleset.FrameStableClock;
+            letterboxOverlay.ProcessCustomClock = false;
+
+            // add the overlay components as a separate step as they proxy some elements from the above underlay/gameplay components.
+            // also give the overlays the ruleset skin provider to allow rulesets to potentially override HUD elements (used to disable combo counters etc.)
+            // we may want to limit this in the future to disallow rulesets from outright replacing elements the user expects to be there.
+            failAnimationContainer.Add(createOverlayComponents());
+
+            // Used by ReplaySettingsOverlay for button positioning.
+            dependencies.CacheAs(HUDOverlay);
+
+            if (!DrawableRuleset.AllowGameplayOverlays)
+            {
+                HUDOverlay.ShowHud.Value = false;
+                HUDOverlay.ShowHud.Disabled = true;
+                BreakOverlay.Hide();
+            }
+
+            DrawableRuleset.FrameStableClock.WaitingOnFrames.BindValueChanged(waiting =&gt;
+            {
+                if (waiting.NewValue)
+                    GameplayClockContainer.Stop();
+                else
+                    GameplayClockContainer.Start();
+            });
+
+            DrawableRuleset.IsPaused.BindValueChanged(_ =&gt;
+            {
+                updateGameplayState();
+                updateSampleDisabledState();
+            });
+
+            DrawableRuleset.FrameStableClock.IsCatchingUp.BindValueChanged(_ =&gt; updateSampleDisabledState());
+
+            DrawableRuleset.HasReplayLoaded.BindValueChanged(_ =&gt; updateGameplayState());
+
+            // bind clock into components that require it
+            ((IBindable&lt;bool&gt;)DrawableRuleset.IsPaused).BindTo(GameplayClockContainer.IsPaused);
+
+            DrawableRuleset.NewResult += r =&gt;
+            {
+                HealthProcessor.ApplyResult(r);
+                ScoreProcessor.ApplyResult(r);
+                GameplayState.ApplyResult(r);
+            };
+
+            DrawableRuleset.RevertResult += r =&gt;
+            {
+                HealthProcessor.RevertResult(r);
+                ScoreProcessor.RevertResult(r);
+            };
+
+            DimmableStoryboard.HasStoryboardEnded.ValueChanged += _ =&gt; checkScoreCompleted();
+
+            // Bind the judgement processors to ourselves
+            ScoreProcessor.HasCompleted.BindValueChanged(_ =&gt; checkScoreCompleted());
+            HealthProcessor.Failed += onFail;
+
+            // Provide judgement processors to mods after they&#39;re loaded so that they&#39;re on the gameplay clock,
+            // this is required for mods that apply transforms to these processors.
+            ScoreProcessor.OnLoadComplete += _ =&gt;
+            {
+                foreach (var mod in gameplayMods.OfType&lt;IApplicableToScoreProcessor&gt;())
+                    mod.ApplyToScoreProcessor(ScoreProcessor);
+            };
+
+            HealthProcessor.OnLoadComplete += _ =&gt;
+            {
+                foreach (var mod in gameplayMods.OfType&lt;IApplicableToHealthProcessor&gt;())
+                    mod.ApplyToHealthProcessor(HealthProcessor);
+            };
+
+            IsBreakTime.BindTo(breakTracker.IsBreakTime);
+            IsBreakTime.BindValueChanged(onBreakTimeChanged, true);
+        }
+
+        protected virtual GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) =&gt; new MasterGameplayClockContainer(beatmap, gameplayStart);
+
+        private Drawable createUnderlayComponents(WorkingBeatmap working)
+        {
+            var container = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    DimmableStoryboard = new DimmableStoryboard(GameplayState.Storyboard, GameplayState.Mods)
+                    {
+                        RelativeSizeAxes = Axes.Both
+                    },
+                    letterboxOverlay = new LetterboxOverlay
+                    {
+                        BreakTracker = breakTracker,
+                        Alpha = working.Beatmap.LetterboxInBreaks ? 1 : 0,
+                    },
+                    new KiaiGameplayFountains(),
+                },
+            };
+
+            return container;
+        }
+
+        private Drawable createGameplayComponents() =&gt; new ScalingContainer(ScalingMode.Gameplay)
+        {
+            Children = new Drawable[]
+            {
+                DrawableRuleset.With(r =&gt;
+                    r.FrameStableComponents.Children = new Drawable[]
+                    {
+                        ScoreProcessor,
+                        HealthProcessor,
+                        new ComboEffects(ScoreProcessor),
+                        breakTracker,
+                    }),
+            }
+        };
+
+        private Drawable createOverlayComponents()
+        {
+            var container = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new[]
+                {
+                    DimmableStoryboard.OverlayLayerContainer.CreateProxy(),
+                    HUDOverlay = new HUDOverlay(DrawableRuleset, GameplayState.Mods, Configuration)
+                    {
+                        HoldToQuit =
+                        {
+                            Action = () =&gt; PerformExitWithConfirmation(),
+                            IsPaused = { BindTarget = GameplayClockContainer.IsPaused },
+                            ReplayLoaded = { BindTarget = DrawableRuleset.HasReplayLoaded },
+                        },
+                        InputCountController =
+                        {
+                            IsCounting =
+                            {
+                                Value = false
+                            },
+                        },
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre
+                    },
+                    BreakOverlay = new BreakOverlay(ScoreProcessor)
+                    {
+                        Clock = DrawableRuleset.FrameStableClock,
+                        ProcessCustomClock = false,
+                        BreakTracker = breakTracker,
+                    },
+                    // display the cursor above some HUD elements.
+                    DrawableRuleset.Cursor?.CreateProxy() ?? new Container(),
+                    SkipIntroOverlay = CreateSkipOverlay(DrawableRuleset.GameplayStartTime).With(o =&gt;
+                    {
+                        o.RequestSkip = RequestIntroSkip;
+                    }),
+                    skipOutroOverlay = new SkipOverlay(GameplayState.Storyboard.LatestEventTime ?? 0)
+                    {
+                        RequestSkip = () =&gt; progressToResults(false),
+                        Alpha = 0
+                    },
+                    DrawableRuleset.ResumeOverlay?.CreateProxy() ?? new Container(),
+                    PauseOverlay = new PauseOverlay
+                    {
+                        OnResume = Resume,
+                        Retries = RestartCount,
+                        OnRetry = () =&gt; Restart(),
+                        OnQuit = () =&gt; PerformExitWithConfirmation(),
+                    },
+                },
+            };
+
+            if (!Configuration.AllowSkipping || !DrawableRuleset.AllowGameplayOverlays)
+            {
+                SkipIntroOverlay.Expire();
+                skipOutroOverlay.Expire();
+            }
+
+            return container;
+        }
+
+        protected virtual SkipOverlay CreateSkipOverlay(double startTime) =&gt; new SkipOverlay(startTime);
+
+        private void onBreakTimeChanged(ValueChangedEvent&lt;bool&gt; isBreakTime)
+        {
+            updateGameplayState();
+            updatePauseOnFocusLostState();
+            HUDOverlay.InputCountController.IsCounting.Value = !isBreakTime.NewValue;
+        }
+
+        private void updateGameplayState()
+        {
+            bool inGameplay = !DrawableRuleset.HasReplayLoaded.Value &amp;&amp; !GameplayState.HasPassed &amp;&amp; !GameplayState.HasFailed;
+            bool inBreak = breakTracker.IsBreakTime.Value || DrawableRuleset.IsPaused.Value;
+
+            if (inGameplay)
+                playingState.Value = inBreak ? LocalUserPlayingState.Break : LocalUserPlayingState.Playing;
+            else
+                playingState.Value = LocalUserPlayingState.NotPlaying;
+
+            localUserPlaying.Value = playingState.Value == LocalUserPlayingState.Playing;
+            OverlayActivationMode.Value = playingState.Value == LocalUserPlayingState.Playing ? OverlayActivation.Disabled : OverlayActivation.UserTriggered;
+        }
+
+        private void updateSampleDisabledState()
+        {
+            samplePlaybackDisabled.Value = DrawableRuleset.FrameStableClock.IsCatchingUp.Value || GameplayClockContainer.IsPaused.Value;
+        }
+
+        private void updatePauseOnFocusLostState()
+        {
+            if (!PauseOnFocusLost || !pausingSupportedByCurrentState || breakTracker.IsBreakTime.Value)
+                return;
+
+            if (gameActive.Value == false)
+            {
+                bool paused = Pause();
+
+                // if the initial pause could not be satisfied, the pause cooldown may be active.
+                // reschedule the pause attempt until it can be achieved.
+                if (!paused)
+                    Scheduler.AddOnce(updatePauseOnFocusLostState);
+            }
+        }
+
+        private IBeatmap loadPlayableBeatmap(Mod[] gameplayMods, CancellationToken cancellationToken)
+        {
+            IBeatmap playable;
+
+            try
+            {
+                if (Beatmap.Value.Beatmap == null)
+                    throw new InvalidOperationException(&quot;Beatmap was not loaded&quot;);
+
+                var rulesetInfo = Ruleset.Value ?? Beatmap.Value.BeatmapInfo.Ruleset;
+                ruleset = rulesetInfo.CreateInstance();
+
+                if (ruleset == null)
+                    throw new RulesetLoadException(&quot;Instantiation failure&quot;);
+
+                try
+                {
+                    playable = Beatmap.Value.GetPlayableBeatmap(ruleset.RulesetInfo, gameplayMods, cancellationToken);
+                }
+                catch (BeatmapInvalidForRulesetException)
+                {
+                    Logger.Log($&quot;The current beatmap is not playable in {ruleset.RulesetInfo.Name}!&quot;, level: LogLevel.Important);
+                    return null;
+                }
+
+                if (playable.HitObjects.Count == 0)
+                {
+                    Logger.Log(&quot;Beatmap contains no hit objects!&quot;, level: LogLevel.Important);
+                    return null;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Load has been cancelled. No logging is required.
+                return null;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;Could not load beatmap successfully!&quot;);
+                //couldn&#39;t load, hard abort!
+                return null;
+            }
+
+            return playable;
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to complete a user request to exit gameplay, with confirmation.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;This should only be called in response to a user interaction. Exiting is not guaranteed.&lt;/item&gt;
+        /// &lt;item&gt;This will interrupt any pending progression to the results screen, even if the transition has begun.&lt;/item&gt;
+        /// &lt;/list&gt;
+        ///
+        /// This method will show the pause or fail dialog before performing an exit.
+        /// If a dialog is not yet displayed, the exit will be blocked and the relevant dialog will display instead.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;Whether this call resulted in a final exit.&lt;/returns&gt;
+        protected bool PerformExitWithConfirmation()
+        {
+            bool pauseOrFailDialogVisible =
+                PauseOverlay.State.Value == Visibility.Visible || FailOverlay.State.Value == Visibility.Visible;
+
+            if (!pauseOrFailDialogVisible)
+            {
+                // if the fail animation is currently in progress, accelerate it (it will show the pause dialog on completion).
+                if (ValidForResume &amp;&amp; GameplayState.HasFailed)
+                {
+                    failAnimationContainer.FinishTransforms(true);
+                    return false;
+                }
+
+                // even if this call has requested a dialog, there is a chance the current player mode doesn&#39;t support pausing.
+                if (pausingSupportedByCurrentState)
+                {
+                    // in the case a dialog needs to be shown, attempt to pause and show it.
+                    // this may fail (see internal checks in Pause()) but the fail cases are temporary, so don&#39;t fall through to Exit().
+                    Pause();
+                    return false;
+                }
+            }
+
+            return PerformExit();
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to complete a user request to exit gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;This should only be called in response to a user interaction. Exiting is not guaranteed.&lt;/item&gt;
+        /// &lt;item&gt;This will interrupt any pending progression to the results screen, even if the transition has begun.&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;skipTransition&quot;&gt;Whether the exit should perform without a transition, because the screen had faded to black already.&lt;/param&gt;
+        /// &lt;returns&gt;Whether this call resulted in a final exit.&lt;/returns&gt;
+        protected bool PerformExit(bool skipTransition = false)
+        {
+            // Matching osu!stable behaviour, if the results screen is pending and the user requests an exit,
+            // show the results instead.
+            if (GameplayState.HasPassed &amp;&amp; !isRestarting)
+            {
+                progressToResults(false);
+                return false;
+            }
+
+            // import current score if possible.
+            prepareAndImportScoreAsync();
+
+            if (this.IsCurrentScreen())
+            {
+                skipExitTransition = skipTransition;
+
+                // The actual exit is performed if
+                // - the pause / fail dialog was not requested
+                // - the pause / fail dialog was requested but is already displayed (user showing intention to exit).
+                // - the pause / fail dialog was requested but couldn&#39;t be displayed due to the type or state of this Player instance.
+                this.Exit();
+            }
+            else
+            {
+                // May be restarting from results screen.
+                if (this.GetChildScreen() != null)
+                    this.MakeCurrent();
+            }
+
+            return true;
+        }
+
+        protected virtual void RequestIntroSkip()
+        {
+            PerformIntroSkip();
+        }
+
+        /// &lt;summary&gt;
+        /// Skip forward to the next valid skip point.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;fullLength&quot;&gt;&lt;c&gt;true&lt;/c&gt; to skip as close to gameplay as possible, or &lt;c&gt;false&lt;/c&gt; to skip only to the next valid skip point.&lt;/param&gt;
+        protected void PerformIntroSkip(bool fullLength = false)
+        {
+            // user requested skip
+            // disable sample playback to stop currently playing samples and perform skip
+            samplePlaybackDisabled.Value = true;
+
+            (GameplayClockContainer as MasterGameplayClockContainer)?.Skip(fullLength);
+
+            // return samplePlaybackDisabled.Value to what is defined by the beatmap&#39;s current state
+            updateSampleDisabledState();
+        }
+
+        /// &lt;summary&gt;
+        /// Seek to a specific time in gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The destination time to seek to.&lt;/param&gt;
+        public void Seek(double time) =&gt; GameplayClockContainer.Seek(time);
+
+        private ScheduledDelegate frameStablePlaybackResetDelegate;
+
+        /// &lt;summary&gt;
+        /// Specify and seek to a custom start time from which gameplay should be observed.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This performs a non-frame-stable seek. Intermediate hitobject judgements may not be applied or reverted correctly during this seek.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The destination time to seek to.&lt;/param&gt;
+        protected void SetGameplayStartTime(double time)
+        {
+            if (frameStablePlaybackResetDelegate?.Cancelled == false &amp;&amp; !frameStablePlaybackResetDelegate.Completed)
+                frameStablePlaybackResetDelegate.RunTask();
+
+            bool wasFrameStable = DrawableRuleset.FrameStablePlayback;
+            DrawableRuleset.FrameStablePlayback = false;
+
+            GameplayClockContainer.Reset(time);
+
+            // Delay resetting frame-stable playback for one frame to give the FrameStabilityContainer a chance to seek.
+            frameStablePlaybackResetDelegate = ScheduleAfterChildren(() =&gt; DrawableRuleset.FrameStablePlayback = wasFrameStable);
+        }
+
+        /// &lt;summary&gt;
+        /// Restart gameplay via a parent &lt;see cref=&quot;PlayerLoader&quot;/&gt;.
+        /// &lt;remarks&gt;This can be called from a child screen in order to trigger the restart process.&lt;/remarks&gt;
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;quickRestart&quot;&gt;Whether a quick restart was requested (skipping intro etc.).&lt;/param&gt;
+        /// &lt;returns&gt;Whether this call resulted in a restart.&lt;/returns&gt;
+        public bool Restart(bool quickRestart = false)
+        {
+            if (!Configuration.AllowRestart)
+                return false;
+
+            isRestarting = true;
+
+            // at the point of restarting the track should either already be paused or the volume should be zero.
+            // stopping here is to ensure music doesn&#39;t become audible after exiting back to PlayerLoader.
+            musicController.Stop();
+
+            skipExitTransition = quickRestart;
+            PrepareLoaderForRestart?.Invoke(quickRestart);
+
+            return PerformExit(quickRestart);
+        }
+
+        /// &lt;summary&gt;
+        /// This delegate, when set, means the results screen has been queued to appear.
+        /// The display of the results screen may be delayed by any work being done in &lt;see cref=&quot;PrepareScoreForResultsAsync&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Once set, this can *only* be cancelled by rewinding, ie. if &lt;see cref=&quot;JudgementProcessor.HasCompleted&quot;&gt;ScoreProcessor.HasCompleted&lt;/see&gt; becomes &lt;see langword=&quot;false&quot;/&gt;.
+        /// Even if the user requests an exit, it will forcefully proceed to the results screen (see special case in &lt;see cref=&quot;OnExiting&quot;/&gt;).
+        /// &lt;/remarks&gt;
+        private ScheduledDelegate resultsDisplayDelegate;
+
+        /// &lt;summary&gt;
+        /// A task which asynchronously prepares a completed score for display at results.
+        /// This may include performing net requests or importing the score into the database, generally to ensure things are in a sane state for the play session.
+        /// &lt;/summary&gt;
+        private Task&lt;ScoreInfo&gt; prepareScoreForDisplayTask;
+
+        /// &lt;summary&gt;
+        /// Handles changes in player state which may progress the completion of gameplay / this screen&#39;s lifetime.
+        /// &lt;/summary&gt;
+        private void checkScoreCompleted()
+        {
+            // If this player instance is in the middle of an exit, don&#39;t attempt any kind of state update.
+            if (!this.IsCurrentScreen())
+                return;
+
+            // Handle cases of arriving at this method when not in a completed state.
+            // - When a storyboard completion triggered this call earlier than gameplay finishes.
+            // - When a replay has been rewound before a queued resultsDisplayDelegate has run.
+            //
+            // Currently, even if this scenario is hit, prepareAndImportScoreAsync has already been queued (and potentially run).
+            // In the scenarios above, this is a non-issue, but it still feels a bit convoluted to have to cancel in this method.
+            // Maybe this can be improved with further refactoring.
+            if (!ScoreProcessor.HasCompleted.Value)
+            {
+                resultsDisplayDelegate?.Cancel();
+                resultsDisplayDelegate = null;
+
+                GameplayState.HasPassed = false;
+                ValidForResume = true;
+                skipOutroOverlay.Hide();
+                return;
+            }
+
+            // Only show the completion screen if the player hasn&#39;t failed
+            if (GameplayState.HasFailed)
+                return;
+
+            GameplayState.HasPassed = true;
+
+            // Setting this early in the process means that even if something were to go wrong in the order of events following, there
+            // is no chance that a user could return to the (already completed) Player instance from a child screen.
+            ValidForResume = false;
+
+            bool storyboardStillRunning = DimmableStoryboard.ContentDisplayed &amp;&amp; !DimmableStoryboard.HasStoryboardEnded.Value;
+
+            // If the current beatmap has a storyboard, this method will be called again on storyboard completion.
+            // Alternatively, the user may press the outro skip button, forcing immediate display of the results screen.
+            if (storyboardStillRunning)
+            {
+                skipOutroOverlay.Show();
+                return;
+            }
+
+            progressToResults(true);
+        }
+
+        /// &lt;summary&gt;
+        /// Queue the results screen for display.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// A final display will only occur once all work is completed in &lt;see cref=&quot;PrepareScoreForResultsAsync&quot;/&gt;. This means that even after calling this method, the results screen will never be shown until &lt;see cref=&quot;JudgementProcessor.HasCompleted&quot;&gt;ScoreProcessor.HasCompleted&lt;/see&gt; becomes &lt;see langword=&quot;true&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;withDelay&quot;&gt;Whether a minimum delay (&lt;see cref=&quot;RESULTS_DISPLAY_DELAY&quot;/&gt;) should be added before the screen is displayed.&lt;/param&gt;
+        private void progressToResults(bool withDelay)
+        {
+            if (!Configuration.ShowResults)
+                return;
+
+            // Setting this early in the process means that even if something were to go wrong in the order of events following, there
+            // is no chance that a user could return to the (already completed) Player instance from a child screen.
+            ValidForResume = false;
+
+            double delay = withDelay ? RESULTS_DISPLAY_DELAY : 0;
+
+            resultsDisplayDelegate?.Cancel();
+            resultsDisplayDelegate = new ScheduledDelegate(() =&gt;
+            {
+                if (prepareScoreForDisplayTask == null)
+                {
+                    // Try importing score since the task hasn&#39;t been invoked yet.
+                    prepareAndImportScoreAsync();
+                    return;
+                }
+
+                if (!prepareScoreForDisplayTask.IsCompleted)
+                    // If the asynchronous preparation has not completed, keep repeating this delegate.
+                    return;
+
+                resultsDisplayDelegate?.Cancel();
+
+                if (prepareScoreForDisplayTask.GetResultSafely() == null)
+                {
+                    // If score import did not occur, we do not want to show the results screen.
+                    return;
+                }
+
+                if (!this.IsCurrentScreen())
+                    // This player instance may already be in the process of exiting.
+                    return;
+
+                OnShowingResults?.Invoke();
+                this.Push(CreateResults(prepareScoreForDisplayTask.GetResultSafely()));
+            }, Time.Current + delay, 50);
+
+            Scheduler.Add(resultsDisplayDelegate);
+        }
+
+        /// &lt;summary&gt;
+        /// Asynchronously run score preparation operations (database import, online submission etc.).
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;forceImport&quot;&gt;Whether the score should be imported even if non-passing (or the current configuration doesn&#39;t allow for it).&lt;/param&gt;
+        /// &lt;returns&gt;The final score.&lt;/returns&gt;
+        [ItemCanBeNull]
+        private Task&lt;ScoreInfo&gt; prepareAndImportScoreAsync(bool forceImport = false)
+        {
+            // Ensure we are not writing to the replay any more, as we are about to consume and store the score.
+            DrawableRuleset.SetRecordTarget(null);
+
+            if (prepareScoreForDisplayTask != null)
+                return prepareScoreForDisplayTask;
+
+            // We do not want to import the score in cases where we don&#39;t show results
+            bool canShowResults = Configuration.ShowResults &amp;&amp; ScoreProcessor.HasCompleted.Value &amp;&amp; GameplayState.HasPassed;
+            if (!canShowResults &amp;&amp; !forceImport)
+                return Task.FromResult&lt;ScoreInfo&gt;(null);
+
+            // Clone score before beginning any async processing.
+            // - Must be run synchronously as the score may potentially be mutated in the background.
+            // - Must be cloned for the same reason.
+            Score scoreCopy = Score.DeepClone();
+
+            return prepareScoreForDisplayTask = Task.Run(async () =&gt;
+            {
+                try
+                {
+                    await PrepareScoreForResultsAsync(scoreCopy).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, @&quot;Score preparation failed!&quot;);
+                }
+
+                try
+                {
+                    await ImportScore(scoreCopy).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error(ex, @&quot;Score import failed!&quot;);
+                }
+
+                return scoreCopy.ScoreInfo;
+            });
+        }
+
+        #region Fail Logic
+
+        protected FailOverlay FailOverlay { get; private set; }
+
+        private FailAnimationContainer failAnimationContainer;
+
+        private bool onFail()
+        {
+            // Failing after the quit sequence has started may cause weird side effects with the fail animation / effects.
+            if (GameplayState.HasQuit)
+                return false;
+
+            if (!CheckModsAllowFailure())
+                return false;
+
+            PerformFail();
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Called when the player is determined to have failed.
+        /// &lt;/summary&gt;
+        protected virtual void PerformFail()
+        {
+            Debug.Assert(!GameplayState.HasFailed);
+            Debug.Assert(!GameplayState.HasPassed);
+            Debug.Assert(!GameplayState.HasQuit);
+
+            GameplayState.HasFailed = true;
+
+            updateGameplayState();
+
+            // There is a chance that we could be in a paused state as the ruleset&#39;s internal clock (see FrameStabilityContainer)
+            // could process an extra frame after the GameplayClock is stopped.
+            // In such cases we want the fail state to precede a user triggered pause.
+            if (PauseOverlay.State.Value == Visibility.Visible)
+                PauseOverlay.Hide();
+
+            bool restartOnFail = GameplayState.Mods.OfType&lt;IApplicableFailOverride&gt;().Any(m =&gt; m.RestartOnFail);
+            if (!restartOnFail)
+                failAnimationContainer.Start();
+
+            // Failures can be triggered either by a judgement, or by a mod.
+            //
+            // For the case of a judgement, due to ordering considerations, ScoreProcessor will not have received
+            // the final judgement which triggered the failure yet (see DrawableRuleset.NewResult handling above).
+            //
+            // A schedule here ensures that any lingering judgements from the current frame are applied before we
+            // finalise the score as &quot;failed&quot;.
+            Schedule(() =&gt;
+            {
+                ConcludeFailedScore(Score);
+
+                if (restartOnFail)
+                    Restart(true);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Performs last operations on the supplied &lt;paramref name=&quot;score&quot;/&gt; before this &lt;see cref=&quot;Player&quot;/&gt; is definitively exited due to failing.
+        /// &lt;/summary&gt;
+        protected virtual void ConcludeFailedScore(Score score)
+        {
+            ScoreProcessor.FailScore(score.ScoreInfo);
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked when the fail animation has finished.
+        /// &lt;/summary&gt;
+        private void onFailComplete()
+        {
+            GameplayClockContainer.Stop();
+
+            FailOverlay.Retries = RestartCount;
+            FailOverlay.Show();
+        }
+
+        #endregion
+
+        #region Pause Logic
+
+        public bool IsResuming { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The amount of gameplay time after which a second pause is allowed.
+        /// &lt;/summary&gt;
+        protected virtual double PauseCooldownDuration =&gt; 1000;
+
+        protected PauseOverlay PauseOverlay { get; private set; }
+
+        private double? lastPauseActionTime;
+
+        private HotkeyRetryOverlay retryOverlay;
+        private HotkeyExitOverlay exitOverlay;
+
+        protected bool PauseCooldownActive =&gt;
+            PlayingState.Value == LocalUserPlayingState.Playing &amp;&amp; lastPauseActionTime.HasValue &amp;&amp; GameplayClockContainer.CurrentTime &lt; lastPauseActionTime + PauseCooldownDuration;
+
+        /// &lt;summary&gt;
+        /// A set of conditionals which defines whether the current game state and configuration allows for
+        /// pausing to be attempted via &lt;see cref=&quot;Pause&quot;/&gt;. If false, the game should generally exit if a user pause
+        /// is attempted.
+        /// &lt;/summary&gt;
+        private bool pausingSupportedByCurrentState =&gt;
+            // must pass basic screen conditions (beatmap loaded, instance allows pause)
+            LoadedBeatmapSuccessfully &amp;&amp; Configuration.AllowPause &amp;&amp; ValidForResume
+            // replays cannot be paused and exit immediately
+            &amp;&amp; !DrawableRuleset.HasReplayLoaded.Value
+            // cannot pause if we are already in a fail state
+            &amp;&amp; !GameplayState.HasFailed;
+
+        private bool canResume =&gt;
+            // cannot resume from a non-paused state
+            GameplayClockContainer.IsPaused.Value
+            // cannot resume if we are already in a fail state
+            &amp;&amp; !GameplayState.HasFailed
+            // already resuming
+            &amp;&amp; !IsResuming;
+
+        public virtual bool Pause()
+        {
+            if (!pausingSupportedByCurrentState) return false;
+
+            if (!IsResuming &amp;&amp; PauseCooldownActive)
+                return false;
+
+            if (IsResuming)
+            {
+                DrawableRuleset.CancelResume();
+                IsResuming = false;
+            }
+
+            GameplayClockContainer.Stop();
+            PauseOverlay.Show();
+            lastPauseActionTime = GameplayClockContainer.CurrentTime;
+            return true;
+        }
+
+        public void Resume()
+        {
+            if (!canResume) return;
+
+            IsResuming = true;
+            PauseOverlay.Hide();
+
+            // breaks and time-based conditions may allow instant resume.
+            if (breakTracker.IsBreakTime.Value)
+                completeResume();
+            else
+                DrawableRuleset.RequestResume(completeResume);
+
+            void completeResume()
+            {
+                GameplayClockContainer.Start();
+                IsResuming = false;
+            }
+        }
+
+        #endregion
+
+        #region Screen Logic
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            if (!LoadedBeatmapSuccessfully)
+                return;
+
+            Alpha = 0;
+            this
+                .ScaleTo(0.7f)
+                .ScaleTo(1, 750, Easing.OutQuint)
+                .Delay(250)
+                .FadeIn(250);
+
+            ApplyToBackground(b =&gt;
+            {
+                b.IgnoreUserSettings.Value = false;
+                b.BlurAmount.Value = 0;
+                b.FadeColour(Color4.White, 250);
+
+                // bind component bindables.
+                ((IBindable&lt;bool&gt;)b.IsBreakTime).BindTo(breakTracker.IsBreakTime);
+
+                b.StoryboardReplacesBackground.BindTo(storyboardReplacesBackground);
+
+                failAnimationContainer.Background = b;
+            });
+
+            HUDOverlay.IsPlaying.BindTo(localUserPlaying);
+            ShowingOverlayComponents.BindTo(HUDOverlay.ShowHud);
+
+            DimmableStoryboard.IsBreakTime.BindTo(breakTracker.IsBreakTime);
+
+            storyboardReplacesBackground.Value = GameplayState.Storyboard.ReplacesBackground &amp;&amp; GameplayState.Storyboard.HasDrawable;
+
+            foreach (var mod in GameplayState.Mods.OfType&lt;IApplicableToPlayer&gt;())
+                mod.ApplyToPlayer(this);
+
+            foreach (var mod in GameplayState.Mods.OfType&lt;IApplicableToHUD&gt;())
+                mod.ApplyToHUD(HUDOverlay);
+
+            foreach (var mod in GameplayState.Mods.OfType&lt;IApplicableToTrack&gt;())
+                mod.ApplyToTrack(GameplayClockContainer.AdjustmentsFromMods);
+
+            updateGameplayState();
+
+            GameplayClockContainer.FadeInFromZero(750, Easing.OutQuint);
+
+            StartGameplay();
+            OnGameplayStarted?.Invoke();
+        }
+
+        /// &lt;summary&gt;
+        /// Called to trigger the starting of the gameplay clock and underlying gameplay.
+        /// This will be called on entering the player screen once. A derived class may block the first call to this to delay the start of gameplay.
+        /// &lt;/summary&gt;
+        protected virtual void StartGameplay()
+        {
+            if (GameplayClockContainer.IsRunning)
+                Logger.Error(new InvalidOperationException($&quot;{nameof(StartGameplay)} should not be called when the gameplay clock is already running&quot;), &quot;Clock failure&quot;);
+
+            GameplayClockContainer.Reset(startClock: true);
+
+            if (Configuration.AutomaticallySkipIntro)
+                SkipIntroOverlay.SkipWhenReady();
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            Debug.Assert(!ValidForResume);
+
+            screenSuspension?.RemoveAndDisposeImmediately();
+
+            // If these are not disposed, audio volume dimming can get stuck.
+            retryOverlay?.RemoveAndDisposeImmediately();
+            exitOverlay?.RemoveAndDisposeImmediately();
+
+            fadeOut();
+            base.OnSuspending(e);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            screenSuspension?.RemoveAndDisposeImmediately();
+
+            // Eagerly clean these up as disposal of child components is asynchronous and may leave sounds playing beyond user expectations.
+            failAnimationContainer?.Stop();
+            PauseOverlay?.StopAllSamples();
+            FailOverlay?.StopAllSamples();
+
+            if (LoadedBeatmapSuccessfully &amp;&amp; !GameplayState.HasPassed)
+            {
+                Debug.Assert(resultsDisplayDelegate == null);
+
+                if (!GameplayState.HasFailed)
+                    GameplayState.HasQuit = true;
+
+                if (DrawableRuleset.ReplayScore == null)
+                    ScoreProcessor.FailScore(Score.ScoreInfo);
+            }
+
+            // GameplayClockContainer performs seeks / start / stop operations on the beatmap&#39;s track.
+            // as we are no longer the current screen, we cannot guarantee the track is still usable.
+            (GameplayClockContainer as MasterGameplayClockContainer)?.StopUsingBeatmapClock();
+
+            musicController.ResetTrackAdjustments();
+
+            fadeOut();
+
+            return base.OnExiting(e);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the player&#39;s &lt;see cref=&quot;Scoring.Score&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;Scoring.Score&quot;/&gt;.&lt;/returns&gt;
+        protected virtual Score CreateScore(IBeatmap beatmap) =&gt; new Score
+        {
+            ScoreInfo = new ScoreInfo
+            {
+                User = api.LocalUser.Value,
+                ClientVersion = game.Version,
+            },
+        };
+
+        /// &lt;summary&gt;
+        /// Imports the player&#39;s &lt;see cref=&quot;Scoring.Score&quot;/&gt; to the local database.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;Scoring.Score&quot;/&gt; to import.&lt;/param&gt;
+        /// &lt;returns&gt;The imported score.&lt;/returns&gt;
+        protected virtual Task ImportScore(Score score)
+        {
+            // Replays are already populated and present in the game&#39;s database, so should not be re-imported.
+            if (DrawableRuleset.ReplayScore != null)
+                return Task.CompletedTask;
+
+            ByteArrayArchiveReader replayReader = null;
+
+            if (score.ScoreInfo.Ruleset.IsLegacyRuleset())
+            {
+                using (var stream = new MemoryStream())
+                {
+                    new LegacyScoreEncoder(score, GameplayState.Beatmap).Encode(stream);
+                    replayReader = new ByteArrayArchiveReader(stream.ToArray(), &quot;replay.osr&quot;);
+                }
+            }
+
+            // the import process will re-attach managed beatmap/rulesets to this score. we don&#39;t want this for now, so create a temporary copy to import.
+            var importableScore = score.ScoreInfo.DeepClone();
+
+            var imported = scoreManager.Import(importableScore, replayReader);
+            Debug.Assert(imported != null);
+
+            imported.PerformRead(s =&gt;
+            {
+                // because of the clone above, it&#39;s required that we copy back the post-import hash/ID to use for availability matching.
+                score.ScoreInfo.Hash = s.Hash;
+                score.ScoreInfo.ID = s.ID;
+                score.ScoreInfo.Files.AddRange(s.Files.Detach());
+            });
+
+            return Task.CompletedTask;
+        }
+
+        /// &lt;summary&gt;
+        /// Prepare the &lt;see cref=&quot;Scoring.Score&quot;/&gt; for display at results.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;Scoring.Score&quot;/&gt; to prepare.&lt;/param&gt;
+        /// &lt;returns&gt;A task that prepares the provided score. On completion, the score is assumed to be ready for display.&lt;/returns&gt;
+        protected virtual Task PrepareScoreForResultsAsync(Score score) =&gt; Task.CompletedTask;
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;ResultsScreen&quot;/&gt; for a &lt;see cref=&quot;ScoreInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;ScoreInfo&quot;/&gt; to be displayed in the results screen.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;ResultsScreen&quot;/&gt;.&lt;/returns&gt;
+        protected abstract ResultsScreen CreateResults(ScoreInfo score);
+
+        private void fadeOut()
+        {
+            if (!skipExitTransition)
+                this.FadeOut(250);
+
+            if (this.IsCurrentScreen())
+            {
+                ApplyToBackground(b =&gt;
+                {
+                    b.IgnoreUserSettings.Value = true;
+
+                    // May be null if the load never completed.
+                    if (breakTracker != null)
+                    {
+                        b.IsBreakTime.UnbindFrom(breakTracker.IsBreakTime);
+                        b.IsBreakTime.Value = false;
+                    }
+                });
+
+                storyboardReplacesBackground.Value = false;
+            }
+        }
+
+        #endregion
+
+        IBindable&lt;bool&gt; ISamplePlaybackDisabler.SamplePlaybackDisabled =&gt; samplePlaybackDisabled;
+
+        public IBindable&lt;LocalUserPlayingState&gt; PlayingState =&gt; playingState;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[58,47,58,52,0],[65,50,65,63,0],[67,60,67,129,0],[69,59,69,63,0],[71,53,71,57,0],[73,63,73,67,0],[78,13,78,14,0],[79,17,79,48,0],[80,21,80,34,0],[82,17,82,69,0],[83,13,83,14,0],[86,78,86,109,0],[89,59,89,64,0],[91,9,91,80,0],[93,9,93,87,0],[98,52,98,56,0],[105,9,105,93,0],[107,52,107,68,0],[109,9,109,81,0],[110,9,110,111,0],[117,9,117,80,0],[123,63,123,67,0],[123,72,123,76,0],[128,9,128,110,0],[131,45,131,49,0],[131,50,131,54,0],[134,36,134,40,0],[134,41,134,45,0],[137,51,137,55,0],[137,56,137,60,0],[140,36,140,40,0],[140,41,140,45,0],[142,46,142,50,0],[142,51,142,63,0],[153,9,153,74,0],[157,50,157,54,0],[157,55,157,67,0],[160,51,160,55,0],[160,56,160,68,0],[162,53,162,57,0],[162,58,162,70,0],[164,53,164,57,0],[164,58,164,70,0],[166,43,166,47,0],[166,48,166,60,0],[168,50,168,88,0],[170,67,170,71,0],[170,72,170,84,0],[172,56,172,60,0],[172,61,172,73,0],[178,59,178,121,0],[178,121,178,136,0],[178,136,178,137,0],[186,30,186,34,0],[186,35,186,47,0],[191,9,191,67,0],[192,9,192,10,0],[193,13,193,72,0],[194,9,194,10,0],[201,16,201,92,0],[204,9,204,10,0],[205,13,205,33,0],[207,13,207,44,0],[208,17,208,24,0],[210,13,210,29,0],[212,13,212,49,0],[212,49,212,94,0],[212,94,212,95,0],[213,13,213,60,0],[213,60,213,105,0],[213,105,213,106,0],[215,13,215,46,0],[215,46,215,75,0],[215,75,215,83,0],[216,9,216,10,0],[222,9,222,10,0],[223,13,223,52,0],[224,9,224,10,0],[228,9,228,10,0],[229,13,229,55,0],[229,55,229,68,0],[229,68,229,80,0],[231,13,231,39,0],[231,39,231,54,0],[231,54,231,56,0],[232,13,232,14,0],[233,17,233,108,0],[234,17,234,24,0],[237,13,237,54,0],[238,17,238,24,0],[240,13,240,93,0],[242,13,242,41,0],[243,17,243,24,0],[245,13,245,75,0],[246,13,246,14,0],[247,17,247,155,0],[248,17,248,24,0],[251,13,251,30,0],[252,17,252,50,0],[254,13,254,96,0],[255,13,255,51,0],[257,13,257,79,0],[258,17,258,70,0],[260,13,260,61,0],[261,13,261,54,0],[262,13,262,58,0],[264,13,264,50,0],[266,13,266,162,0],[267,13,267,104,0],[268,13,268,59,0],[270,13,270,51,0],[272,13,275,15,0],[277,13,277,97,0],[279,13,279,50,0],[282,13,282,69,0],[283,13,283,74,0],[284,13,284,59,0],[285,13,285,49,0],[287,13,287,189,0],[289,13,289,119,0],[290,13,290,88,0],[291,13,291,92,0],[292,13,292,96,0],[294,13,294,75,0],[297,13,300,15,0],[304,13,304,61,0],[306,13,306,59,0],[307,17,307,24,0],[309,13,323,83,0],[323,83,323,143,0],[323,143,324,74,0],[324,74,324,83,0],[324,83,325,36,0],[325,36,325,65,0],[325,65,327,16,0],[329,13,329,59,0],[330,17,330,24,0],[332,13,336,17,0],[336,17,336,18,0],[336,18,337,21,0],[337,21,337,49,0],[337,49,337,50,0],[337,50,337,57,0],[337,57,339,21,0],[339,21,339,55,0],[339,55,340,17,0],[340,17,340,18,0],[340,18,341,16,0],[343,13,343,44,0],[344,13,344,14,0],[345,17,349,21,0],[349,21,349,22,0],[349,22,350,25,0],[350,25,350,53,0],[350,53,350,54,0],[350,54,350,61,0],[350,61,352,25,0],[352,25,352,39,0],[352,39,353,21,0],[353,21,353,22,0],[353,22,354,20,0],[355,13,355,14,0],[357,13,357,68,0],[358,13,358,84,0],[360,13,360,71,0],[361,13,361,57,0],[366,13,366,67,0],[369,13,369,46,0],[371,13,371,56,0],[372,13,372,14,0],[373,17,373,50,0],[374,17,374,52,0],[375,17,375,37,0],[376,13,376,14,0],[378,13,379,13,0],[379,13,379,14,0],[379,14,380,17,0],[380,17,380,38,0],[380,38,381,21,0],[381,21,381,51,0],[381,51,383,21,0],[383,21,383,52,0],[383,52,384,13,0],[384,13,384,14,0],[384,14,384,16,0],[386,13,387,13,0],[387,13,387,14,0],[387,14,388,17,0],[388,17,388,39,0],[388,39,389,17,0],[389,17,389,45,0],[389,45,390,13,0],[390,13,390,14,0],[390,14,390,16,0],[392,13,392,81,0],[392,81,392,108,0],[392,108,392,110,0],[394,13,394,67,0],[394,67,394,88,0],[394,88,394,90,0],[397,13,397,97,0],[399,13,400,13,0],[400,13,400,14,0],[400,14,401,17,0],[401,17,401,48,0],[401,48,402,17,0],[402,17,402,47,0],[402,47,403,17,0],[403,17,403,46,0],[403,46,404,13,0],[404,13,404,14,0],[404,14,404,15,0],[406,13,407,13,0],[407,13,407,14,0],[407,14,408,17,0],[408,17,408,49,0],[408,49,409,17,0],[409,17,409,48,0],[409,48,410,13,0],[410,13,410,14,0],[410,14,410,15,0],[412,13,412,72,0],[412,72,412,93,0],[412,93,412,94,0],[415,13,415,63,0],[415,63,415,84,0],[415,84,415,86,0],[416,13,416,46,0],[420,13,421,13,0],[421,13,421,14,0],[421,14,422,17,0],[422,17,422,24,0],[422,24,422,26,0],[422,26,422,33,0],[422,33,422,34,0],[422,34,422,36,0],[422,36,422,37,0],[422,37,422,87,0],[422,87,423,21,0],[423,21,423,63,0],[423,63,424,13,0],[424,13,424,14,0],[424,14,424,15,0],[426,13,427,13,0],[427,13,427,14,0],[427,14,428,17,0],[428,17,428,24,0],[428,24,428,26,0],[428,26,428,33,0],[428,33,428,34,0],[428,34,428,36,0],[428,36,428,37,0],[428,37,428,88,0],[428,88,429,21,0],[429,21,429,65,0],[429,65,430,13,0],[430,13,430,14,0],[430,14,430,15,0],[432,13,432,58,0],[433,13,433,68,0],[434,9,434,10,0],[436,128,436,184,0],[439,9,439,10,0],[440,13,456,15,0],[458,13,458,30,0],[459,9,459,10,0],[461,56,466,21,0],[466,21,472,22,0],[472,22,474,10,0],[477,9,477,10,0],[478,13,488,44,0],[488,44,488,73,0],[488,73,511,21,0],[511,21,511,22,0],[511,22,512,25,0],[512,25,512,58,0],[512,58,513,21,0],[513,21,513,22,0],[513,22,516,45,0],[516,45,516,69,0],[516,69,524,41,0],[524,41,524,50,0],[524,50,525,40,0],[525,40,525,69,0],[525,69,528,15,0],[530,13,530,88,0],[531,13,531,14,0],[532,17,532,43,0],[533,17,533,43,0],[534,13,534,14,0],[536,13,536,30,0],[537,9,537,10,0],[539,78,539,104,0],[542,9,542,10,0],[543,13,543,35,0],[544,13,544,43,0],[545,13,545,86,0],[546,9,546,10,0],[549,9,549,10,0],[550,13,550,126,0],[551,13,551,93,0],[553,13,553,28,0],[554,17,554,108,0],[556,17,556,71,0],[558,13,558,90,0],[559,13,559,158,0],[560,9,560,10,0],[563,9,563,10,0],[564,13,564,137,0],[565,9,565,10,0],[568,9,568,10,0],[569,13,569,104,0],[570,17,570,24,0],[572,13,572,43,0],[573,13,573,14,0],[574,17,574,39,0],[578,17,578,29,0],[579,21,579,68,0],[580,13,580,14,0],[581,9,581,10,0],[584,9,584,10,0],[588,13,588,14,0],[589,17,589,51,0],[590,21,590,83,0],[592,17,592,86,0],[593,17,593,56,0],[595,17,595,37,0],[596,21,596,77,0],[599,17,599,18,0],[600,21,600,119,0],[601,17,601,18,0],[602,17,602,58,0],[603,17,603,18,0],[604,21,604,130,0],[605,21,605,33,0],[608,17,608,52,0],[609,17,609,18,0],[610,21,610,95,0],[611,21,611,33,0],[613,13,613,14,0],[614,13,614,47,0],[615,13,615,14,0],[617,17,617,29,0],[619,13,619,32,0],[620,13,620,14,0],[621,17,621,73,0],[623,17,623,29,0],[626,13,626,29,0],[627,9,627,10,0],[643,9,643,10,0],[644,13,645,113,0],[647,13,647,43,0],[648,13,648,14,0],[650,17,650,63,0],[651,17,651,18,0],[652,21,652,67,0],[653,21,653,34,0],[657,17,657,52,0],[658,17,658,18,0],[661,21,661,29,0],[662,21,662,34,0],[664,13,664,14,0],[666,13,666,34,0],[667,9,667,10,0],[681,9,681,10,0],[684,13,684,58,0],[685,13,685,14,0],[686,17,686,42,0],[687,17,687,30,0],[691,13,691,42,0],[693,13,693,40,0],[694,13,694,14,0],[695,17,695,53,0],[701,17,701,29,0],[702,13,702,14,0],[704,13,704,14,0],[706,17,706,51,0],[707,21,707,40,0],[708,13,708,14,0],[710,13,710,25,0],[711,9,711,10,0],[714,9,714,10,0],[715,13,715,32,0],[716,9,716,10,0],[723,9,723,10,0],[726,13,726,49,0],[728,13,728,88,0],[731,13,731,41,0],[732,9,732,10,0],[738,42,738,75,0],[750,9,750,10,0],[751,13,751,117,0],[752,17,752,60,0],[754,13,754,71,0],[755,13,755,57,0],[757,13,757,48,0],[760,13,760,76,0],[760,76,760,128,0],[760,128,760,130,0],[761,9,761,10,0],[770,9,770,10,0],[771,13,771,45,0],[772,17,772,30,0],[774,13,774,33,0],[778,13,778,36,0],[780,13,780,47,0],[781,13,781,59,0],[783,13,783,46,0],[784,9,784,10,0],[806,9,806,10,0],[808,13,808,41,0],[809,17,809,24,0],[818,13,818,52,0],[819,13,819,14,0],[820,17,820,50,0],[821,17,821,47,0],[823,17,823,49,0],[824,17,824,39,0],[825,17,825,41,0],[826,17,826,24,0],[830,13,830,41,0],[831,17,831,24,0],[833,13,833,44,0],[837,13,837,36,0],[839,13,839,127,0],[843,13,843,40,0],[844,13,844,14,0],[845,17,845,41,0],[846,17,846,24,0],[849,13,849,37,0],[850,9,850,10,0],[860,9,860,10,0],[861,13,861,44,0],[862,17,862,24,0],[866,13,866,36,0],[868,13,868,66,0],[870,13,870,46,0],[871,13,872,13,0],[872,13,872,14,0],[872,14,873,17,0],[873,17,873,56,0],[873,56,874,17,0],[874,17,874,18,0],[874,18,876,21,0],[876,21,876,50,0],[876,50,877,21,0],[877,21,877,28,0],[877,28,880,17,0],[880,17,880,61,0],[880,61,882,21,0],[882,21,882,28,0],[882,28,884,17,0],[884,17,884,50,0],[884,50,886,17,0],[886,17,886,74,0],[886,74,887,17,0],[887,17,887,18,0],[887,18,889,21,0],[889,21,889,28,0],[889,28,892,17,0],[892,17,892,45,0],[892,45,894,21,0],[894,21,894,28,0],[894,28,896,17,0],[896,17,896,44,0],[896,44,897,17,0],[897,17,897,88,0],[897,88,898,13,0],[898,13,898,14,0],[898,14,898,42,0],[900,13,900,51,0],[901,9,901,10,0],[910,9,910,10,0],[912,13,912,51,0],[914,13,914,52,0],[915,17,915,51,0],[918,13,918,125,0],[919,13,919,49,0],[920,17,920,57,0],[925,13,925,49,0],[927,13,928,13,0],[928,13,928,14,0],[928,14,930,17,0],[930,17,930,18,0],[930,18,931,21,0],[931,21,931,88,0],[931,88,932,17,0],[932,17,932,18,0],[932,18,933,17,0],[933,17,933,37,0],[933,37,934,17,0],[934,17,934,18,0],[934,18,935,21,0],[935,21,935,68,0],[935,68,936,17,0],[936,17,936,18,0],[936,18,939,17,0],[939,17,939,18,0],[939,18,940,21,0],[940,21,940,72,0],[940,72,941,17,0],[941,17,941,18,0],[941,18,942,17,0],[942,17,942,37,0],[942,37,943,17,0],[943,17,943,18,0],[943,18,944,21,0],[944,21,944,63,0],[944,63,945,17,0],[945,17,945,18,0],[945,18,947,17,0],[947,17,947,44,0],[947,44,948,13,0],[948,13,948,14,0],[948,14,948,16,0],[949,9,949,10,0],[953,45,953,49,0],[953,50,953,62,0],[958,9,958,10,0],[960,13,960,39,0],[961,17,961,30,0],[963,13,963,42,0],[964,17,964,30,0],[966,13,966,27,0],[967,13,967,25,0],[968,9,968,10,0],[974,9,974,10,0],[975,13,975,52,0],[976,13,976,52,0],[977,13,977,50,0],[979,13,979,44,0],[981,13,981,35,0],[986,13,986,64,0],[987,17,987,37,0],[989,13,989,96,0],[989,96,989,111,0],[989,111,989,113,0],[990,13,990,32,0],[991,17,991,48,0],[1000,13,1001,13,0],[1001,13,1001,14,0],[1001,14,1002,17,0],[1002,17,1002,44,0],[1002,44,1004,17,0],[1004,17,1004,35,0],[1004,35,1005,21,0],[1005,21,1005,35,0],[1005,35,1006,13,0],[1006,13,1006,14,0],[1006,14,1006,16,0],[1007,9,1007,10,0],[1013,9,1013,10,0],[1014,13,1014,55,0],[1015,9,1015,10,0],[1021,9,1021,10,0],[1022,13,1022,43,0],[1024,13,1024,48,0],[1025,13,1025,32,0],[1026,9,1026,10,0],[1032,34,1032,38,0],[1032,39,1032,51,0],[1037,59,1037,63,0],[1039,47,1039,51,0],[1039,52,1039,64,0],[1047,13,1047,180,0],[1056,13,1060,40,0],[1064,13,1068,27,0],[1071,9,1071,10,0],[1072,13,1072,49,0],[1072,50,1072,63,0],[1074,13,1074,52,0],[1075,17,1075,30,0],[1077,13,1077,28,0],[1078,13,1078,14,0],[1079,17,1079,48,0],[1080,17,1080,36,0],[1081,13,1081,14,0],[1083,13,1083,43,0],[1084,13,1084,33,0],[1085,13,1085,70,0],[1086,13,1086,25,0],[1087,9,1087,10,0],[1090,9,1090,10,0],[1091,13,1091,28,0],[1091,29,1091,36,0],[1093,13,1093,31,0],[1094,13,1094,33,0],[1097,13,1097,48,0],[1098,17,1098,34,0],[1100,17,1100,63,0],[1103,13,1103,14,0],[1104,17,1104,48,0],[1105,17,1105,36,0],[1106,13,1106,14,0],[1107,9,1107,10,0],[1114,9,1114,10,0],[1115,13,1115,32,0],[1117,13,1117,44,0],[1118,17,1118,24,0],[1120,13,1120,23,0],[1121,13,1125,30,0],[1127,13,1128,13,0],[1128,13,1128,14,0],[1128,14,1129,17,0],[1129,17,1129,52,0],[1129,52,1130,17,0],[1130,17,1130,40,0],[1130,40,1131,17,0],[1131,17,1131,49,0],[1131,49,1134,17,0],[1134,17,1134,83,0],[1134,83,1136,17,0],[1136,17,1136,85,0],[1136,85,1138,17,0],[1138,17,1138,55,0],[1138,55,1139,13,0],[1139,13,1139,14,0],[1139,14,1139,16,0],[1141,13,1141,59,0],[1142,13,1142,65,0],[1144,13,1144,77,0],[1146,13,1146,134,0],[1148,13,1148,20,0],[1148,22,1148,29,0],[1148,30,1148,32,0],[1148,33,1148,81,0],[1149,17,1149,41,0],[1151,13,1151,20,0],[1151,22,1151,29,0],[1151,30,1151,32,0],[1151,33,1151,78,0],[1152,17,1152,44,0],[1154,13,1154,20,0],[1154,22,1154,29,0],[1154,30,1154,32,0],[1154,33,1154,80,0],[1155,17,1155,78,0],[1157,13,1157,35,0],[1159,13,1159,73,0],[1161,13,1161,29,0],[1162,13,1162,41,0],[1163,9,1163,10,0],[1170,9,1170,10,0],[1171,13,1171,50,0],[1172,17,1172,170,0],[1174,13,1174,60,0],[1176,13,1176,54,0],[1177,17,1177,50,0],[1178,9,1178,10,0],[1181,9,1181,10,0],[1182,13,1182,43,0],[1184,13,1184,61,0],[1187,13,1187,57,0],[1188,13,1188,56,0],[1190,13,1190,23,0],[1191,13,1191,34,0],[1192,9,1192,10,0],[1195,9,1195,10,0],[1196,13,1196,61,0],[1199,13,1199,44,0],[1200,13,1200,44,0],[1201,13,1201,43,0],[1203,13,1203,71,0],[1204,13,1204,14,0],[1205,17,1205,62,0],[1207,17,1207,46,0],[1208,21,1208,50,0],[1210,17,1210,57,0],[1211,21,1211,63,0],[1212,13,1212,14,0],[1216,13,1216,95,0],[1218,13,1218,53,0],[1220,13,1220,23,0],[1222,13,1222,38,0],[1223,9,1223,10,0],[1230,66,1237,10,0],[1245,9,1245,10,0],[1247,13,1247,53,0],[1248,17,1248,43,0],[1250,13,1250,56,0],[1252,13,1252,59,0],[1253,13,1253,14,0],[1254,24,1254,55,0],[1255,17,1255,18,0],[1256,21,1256,89,0],[1257,21,1257,95,0],[1258,17,1258,18,0],[1259,13,1259,14,0],[1262,13,1262,63,0],[1264,13,1264,79,0],[1265,13,1265,44,0],[1267,13,1268,13,0],[1268,13,1268,14,0],[1268,14,1270,17,0],[1270,17,1270,47,0],[1270,47,1271,17,0],[1271,17,1271,43,0],[1271,43,1272,17,0],[1272,17,1272,66,0],[1272,66,1273,13,0],[1273,13,1273,14,0],[1273,14,1273,16,0],[1275,13,1275,39,0],[1276,9,1276,10,0],[1283,76,1283,94,0],[1293,9,1293,10,0],[1294,13,1294,37,0],[1295,17,1295,35,0],[1297,13,1297,40,0],[1298,13,1298,14,0],[1299,17,1300,17,0],[1300,17,1300,18,0],[1300,18,1301,21,0],[1301,21,1301,55,0],[1301,55,1304,21,0],[1304,21,1304,46,0],[1304,46,1305,21,0],[1305,21,1305,22,0],[1305,22,1306,25,0],[1306,25,1306,76,0],[1306,76,1307,25,0],[1307,25,1307,53,0],[1307,53,1308,21,0],[1308,21,1308,22,0],[1308,22,1309,17,0],[1309,17,1309,18,0],[1309,18,1309,20,0],[1311,17,1311,60,0],[1312,13,1312,14,0],[1313,9,1313,10,0],[1317,75,1317,97,0],[1319,65,1319,77,0]]);
+    </script>
+  </body>
+</html>

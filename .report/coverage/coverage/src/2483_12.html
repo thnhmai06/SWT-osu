@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/UserProfileOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Game.Extensions;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.Profile;
+using osu.Game.Overlays.Profile.Sections;
+using osu.Game.Rulesets;
+using osu.Game.Users;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays
+{
+    public partial class UserProfileOverlay : FullscreenOverlay&lt;ProfileHeader&gt;
+    {
+        protected override Container&lt;Drawable&gt; Content =&gt; onlineViewContainer;
+
+        private readonly OnlineViewContainer onlineViewContainer;
+        private readonly LoadingLayer loadingLayer;
+
+        private ProfileSection? lastSection;
+        private ProfileSection[]? sections;
+        private GetUserRequest? userReq;
+        private ProfileSectionsContainer? sectionsContainer;
+        private ProfileSectionTabControl? tabs;
+
+        private IUser? user;
+        private IRulesetInfo? ruleset;
+
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; } = null!;
+
+        public UserProfileOverlay()
+            : base(OverlayColourScheme.Pink)
+        {
+            base.Content.Add(new PopoverContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    onlineViewContainer = new OnlineViewContainer($&quot;Sign in to view the {Header.Title.Title}&quot;)
+                    {
+                        RelativeSizeAxes = Axes.Both
+                    },
+                    loadingLayer = new LoadingLayer(true)
+                }
+            });
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            apiState.BindTo(API.State);
+            apiState.BindValueChanged(state =&gt; Schedule(() =&gt;
+            {
+                if (state.NewValue == APIState.Online &amp;&amp; user != null)
+                    Scheduler.AddOnce(fetchAndSetContent);
+            }));
+        }
+
+        protected override ProfileHeader CreateHeader() =&gt; new ProfileHeader();
+
+        protected override Color4 BackgroundColour =&gt; ColourProvider.Background5;
+
+        public void ShowUser(IUser userToShow, IRulesetInfo? userRuleset = null)
+        {
+            if (userToShow.OnlineID == APIUser.SYSTEM_USER_ID)
+                return;
+
+            user = userToShow;
+            ruleset = userRuleset;
+
+            Show();
+            Scheduler.AddOnce(fetchAndSetContent);
+        }
+
+        private void fetchAndSetContent()
+        {
+            Debug.Assert(user != null);
+
+            bool sameUser = user.OnlineID == Header.User.Value?.User.Id;
+            if (sameUser &amp;&amp; ruleset?.MatchesOnlineID(Header.User.Value?.Ruleset) == true)
+                return;
+
+            sectionsContainer?.ExpandableHeader = null;
+
+            userReq?.Cancel();
+            lastSection = null;
+
+            sections = !user.IsBot
+                ? new ProfileSection[]
+                {
+                    //new AboutSection(),
+                    new RecentSection(),
+                    new RanksSection(),
+                    //new MedalsSection(),
+                    new HistoricalSection(),
+                    new BeatmapsSection(),
+                    new KudosuSection()
+                }
+                : Array.Empty&lt;ProfileSection&gt;();
+
+            if (!sameUser)
+                changeOverlayColours(OverlayColourScheme.Pink.GetHue());
+
+            recreateBaseContent();
+
+            if (API.State.Value != APIState.Offline)
+            {
+                userReq = user.OnlineID &gt; 1 ? new GetUserRequest(user.OnlineID, ruleset) : new GetUserRequest(user.Username, ruleset);
+                userReq.Success += u =&gt; userLoadComplete(u, ruleset);
+
+                API.Queue(userReq);
+                loadingLayer.Show();
+            }
+        }
+
+        private void userLoadComplete(APIUser loadedUser, IRulesetInfo? userRuleset)
+        {
+            Debug.Assert(sections != null &amp;&amp; sectionsContainer != null &amp;&amp; tabs != null);
+
+            // reuse header and content if same colour scheme, otherwise recreate both.
+            int profileHue = loadedUser.ProfileHue ?? OverlayColourScheme.Pink.GetHue();
+
+            if (changeOverlayColours(profileHue))
+                recreateBaseContent();
+
+            var actualRuleset = rulesets.GetRuleset(userRuleset?.ShortName ?? loadedUser.PlayMode).AsNonNull();
+
+            var userProfile = new UserProfileData(loadedUser, actualRuleset);
+            Header.User.Value = userProfile;
+
+            if (loadedUser.ProfileOrder != null)
+            {
+                foreach (string id in loadedUser.ProfileOrder)
+                {
+                    var sec = sections.FirstOrDefault(s =&gt; s.Identifier == id);
+
+                    if (sec != null)
+                    {
+                        sec.User.Value = userProfile;
+
+                        sectionsContainer.Add(sec);
+                        tabs.AddItem(sec);
+                    }
+                }
+            }
+
+            loadingLayer.Hide();
+        }
+
+        private void recreateBaseContent()
+        {
+            Child = new OsuContextMenuContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Child = sectionsContainer = new ProfileSectionsContainer
+                {
+                    ExpandableHeader = Header,
+                    FixedHeader = tabs = new ProfileSectionTabControl
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                    },
+                    HeaderBackground = new Box
+                    {
+                        // this is only visible as the ProfileTabControl background
+                        Colour = ColourProvider.Background5,
+                        RelativeSizeAxes = Axes.Both
+                    },
+                }
+            };
+
+            sectionsContainer.SelectedSection.ValueChanged += section =&gt;
+            {
+                if (lastSection != section.NewValue)
+                {
+                    lastSection = section.NewValue;
+                    tabs.Current.Value = lastSection!;
+                }
+            };
+
+            tabs.Current.ValueChanged += section =&gt;
+            {
+                if (lastSection == null)
+                {
+                    lastSection = sectionsContainer.Children.FirstOrDefault();
+                    if (lastSection != null)
+                        tabs.Current.Value = lastSection;
+                    return;
+                }
+
+                if (lastSection != section.NewValue)
+                {
+                    lastSection = section.NewValue;
+                    sectionsContainer.ScrollTo(lastSection);
+                }
+            };
+        }
+
+        private bool changeOverlayColours(int hue)
+        {
+            if (hue == ColourProvider.Hue)
+                return false;
+
+            ColourProvider.ChangeColourScheme(hue);
+
+            RecreateHeader();
+            UpdateColours();
+            return true;
+        }
+
+        private partial class ProfileSectionTabControl : OsuTabControl&lt;ProfileSection&gt;
+        {
+            public ProfileSectionTabControl()
+            {
+                Height = 40;
+                Padding = new MarginPadding { Horizontal = HORIZONTAL_PADDING };
+                TabContainer.Spacing = new Vector2(20);
+            }
+
+            protected override TabItem&lt;ProfileSection&gt; CreateTabItem(ProfileSection value) =&gt; new ProfileSectionTabItem(value);
+
+            protected override bool OnClick(ClickEvent e) =&gt; true;
+
+            protected override bool OnHover(HoverEvent e) =&gt; true;
+
+            private partial class ProfileSectionTabItem : TabItem&lt;ProfileSection&gt;
+            {
+                private OsuSpriteText text = null!;
+
+                [Resolved]
+                private OverlayColourProvider colourProvider { get; set; } = null!;
+
+                public ProfileSectionTabItem(ProfileSection value)
+                    : base(value)
+                {
+                }
+
+                [BackgroundDependencyLoader]
+                private void load()
+                {
+                    AutoSizeAxes = Axes.Both;
+                    Anchor = Anchor.CentreLeft;
+                    Origin = Anchor.CentreLeft;
+
+                    InternalChild = text = new OsuSpriteText
+                    {
+                        Text = Value.Title
+                    };
+
+                    updateState();
+                }
+
+                protected override void OnActivated() =&gt; updateState();
+
+                protected override void OnDeactivated() =&gt; updateState();
+
+                protected override bool OnHover(HoverEvent e)
+                {
+                    updateState();
+                    return true;
+                }
+
+                protected override void OnHoverLost(HoverLostEvent e) =&gt; updateState();
+
+                private void updateState()
+                {
+                    text.Font = OsuFont.Default.With(size: 14, weight: Active.Value ? FontWeight.SemiBold : FontWeight.Regular);
+
+                    Colour4 textColour;
+
+                    if (IsHovered)
+                        textColour = colourProvider.Light1;
+                    else
+                        textColour = Active.Value ? colourProvider.Content1 : colourProvider.Light2;
+
+                    text.FadeColour(textColour, 300, Easing.OutQuint);
+                }
+            }
+        }
+
+        private partial class ProfileSectionsContainer : SectionsContainer&lt;ProfileSection&gt;
+        {
+            private OverlayScrollContainer scroll = null!;
+
+            public ProfileSectionsContainer()
+            {
+                RelativeSizeAxes = Axes.Both;
+            }
+
+            protected override UserTrackingScrollContainer CreateScrollContainer() =&gt; scroll = new OverlayScrollContainer();
+
+            // Reverse child ID is required so expanding beatmap panels can appear above sections below them.
+            // This can also be done by setting Depth when adding new sections above if using ReverseChildID turns out to have any issues.
+            protected override FlowContainer&lt;ProfileSection&gt; CreateScrollContentContainer() =&gt; new ReverseChildIDFillFlowContainer&lt;ProfileSection&gt;
+            {
+                Direction = FillDirection.Vertical,
+                AutoSizeAxes = Axes.Y,
+                RelativeSizeAxes = Axes.X,
+                Spacing = new Vector2(0, 10),
+                Padding = new MarginPadding { Horizontal = 10 },
+                Margin = new MarginPadding { Bottom = 10 },
+            };
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                // Ensure the scroll-to-top button is displayed above the fixed header.
+                AddInternal(scroll.Button.CreateProxy());
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,59,37,78,0],[51,9,51,82,0],[54,41,54,45,0],[54,46,54,50,0],[54,55,54,60,0],[57,15,57,45,0],[58,9,58,10,0],[59,13,70,16,0],[71,9,71,10,0],[75,9,75,10,0],[76,13,76,40,0],[77,13,77,48,0],[77,48,78,13,0],[78,13,78,14,0],[78,14,79,17,0],[79,17,79,71,0],[79,71,80,21,0],[80,21,80,59,0],[80,59,81,13,0],[81,13,81,14,0],[81,14,81,15,0],[81,15,81,17,0],[82,9,82,10,0],[84,60,84,79,0],[86,55,86,81,0],[89,9,89,10,0],[90,13,90,63,0],[91,17,91,24,0],[93,13,93,31,0],[94,13,94,35,0],[96,13,96,20,0],[97,13,97,51,0],[98,9,98,10,0],[101,9,101,10,0],[102,13,102,40,0],[104,13,104,73,0],[105,13,105,90,0],[106,17,106,24,0],[108,13,108,56,0],[110,13,110,31,0],[111,13,111,32,0],[113,13,124,49,0],[126,13,126,27,0],[127,17,127,73,0],[129,13,129,35,0],[131,13,131,53,0],[132,13,132,14,0],[133,17,133,135,0],[134,17,134,41,0],[134,41,134,69,0],[134,69,134,70,0],[136,17,136,36,0],[137,17,137,37,0],[138,13,138,14,0],[139,9,139,10,0],[142,9,142,10,0],[143,13,143,89,0],[146,13,146,89,0],[148,13,148,50,0],[149,17,149,39,0],[151,13,151,112,0],[153,13,153,78,0],[154,13,154,45,0],[156,13,156,49,0],[157,13,157,14,0],[158,17,158,24,0],[158,26,158,35,0],[158,36,158,38,0],[158,39,158,62,0],[159,17,159,18,0],[160,21,160,60,0],[160,60,160,78,0],[160,78,160,80,0],[162,21,162,37,0],[163,21,163,22,0],[164,25,164,54,0],[166,25,166,52,0],[167,25,167,43,0],[168,21,168,22,0],[169,17,169,18,0],[170,13,170,14,0],[172,13,172,33,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,196,15,0],[198,13,199,13,0],[199,13,199,14,0],[199,14,200,17,0],[200,17,200,53,0],[200,53,201,17,0],[201,17,201,18,0],[201,18,202,21,0],[202,21,202,52,0],[202,52,203,21,0],[203,21,203,55,0],[203,55,204,17,0],[204,17,204,18,0],[204,18,205,13,0],[205,13,205,14,0],[205,14,205,15,0],[207,13,208,13,0],[208,13,208,14,0],[208,14,209,17,0],[209,17,209,41,0],[209,41,210,17,0],[210,17,210,18,0],[210,18,211,21,0],[211,21,211,79,0],[211,79,212,21,0],[212,21,212,45,0],[212,45,213,25,0],[213,25,213,58,0],[213,58,214,21,0],[214,21,214,28,0],[214,28,217,17,0],[217,17,217,53,0],[217,53,218,17,0],[218,17,218,18,0],[218,18,219,21,0],[219,21,219,52,0],[219,52,220,21,0],[220,21,220,61,0],[220,61,221,17,0],[221,17,221,18,0],[221,18,222,13,0],[222,13,222,14,0],[222,14,222,15,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,43,0],[228,17,228,30,0],[230,13,230,52,0],[232,13,232,30,0],[233,13,233,29,0],[234,13,234,25,0],[235,9,235,10,0],[239,13,239,46,0],[240,13,240,14,0],[241,17,241,29,0],[242,17,242,81,0],[243,17,243,56,0],[244,13,244,14,0],[246,95,246,127,0],[248,62,248,66,0],[250,62,250,66,0],[254,17,254,52,0],[257,64,257,68,0],[257,69,257,73,0],[257,78,257,83,0],[260,23,260,34,0],[261,17,261,18,0],[262,17,262,18,0],[266,17,266,18,0],[267,21,267,46,0],[268,21,268,48,0],[269,21,269,48,0],[271,21,274,23,0],[276,21,276,35,0],[277,17,277,18,0],[279,58,279,71,0],[281,60,281,73,0],[284,17,284,18,0],[285,21,285,35,0],[286,21,286,33,0],[287,17,287,18,0],[289,74,289,87,0],[292,17,292,18,0],[293,21,293,129,0],[297,21,297,35,0],[298,25,298,60,0],[300,25,300,101,0],[302,21,302,71,0],[303,17,303,18,0],[309,13,309,59,0],[311,13,311,46,0],[312,13,312,14,0],[313,17,313,46,0],[314,13,314,14,0],[316,87,316,124,0],[320,96,328,14,0],[331,13,331,14,0],[332,17,332,37,0],[335,17,335,58,0],[336,13,336,14,0]]);
+    </script>
+  </body>
+</html>

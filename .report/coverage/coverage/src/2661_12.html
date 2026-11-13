@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Profile/Sections/PaginatedProfileSubsection.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osuTK;
+
+namespace osu.Game.Overlays.Profile.Sections
+{
+    public abstract partial class PaginatedProfileSubsection&lt;TModel&gt; : ProfileSubsection
+    {
+        /// &lt;summary&gt;
+        /// The number of items displayed per page.
+        /// &lt;/summary&gt;
+        protected virtual int ItemsPerPage =&gt; 50;
+
+        /// &lt;summary&gt;
+        /// The number of items displayed initially.
+        /// &lt;/summary&gt;
+        protected virtual int InitialItemsCount =&gt; 5;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        protected PaginationParameters? CurrentPage { get; private set; }
+
+        protected ReverseChildIDFillFlowContainer&lt;Drawable&gt; ItemsContainer { get; private set; } = null!;
+
+        private APIRequest&lt;List&lt;TModel&gt;&gt;? retrievalRequest;
+        private CancellationTokenSource? loadCancellation;
+
+        private ShowMoreButton moreButton = null!;
+        private OsuSpriteText missing = null!;
+        private readonly LocalisableString? missingText;
+
+        protected PaginatedProfileSubsection(Bindable&lt;UserProfileData?&gt; user, LocalisableString? headerText = null, LocalisableString? missingText = null)
+            : base(user, headerText, CounterVisibilityState.AlwaysVisible)
+        {
+            this.missingText = missingText;
+        }
+
+        protected override Drawable CreateContent() =&gt; new FillFlowContainer
+        {
+            RelativeSizeAxes = Axes.X,
+            AutoSizeAxes = Axes.Y,
+            Direction = FillDirection.Vertical,
+            Children = new Drawable[]
+            {
+                // reverse ID flow is required for correct Z-ordering of the items (last item should be front-most).
+                // particularly important in PaginatedBeatmapContainer, as it uses beatmap cards, which have expandable overhanging content.
+                ItemsContainer = new ReverseChildIDFillFlowContainer&lt;Drawable&gt;
+                {
+                    AutoSizeAxes = Axes.Y,
+                    RelativeSizeAxes = Axes.X,
+                    Spacing = new Vector2(0, 2),
+                    // ensure the container and its contents are in front of the &quot;more&quot; button.
+                    Depth = float.MinValue
+                },
+                moreButton = new ShowMoreButton
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    Alpha = 0,
+                    Margin = new MarginPadding { Top = 10 },
+                    Action = showMore,
+                },
+                missing = new OsuSpriteText
+                {
+                    Font = OsuFont.GetFont(size: 15),
+                    Text = missingText ?? string.Empty,
+                    Alpha = 0,
+                }
+            }
+        };
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            User.BindValueChanged(onUserChanged, true);
+        }
+
+        private void onUserChanged(ValueChangedEvent&lt;UserProfileData?&gt; e)
+        {
+            loadCancellation?.Cancel();
+            retrievalRequest?.Cancel();
+
+            CurrentPage = null;
+            ItemsContainer.Clear();
+
+            if (e.NewValue?.User != null)
+            {
+                showMore();
+                SetCount(GetCount(e.NewValue.User));
+            }
+        }
+
+        private void showMore()
+        {
+            if (User.Value == null)
+                return;
+
+            loadCancellation = new CancellationTokenSource();
+
+            CurrentPage = CurrentPage?.TakeNext(ItemsPerPage) ?? new PaginationParameters(InitialItemsCount);
+
+            retrievalRequest = CreateRequest(User.Value, new PaginationParameters(CurrentPage.Value.Offset, CurrentPage.Value.Limit + 1));
+            retrievalRequest.Success += items =&gt; UpdateItems(items, loadCancellation);
+
+            api.Queue(retrievalRequest);
+        }
+
+        protected virtual void UpdateItems(List&lt;TModel&gt; items, CancellationTokenSource cancellationTokenSource) =&gt; Schedule(() =&gt;
+        {
+            if (!items.Any() &amp;&amp; CurrentPage?.Offset == 0)
+            {
+                moreButton.Hide();
+                moreButton.IsLoading = false;
+
+                if (missingText.HasValue)
+                    missing.Show();
+
+                return;
+            }
+
+            bool hasMore = items.Count &gt; CurrentPage?.Limit;
+
+            if (hasMore)
+                items.RemoveAt(items.Count - 1);
+
+            OnItemsReceived(items);
+
+            LoadComponentsAsync(items.Select(CreateDrawableItem).Where(d =&gt; d != null).Cast&lt;Drawable&gt;(), drawables =&gt;
+            {
+                missing.Hide();
+
+                moreButton.FadeTo(hasMore ? 1 : 0);
+                moreButton.IsLoading = false;
+
+                ItemsContainer.AddRange(drawables);
+            }, cancellationTokenSource.Token);
+        });
+
+        protected virtual int GetCount(APIUser user) =&gt; 0;
+
+        protected virtual void OnItemsReceived(List&lt;TModel&gt; items)
+        {
+        }
+
+        protected abstract APIRequest&lt;List&lt;TModel&gt;&gt; CreateRequest(UserProfileData user, PaginationParameters pagination);
+
+        protected abstract Drawable? CreateDrawableItem(TModel model);
+
+        protected override void Dispose(bool isDisposing)
+        {
+            retrievalRequest?.Cancel();
+            loadCancellation?.Cancel();
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,47,28,49,0],[33,52,33,53,0],[36,36,36,40,0],[36,41,36,45,0],[36,50,36,55,0],[38,55,38,59,0],[38,60,38,72,0],[40,78,40,82,0],[40,83,40,95,0],[40,100,40,105,0],[45,9,45,51,0],[46,9,46,47,0],[50,15,50,75,0],[51,9,51,10,0],[52,13,52,44,0],[53,9,53,10,0],[55,56,87,10,0],[90,9,90,10,0],[91,13,91,33,0],[92,13,92,56,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,40,0],[98,13,98,40,0],[100,13,100,32,0],[101,13,101,36,0],[103,13,103,42,0],[104,13,104,14,0],[105,17,105,28,0],[106,17,106,53,0],[107,13,107,14,0],[108,9,108,10,0],[111,9,111,10,0],[112,13,112,36,0],[113,17,113,24,0],[115,13,115,62,0],[117,13,117,110,0],[119,13,119,139,0],[120,13,120,50,0],[120,50,120,86,0],[120,86,120,87,0],[122,13,122,41,0],[123,9,123,10,0],[125,116,126,9,0],[126,9,126,10,0],[126,10,127,13,0],[127,13,127,58,0],[127,58,128,13,0],[128,13,128,14,0],[128,14,129,17,0],[129,17,129,35,0],[129,35,130,17,0],[130,17,130,46,0],[130,46,132,17,0],[132,17,132,42,0],[132,42,133,21,0],[133,21,133,36,0],[133,36,135,17,0],[135,17,135,24,0],[135,24,138,13,0],[138,13,138,61,0],[138,61,140,13,0],[140,13,140,25,0],[140,25,141,17,0],[141,17,141,49,0],[141,49,143,13,0],[143,13,143,36,0],[143,36,145,13,0],[145,13,145,77,0],[145,77,145,86,0],[145,86,146,13,0],[146,13,146,14,0],[146,14,147,17,0],[147,17,147,32,0],[147,32,149,17,0],[149,17,149,52,0],[149,52,150,17,0],[150,17,150,46,0],[150,46,152,17,0],[152,17,152,52,0],[152,52,153,13,0],[153,13,153,14,0],[153,14,153,47,0],[153,47,154,9,0],[154,9,154,10,0],[154,10,154,11,0],[156,57,156,58,0],[159,9,159,10,0],[160,9,160,10,0],[167,9,167,10,0],[168,13,168,40,0],[169,13,169,40,0],[170,13,170,39,0],[171,9,171,10,0]]);
+    </script>
+  </body>
+</html>

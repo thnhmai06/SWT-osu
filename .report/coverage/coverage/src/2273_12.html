@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Scoring/HitEventExtensions.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Game.Rulesets.Objects;
+
+namespace osu.Game.Rulesets.Scoring
+{
+    public static class HitEventExtensions
+    {
+        /// &lt;summary&gt;
+        /// Calculates the &quot;unstable rate&quot; for a sequence of &lt;see cref=&quot;HitEvent&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Uses &lt;a href=&quot;https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford&#39;s_online_algorithm&quot;&gt;Welford&#39;s online algorithm&lt;/a&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;
+        /// A non-null &lt;see langword=&quot;double&quot;/&gt; value if unstable rate could be calculated,
+        /// and &lt;see langword=&quot;null&quot;/&gt; if unstable rate cannot be calculated due to &lt;paramref name=&quot;hitEvents&quot;/&gt; being empty.
+        /// &lt;/returns&gt;
+        public static UnstableRateCalculationResult? CalculateUnstableRate(this IReadOnlyList&lt;HitEvent&gt; hitEvents, UnstableRateCalculationResult? result = null)
+        {
+            Debug.Assert(hitEvents.All(ev =&gt; ev.GameplayRate != null));
+
+            result ??= new UnstableRateCalculationResult();
+
+            // Handle rewinding in the simplest way possible.
+            if (hitEvents.Count &lt; result.LastProcessedIndex + 1)
+                result = new UnstableRateCalculationResult();
+
+            for (int i = result.LastProcessedIndex + 1; i &lt; hitEvents.Count; i++)
+            {
+                result.LastProcessedIndex = i;
+                HitEvent e = hitEvents[i];
+
+                if (!AffectsUnstableRate(e))
+                    continue;
+
+                result.EventCount++;
+
+                // Division by gameplay rate is to account for TimeOffset scaling with gameplay rate.
+                double currentValue = e.TimeOffset / e.GameplayRate!.Value;
+                double nextMean = result.Mean + (currentValue - result.Mean) / result.EventCount;
+                result.SumOfSquares += (currentValue - result.Mean) * (currentValue - nextMean);
+                result.Mean = nextMean;
+            }
+
+            if (result.EventCount == 0)
+                return null;
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the average hit offset/error for a sequence of &lt;see cref=&quot;HitEvent&quot;/&gt;s, where negative numbers mean the user hit too early on average.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;
+        /// A non-null &lt;see langword=&quot;double&quot;/&gt; value if unstable rate could be calculated,
+        /// and &lt;see langword=&quot;null&quot;/&gt; if unstable rate cannot be calculated due to &lt;paramref name=&quot;hitEvents&quot;/&gt; being empty.
+        /// &lt;/returns&gt;
+        public static double? CalculateAverageHitError(this IEnumerable&lt;HitEvent&gt; hitEvents)
+        {
+            double[] timeOffsets = hitEvents.Where(AffectsUnstableRate).Select(ev =&gt; ev.TimeOffset).ToArray();
+
+            if (timeOffsets.Length == 0)
+                return null;
+
+            return timeOffsets.Average();
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the median hit offset/error for a sequence of &lt;see cref=&quot;HitEvent&quot;/&gt;s, where negative numbers mean the user hit too early on average.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;
+        /// A non-null &lt;see langword=&quot;double&quot;/&gt; value if unstable rate could be calculated,
+        /// and &lt;see langword=&quot;null&quot;/&gt; if unstable rate cannot be calculated due to &lt;paramref name=&quot;hitEvents&quot;/&gt; being empty.
+        /// &lt;/returns&gt;
+        public static double? CalculateMedianHitError(this IEnumerable&lt;HitEvent&gt; hitEvents)
+        {
+            double[] timeOffsets = hitEvents.Where(AffectsUnstableRate).Select(ev =&gt; ev.TimeOffset).OrderBy(x =&gt; x).ToArray();
+
+            if (timeOffsets.Length == 0)
+                return null;
+
+            int center = timeOffsets.Length / 2;
+
+            // Use average of the 2 central values if length is even
+            return timeOffsets.Length % 2 == 0 ? (timeOffsets[center - 1] + timeOffsets[center]) / 2 : timeOffsets[center];
+        }
+
+        public static bool AffectsUnstableRate(HitEvent e) =&gt; AffectsUnstableRate(e.HitObject, e.Result);
+        public static bool AffectsUnstableRate(HitObject hitObject, HitResult result) =&gt; hitObject.HitWindows != HitWindows.Empty &amp;&amp; result.IsHit();
+
+        /// &lt;summary&gt;
+        /// Data type returned by &lt;see cref=&quot;HitEventExtensions.CalculateUnstableRate&quot;/&gt; which allows efficient incremental processing.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This should be passed back into future &lt;see cref=&quot;HitEventExtensions.CalculateUnstableRate&quot;/&gt; calls as a parameter.
+        ///
+        /// The optimisations used here rely on hit events being a consecutive sequence from a single gameplay session.
+        /// When a new gameplay session is started, any existing results should be disposed.
+        /// &lt;/remarks&gt;
+        public class UnstableRateCalculationResult
+        {
+            /// &lt;summary&gt;
+            /// The last result index processed. For internal incremental calculation use.
+            /// &lt;/summary&gt;
+            public int LastProcessedIndex = -1;
+
+            /// &lt;summary&gt;
+            /// Total events processed. For internal incremental calculation use.
+            /// &lt;/summary&gt;
+            public int EventCount;
+
+            /// &lt;summary&gt;
+            /// Last sum-of-squares value. For internal incremental calculation use.
+            /// &lt;/summary&gt;
+            public double SumOfSquares;
+
+            /// &lt;summary&gt;
+            /// Last mean value. For internal incremental calculation use.
+            /// &lt;/summary&gt;
+            public double Mean;
+
+            /// &lt;summary&gt;
+            /// The unstable rate.
+            /// &lt;/summary&gt;
+            public double Result =&gt; EventCount == 0 ? 0 : 10.0 * Math.Sqrt(SumOfSquares / EventCount);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,9,25,10,0],[26,13,26,46,0],[26,46,26,69,0],[26,69,26,72,0],[28,13,28,60,0],[31,13,31,65,0],[32,17,32,62,0],[34,18,34,55,0],[34,57,34,76,0],[34,78,34,81,0],[35,13,35,14,0],[36,17,36,47,0],[37,17,37,43,0],[39,17,39,45,0],[40,21,40,30,0],[42,17,42,37,0],[45,17,45,76,0],[46,17,46,98,0],[47,17,47,97,0],[48,17,48,40,0],[49,13,49,14,0],[51,13,51,40,0],[52,17,52,29,0],[54,13,54,27,0],[55,9,55,10,0],[65,9,65,10,0],[66,13,66,86,0],[66,86,66,99,0],[66,99,66,111,0],[68,13,68,41,0],[69,17,69,29,0],[71,13,71,42,0],[72,9,72,10,0],[82,9,82,10,0],[83,13,83,86,0],[83,86,83,99,0],[83,99,83,114,0],[83,114,83,115,0],[83,115,83,127,0],[85,13,85,41,0],[86,17,86,29,0],[88,13,88,49,0],[91,13,91,124,0],[92,9,92,10,0],[94,63,94,105,0],[95,90,95,148,0],[111,13,111,48,0],[131,37,131,102,0]]);
+    </script>
+  </body>
+</html>

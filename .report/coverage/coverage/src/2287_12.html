@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/HitObjectLifetimeEntry.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics.Performance;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects.Drawables;
+
+namespace osu.Game.Rulesets.Objects
+{
+    /// &lt;summary&gt;
+    /// A &lt;see cref=&quot;LifetimeEntry&quot;/&gt; that stores the lifetime for a &lt;see cref=&quot;HitObject&quot;/&gt;.
+    /// &lt;/summary&gt;
+    public class HitObjectLifetimeEntry : LifetimeEntry
+    {
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public readonly HitObject HitObject;
+
+        /// &lt;summary&gt;
+        /// The list of &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt; for the &lt;see cref=&quot;HitObject&quot;/&gt;&#39;s nested objects (if any).
+        /// &lt;/summary&gt;
+        public List&lt;HitObjectLifetimeEntry&gt; NestedEntries { get; internal set; } = new List&lt;HitObjectLifetimeEntry&gt;();
+
+        /// &lt;summary&gt;
+        /// The result that &lt;see cref=&quot;HitObject&quot;/&gt; was judged with.
+        /// This is set by the accompanying &lt;see cref=&quot;DrawableHitObject&quot;/&gt;, and reused when required for rewinding.
+        /// &lt;/summary&gt;
+        internal JudgementResult? Result;
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;HitObject&quot;/&gt; has been judged.
+        /// Note: This does NOT include nested hitobjects.
+        /// &lt;/summary&gt;
+        public bool Judged =&gt; Result?.HasResult ?? false;
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;HitObject&quot;/&gt; and all of its nested objects have been judged.
+        /// &lt;/summary&gt;
+        public bool AllJudged
+        {
+            get
+            {
+                if (!Judged)
+                    return false;
+
+                foreach (var entry in NestedEntries)
+                {
+                    if (!entry.AllJudged)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
+        private readonly IBindable&lt;double&gt; startTimeBindable = new BindableDouble();
+
+        internal event Action? RevertResult;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to store the lifetime of.&lt;/param&gt;
+        public HitObjectLifetimeEntry(HitObject hitObject)
+        {
+            HitObject = hitObject;
+
+            startTimeBindable.BindTo(HitObject.StartTimeBindable);
+            startTimeBindable.BindValueChanged(_ =&gt; SetInitialLifetime(), true);
+
+            // Subscribe to this event before the DrawableHitObject so that the local callback is invoked before the entry is re-applied as a result of DefaultsApplied.
+            // This way, the DrawableHitObject can use OnApply() to overwrite the LifetimeStart that was set inside setInitialLifetime().
+            HitObject.DefaultsApplied += _ =&gt; SetInitialLifetime();
+        }
+
+        // The lifetime, as set by the hitobject.
+        private double realLifetimeStart = double.MinValue;
+        private double realLifetimeEnd = double.MaxValue;
+
+        // This method is called even if `start == LifetimeStart` when `KeepAlive` is true (necessary to update `realLifetimeStart`).
+        protected override void SetLifetimeStart(double start)
+        {
+            realLifetimeStart = start;
+            if (!keepAlive)
+                base.SetLifetimeStart(start);
+        }
+
+        protected override void SetLifetimeEnd(double end)
+        {
+            realLifetimeEnd = end;
+            if (!keepAlive)
+                base.SetLifetimeEnd(end);
+        }
+
+        private bool keepAlive;
+
+        /// &lt;summary&gt;
+        /// Whether the &lt;see cref=&quot;HitObject&quot;/&gt; should be kept always alive.
+        /// &lt;/summary&gt;
+        internal bool KeepAlive
+        {
+            set
+            {
+                if (keepAlive == value)
+                    return;
+
+                keepAlive = value;
+                if (keepAlive)
+                    SetLifetime(double.MinValue, double.MaxValue);
+                else
+                    SetLifetime(realLifetimeStart, realLifetimeEnd);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// A safe offset prior to the start time of &lt;see cref=&quot;HitObject&quot;/&gt; at which it may begin displaying contents.
+        /// By default, &lt;see cref=&quot;HitObject&quot;/&gt;s are assumed to display their contents within 10 seconds prior to their start time.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is only used as an optimisation to delay the initial application of the &lt;see cref=&quot;HitObject&quot;/&gt; to a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// A more accurate &lt;see cref=&quot;LifetimeEntry.LifetimeStart&quot;/&gt; should be set on the hit object application, for further optimisation.
+        /// &lt;/remarks&gt;
+        protected virtual double InitialLifetimeOffset =&gt; 10000;
+
+        /// &lt;summary&gt;
+        /// Set &lt;see cref=&quot;LifetimeEntry.LifetimeStart&quot;/&gt; using &lt;see cref=&quot;InitialLifetimeOffset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        internal void SetInitialLifetime() =&gt; LifetimeStart = HitObject.StartTime - InitialLifetimeOffset;
+
+        internal void OnRevertResult() =&gt; RevertResult?.Invoke();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,61,26,65,0],[26,66,26,79,0],[26,84,26,118,0],[38,31,38,57,0],[46,13,46,14,0],[47,17,47,29,0],[48,21,48,34,0],[50,17,50,24,0],[50,26,50,35,0],[50,36,50,38,0],[50,39,50,52,0],[51,17,51,18,0],[52,21,52,42,0],[53,25,53,38,0],[54,17,54,18,0],[56,17,56,29,0],[57,13,57,14,0],[60,9,60,85,0],[68,9,68,59,0],[69,9,69,10,0],[70,13,70,35,0],[72,13,72,67,0],[73,13,73,53,0],[73,53,73,73,0],[73,73,73,81,0],[77,13,77,47,0],[77,47,77,67,0],[77,67,77,68,0],[78,9,78,10,0],[81,9,81,60,0],[82,9,82,58,0],[86,9,86,10,0],[87,13,87,39,0],[88,13,88,28,0],[89,17,89,46,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,35,0],[95,13,95,28,0],[96,17,96,42,0],[97,9,97,10,0],[107,13,107,14,0],[108,17,108,40,0],[109,21,109,28,0],[111,17,111,35,0],[112,17,112,31,0],[113,21,113,67,0],[115,21,115,69,0],[116,13,116,14,0],[127,59,127,64,0],[132,47,132,106,0],[134,43,134,65,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Menu/ButtonSystem.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Menu
+{
+    public partial class ButtonSystem : Container, IStateful&lt;ButtonSystemState&gt;, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        public const float BUTTON_WIDTH = 140f;
+        public const float WEDGE_WIDTH = 20;
+
+        public event Action&lt;ButtonSystemState&gt;? StateChanged;
+
+        public Action? OnEditBeatmap;
+        public Action? OnEditSkin;
+        public Action&lt;UIEvent&gt;? OnExit;
+        public Action? OnBeatmapListing;
+        public Action? OnSolo;
+        public Action? OnSettings;
+        public Action? OnMultiplayer;
+        public Action? OnQuickPlay;
+        public Action? OnRankedPlay;
+        public Action? OnPlaylists;
+        public Action&lt;Room&gt;? OnDailyChallenge;
+
+        private readonly IBindable&lt;bool&gt; isIdle = new BindableBool();
+
+        private OsuLogo? logo;
+
+        /// &lt;summary&gt;
+        /// Assign the &lt;see cref=&quot;OsuLogo&quot;/&gt; that this ButtonSystem should manage the position of.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;logo&quot;&gt;The instance of the logo to be assigned. If null, we are suspending from the screen that uses this ButtonSystem.&lt;/param&gt;
+        public void SetOsuLogo(OsuLogo? logo)
+        {
+            this.logo = logo;
+
+            if (this.logo != null)
+            {
+                this.logo.Action = onOsuLogo;
+
+                // osuLogo.SizeForFlow relies on loading to be complete.
+                buttonArea.Flow.Position = new Vector2(WEDGE_WIDTH * 2 - (BUTTON_WIDTH + this.logo.SizeForFlow / 4), 0);
+
+                updateLogoState();
+            }
+            else
+            {
+                // We should stop tracking as the facade is now out of scope.
+                logoTracking?.Dispose();
+                logoTracking = null;
+            }
+        }
+
+        private readonly ButtonArea buttonArea;
+
+        private readonly MainMenuButton backButton;
+
+        private readonly List&lt;MainMenuButton&gt; buttonsTopLevel = new List&lt;MainMenuButton&gt;();
+        private readonly List&lt;MainMenuButton&gt; buttonsPlay = new List&lt;MainMenuButton&gt;();
+        private readonly List&lt;MainMenuButton&gt; buttonsMulti = new List&lt;MainMenuButton&gt;();
+        private readonly List&lt;MainMenuButton&gt; buttonsEdit = new List&lt;MainMenuButton&gt;();
+
+        private Sample? sampleBackToLogo;
+        private Sample? sampleLogoSwoosh;
+
+        private readonly LogoTrackingContainer logoTrackingContainer;
+
+        public bool ReturnToTopOnIdle { get; set; } = true;
+
+        public ButtonSystem()
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            Child = logoTrackingContainer = new LogoTrackingContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Child = buttonArea = new ButtonArea()
+            };
+
+            buttonArea.AddRange(new Drawable[]
+            {
+                new MainMenuButton(ButtonSystemStrings.Settings, string.Empty, OsuIcon.Settings, new Color4(85, 85, 85, 255), (_, _) =&gt; OnSettings?.Invoke(), Key.O, Key.S)
+                {
+                    Padding = new MarginPadding { Right = WEDGE_WIDTH },
+                },
+                backButton = new MainMenuButton(ButtonSystemStrings.Back, @&quot;back-to-top&quot;, OsuIcon.PrevCircle, new Color4(51, 58, 94, 255), (_, _) =&gt;
+                {
+                    switch (State)
+                    {
+                        case ButtonSystemState.Multi:
+                            State = ButtonSystemState.Play;
+                            break;
+
+                        default:
+                            State = ButtonSystemState.TopLevel;
+                            break;
+                    }
+                })
+                {
+                    Padding = new MarginPadding { Right = WEDGE_WIDTH },
+                    VisibleStateMin = ButtonSystemState.Play,
+                    VisibleStateMax = ButtonSystemState.Edit,
+                },
+                logoTrackingContainer.LogoFacade.With(d =&gt; d.Scale = new Vector2(0.74f))
+            });
+
+            buttonArea.Flow.CentreTarget = logoTrackingContainer.LogoFacade;
+        }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private LoginOverlay? loginOverlay { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio, IdleTracker? idleTracker, GameHost host)
+        {
+            buttonsPlay.Add(new MainMenuButton(ButtonSystemStrings.Solo, @&quot;button-default-select&quot;, OsuIcon.Player, new Color4(102, 68, 204, 255), (_, _) =&gt; OnSolo?.Invoke(), Key.P)
+            {
+                Padding = new MarginPadding { Left = WEDGE_WIDTH },
+            });
+            buttonsPlay.Add(new MainMenuButton(ButtonSystemStrings.Multi, @&quot;button-default-select&quot;, OsuIcon.Online, new Color4(94, 63, 186, 255), (_, _) =&gt; State = ButtonSystemState.Multi, Key.M));
+            buttonsPlay.Add(new MainMenuButton(ButtonSystemStrings.Playlists, @&quot;button-default-select&quot;, OsuIcon.Tournament, new Color4(94, 63, 186, 255), onPlaylists, Key.L));
+            buttonsPlay.Add(new DailyChallengeButton(@&quot;button-daily-select&quot;, new Color4(94, 63, 186, 255), onDailyChallenge, Key.D));
+            buttonsPlay.ForEach(b =&gt; b.VisibleState = ButtonSystemState.Play);
+
+            buttonsMulti.Add(new MainMenuButton(ButtonSystemStrings.Lounge, @&quot;button-default-select&quot;, FontAwesome.Solid.Couch, new Color4(94, 63, 186, 255), onMultiplayer, Key.L, Key.M)
+            {
+                Padding = new MarginPadding { Left = WEDGE_WIDTH }
+            });
+            buttonsMulti.Add(new MainMenuButton(ButtonSystemStrings.RankedPlay, @&quot;button-daily-select&quot;, FontAwesome.Solid.Crown, new Color4(94, 63, 186, 255), onRankedPlay, Key.R));
+            // disabled for now to give ranked play space.
+            // buttonsMulti.Add(new MainMenuButton(ButtonSystemStrings.QuickPlay, @&quot;button-daily-select&quot;, FontAwesome.Solid.Bolt, new Color4(94, 63, 186, 255), onQuickPlay, Key.Q));
+            buttonsMulti.ForEach(b =&gt; b.VisibleState = ButtonSystemState.Multi);
+
+            buttonsEdit.Add(new MainMenuButton(EditorStrings.BeatmapEditor.ToLower(), @&quot;button-default-select&quot;, OsuIcon.Beatmap, new Color4(238, 170, 0, 255), (_, _) =&gt; OnEditBeatmap?.Invoke(), Key.B,
+                Key.E)
+            {
+                Padding = new MarginPadding { Left = WEDGE_WIDTH },
+            });
+            buttonsEdit.Add(new MainMenuButton(SkinEditorStrings.SkinEditor.ToLower(), @&quot;button-default-select&quot;, OsuIcon.SkinB, new Color4(220, 160, 0, 255), (_, _) =&gt; OnEditSkin?.Invoke(), Key.S));
+            buttonsEdit.ForEach(b =&gt; b.VisibleState = ButtonSystemState.Edit);
+
+            buttonsTopLevel.Add(new MainMenuButton(ButtonSystemStrings.Play, @&quot;button-play-select&quot;, OsuIcon.Logo, new Color4(102, 68, 204, 255), (_, _) =&gt; State = ButtonSystemState.Play, Key.P, Key.M,
+                Key.L)
+            {
+                Padding = new MarginPadding { Left = WEDGE_WIDTH },
+            });
+            buttonsTopLevel.Add(new MainMenuButton(ButtonSystemStrings.Edit, @&quot;button-play-select&quot;, OsuIcon.EditCircle, new Color4(238, 170, 0, 255), (_, _) =&gt; State = ButtonSystemState.Edit, Key.E));
+            buttonsTopLevel.Add(new MainMenuButton(ButtonSystemStrings.Browse, @&quot;button-default-select&quot;, OsuIcon.Beatmap, new Color4(165, 204, 0, 255), (_, _) =&gt; OnBeatmapListing?.Invoke(), Key.B,
+                Key.D));
+
+            if (host.CanExit)
+                buttonsTopLevel.Add(new MainMenuButton(ButtonSystemStrings.Exit, string.Empty, OsuIcon.CrossCircle, new Color4(238, 51, 153, 255), (_, e) =&gt; OnExit?.Invoke(e), Key.Q));
+
+            buttonArea.AddRange(buttonsMulti);
+            buttonArea.AddRange(buttonsPlay);
+            buttonArea.AddRange(buttonsEdit);
+            buttonArea.AddRange(buttonsTopLevel);
+
+            buttonArea.ForEach(b =&gt;
+            {
+                if (b is MainMenuButton)
+                {
+                    b.Origin = Anchor.CentreLeft;
+                    b.Anchor = Anchor.CentreLeft;
+                }
+            });
+
+            isIdle.ValueChanged += idle =&gt; updateIdleState(idle.NewValue);
+
+            if (idleTracker != null) isIdle.BindTo(idleTracker.IsIdle);
+
+            sampleBackToLogo = audio.Samples.Get(@&quot;Menu/back-to-logo&quot;);
+            sampleLogoSwoosh = audio.Samples.Get(@&quot;Menu/osu-logo-swoosh&quot;);
+        }
+
+        private void onMultiplayer(MainMenuButton mainMenuButton, UIEvent uiEvent)
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            OnMultiplayer?.Invoke();
+        }
+
+        private void onQuickPlay(MainMenuButton mainMenuButton, UIEvent uiEvent)
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            OnQuickPlay?.Invoke();
+        }
+
+        private void onRankedPlay(MainMenuButton mainMenuButton, UIEvent uiEvent)
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            OnRankedPlay?.Invoke();
+        }
+
+        private void onPlaylists(MainMenuButton mainMenuButton, UIEvent uiEvent)
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            OnPlaylists?.Invoke();
+        }
+
+        private void onDailyChallenge(MainMenuButton button, UIEvent uiEvent)
+        {
+            if (api.State.Value != APIState.Online)
+            {
+                loginOverlay?.Show();
+                return;
+            }
+
+            var dailyChallengeButton = (DailyChallengeButton)button;
+
+            if (dailyChallengeButton.Room != null)
+                OnDailyChallenge?.Invoke(dailyChallengeButton.Room);
+        }
+
+        private void updateIdleState(bool isIdle)
+        {
+            if (!ReturnToTopOnIdle)
+                return;
+
+            if (isIdle &amp;&amp; State != ButtonSystemState.Exit &amp;&amp; State != ButtonSystemState.EnteringMode)
+                State = ButtonSystemState.Initial;
+        }
+
+        /// &lt;summary&gt;
+        /// Triggers the &lt;see cref=&quot;logo&quot;/&gt; if the current &lt;see cref=&quot;State&quot;/&gt; is &lt;see cref=&quot;ButtonSystemState.Initial&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;&lt;c&gt;true&lt;/c&gt; if the &lt;see cref=&quot;logo&quot;/&gt; was triggered, &lt;c&gt;false&lt;/c&gt; otherwise.&lt;/returns&gt;
+        private bool triggerInitialOsuLogo()
+        {
+            if (State == ButtonSystemState.Initial)
+            {
+                StopSamplePlayback();
+                logo?.TriggerClick();
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat || e.ControlPressed || e.ShiftPressed || e.AltPressed || e.SuperPressed)
+                return false;
+
+            if (e.Key &gt;= Key.F1 &amp;&amp; e.Key &lt;= Key.F35)
+                return false;
+
+            if (e.Key &gt;= Key.Mute &amp;&amp; e.Key &lt;= Key.TrackNext)
+                return false;
+
+            switch (e.Key)
+            {
+                case Key.Escape:
+                    return false;
+            }
+
+            if (triggerInitialOsuLogo())
+                return true;
+
+            return base.OnKeyDown(e);
+        }
+
+        protected override bool OnJoystickPress(JoystickPressEvent e)
+        {
+            if (triggerInitialOsuLogo())
+                return true;
+
+            return base.OnJoystickPress(e);
+        }
+
+        protected override bool OnMidiDown(MidiDownEvent e)
+        {
+            if (triggerInitialOsuLogo())
+                return true;
+
+            return base.OnMidiDown(e);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.Back:
+                    return goBack();
+
+                case GlobalAction.Select:
+                    logo?.TriggerClick();
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        private bool goBack()
+        {
+            switch (State)
+            {
+                case ButtonSystemState.TopLevel:
+                    State = ButtonSystemState.Initial;
+
+                    // Samples are explicitly played here in response to user interaction and not when transitioning due to idle.
+                    StopSamplePlayback();
+                    sampleBackToLogo?.Play();
+
+                    return true;
+
+                case ButtonSystemState.Edit:
+                case ButtonSystemState.Play:
+                case ButtonSystemState.Multi:
+                    StopSamplePlayback();
+                    backButton.TriggerClick();
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public void StopSamplePlayback()
+        {
+            buttonsPlay.ForEach(button =&gt; button.StopSamplePlayback());
+            buttonsMulti.ForEach(button =&gt; button.StopSamplePlayback());
+            buttonsTopLevel.ForEach(button =&gt; button.StopSamplePlayback());
+            logo?.StopSamplePlayback();
+        }
+
+        private bool onOsuLogo()
+        {
+            switch (state)
+            {
+                default:
+                    return false;
+
+                case ButtonSystemState.Initial:
+                    State = ButtonSystemState.TopLevel;
+                    return true;
+
+                case ButtonSystemState.TopLevel:
+                    buttonsTopLevel.First().TriggerClick();
+                    return false;
+
+                case ButtonSystemState.Play:
+                    buttonsPlay.First().TriggerClick();
+                    return false;
+
+                case ButtonSystemState.Multi:
+                    buttonsMulti.First().TriggerClick();
+                    return false;
+
+                case ButtonSystemState.Edit:
+                    buttonsEdit.First().TriggerClick();
+                    return false;
+            }
+        }
+
+        private ButtonSystemState state = ButtonSystemState.Initial;
+
+        public override bool HandleNonPositionalInput =&gt; state != ButtonSystemState.Exit;
+        public override bool HandlePositionalInput =&gt; state != ButtonSystemState.Exit;
+
+        public ButtonSystemState State
+        {
+            get =&gt; state;
+
+            set
+            {
+                if (state == value) return;
+
+                ButtonSystemState lastState = state;
+                state = value;
+
+                updateLogoState(lastState);
+
+                Logger.Log($&quot;{nameof(ButtonSystem)}&#39;s state changed from {lastState} to {state}&quot;);
+
+                buttonArea.FinishTransforms(true);
+
+                using (buttonArea.BeginDelayedSequence(lastState == ButtonSystemState.Initial ? 150 : 0))
+                {
+                    buttonArea.ButtonSystemState = state;
+
+                    foreach (var b in buttonArea.OfType&lt;MainMenuButton&gt;())
+                        b.ButtonSystemState = state;
+                }
+
+                StateChanged?.Invoke(State);
+            }
+        }
+
+        private ScheduledDelegate? logoDelayedAction;
+        private IDisposable? logoTracking;
+
+        private void updateLogoState(ButtonSystemState lastState = ButtonSystemState.Initial)
+        {
+            if (logo == null) return;
+
+            switch (state)
+            {
+                case ButtonSystemState.Exit:
+                case ButtonSystemState.Initial:
+                    logoDelayedAction?.Cancel();
+                    logoDelayedAction = Scheduler.AddDelayed(() =&gt;
+                    {
+                        logoTracking?.Dispose();
+                        logoTracking = null;
+
+                        game?.Toolbar.Hide();
+
+                        logo?.ClearTransforms(targetMember: nameof(Position));
+                        logo?.MoveTo(new Vector2(0.5f), 800, Easing.OutExpo);
+                        logo?.ScaleTo(1, 800, Easing.OutExpo);
+                    }, buttonArea.Alpha * 150);
+
+                    if (lastState == ButtonSystemState.TopLevel)
+                        sampleLogoSwoosh?.Play();
+                    break;
+
+                case ButtonSystemState.TopLevel:
+                case ButtonSystemState.Play:
+                    switch (lastState)
+                    {
+                        case ButtonSystemState.TopLevel: // coming from toplevel to play
+                            break;
+
+                        case ButtonSystemState.Initial:
+                            logo.ClearTransforms(targetMember: nameof(Position));
+
+                            bool impact = logo.Scale.X &gt; 0.6f;
+
+                            logo.ScaleTo(0.5f, 200, Easing.In);
+
+                            logoTracking?.Dispose();
+                            logoTracking = logoTrackingContainer.StartTracking(logo, 200, Easing.In);
+
+                            logoDelayedAction?.Cancel();
+                            logoDelayedAction = Scheduler.AddDelayed(() =&gt;
+                            {
+                                if (impact)
+                                    logo?.Impact();
+
+                                game?.Toolbar.Show();
+                            }, 200);
+                            break;
+
+                        default:
+                            logo.ClearTransforms(targetMember: nameof(Position));
+
+                            logoTracking?.Dispose();
+                            logoTracking = logoTrackingContainer.StartTracking(logo, 0, Easing.In);
+
+                            logo.ScaleTo(0.5f, 200, Easing.OutQuint);
+                            break;
+                    }
+
+                    break;
+
+                case ButtonSystemState.EnteringMode:
+                    logoTracking?.Dispose();
+                    logoTracking = logoTrackingContainer.StartTracking(logo, lastState == ButtonSystemState.Initial ? MainMenu.FADE_OUT_DURATION : 0, Easing.InSine);
+                    break;
+            }
+        }
+    }
+
+    public enum ButtonSystemState
+    {
+        Exit,
+        Initial,
+        TopLevel,
+        Play,
+        Multi,
+        Edit,
+        EnteringMode,
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[55,9,55,70,0],[64,9,64,10,0],[65,13,65,30,0],[67,13,67,35,0],[68,13,68,14,0],[69,17,69,46,0],[72,17,72,121,0],[74,17,74,35,0],[75,13,75,14,0],[77,13,77,14,0],[79,17,79,41,0],[80,17,80,37,0],[81,13,81,14,0],[82,9,82,10,0],[88,9,88,92,0],[89,9,89,88,0],[90,9,90,89,0],[91,9,91,88,0],[98,41,98,45,0],[98,46,98,50,0],[98,55,98,59,0],[100,9,100,30,0],[101,9,101,10,0],[102,13,102,42,0],[104,13,108,15,0],[110,13,112,137,0],[112,137,112,157,0],[112,157,117,17,0],[117,17,117,18,0],[117,18,118,21,0],[118,21,118,35,0],[118,35,121,29,0],[121,29,121,60,0],[121,60,122,29,0],[122,29,122,35,0],[122,35,125,29,0],[125,29,125,64,0],[125,64,126,29,0],[126,29,126,35,0],[126,35,128,17,0],[128,17,128,18,0],[128,18,134,60,0],[134,60,134,88,0],[134,88,135,16,0],[137,13,137,77,0],[138,9,138,10,0],[141,36,141,40,0],[141,41,141,45,0],[141,50,141,55,0],[144,33,144,37,0],[144,38,144,42,0],[147,46,147,50,0],[147,51,147,55,0],[151,9,151,10,0],[152,13,152,157,0],[152,157,152,173,0],[152,173,155,16,0],[156,13,156,157,0],[156,157,156,188,0],[156,188,156,198,0],[157,13,157,176,0],[158,13,158,134,0],[159,13,159,38,0],[159,38,159,77,0],[159,77,159,79,0],[161,13,164,16,0],[165,13,165,182,0],[168,13,168,39,0],[168,39,168,79,0],[168,79,168,81,0],[170,13,170,170,0],[170,170,170,193,0],[170,193,174,16,0],[175,13,175,169,0],[175,169,175,189,0],[175,189,175,199,0],[176,13,176,38,0],[176,38,176,77,0],[176,77,176,79,0],[178,13,178,156,0],[178,156,178,186,0],[178,186,182,16,0],[183,13,183,161,0],[183,161,183,191,0],[183,191,183,201,0],[184,13,184,163,0],[184,163,184,189,0],[184,189,185,25,0],[187,13,187,30,0],[188,17,188,158,0],[188,158,188,175,0],[188,175,188,185,0],[190,13,190,47,0],[191,13,191,46,0],[192,13,192,46,0],[193,13,193,50,0],[195,13,196,13,0],[196,13,196,14,0],[196,14,197,17,0],[197,17,197,41,0],[197,41,198,17,0],[198,17,198,18,0],[198,18,199,21,0],[199,21,199,50,0],[199,50,200,21,0],[200,21,200,50,0],[200,50,201,17,0],[201,17,201,18,0],[201,18,202,13,0],[202,13,202,14,0],[202,14,202,16,0],[204,13,204,44,0],[204,44,204,74,0],[204,74,204,75,0],[206,13,206,37,0],[206,38,206,72,0],[208,13,208,72,0],[209,13,209,75,0],[210,9,210,10,0],[213,9,213,10,0],[214,13,214,52,0],[215,13,215,14,0],[216,17,216,38,0],[217,17,217,24,0],[220,13,220,37,0],[221,9,221,10,0],[224,9,224,10,0],[225,13,225,52,0],[226,13,226,14,0],[227,17,227,38,0],[228,17,228,24,0],[231,13,231,35,0],[232,9,232,10,0],[235,9,235,10,0],[236,13,236,52,0],[237,13,237,14,0],[238,17,238,38,0],[239,17,239,24,0],[242,13,242,36,0],[243,9,243,10,0],[246,9,246,10,0],[247,13,247,52,0],[248,13,248,14,0],[249,17,249,38,0],[250,17,250,24,0],[253,13,253,35,0],[254,9,254,10,0],[257,9,257,10,0],[258,13,258,52,0],[259,13,259,14,0],[260,17,260,38,0],[261,17,261,24,0],[264,13,264,69,0],[266,13,266,51,0],[267,17,267,69,0],[268,9,268,10,0],[271,9,271,10,0],[272,13,272,36,0],[273,17,273,24,0],[275,13,275,102,0],[276,17,276,51,0],[277,9,277,10,0],[284,9,284,10,0],[285,13,285,52,0],[286,13,286,14,0],[287,17,287,38,0],[288,17,288,38,0],[289,17,289,29,0],[292,13,292,26,0],[293,9,293,10,0],[296,9,296,10,0],[297,13,297,98,0],[298,17,298,30,0],[300,13,300,53,0],[301,17,301,30,0],[303,13,303,61,0],[304,17,304,30,0],[306,13,306,27,0],[309,21,309,34,0],[312,13,312,41,0],[313,17,313,29,0],[315,13,315,38,0],[316,9,316,10,0],[319,9,319,10,0],[320,13,320,41,0],[321,17,321,29,0],[323,13,323,44,0],[324,9,324,10,0],[327,9,327,10,0],[328,13,328,41,0],[329,17,329,29,0],[331,13,331,39,0],[332,9,332,10,0],[335,9,335,10,0],[336,13,336,26,0],[337,17,337,30,0],[339,13,339,30,0],[342,21,342,37,0],[345,21,345,42,0],[346,21,346,33,0],[349,21,349,34,0],[351,9,351,10,0],[354,9,354,10,0],[355,9,355,10,0],[358,9,358,10,0],[359,13,359,27,0],[362,21,362,55,0],[365,21,365,42,0],[366,21,366,46,0],[368,21,368,33,0],[373,21,373,42,0],[374,21,374,47,0],[375,21,375,33,0],[378,21,378,34,0],[380,9,380,10,0],[383,9,383,10,0],[384,13,384,43,0],[384,43,384,70,0],[384,70,384,72,0],[385,13,385,44,0],[385,44,385,71,0],[385,71,385,73,0],[386,13,386,47,0],[386,47,386,74,0],[386,74,386,76,0],[387,13,387,40,0],[388,9,388,10,0],[391,9,391,10,0],[392,13,392,27,0],[395,21,395,34,0],[398,21,398,56,0],[399,21,399,33,0],[402,21,402,60,0],[403,21,403,34,0],[406,21,406,56,0],[407,21,407,34,0],[410,21,410,57,0],[411,21,411,34,0],[414,21,414,56,0],[415,21,415,34,0],[417,9,417,10,0],[419,9,419,69,0],[421,58,421,89,0],[422,55,422,86,0],[426,20,426,25,0],[429,13,429,14,0],[430,17,430,36,0],[430,37,430,44,0],[432,17,432,53,0],[433,17,433,31,0],[435,17,435,44,0],[437,17,437,99,0],[439,17,439,51,0],[441,17,441,106,0],[442,17,442,18,0],[443,21,443,58,0],[445,21,445,28,0],[445,30,445,35,0],[445,36,445,38,0],[445,39,445,74,0],[446,25,446,53,0],[447,17,447,18,0],[449,17,449,45,0],[450,13,450,14,0],[457,9,457,10,0],[458,13,458,30,0],[458,31,458,38,0],[460,13,460,27,0],[464,21,464,49,0],[465,21,466,21,0],[466,21,466,22,0],[466,22,467,25,0],[467,25,467,49,0],[467,49,468,25,0],[468,25,468,45,0],[468,45,470,25,0],[470,25,470,46,0],[470,46,472,25,0],[472,25,472,79,0],[472,79,473,25,0],[473,25,473,78,0],[473,78,474,25,0],[474,25,474,63,0],[474,63,475,21,0],[475,21,475,22,0],[475,22,475,48,0],[477,21,477,65,0],[478,25,478,50,0],[479,21,479,27,0],[486,29,486,35,0],[489,29,489,82,0],[491,29,491,63,0],[493,29,493,64,0],[495,29,495,53,0],[496,29,496,102,0],[498,29,498,57,0],[499,29,500,29,0],[500,29,500,30,0],[500,30,501,33,0],[501,33,501,44,0],[501,44,502,37,0],[502,37,502,52,0],[502,52,504,33,0],[504,33,504,54,0],[504,54,505,29,0],[505,29,505,30,0],[505,30,505,37,0],[506,29,506,35,0],[509,29,509,82,0],[511,29,511,53,0],[512,29,512,100,0],[514,29,514,70,0],[515,29,515,35,0],[518,21,518,27,0],[521,21,521,45,0],[522,21,522,166,0],[523,21,523,27,0],[525,9,525,10,0]]);
+    </script>
+  </body>
+</html>

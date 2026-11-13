@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Mods/ModNightcore.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Overlays.Settings;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.UI;
+using osu.Game.Skinning;
+
+namespace osu.Game.Rulesets.Mods
+{
+    public abstract class ModNightcore : ModRateAdjust
+    {
+        public override string Name =&gt; &quot;Nightcore&quot;;
+        public override string Acronym =&gt; &quot;NC&quot;;
+        public override IconUsage? Icon =&gt; OsuIcon.ModNightcore;
+        public override ModType Type =&gt; ModType.DifficultyIncrease;
+        public override LocalisableString Description =&gt; &quot;Uguuuuuuuu...&quot;;
+        public override bool Ranked =&gt; UsesDefaultConfiguration;
+
+        [SettingSource(&quot;Speed increase&quot;, &quot;The actual increase to apply&quot;, SettingControlType = typeof(MultiplierSettingsSlider))]
+        public override BindableNumber&lt;double&gt; SpeedChange { get; } = new BindableDouble(1.5)
+        {
+            MinValue = 1.01,
+            MaxValue = 2,
+            Precision = 0.01,
+        };
+
+        private readonly BindableNumber&lt;double&gt; tempoAdjust = new BindableDouble(1);
+        private readonly BindableNumber&lt;double&gt; freqAdjust = new BindableDouble(1);
+
+        protected ModNightcore()
+        {
+            // intentionally not using `RateAdjustModHelper`
+            // as the expected result of operation is not the same (nightcore should preserve constant pitch).
+            SpeedChange.BindValueChanged(val =&gt;
+            {
+                freqAdjust.Value = SpeedChange.Default;
+                tempoAdjust.Value = val.NewValue / SpeedChange.Default;
+            }, true);
+        }
+
+        public override void ApplyToTrack(IAdjustableAudioComponent track)
+        {
+            track.AddAdjustment(AdjustableProperty.Frequency, freqAdjust);
+            track.AddAdjustment(AdjustableProperty.Tempo, tempoAdjust);
+        }
+    }
+
+    public abstract partial class ModNightcore&lt;TObject&gt; : ModNightcore, IApplicableToDrawableRuleset&lt;TObject&gt;
+        where TObject : HitObject
+    {
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;TObject&gt; drawableRuleset)
+        {
+            // from stable:
+            // &gt; (in a perfect world) tick rates other than 2 imply there isn&#39;t a regular offbeat, so offbeat hats would stand out.
+            // &gt; only enable them if tick rate is a multiple of 2.
+            bool playHats = Precision.AlmostEquals(drawableRuleset.Beatmap.Difficulty.SliderTickRate % 2, 0);
+            drawableRuleset.Overlays.Add(new NightcoreBeatContainer(playHats));
+        }
+
+        public partial class NightcoreBeatContainer : BeatSyncedContainer
+        {
+            private PausableSkinnableSound? hatSample;
+            private PausableSkinnableSound? clapSample;
+            private PausableSkinnableSound? kickSample;
+            private PausableSkinnableSound? finishSample;
+
+            private int? firstBeat;
+            private int lastBeat = -1;
+
+            private readonly bool playHats;
+
+            public NightcoreBeatContainer(bool playHats = true)
+            {
+                this.playHats = playHats;
+                Divisor = 2;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                InternalChildren = new Drawable[]
+                {
+                    hatSample = new PausableSkinnableSound(new SampleInfo(&quot;Gameplay/nightcore-hat&quot;)),
+                    clapSample = new PausableSkinnableSound(new SampleInfo(&quot;Gameplay/nightcore-clap&quot;)),
+                    kickSample = new PausableSkinnableSound(new SampleInfo(&quot;Gameplay/nightcore-kick&quot;)),
+                    finishSample = new PausableSkinnableSound(new SampleInfo(&quot;Gameplay/nightcore-finish&quot;)),
+                };
+            }
+
+            private const int bars_per_segment = 4;
+
+            protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, ChannelAmplitudes amplitudes)
+            {
+                base.OnNewBeat(beatIndex, timingPoint, effectPoint, amplitudes);
+
+                int beatsPerBar = timingPoint.TimeSignature.Numerator;
+                int segmentLength = beatsPerBar * Divisor * bars_per_segment;
+
+                if (!IsBeatSyncedWithTrack)
+                {
+                    firstBeat = null;
+                    return;
+                }
+
+                if (!firstBeat.HasValue || beatIndex &lt; firstBeat)
+                    // decide on a good starting beat index if once has not yet been decided.
+                    firstBeat = beatIndex &lt; 0 ? 0 : (beatIndex / segmentLength) * segmentLength;
+
+                if (beatIndex &gt;= firstBeat)
+                    playBeatFor(beatIndex, segmentLength, timingPoint);
+            }
+
+            private void playBeatFor(int beatIndex, int segmentLength, TimingControlPoint timingPoint)
+            {
+                // https://github.com/peppy/osu-stable-reference/blob/6ab0cf1f9f7b3449f5c0d8defcd458aae72cdb88/osu!/Audio/NightcoreBeat.cs#L41
+                if (lastBeat == beatIndex)
+                    return;
+
+                lastBeat = beatIndex;
+
+                int beatInSegment = beatIndex % segmentLength;
+
+                if (beatInSegment == 0)
+                {
+                    // https://github.com/peppy/osu-stable-reference/blob/6ab0cf1f9f7b3449f5c0d8defcd458aae72cdb88/osu!/Audio/NightcoreBeat.cs#L53
+                    bool playFinish = beatIndex &gt; 0 || !timingPoint.OmitFirstBarLine;
+
+                    if (playFinish)
+                        finishSample?.Play();
+                }
+
+                switch (timingPoint.TimeSignature.Numerator)
+                {
+                    case 3:
+                        switch (beatInSegment % 6)
+                        {
+                            case 0:
+                                kickSample?.Play();
+                                break;
+
+                            case 3:
+                                clapSample?.Play();
+                                break;
+
+                            default:
+                                if (playHats)
+                                    hatSample?.Play();
+                                break;
+                        }
+
+                        break;
+
+                    case 4:
+                        switch (beatInSegment % 4)
+                        {
+                            case 0:
+                                kickSample?.Play();
+                                break;
+
+                            case 2:
+                                clapSample?.Play();
+                                break;
+
+                            default:
+                                if (playHats)
+                                    hatSample?.Play();
+                                break;
+                        }
+
+                        break;
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,40,26,51,0],[27,43,27,47,1],[28,44,28,64,0],[29,41,29,67,1],[30,58,30,73,0],[31,40,31,64,0],[34,62,34,66,1],[34,71,39,10,1],[41,9,41,85,1],[42,9,42,84,1],[44,9,44,33,1],[45,9,45,10,1],[48,13,49,13,1],[49,13,49,14,1],[49,14,50,17,1],[50,17,50,56,1],[50,56,51,17,1],[51,17,51,72,1],[51,72,52,13,1],[52,13,52,14,1],[52,14,52,22,1],[53,9,53,10,1],[56,9,56,10,0],[57,13,57,75,0],[58,13,58,72,0],[59,9,59,10,0],[66,9,66,10,0],[70,13,70,110,0],[71,13,71,80,0],[72,9,72,10,0],[82,13,82,39,0],[86,13,86,64,0],[87,13,87,14,0],[88,17,88,42,0],[89,17,89,29,0],[90,13,90,14,0],[94,13,94,14,0],[95,17,101,19,0],[102,13,102,14,0],[107,13,107,14,0],[108,17,108,81,0],[110,17,110,71,0],[111,17,111,78,0],[113,17,113,44,0],[114,17,114,18,0],[115,21,115,38,0],[116,21,116,28,0],[119,17,119,66,0],[121,21,121,97,0],[123,17,123,44,0],[124,21,124,72,0],[125,13,125,14,0],[128,13,128,14,0],[130,17,130,43,0],[131,21,131,28,0],[133,17,133,38,0],[135,17,135,63,0],[137,17,137,40,0],[138,17,138,18,0],[140,21,140,86,0],[142,21,142,36,0],[143,25,143,46,0],[144,17,144,18,0],[146,17,146,61,0],[149,25,149,51,0],[152,33,152,52,0],[153,33,153,39,0],[156,33,156,52,0],[157,33,157,39,0],[160,33,160,46,0],[161,37,161,55,0],[162,33,162,39,0],[165,25,165,31,0],[168,25,168,51,0],[171,33,171,52,0],[172,33,172,39,0],[175,33,175,52,0],[176,33,176,39,0],[179,33,179,46,0],[180,37,180,55,0],[181,33,181,39,0],[184,25,184,31,0],[186,13,186,14,0]]);
+    </script>
+  </body>
+</html>

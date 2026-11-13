@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/DrawableRulesetDependencies.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.IO.Stores;
+using osu.Framework.Platform;
+using osu.Game.Rulesets.Configuration;
+
+namespace osu.Game.Rulesets.UI
+{
+    public class DrawableRulesetDependencies : DependencyContainer, IDisposable
+    {
+        /// &lt;summary&gt;
+        /// The texture store to be used for the ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Reads textures from the &quot;Textures&quot; folder in ruleset resources.
+        /// If not available locally, lookups will fallback to the global texture store.
+        /// &lt;/remarks&gt;
+        public TextureStore TextureStore { get; }
+
+        /// &lt;summary&gt;
+        /// The sample store to be used for the ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Reads samples from the &quot;Samples&quot; folder in ruleset resources.
+        /// If not available locally, lookups will fallback to the global sample store.
+        /// &lt;/remarks&gt;
+        public ISampleStore SampleStore { get; }
+
+        /// &lt;summary&gt;
+        /// The shader manager to be used for the ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Reads shaders from the &quot;Shaders&quot; folder in ruleset resources.
+        /// If not available locally, lookups will fallback to the global shader manager.
+        /// &lt;/remarks&gt;
+        public ShaderManager ShaderManager { get; }
+
+        /// &lt;summary&gt;
+        /// The ruleset config manager. May be null if ruleset does not expose a configuration manager.
+        /// &lt;/summary&gt;
+        public IRulesetConfigManager? RulesetConfigManager { get; }
+
+        public DrawableRulesetDependencies(Ruleset ruleset, IReadOnlyDependencyContainer parent)
+            : base(parent)
+        {
+            var resources = ruleset.CreateResourceStore();
+
+            var host = parent.Get&lt;GameHost&gt;();
+
+            TextureStore = new TextureStore(host.Renderer, parent.Get&lt;GameHost&gt;().CreateTextureLoaderStore(new NamespacedResourceStore&lt;byte[]&gt;(resources, @&quot;Textures&quot;)));
+            CacheAs(TextureStore = new FallbackTextureStore(host.Renderer, TextureStore, parent.Get&lt;TextureStore&gt;()));
+
+            SampleStore = parent.Get&lt;AudioManager&gt;().GetSampleStore(new NamespacedResourceStore&lt;byte[]&gt;(resources, @&quot;Samples&quot;));
+            SampleStore.PlaybackConcurrency = OsuGameBase.SAMPLE_CONCURRENCY;
+            CacheAs(SampleStore = new FallbackSampleStore(SampleStore, parent.Get&lt;ISampleStore&gt;()));
+
+            CacheAs(ShaderManager = new RulesetShaderManager(host.Renderer, new NamespacedResourceStore&lt;byte[]&gt;(resources, @&quot;Shaders&quot;), parent.Get&lt;ShaderManager&gt;()));
+
+            RulesetConfigManager = parent.Get&lt;IRulesetConfigCache&gt;().GetConfigFor(ruleset);
+            if (RulesetConfigManager != null)
+                Cache(RulesetConfigManager);
+        }
+
+        #region Disposal
+
+        ~DrawableRulesetDependencies()
+        {
+            // required to potentially clean up sample store from audio hierarchy.
+            Dispose(false);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private bool isDisposed;
+
+        protected void Dispose(bool disposing)
+        {
+            if (isDisposed)
+                return;
+
+            isDisposed = true;
+
+            if (SampleStore.IsNotNull()) SampleStore.Dispose();
+            if (TextureStore.IsNotNull()) TextureStore.Dispose();
+            if (ShaderManager.IsNotNull()) ShaderManager.Dispose();
+        }
+
+        #endregion
+
+        /// &lt;summary&gt;
+        /// A sample store which adds a fallback source and prevents disposal of the fallback source.
+        /// &lt;/summary&gt;
+        private class FallbackSampleStore : ISampleStore
+        {
+            private readonly ISampleStore primary;
+            private readonly ISampleStore fallback;
+
+            public FallbackSampleStore(ISampleStore primary, ISampleStore fallback)
+            {
+                this.primary = primary;
+                this.fallback = fallback;
+            }
+
+            public Sample Get(string name) =&gt; primary.Get(name) ?? fallback.Get(name);
+
+            public async Task&lt;Sample&gt; GetAsync(string name, CancellationToken cancellationToken = default)
+            {
+                return await primary.GetAsync(name, cancellationToken).ConfigureAwait(false)
+                       ?? await fallback.GetAsync(name, cancellationToken).ConfigureAwait(false);
+            }
+
+            public Stream GetStream(string name) =&gt; primary.GetStream(name) ?? fallback.GetStream(name);
+
+            public IEnumerable&lt;string&gt; GetAvailableResources() =&gt; throw new NotSupportedException();
+
+            public void AddAdjustment(AdjustableProperty type, IBindable&lt;double&gt; adjustBindable) =&gt; throw new NotSupportedException();
+
+            public void RemoveAdjustment(AdjustableProperty type, IBindable&lt;double&gt; adjustBindable) =&gt; throw new NotSupportedException();
+
+            public void RemoveAllAdjustments(AdjustableProperty type) =&gt; throw new NotSupportedException();
+
+            public void BindAdjustments(IAggregateAudioAdjustment component) =&gt; throw new NotImplementedException();
+
+            public void UnbindAdjustments(IAggregateAudioAdjustment component) =&gt; throw new NotImplementedException();
+
+            public BindableNumber&lt;double&gt; Volume =&gt; throw new NotSupportedException();
+
+            public BindableNumber&lt;double&gt; Balance =&gt; throw new NotSupportedException();
+
+            public BindableNumber&lt;double&gt; Frequency =&gt; throw new NotSupportedException();
+
+            public BindableNumber&lt;double&gt; Tempo =&gt; throw new NotSupportedException();
+
+            public IBindable&lt;double&gt; AggregateVolume =&gt; throw new NotSupportedException();
+
+            public IBindable&lt;double&gt; AggregateBalance =&gt; throw new NotSupportedException();
+
+            public IBindable&lt;double&gt; AggregateFrequency =&gt; throw new NotSupportedException();
+
+            public IBindable&lt;double&gt; AggregateTempo =&gt; throw new NotSupportedException();
+
+            public void Invalidate(string name) =&gt; throw new NotSupportedException();
+
+            public int PlaybackConcurrency
+            {
+                get =&gt; throw new NotSupportedException();
+                set =&gt; throw new NotSupportedException();
+            }
+
+            public void AddExtension(string extension) =&gt; throw new NotSupportedException();
+
+            public void Dispose()
+            {
+                if (primary.IsNotNull()) primary.Dispose();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// A texture store which adds a fallback source and prevents disposal of the fallback source.
+        /// &lt;/summary&gt;
+        private class FallbackTextureStore : TextureStore
+        {
+            private readonly TextureStore primary;
+            private readonly TextureStore fallback;
+
+            public FallbackTextureStore(IRenderer renderer, TextureStore primary, TextureStore fallback)
+                : base(renderer)
+            {
+                this.primary = primary;
+                this.fallback = fallback;
+            }
+
+            public override Texture? Get(string name, WrapMode wrapModeS, WrapMode wrapModeT)
+                =&gt; primary.Get(name, wrapModeS, wrapModeT) ?? fallback.Get(name, wrapModeS, wrapModeT);
+
+            protected override void Dispose(bool disposing)
+            {
+                base.Dispose(disposing);
+                if (primary.IsNotNull()) primary.Dispose();
+            }
+        }
+
+        private class RulesetShaderManager : ShaderManager
+        {
+            private readonly ShaderManager parent;
+
+            public RulesetShaderManager(IRenderer renderer, NamespacedResourceStore&lt;byte[]&gt; rulesetResources, ShaderManager parent)
+                : base(renderer, rulesetResources)
+            {
+                this.parent = parent;
+            }
+
+            public override IShader? GetCachedShader(string vertex, string fragment) =&gt; base.GetCachedShader(vertex, fragment) ?? parent.GetCachedShader(vertex, fragment);
+
+            public override IShaderPart? GetCachedShaderPart(string name) =&gt; base.GetCachedShaderPart(name) ?? parent.GetCachedShaderPart(name);
+
+            public override byte[]? GetRawData(string fileName) =&gt; base.GetRawData(fileName) ?? parent.GetRawData(fileName);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,44,32,48,0],[41,43,41,47,0],[50,46,50,50,0],[55,62,55,66,0],[58,15,58,27,0],[59,9,59,10,0],[60,13,60,59,0],[62,13,62,47,0],[64,13,64,170,0],[65,13,65,119,0],[67,13,67,129,0],[68,13,68,78,0],[69,13,69,101,0],[71,13,71,167,0],[73,13,73,92,0],[74,13,74,46,0],[75,17,75,45,0],[76,9,76,10,0],[81,9,81,10,0],[83,13,83,28,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,27,0],[89,13,89,39,0],[90,9,90,10,0],[95,9,95,10,0],[96,13,96,28,0],[97,17,97,24,0],[99,13,99,31,0],[101,13,101,41,0],[101,42,101,64,0],[102,13,102,42,0],[102,43,102,66,0],[103,13,103,43,0],[103,44,103,68,0],[104,9,104,10,0],[116,13,116,84,0],[117,13,117,14,0],[118,17,118,40,0],[119,17,119,42,0],[120,13,120,14,0],[122,47,122,86,0],[125,13,125,14,0],[126,17,127,98,0],[128,13,128,14,0],[130,53,130,104,0],[132,67,132,100,0],[134,101,134,134,0],[136,104,136,137,0],[138,74,138,107,0],[140,81,140,116,0],[142,83,142,118,0],[144,53,144,86,0],[146,54,146,87,0],[148,56,148,89,0],[150,52,150,85,0],[152,57,152,90,0],[154,58,154,91,0],[156,60,156,93,0],[158,56,158,89,0],[160,52,160,85,0],[164,24,164,57,0],[165,24,165,57,0],[168,59,168,92,0],[171,13,171,14,0],[172,17,172,41,0],[172,42,172,60,0],[173,13,173,14,0],[185,19,185,33,0],[186,13,186,14,0],[187,17,187,40,0],[188,17,188,42,0],[189,13,189,14,0],[192,20,192,103,0],[195,13,195,14,0],[196,17,196,41,0],[197,17,197,41,0],[197,42,197,60,0],[198,13,198,14,0],[206,19,206,51,0],[207,13,207,14,0],[208,17,208,38,0],[209,13,209,14,0],[211,89,211,171,0],[213,78,213,144,0],[215,68,215,124,0]]);
+    </script>
+  </body>
+</html>

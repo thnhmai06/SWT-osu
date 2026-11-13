@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/IPC/WebSocketChannel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace osu.Game.IPC
+{
+    /// &lt;summary&gt;
+    /// Represents a WebSocket-based communication channel.
+    /// Only supports UTF-8 string-based messages, of maximum size of &lt;see cref=&quot;max_message_size&quot;/&gt; bytes.
+    /// &lt;/summary&gt;
+    public sealed class WebSocketChannel : IDisposable
+    {
+        public event Action&lt;string&gt;? MessageReceived;
+        public event Action? ClosedPrematurely;
+
+        private const int max_message_size = 4096; // bytes
+
+        private readonly byte[] receiveBuffer = new byte[max_message_size];
+        private int currentBufferPosition;
+
+        private readonly WebSocket webSocket;
+        private Task? readWriteTask;
+        private readonly CancellationTokenSource runningTokenSource = new CancellationTokenSource();
+        private bool isDisposed;
+
+        public WebSocketChannel(WebSocket webSocket)
+        {
+            this.webSocket = webSocket;
+        }
+
+        /// &lt;summary&gt;
+        /// Starts the channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;Use this to abort the start.&lt;/param&gt;
+        public void Start(CancellationToken cancellationToken)
+        {
+            if (readWriteTask?.Status &gt;= TaskStatus.Running)
+                throw new InvalidOperationException($@&quot;Cannot {nameof(Start)} more than once.&quot;);
+
+            readWriteTask = Task.Run(readWriteLoop, cancellationToken);
+        }
+
+        private async Task readWriteLoop()
+        {
+            var token = runningTokenSource.Token;
+
+            while (!token.IsCancellationRequested)
+            {
+                ValueWebSocketReceiveResult result;
+
+                try
+                {
+                    result = await webSocket.ReceiveAsync(receiveBuffer.AsMemory(currentBufferPosition), token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // normal when `token` is cancelled.
+                    // at this point the websocket will have entered `Aborted` state on its own, so no further clean-up can be done.
+                    return;
+                }
+                catch (Exception)
+                {
+                    // could throw something like `WebSocketException`s from the other side hard-aborting.
+                    ClosedPrematurely?.Invoke();
+                    return;
+                }
+
+                currentBufferPosition += result.Count;
+
+                if (webSocket.State &gt; WebSocketState.Open)
+                {
+                    if (webSocket.State == WebSocketState.CloseReceived)
+                    {
+                        try
+                        {
+                            // attempt to complete the close handshake nicely.
+                            await webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, @&quot;Received close request&quot;, token).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // an attempt was made, and failed. bail.
+                        }
+                    }
+
+                    ClosedPrematurely?.Invoke();
+                    return;
+                }
+
+                if (result.MessageType == WebSocketMessageType.Binary)
+                {
+                    // see https://github.com/dotnet/runtime/issues/81762#issuecomment-1421029475 for difference between `CloseAsync()` and `CloseOutputAsync()`.
+                    // there is basically no incentive to use `CloseAsync()` in these error scenarios. the point is to drop the errant peer on the floor immediately.
+                    await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidMessageType, @&quot;Binary messages are not supported.&quot;, token).ConfigureAwait(false);
+                    ClosedPrematurely?.Invoke();
+                    return;
+                }
+
+                if (currentBufferPosition &gt;= max_message_size)
+                {
+                    await webSocket.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, $@&quot;Exceeded maximum message size of {max_message_size} bytes.&quot;, token).ConfigureAwait(false);
+                    ClosedPrematurely?.Invoke();
+                    return;
+                }
+
+                if (result.EndOfMessage)
+                {
+                    string message;
+
+                    try
+                    {
+                        message = Encoding.UTF8.GetString(receiveBuffer, 0, currentBufferPosition);
+                    }
+                    catch (ArgumentException)
+                    {
+                        await webSocket.CloseOutputAsync(WebSocketCloseStatus.InvalidPayloadData, @&quot;UTF-8 encoded strings expected.&quot;, token).ConfigureAwait(false);
+                        ClosedPrematurely?.Invoke();
+                        return;
+                    }
+
+                    MessageReceived?.Invoke(message);
+                    Array.Fill(receiveBuffer, (byte)0, 0, currentBufferPosition);
+                    currentBufferPosition = 0;
+                }
+            }
+        }
+
+        public async Task SendAsync(string message)
+        {
+            if (readWriteTask == null)
+                throw new InvalidOperationException($@&quot;Must {nameof(Start)} first.&quot;);
+
+            byte[] bytes = Encoding.UTF8.GetBytes(message);
+            await webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Stops the channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;stoppingToken&quot;&gt;Cancel this to transition from a graceful shutdown to a forced shutdown.&lt;/param&gt;
+        public async Task StopAsync(CancellationToken stoppingToken)
+        {
+            if (isDisposed)
+                return;
+
+            await runningTokenSource.CancelAsync().ConfigureAwait(false);
+
+            if (readWriteTask != null)
+                await readWriteTask.WaitAsync(stoppingToken).ConfigureAwait(false);
+
+            if (stoppingToken.IsCancellationRequested)
+                webSocket.Abort();
+        }
+
+        public void Dispose()
+        {
+            if (isDisposed)
+                return;
+
+            isDisposed = true;
+            webSocket.Dispose();
+            runningTokenSource.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,9,23,76,0],[28,9,28,101,0],[31,9,31,53,0],[32,9,32,10,0],[33,13,33,40,0],[34,9,34,10,0],[41,9,41,10,0],[42,13,42,61,0],[43,17,43,97,0],[45,13,45,72,0],[46,9,46,10,0],[49,9,49,10,0],[50,13,50,50,0],[52,13,52,51,0],[53,13,53,14,0],[57,17,57,18,0],[58,21,58,135,0],[59,17,59,18,0],[60,17,60,51,0],[61,17,61,18,0],[64,21,64,28,0],[66,17,66,34,0],[67,17,67,18,0],[69,21,69,49,0],[70,21,70,28,0],[73,17,73,55,0],[75,17,75,59,0],[76,17,76,18,0],[77,21,77,73,0],[78,21,78,22,0],[80,25,80,26,0],[82,29,82,154,0],[83,25,83,26,0],[84,25,84,30,0],[85,25,85,26,0],[87,25,87,26,0],[88,21,88,22,0],[90,21,90,49,0],[91,21,91,28,0],[94,17,94,71,0],[95,17,95,18,0],[98,21,98,163,0],[99,21,99,49,0],[100,21,100,28,0],[103,17,103,63,0],[104,17,104,18,0],[105,21,105,183,0],[106,21,106,49,0],[107,21,107,28,0],[110,17,110,41,0],[111,17,111,18,0],[115,21,115,22,0],[116,25,116,100,0],[117,21,117,22,0],[118,21,118,46,0],[119,21,119,22,0],[120,25,120,164,0],[121,25,121,53,0],[122,25,122,32,0],[125,21,125,54,0],[126,21,126,82,0],[127,21,127,47,0],[128,17,128,18,0],[129,13,129,14,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,39,0],[135,17,135,86,0],[137,13,137,60,0],[138,13,138,125,0],[139,9,139,10,0],[146,9,146,10,0],[147,13,147,28,0],[148,17,148,24,0],[150,13,150,74,0],[152,13,152,39,0],[153,17,153,84,0],[155,13,155,55,0],[156,17,156,35,0],[157,9,157,10,0],[160,9,160,10,0],[161,13,161,28,0],[162,17,162,24,0],[164,13,164,31,0],[165,13,165,33,0],[166,13,166,42,0],[167,9,167,10,0]]);
+    </script>
+  </body>
+</html>

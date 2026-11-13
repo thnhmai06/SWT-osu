@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/LegacyBeatmapExporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.Localisation;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Skinning;
+using osu.Game.Utils;
+using osuTK;
+
+namespace osu.Game.Database
+{
+    /// &lt;summary&gt;
+    /// Exporter for osu!stable legacy beatmap archives.
+    /// Converts all beatmaps in the set to legacy format and exports it as a legacy package.
+    /// &lt;/summary&gt;
+    public class LegacyBeatmapExporter : LegacyArchiveExporter&lt;BeatmapSetInfo&gt;
+    {
+        public LegacyBeatmapExporter(Storage storage)
+            : base(storage)
+        {
+        }
+
+        protected override Stream? GetFileContents(BeatmapSetInfo model, INamedFileUsage file)
+        {
+            var beatmapInfo = model.Beatmaps.SingleOrDefault(o =&gt; o.Hash == file.File.Hash);
+
+            if (beatmapInfo == null)
+                return base.GetFileContents(model, file);
+
+            // Read the beatmap contents and skin
+            using var contentStream = base.GetFileContents(model, file);
+
+            if (contentStream == null)
+                return null;
+
+            using var contentStreamReader = new LineBufferedReader(contentStream);
+
+            // FIRST_LAZER_VERSION is specified here to avoid flooring object coordinates on decode via `(int)` casts.
+            // we will be making integers out of them lower down, but in a slightly different manner (rounding rather than truncating)
+            var beatmapContent = new LegacyBeatmapDecoder(LegacyBeatmapEncoder.FIRST_LAZER_VERSION).Decode(contentStreamReader);
+
+            var workingBeatmap = new FlatWorkingBeatmap(beatmapContent);
+            var playableBeatmap = workingBeatmap.GetPlayableBeatmap(beatmapInfo.Ruleset);
+
+            using var skinStream = base.GetFileContents(model, file);
+
+            if (skinStream == null)
+                return null;
+
+            using var skinStreamReader = new LineBufferedReader(skinStream);
+            var beatmapSkin = new LegacySkin(new SkinInfo(), null!)
+            {
+                Configuration = new LegacySkinDecoder().Decode(skinStreamReader)
+            };
+
+            using var storyboardStream = base.GetFileContents(model, file);
+
+            if (storyboardStream == null)
+                return null;
+
+            using var storyboardStreamReader = new LineBufferedReader(storyboardStream);
+            var beatmapStoryboard = new LegacyStoryboardDecoder().Decode(storyboardStreamReader);
+            beatmapStoryboard.Beatmap = beatmapContent;
+            beatmapStoryboard.BeatmapInfo = beatmapInfo;
+
+            MutateBeatmap(model, playableBeatmap);
+
+            // Encode to legacy format
+            var stream = new MemoryStream();
+
+            using (var sw = new StreamWriter(stream, Encoding.UTF8, 1024, true))
+            {
+                // Maintain line endings in windows style.
+                // If we don&#39;t do that, uploads to BSS may show changes where there are none.
+                sw.NewLine = &quot;\r\n&quot;;
+
+                new LegacyBeatmapEncoder(playableBeatmap, beatmapSkin, beatmapStoryboard).Encode(sw);
+            }
+
+            stream.Seek(0, SeekOrigin.Begin);
+
+            return stream;
+        }
+
+        protected virtual void MutateBeatmap(BeatmapSetInfo beatmapSet, IBeatmap playableBeatmap)
+        {
+            // Limit grid sizes to those which stable knows about.
+            if (playableBeatmap.GridSize &gt;= 24)
+                playableBeatmap.GridSize = 32;
+            else if (playableBeatmap.GridSize &gt;= 12)
+                playableBeatmap.GridSize = 16;
+            else if (playableBeatmap.GridSize &gt;= 6)
+                playableBeatmap.GridSize = 8;
+            else
+                playableBeatmap.GridSize = 4;
+
+            // Convert beatmap elements to be compatible with legacy format
+            // So we truncate time and position values to integers, and convert paths with multiple segments to B&#233;zier curves
+
+            // We must first truncate all timing points and move all objects in the timing section with it to ensure everything stays snapped
+            for (int i = 0; i &lt; playableBeatmap.ControlPointInfo.TimingPoints.Count; i++)
+            {
+                var timingPoint = playableBeatmap.ControlPointInfo.TimingPoints[i];
+                double offset = Math.Floor(timingPoint.Time) - timingPoint.Time;
+                double nextTimingPointTime = i + 1 &lt; playableBeatmap.ControlPointInfo.TimingPoints.Count
+                    ? playableBeatmap.ControlPointInfo.TimingPoints[i + 1].Time
+                    : double.PositiveInfinity;
+
+                // Offset all control points in the timing section (including the current one)
+                foreach (var controlPoint in playableBeatmap.ControlPointInfo.AllControlPoints.Where(o =&gt; o.Time &gt;= timingPoint.Time &amp;&amp; o.Time &lt; nextTimingPointTime))
+                    controlPoint.Time += offset;
+
+                // Offset all hit objects in the timing section
+                foreach (var hitObject in playableBeatmap.HitObjects.Where(o =&gt; o.StartTime &gt;= timingPoint.Time &amp;&amp; o.StartTime &lt; nextTimingPointTime))
+                    hitObject.StartTime += offset;
+            }
+
+            foreach (var controlPoint in playableBeatmap.ControlPointInfo.AllControlPoints)
+                controlPoint.Time = Math.Floor(controlPoint.Time);
+
+            for (int i = 0; i &lt; playableBeatmap.Breaks.Count; i++)
+                playableBeatmap.Breaks[i] = new BreakPeriod(Math.Floor(playableBeatmap.Breaks[i].StartTime), Math.Floor(playableBeatmap.Breaks[i].EndTime));
+
+            foreach (var hitObject in playableBeatmap.HitObjects)
+            {
+                // Truncate end time before truncating start time because end time is dependent on start time
+                if (hitObject is IHasDuration hasDuration &amp;&amp; hitObject is not IHasPath)
+                    hasDuration.Duration = Math.Floor(hasDuration.EndTime) - Math.Floor(hitObject.StartTime);
+
+                hitObject.StartTime = Math.Floor(hitObject.StartTime);
+
+                if (hitObject is IHasXPosition hasXPosition)
+                    hasXPosition.X = MathF.Round(hasXPosition.X);
+
+                if (hitObject is IHasYPosition hasYPosition)
+                    hasYPosition.Y = MathF.Round(hasYPosition.Y);
+
+                if (hitObject is not IHasPath hasPath) continue;
+
+                // stable&#39;s hit object parsing expects the entire slider to use only one type of curve,
+                // and happens to use the last non-empty curve type read for the entire slider.
+                // this clear of the last control point type handles an edge case
+                // wherein the last control point of an otherwise-single-segment slider path has a different type than previous,
+                // which would lead to sliders being mangled when exported back to stable.
+                // normally, that would be handled by the `BezierConverter.ConvertToModernBezier()` call below,
+                // which outputs a slider path containing only BEZIER control points,
+                // but a non-inherited last control point is (rightly) not considered to be starting a new segment,
+                // therefore it would fail to clear the `CountSegments() &lt;= 1` check.
+                // by clearing explicitly we both fix the issue and avoid unnecessary conversions to BEZIER.
+                if (hasPath.Path.ControlPoints.Count &gt; 1)
+                    hasPath.Path.ControlPoints[^1].Type = null;
+
+                if (BezierConverter.CountSegments(hasPath.Path.ControlPoints) &lt;= 1
+                    &amp;&amp; hasPath.Path.ControlPoints[0].Type!.Value.Degree == null)
+                {
+                    // Round every control point to integer positions before skipping to the next hit object
+                    for (int i = 0; i &lt; hasPath.Path.ControlPoints.Count; i++)
+                    {
+                        var position = new Vector2(
+                            MathF.Round(hasPath.Path.ControlPoints[i].Position.X),
+                            MathF.Round(hasPath.Path.ControlPoints[i].Position.Y));
+
+                        hasPath.Path.ControlPoints[i].Position = position;
+                    }
+
+                    continue;
+                }
+
+                var convertedToBezier = BezierConverter.ConvertToModernBezier(hasPath.Path.ControlPoints);
+
+                hasPath.Path.ControlPoints.Clear();
+
+                for (int i = 0; i &lt; convertedToBezier.Count; i++)
+                {
+                    var convertedPoint = convertedToBezier[i];
+
+                    // Round control points to integer positions
+                    var position = new Vector2(
+                        MathF.Round(convertedPoint.Position.X),
+                        MathF.Round(convertedPoint.Position.Y));
+
+                    // stable only supports a single curve type specification per slider.
+                    // we exploit the fact that the converted-to-B&#233;zier path only has B&#233;zier segments,
+                    // and thus we specify the B&#233;zier curve type once ever at the start of the slider.
+                    hasPath.Path.ControlPoints.Add(new PathControlPoint(position, i == 0 ? PathType.BEZIER : null));
+
+                    // however, the B&#233;zier path as output by the converter has multiple segments.
+                    // `LegacyBeatmapEncoder` will attempt to encode this by emitting per-control-point curve type specs which don&#39;t do anything for stable.
+                    // instead, stable expects control points that start a segment to be present in the path twice in succession.
+                    if (convertedPoint.Type == PathType.BEZIER &amp;&amp; i &gt; 0)
+                        hasPath.Path.ControlPoints.Add(new PathControlPoint(position));
+                }
+            }
+        }
+
+        protected override string FileExtension =&gt; @&quot;.osz&quot;;
+
+        public Task ExportAsync(Live&lt;BeatmapInfo&gt; beatmap) =&gt; Task.Run(() =&gt;
+        {
+            string itemFilename = Path.GetFileNameWithoutExtension(beatmap.PerformRead(s =&gt; s.File!.Filename.GetValidFilename()));
+            const string osu_extension = @&quot;.osu&quot;;
+
+            if (itemFilename.Length &gt; MAX_FILENAME_LENGTH - osu_extension.Length)
+                itemFilename = itemFilename.Remove(MAX_FILENAME_LENGTH - osu_extension.Length);
+
+            IEnumerable&lt;string&gt; existingExports = ExportStorage
+                                                  .GetFiles(string.Empty, $&quot;{itemFilename}*{osu_extension}&quot;)
+                                                  .Concat(ExportStorage.GetDirectories(string.Empty));
+
+            string filename = NamingUtils.GetNextBestFilename(existingExports, $&quot;{itemFilename}{osu_extension}&quot;);
+
+            ProgressNotification notification = new ProgressNotification
+            {
+                State = ProgressNotificationState.Active,
+                Text = NotificationsStrings.FileExportOngoing(itemFilename),
+            };
+
+            PostNotification?.Invoke(notification);
+
+            try
+            {
+                beatmap.PerformRead(b =&gt;
+                {
+                    using var exportStream = ExportStorage.CreateFileSafely(filename);
+                    using var inputFile = GetFileContents(b.BeatmapSet!, b.File!);
+
+                    if (inputFile == null)
+                        throw new InvalidOperationException($&quot;Beatmap file {b.File!.Filename} could not be opened!&quot;);
+
+                    inputFile.CopyTo(exportStream);
+                });
+            }
+            catch
+            {
+                notification.State = ProgressNotificationState.Cancelled;
+
+                // cleanup if export is failed or canceled.
+                ExportStorage.Delete(filename);
+                throw;
+            }
+
+            notification.CompletionText = NotificationsStrings.FileExportFinished(itemFilename);
+            notification.CompletionClickAction = () =&gt; ExportStorage.PresentFileExternally(filename);
+            notification.State = ProgressNotificationState.Completed;
+        });
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,15,33,28,0],[34,9,34,10,0],[35,9,35,10,0],[38,9,38,10,0],[39,13,39,67,0],[39,67,39,91,0],[39,91,39,93,0],[41,13,41,37,0],[42,17,42,58,0],[45,13,45,73,0],[47,13,47,39,0],[48,17,48,29,0],[50,13,50,83,0],[54,13,54,129,0],[56,13,56,73,0],[57,13,57,90,0],[59,13,59,70,0],[61,13,61,36,0],[62,17,62,29,0],[64,13,64,77,0],[65,13,68,15,0],[70,13,70,76,0],[72,13,72,42,0],[73,17,73,29,0],[75,13,75,89,0],[76,13,76,98,0],[77,13,77,56,0],[78,13,78,57,0],[80,13,80,51,0],[83,13,83,45,0],[85,20,85,80,0],[86,13,86,14,0],[89,17,89,37,0],[91,17,91,102,0],[92,13,92,14,0],[94,13,94,46,0],[96,13,96,27,0],[97,9,97,10,0],[100,9,100,10,0],[102,13,102,48,0],[103,17,103,47,0],[104,18,104,53,0],[105,17,105,47,0],[106,18,106,52,0],[107,17,107,46,0],[109,17,109,46,0],[115,18,115,27,0],[115,29,115,84,0],[115,86,115,89,0],[116,13,116,14,0],[117,17,117,84,0],[118,17,118,81,0],[119,17,121,47,0],[124,17,124,24,0],[124,26,124,42,0],[124,43,124,45,0],[124,46,124,107,0],[124,107,124,165,0],[124,165,124,166,0],[125,21,125,49,0],[128,17,128,24,0],[128,26,128,39,0],[128,40,128,42,0],[128,43,128,81,0],[128,81,128,149,0],[128,149,128,150,0],[129,21,129,51,0],[130,13,130,14,0],[132,13,132,20,0],[132,22,132,38,0],[132,39,132,41,0],[132,42,132,91,0],[133,17,133,67,0],[135,18,135,27,0],[135,29,135,61,0],[135,63,135,66,0],[136,17,136,157,0],[138,13,138,20,0],[138,22,138,35,0],[138,36,138,38,0],[138,39,138,65,0],[139,13,139,14,0],[141,17,141,88,0],[142,21,142,110,0],[144,17,144,71,0],[146,17,146,61,0],[147,21,147,66,0],[149,17,149,61,0],[150,21,150,66,0],[152,17,152,55,0],[152,56,152,65,0],[164,17,164,58,0],[165,21,165,64,0],[167,17,168,81,0],[169,17,169,18,0],[171,26,171,35,0],[171,37,171,73,0],[171,75,171,78,0],[172,21,172,22,0],[173,25,175,84,0],[177,25,177,75,0],[178,21,178,22,0],[180,21,180,30,0],[183,17,183,107,0],[185,17,185,52,0],[187,22,187,31,0],[187,33,187,60,0],[187,62,187,65,0],[188,17,188,18,0],[189,21,189,63,0],[192,21,194,65,0],[199,21,199,117,0],[204,21,204,73,0],[205,25,205,88,0],[206,17,206,18,0],[207,13,207,14,0],[208,9,208,10,0],[210,52,210,59,0],[212,63,213,9,0],[213,9,213,10,0],[213,10,214,13,0],[214,13,214,93,0],[214,93,214,128,0],[214,128,214,131,0],[214,131,217,13,0],[217,13,217,82,0],[217,82,218,17,0],[218,17,218,96,0],[218,96,220,13,0],[220,13,222,103,0],[222,103,224,13,0],[224,13,224,114,0],[224,114,226,13,0],[226,13,230,15,0],[230,15,232,13,0],[232,13,232,52,0],[232,52,235,13,0],[235,13,235,14,0],[235,14,236,17,0],[236,17,237,17,0],[237,17,237,18,0],[237,18,238,21,0],[238,21,238,87,0],[238,87,239,21,0],[239,21,239,83,0],[239,83,241,21,0],[241,21,241,43,0],[241,43,242,25,0],[242,25,242,118,0],[242,118,244,21,0],[244,21,244,52,0],[244,52,245,17,0],[245,17,245,18,0],[245,18,245,20,0],[245,20,246,13,0],[246,13,246,14,0],[246,14,247,13,0],[247,13,247,18,0],[247,18,248,13,0],[248,13,248,14,0],[248,14,249,17,0],[249,17,249,74,0],[249,74,252,17,0],[252,17,252,48,0],[252,48,253,17,0],[253,17,253,23,0],[253,23,256,13,0],[256,13,256,97,0],[256,97,257,13,0],[257,13,257,56,0],[257,56,257,101,0],[257,101,257,102,0],[257,102,258,13,0],[258,13,258,70,0],[258,70,259,9,0],[259,9,259,10,0],[259,10,259,11,0]]);
+    </script>
+  </body>
+</html>

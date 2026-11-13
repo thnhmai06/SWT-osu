@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/OnlinePlayScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Diagnostics;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Screens.Menu;
+using osu.Game.Screens.OnlinePlay.Lounge;
+using osu.Game.Users;
+
+namespace osu.Game.Screens.OnlinePlay
+{
+    [Cached]
+    public abstract partial class OnlinePlayScreen : OsuScreen, IHasSubScreenStack
+    {
+        [Cached]
+        protected readonly OverlayColourProvider ColourProvider = new OverlayColourProvider(OverlayColourScheme.Plum);
+
+        // Without this, the beatmap / menu background will be displayed behind the online play overlays.
+        // This adds needless load, and in some cases is visible when everything in front is transparent momentarily (song select).
+        protected override BackgroundScreen CreateBackground() =&gt; new BackgroundScreenBlack(WaveContainer.APPEAR_DURATION);
+
+        public IScreen CurrentSubScreen =&gt; screenStack.CurrentScreen;
+
+        public override bool CursorVisible =&gt; (screenStack.CurrentScreen as IOnlinePlaySubScreen)?.CursorVisible ?? true;
+
+        // this is required due to PlayerLoader eventually being pushed to the main stack
+        // while leases may be taken out by a subscreen.
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        protected LoungeSubScreen Lounge { get; private set; } = null!;
+
+        private readonly ScreenStack screenStack = new OnlinePlaySubScreenStack { RelativeSizeAxes = Axes.Both };
+        private OnlinePlayScreenWaveContainer waves = null!;
+
+        [Cached]
+        private readonly OngoingOperationTracker ongoingOperationTracker = new OngoingOperationTracker();
+
+        [Resolved]
+        protected IAPIProvider API { get; private set; } = null!;
+
+        protected OnlinePlayScreen()
+        {
+            Anchor = Anchor.Centre;
+            Origin = Anchor.Centre;
+            RelativeSizeAxes = Axes.Both;
+            Padding = new MarginPadding { Horizontal = -HORIZONTAL_OVERFLOW_PADDING };
+        }
+
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChild = waves = new OnlinePlayScreenWaveContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    screenStack,
+                    new Header(ScreenTitle, screenStack),
+                    ongoingOperationTracker,
+                }
+            };
+        }
+
+        private void onlineStateChanged(ValueChangedEvent&lt;APIState&gt; state) =&gt; Schedule(() =&gt;
+        {
+            if (state.NewValue != APIState.Online)
+                Schedule(forcefullyExit);
+        });
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            screenStack.ScreenPushed += screenPushed;
+            screenStack.ScreenExited += screenExited;
+
+            screenStack.Push(Lounge = CreateLounge());
+
+            apiState.BindTo(API.State);
+            apiState.BindValueChanged(onlineStateChanged, true);
+        }
+
+        private void forcefullyExit()
+        {
+            Logger.Log($&quot;{this} forcefully exiting due to loss of API connection&quot;);
+
+            // This is temporary since we don&#39;t currently have a way to force screens to be exited
+            // See also: `DailyChallenge.forcefullyExit()`
+            if (this.IsCurrentScreen())
+            {
+                while (this.IsCurrentScreen())
+                    this.Exit();
+            }
+            // Also handle the case where a child screen is current (ie. gameplay).
+            else if (this.GetChildScreen() != null)
+            {
+                this.MakeCurrent();
+                Schedule(forcefullyExit);
+            }
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            this.FadeIn();
+            waves.Show();
+
+            Mods.SetDefault();
+
+            if (Lounge.IsCurrentScreen())
+                Lounge.OnEntering(e);
+            else
+                Lounge.MakeCurrent();
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            this.FadeIn(250);
+            this.ScaleTo(1, 250, Easing.OutSine);
+
+            Debug.Assert(screenStack.CurrentScreen != null);
+
+            // if a subscreen was pushed to the nested stack while the stack was not present, this path will proxy `OnResuming()`
+            // to the subscreen before `OnEntering()` can even be called for the subscreen, breaking ordering expectations.
+            // to work around this, do not proxy resume to screens that haven&#39;t loaded yet.
+            if ((screenStack.CurrentScreen as Drawable)?.IsLoaded == true)
+                screenStack.CurrentScreen.OnResuming(e);
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            this.ScaleTo(1.1f, 250, Easing.InSine);
+            this.FadeOut(250);
+
+            Debug.Assert(screenStack.CurrentScreen != null);
+
+            // if a subscreen was pushed to the nested stack while the stack was not present, this path will proxy `OnSuspending()`
+            // to the subscreen before `OnEntering()` can even be called for the subscreen, breaking ordering expectations.
+            // to work around this, do not proxy suspend to screens that haven&#39;t loaded yet.
+            if ((screenStack.CurrentScreen as Drawable)?.IsLoaded == true)
+                screenStack.CurrentScreen.OnSuspending(e);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            while (screenStack.CurrentScreen != null &amp;&amp; screenStack.CurrentScreen is not LoungeSubScreen)
+            {
+                var subScreen = (Screen)screenStack.CurrentScreen;
+
+                subScreen.Exit();
+
+                // If it&#39;s still current after calling Exit(), it must have blocked OnExiting().
+                if (subScreen.IsCurrentScreen())
+                    return true;
+            }
+
+            waves.Hide();
+
+            this.Delay(WaveContainer.DISAPPEAR_DURATION).FadeOut();
+
+            return base.OnExiting(e);
+        }
+
+        public override bool OnBackButton()
+        {
+            if (!(screenStack.CurrentScreen is IOnlinePlaySubScreen onlineSubScreen))
+                return false;
+
+            if (((Drawable)onlineSubScreen).IsLoaded &amp;&amp; onlineSubScreen.AllowUserExit &amp;&amp; onlineSubScreen.OnBackButton())
+                return true;
+
+            if (screenStack.CurrentScreen != null &amp;&amp; !(screenStack.CurrentScreen is LoungeSubScreen))
+            {
+                screenStack.Exit();
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override void LogoExiting(OsuLogo logo)
+        {
+            base.LogoExiting(logo);
+
+            // the wave overlay transition takes longer than expected to run.
+            logo.Delay(WaveContainer.DISAPPEAR_DURATION / 2).FadeOut();
+        }
+
+        private void screenPushed(IScreen lastScreen, IScreen newScreen)
+        {
+            subScreenChanged(lastScreen, newScreen);
+        }
+
+        private void screenExited(IScreen lastScreen, IScreen newScreen)
+        {
+            subScreenChanged(lastScreen, newScreen);
+
+            if (screenStack.CurrentScreen == null &amp;&amp; this.IsCurrentScreen())
+                this.Exit();
+        }
+
+        private void subScreenChanged(IScreen lastScreen, IScreen newScreen)
+        {
+            if (lastScreen is IOsuScreen lastOsuScreen)
+                Activity.UnbindFrom(lastOsuScreen.Activity);
+
+            if (newScreen is IOsuScreen newOsuScreen)
+                ((IBindable&lt;UserActivity&gt;)Activity).BindTo(newOsuScreen.Activity);
+        }
+
+        protected abstract string ScreenTitle { get; }
+
+        protected abstract LoungeSubScreen CreateLounge();
+
+        ScreenStack IHasSubScreenStack.SubScreenStack =&gt; screenStack;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,119,0],[28,67,28,123,0],[30,44,30,69,0],[32,47,32,121,0],[36,71,36,75,0],[38,44,38,48,0],[38,49,38,61,0],[38,66,38,71,0],[40,9,40,114,0],[41,9,41,61,0],[44,9,44,106,0],[47,38,47,42,0],[47,43,47,55,0],[47,60,47,65,0],[49,9,49,37,0],[50,9,50,10,0],[51,13,51,36,0],[52,13,52,36,0],[53,13,53,42,0],[54,13,54,87,0],[55,9,55,10,0],[57,9,57,82,0],[61,9,61,10,0],[62,13,71,15,0],[72,9,72,10,0],[74,79,75,9,0],[75,9,75,10,0],[75,10,76,13,0],[76,13,76,51,0],[76,51,77,17,0],[77,17,77,42,0],[77,42,78,9,0],[78,9,78,10,0],[78,10,78,11,0],[81,9,81,10,0],[82,13,82,33,0],[84,13,84,54,0],[85,13,85,54,0],[87,13,87,55,0],[89,13,89,40,0],[90,13,90,65,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,84,0],[99,13,99,40,0],[100,13,100,14,0],[101,17,101,47,0],[102,21,102,33,0],[103,13,103,14,0],[105,18,105,52,0],[106,13,106,14,0],[107,17,107,36,0],[108,17,108,42,0],[109,13,109,14,0],[110,9,110,10,0],[113,9,113,10,0],[114,13,114,32,0],[116,13,116,27,0],[117,13,117,26,0],[119,13,119,31,0],[121,13,121,42,0],[122,17,122,38,0],[124,17,124,38,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,32,0],[131,13,131,30,0],[132,13,132,50,0],[134,13,134,61,0],[139,13,139,75,0],[140,17,140,57,0],[141,9,141,10,0],[144,9,144,10,0],[145,13,145,34,0],[147,13,147,52,0],[148,13,148,31,0],[150,13,150,61,0],[155,13,155,75,0],[156,17,156,59,0],[157,9,157,10,0],[160,9,160,10,0],[161,13,161,106,0],[162,13,162,14,0],[163,17,163,67,0],[165,17,165,34,0],[168,17,168,49,0],[169,21,169,33,0],[170,13,170,14,0],[172,13,172,26,0],[174,13,174,68,0],[176,13,176,38,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,86,0],[182,17,182,30,0],[184,13,184,121,0],[185,17,185,29,0],[187,13,187,102,0],[188,13,188,14,0],[189,17,189,36,0],[190,17,190,29,0],[193,13,193,26,0],[194,9,194,10,0],[197,9,197,10,0],[198,13,198,36,0],[201,13,201,72,0],[202,9,202,10,0],[205,9,205,10,0],[206,13,206,53,0],[207,9,207,10,0],[210,9,210,10,0],[211,13,211,53,0],[213,13,213,77,0],[214,17,214,29,0],[215,9,215,10,0],[218,9,218,10,0],[219,13,219,56,0],[220,17,220,61,0],[222,13,222,54,0],[223,17,223,83,0],[224,9,224,10,0],[230,58,230,69,0]]);
+    </script>
+  </body>
+</html>

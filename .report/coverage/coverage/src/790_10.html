@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/Edit/CatchHitObjectComposer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Catch.UI;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Edit.Tools;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
+
+namespace osu.Game.Rulesets.Catch.Edit
+{
+    [Cached]
+    public partial class CatchHitObjectComposer : ScrollingHitObjectComposer&lt;CatchHitObject, CatchAction&gt;, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        public const float DISTANCE_SNAP_RADIUS = 50;
+
+        public override Bindable&lt;TernaryState&gt;? SelectionNewComboState { get; } = new Bindable&lt;TernaryState&gt;();
+
+        private CatchDistanceSnapGrid distanceSnapGrid = null!;
+
+        private readonly BindableDouble timeRangeMultiplier = new BindableDouble(1)
+        {
+            MinValue = 1,
+            MaxValue = 10,
+        };
+
+        [Cached(typeof(IDistanceSnapProvider))]
+        protected readonly CatchDistanceSnapProvider DistanceSnapProvider = new CatchDistanceSnapProvider();
+
+        public CatchHitObjectComposer(CatchRuleset ruleset)
+            : base(ruleset)
+        {
+        }
+
+        private Bindable&lt;bool&gt; limitPlacementToCurrentTime = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            limitPlacementToCurrentTime = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+
+            AddInternal(DistanceSnapProvider);
+            DistanceSnapProvider.AttachToToolbox(RightToolbox);
+
+            // todo: enable distance spacing once catch supports applying it to its existing distance snap grid implementation.
+            DistanceSnapProvider.DistanceSpacingMultiplier.Disabled = true;
+
+            LayerBelowRuleset.Add(new PlayfieldBorder
+            {
+                Anchor = Anchor.BottomCentre,
+                Origin = Anchor.BottomCentre,
+                RelativeSizeAxes = Axes.X,
+                Height = CatchPlayfield.HEIGHT,
+                PlayfieldBorderStyle = { Value = PlayfieldBorderStyle.Corners }
+            });
+
+            LayerBelowRuleset.Add(distanceSnapGrid = new CatchDistanceSnapGrid(new[]
+            {
+                0.0,
+                Catcher.BASE_DASH_SPEED, -Catcher.BASE_DASH_SPEED,
+                Catcher.BASE_WALK_SPEED, -Catcher.BASE_WALK_SPEED,
+            }));
+        }
+
+        public override SnapResult FindSnappedPositionAndTime(Vector2 screenSpacePosition)
+        {
+            if (limitPlacementToCurrentTime.Value
+                &amp;&amp; BlueprintContainer.CurrentHitObjectPlacement?.PlacementActive == PlacementBlueprint.PlacementState.Waiting)
+            {
+                var playfield = (CatchPlayfield)Playfield;
+                double time = BeatSnapProvider.SnapTime(EditorClock.CurrentTime);
+                return new SnapResult(playfield.ScreenSpacePositionAtTime(time), time, playfield);
+            }
+
+            return base.FindSnappedPositionAndTime(screenSpacePosition);
+        }
+
+        protected override Drawable CreateHitObjectInspector() =&gt; new CatchHitObjectInspector(DistanceSnapProvider);
+
+        protected override IEnumerable&lt;Drawable&gt; CreateTernaryButtons()
+            =&gt; base.CreateTernaryButtons()
+                   .Concat(DistanceSnapProvider.CreateTernaryButtons());
+
+        protected override DrawableRuleset&lt;CatchHitObject&gt; CreateDrawableRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods) =&gt;
+            new DrawableCatchEditorRuleset(ruleset, beatmap, mods)
+            {
+                TimeRangeMultiplier = { BindTarget = timeRangeMultiplier, }
+            };
+
+        protected override ComposeBlueprintContainer CreateBlueprintContainer() =&gt; new CatchBlueprintContainer(this);
+
+        protected override BeatSnapGrid CreateBeatSnapGrid() =&gt; new CatchBeatSnapGrid();
+
+        protected override IReadOnlyList&lt;CompositionTool&lt;CatchAction&gt;&gt; CompositionTools =&gt; new CompositionTool&lt;CatchAction&gt;[]
+        {
+            new FruitCompositionTool(),
+            new JuiceStreamCompositionTool(),
+            new BananaShowerCompositionTool()
+        };
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                // Note that right now these are hard to use as the default key bindings conflict with existing editor key bindings.
+                // In the future we will want to expose this via UI and potentially change the key bindings to be editor-specific.
+                // May be worth considering standardising &quot;zoom&quot; behaviour with what the timeline uses (ie. alt-wheel) but that may cause new conflicts.
+                case GlobalAction.IncreaseScrollSpeed:
+                    this.TransformBindableTo(timeRangeMultiplier, timeRangeMultiplier.Value - 1, 200, Easing.OutQuint);
+                    return true;
+
+                case GlobalAction.DecreaseScrollSpeed:
+                    this.TransformBindableTo(timeRangeMultiplier, timeRangeMultiplier.Value + 1, 200, Easing.OutQuint);
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat)
+                return false;
+
+            handleToggleViaKey(e);
+            return base.OnKeyDown(e);
+        }
+
+        protected override void OnKeyUp(KeyUpEvent e)
+        {
+            handleToggleViaKey(e);
+            base.OnKeyUp(e);
+        }
+
+        private void handleToggleViaKey(KeyboardEvent key)
+        {
+            DistanceSnapProvider.HandleToggleViaKey(key);
+        }
+
+        public SnapResult? TryDistanceSnap(Vector2 screenSpacePosition)
+        {
+            if (distanceSnapGrid.IsPresent &amp;&amp; distanceSnapGrid.GetSnappedPosition(screenSpacePosition) is SnapResult snapResult)
+                return snapResult;
+
+            return null;
+        }
+
+        private PalpableCatchHitObject? getLastSnappableHitObject(double time)
+        {
+            var hitObject = EditorBeatmap.HitObjects.OfType&lt;CatchHitObject&gt;().LastOrDefault(h =&gt; h.GetEndTime() &lt; time &amp;&amp; !(h is BananaShower));
+
+            switch (hitObject)
+            {
+                case Fruit fruit:
+                    return fruit;
+
+                case JuiceStream juiceStream:
+                    return juiceStream.NestedHitObjects.OfType&lt;PalpableCatchHitObject&gt;().LastOrDefault(h =&gt; !(h is TinyDroplet));
+
+                default:
+                    return null;
+            }
+        }
+
+        private PalpableCatchHitObject? getDistanceSnapGridSourceHitObject()
+        {
+            switch (BlueprintContainer.CurrentTool)
+            {
+                case SelectTool:
+                    if (EditorBeatmap.SelectedHitObjects.Count == 0)
+                        return null;
+
+                    double minTime = EditorBeatmap.SelectedHitObjects.Min(hitObject =&gt; hitObject.StartTime);
+                    return getLastSnappableHitObject(minTime);
+
+                case FruitCompositionTool:
+                case JuiceStreamCompositionTool:
+                    if (!CursorInPlacementArea)
+                        return null;
+
+                    if (EditorBeatmap.PlacementObject.Value is JuiceStream)
+                    {
+                        // Juice stream path is not subject to snapping.
+                        if (BlueprintContainer.CurrentPlacement.PlacementActive is PlacementBlueprint.PlacementState.Active)
+                            return null;
+                    }
+
+                    double timeAtCursor = ((CatchPlayfield)Playfield).TimeAtScreenSpacePosition(InputManager.CurrentState.Mouse.Position);
+                    return getLastSnappableHitObject(timeAtCursor);
+
+                default:
+                    return null;
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            updateDistanceSnapGrid();
+        }
+
+        private void updateDistanceSnapGrid()
+        {
+            if (DistanceSnapProvider.DistanceSnapToggle.Value != TernaryState.True)
+            {
+                distanceSnapGrid.Hide();
+                return;
+            }
+
+            var sourceHitObject = getDistanceSnapGridSourceHitObject();
+
+            if (sourceHitObject == null)
+            {
+                distanceSnapGrid.Hide();
+                return;
+            }
+
+            distanceSnapGrid.Show();
+            distanceSnapGrid.StartTime = sourceHitObject.GetEndTime();
+            distanceSnapGrid.StartX = sourceHitObject.EffectiveX;
+        }
+
+        #region Clipboard handling
+
+        public override string ConvertSelectionToString()
+            =&gt; string.Join(&#39;,&#39;, EditorBeatmap.SelectedHitObjects.Cast&lt;CatchHitObject&gt;().OrderBy(h =&gt; h.StartTime)
+                                             .Select(h =&gt; (h.IndexInCurrentCombo + 1).ToString(CultureInfo.InvariantCulture)));
+
+        // 1,2,3,4 ...
+        private static readonly Regex selection_regex = new Regex(@&quot;^\d+(,\d+)*$&quot;, RegexOptions.Compiled);
+
+        public override void SelectFromTimestamp(double timestamp, string objectDescription)
+        {
+            if (!selection_regex.IsMatch(objectDescription))
+                return;
+
+            List&lt;CatchHitObject&gt; remainingHitObjects = EditorBeatmap.HitObjects.Cast&lt;CatchHitObject&gt;().Where(h =&gt; h.StartTime &gt;= timestamp).ToList();
+            string[] splitDescription = objectDescription.Split(&#39;,&#39;);
+
+            for (int i = 0; i &lt; splitDescription.Length; i++)
+            {
+                if (!int.TryParse(splitDescription[i], out int combo) || combo &lt; 1)
+                    continue;
+
+                CatchHitObject? current = remainingHitObjects.FirstOrDefault(h =&gt; h.IndexInCurrentCombo + 1 == combo);
+
+                if (current == null)
+                    continue;
+
+                EditorBeatmap.SelectedHitObjects.Add(current);
+
+                if (i &lt; splitDescription.Length - 1)
+                    remainingHitObjects = remainingHitObjects.Where(h =&gt; h != current &amp;&amp; h.StartTime &gt;= current.StartTime).ToList();
+            }
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,74,34,78,0],[34,83,34,111,0],[36,9,36,64,0],[38,9,42,11,0],[45,9,45,109,0],[48,15,48,28,0],[49,9,49,10,0],[50,9,50,10,0],[52,9,52,68,0],[56,9,56,10,0],[57,13,57,106,0],[59,13,59,47,0],[60,13,60,64,0],[63,13,63,76,0],[65,13,72,16,0],[74,13,79,17,0],[80,9,80,10,0],[83,9,83,10,0],[84,13,85,127,0],[86,13,86,14,0],[87,17,87,59,0],[88,17,88,82,0],[89,17,89,99,0],[92,13,92,73,0],[93,9,93,10,0],[95,67,95,116,0],[98,16,99,72,0],[102,13,105,14,0],[107,84,107,117,0],[109,65,109,88,0],[111,92,116,10,0],[119,9,119,10,0],[120,13,120,30,0],[126,21,126,120,0],[127,21,127,33,0],[130,21,130,120,0],[131,21,131,33,0],[134,13,134,26,0],[135,9,135,10,0],[138,9,138,10,0],[139,9,139,10,0],[142,9,142,10,0],[143,13,143,26,0],[144,17,144,30,0],[146,13,146,35,0],[147,13,147,38,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,35,0],[153,13,153,29,0],[154,9,154,10,0],[157,9,157,10,0],[158,13,158,58,0],[159,9,159,10,0],[162,9,162,10,0],[163,13,163,129,0],[164,17,164,35,0],[166,13,166,25,0],[167,9,167,10,0],[170,9,170,10,0],[171,13,171,98,0],[171,98,171,143,0],[171,143,171,145,0],[173,13,173,31,0],[176,21,176,34,0],[179,21,179,109,0],[179,109,179,128,0],[179,128,179,130,0],[182,21,182,33,0],[184,9,184,10,0],[187,9,187,10,0],[188,13,188,52,0],[191,21,191,69,0],[192,25,192,37,0],[194,21,194,88,0],[194,88,194,107,0],[194,107,194,109,0],[195,21,195,63,0],[199,21,199,48,0],[200,25,200,37,0],[202,21,202,76,0],[203,21,203,22,0],[205,25,205,125,0],[206,29,206,41,0],[207,21,207,22,0],[209,21,209,139,0],[210,21,210,68,0],[213,21,213,33,0],[215,9,215,10,0],[218,9,218,10,0],[219,13,219,27,0],[221,13,221,38,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,84,0],[227,13,227,14,0],[228,17,228,41,0],[229,17,229,24,0],[232,13,232,72,0],[234,13,234,41,0],[235,13,235,14,0],[236,17,236,41,0],[237,17,237,24,0],[240,13,240,37,0],[241,13,241,71,0],[242,13,242,66,0],[243,9,243,10,0],[248,16,248,102,0],[248,102,248,113,0],[248,113,249,59,0],[249,59,249,125,0],[249,125,249,127,0],[252,9,252,107,0],[255,9,255,10,0],[256,13,256,61,0],[257,17,257,24,0],[259,13,259,115,0],[259,115,259,139,0],[259,139,259,150,0],[260,13,260,70,0],[262,18,262,27,0],[262,29,262,56,0],[262,58,262,61,0],[263,13,263,14,0],[264,17,264,84,0],[265,21,265,30,0],[267,17,267,83,0],[267,83,267,117,0],[267,117,267,119,0],[269,17,269,37,0],[270,21,270,30,0],[272,17,272,63,0],[274,17,274,53,0],[275,21,275,74,0],[275,74,275,122,0],[275,122,275,133,0],[276,13,276,14,0],[277,9,277,10,0]]);
+    </script>
+  </body>
+</html>

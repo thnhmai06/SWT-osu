@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/ModelDownloader.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
+using Humanizer;
+using osu.Framework.Logging;
+using osu.Game.Extensions;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Overlays.Notifications;
+
+namespace osu.Game.Database
+{
+    public abstract partial class ModelDownloader&lt;TModel, T&gt; : IModelDownloader&lt;T&gt;
+        where TModel : class, IHasGuidPrimaryKey, ISoftDelete, IEquatable&lt;TModel&gt;, T
+        where T : class
+    {
+        public Action&lt;Notification&gt;? PostNotification { protected get; set; }
+
+        public event Action&lt;ArchiveDownloadRequest&lt;T&gt;&gt;? DownloadBegan;
+
+        public event Action&lt;ArchiveDownloadRequest&lt;T&gt;&gt;? DownloadFailed;
+
+        private readonly IModelImporter&lt;TModel&gt; importer;
+        private readonly IAPIProvider? api;
+
+        protected readonly List&lt;ArchiveDownloadRequest&lt;T&gt;&gt; CurrentDownloads = new List&lt;ArchiveDownloadRequest&lt;T&gt;&gt;();
+
+        protected ModelDownloader(IModelImporter&lt;TModel&gt; importer, IAPIProvider? api)
+        {
+            this.importer = importer;
+            this.api = api;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the download request for this &lt;typeparamref name=&quot;T&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;model&quot;&gt;The &lt;typeparamref name=&quot;T&quot;/&gt; to be downloaded.&lt;/param&gt;
+        /// &lt;param name=&quot;minimiseDownloadSize&quot;&gt;Whether this download should be optimised for slow connections. Generally means extras are not included in the download bundle.&lt;/param&gt;
+        /// &lt;returns&gt;The request object.&lt;/returns&gt;
+        protected abstract ArchiveDownloadRequest&lt;T&gt; CreateDownloadRequest(T model, bool minimiseDownloadSize);
+
+        public bool Download(T model, bool minimiseDownloadSize = false) =&gt; Download(model, minimiseDownloadSize, null);
+
+        public void DownloadAsUpdate(TModel originalModel, bool minimiseDownloadSize) =&gt; Download(originalModel, minimiseDownloadSize, originalModel);
+
+        protected bool Download(T model, bool minimiseDownloadSize, TModel? originalModel)
+        {
+            if (!canDownload(model)) return false;
+
+            var request = CreateDownloadRequest(model, minimiseDownloadSize);
+
+            DownloadNotification notification = new DownloadNotification
+            {
+                Text = NotificationsStrings.Downloading(request.Model.GetDisplayString()),
+            };
+
+            request.DownloadProgressed += progress =&gt;
+            {
+                notification.State = ProgressNotificationState.Active;
+                notification.Progress = progress;
+            };
+
+            request.Success += filename =&gt;
+            {
+                Task.Factory.StartNew(async () =&gt;
+                {
+                    bool importSuccessful = false;
+
+                    try
+                    {
+                        if (originalModel != null)
+                            importSuccessful = (await importer.ImportAsUpdate(notification, new ImportTask(filename), originalModel).ConfigureAwait(false)) != null;
+                        else
+                            importSuccessful = (await importer.Import(notification, new[] { new ImportTask(filename) }).ConfigureAwait(false)).Any();
+                    }
+                    finally
+                    {
+                        // for now a failed import will be marked as a failed download for simplicity.
+                        if (!importSuccessful)
+                            DownloadFailed?.Invoke(request);
+
+                        CurrentDownloads.Remove(request);
+                    }
+                }, TaskCreationOptions.LongRunning);
+            };
+
+            request.Failure += triggerFailure;
+
+            notification.CancelRequested += () =&gt;
+            {
+                request.Cancel();
+                return true;
+            };
+
+            CurrentDownloads.Add(request);
+            PostNotification?.Invoke(notification);
+
+            api?.PerformAsync(request);
+
+            DownloadBegan?.Invoke(request);
+            return true;
+
+            void triggerFailure(Exception error)
+            {
+                CurrentDownloads.Remove(request);
+
+                DownloadFailed?.Invoke(request);
+
+                notification.State = ProgressNotificationState.Cancelled;
+
+                if (!(error is OperationCanceledException))
+                {
+                    if (error is WebException webException &amp;&amp; webException.Message == @&quot;TooManyRequests&quot;)
+                    {
+                        notification.Close(false);
+                        PostNotification?.Invoke(new TooManyDownloadsNotification());
+                    }
+                    else
+                        Logger.Error(error, $&quot;{importer.HumanisedModelName.Titleize()} download failed!&quot;);
+                }
+            }
+        }
+
+        public abstract ArchiveDownloadRequest&lt;T&gt;? GetExistingDownload(T model);
+
+        private bool canDownload(T model) =&gt; GetExistingDownload(model) == null &amp;&amp; api != null;
+
+        private partial class DownloadNotification : ProgressNotification
+        {
+            protected override Notification CreateCompletionNotification() =&gt; new SilencedProgressCompletionNotification
+            {
+                Activated = CompletionClickAction,
+                Text = CompletionText
+            };
+
+            private partial class SilencedProgressCompletionNotification : ProgressCompletionNotification
+            {
+                public SilencedProgressCompletionNotification()
+                {
+                    IsImportant = false;
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,57,22,71,0],[22,72,22,76,0],[31,9,31,117,0],[33,9,33,86,0],[34,9,34,10,0],[35,13,35,38,0],[36,13,36,28,0],[37,9,37,10,0],[47,77,47,120,0],[49,90,49,150,0],[52,9,52,10,0],[53,13,53,37,0],[53,38,53,51,0],[55,13,55,78,0],[57,13,60,15,0],[62,13,63,13,0],[63,13,63,14,0],[63,14,64,17,0],[64,17,64,71,0],[64,71,65,17,0],[65,17,65,50,0],[65,50,66,13,0],[66,13,66,14,0],[66,14,66,15,0],[68,13,69,13,0],[69,13,69,14,0],[69,14,70,17,0],[70,17,71,17,0],[71,17,71,18,0],[71,18,72,21,0],[72,21,72,51,0],[72,51,75,21,0],[75,21,75,22,0],[75,22,76,25,0],[76,25,76,51,0],[76,51,77,29,0],[77,29,77,165,0],[77,165,79,29,0],[79,29,79,150,0],[79,150,80,21,0],[80,21,80,22,0],[80,22,82,21,0],[82,21,82,22,0],[82,22,84,25,0],[84,25,84,47,0],[84,47,85,29,0],[85,29,85,61,0],[85,61,87,25,0],[87,25,87,58,0],[87,58,88,21,0],[88,21,88,22,0],[88,22,89,17,0],[89,17,89,18,0],[89,18,89,53,0],[89,53,90,13,0],[90,13,90,14,0],[90,14,90,15,0],[92,13,92,47,0],[94,13,95,13,0],[95,13,95,14,0],[95,14,96,17,0],[96,17,96,34,0],[96,34,97,17,0],[97,17,97,29,0],[97,29,98,13,0],[98,13,98,14,0],[98,14,98,15,0],[100,13,100,43,0],[101,13,101,52,0],[103,13,103,40,0],[105,13,105,44,0],[106,13,106,25,0],[109,13,109,14,0],[110,17,110,50,0],[112,17,112,49,0],[114,17,114,74,0],[116,17,116,60,0],[117,17,117,18,0],[118,21,118,106,0],[119,21,119,22,0],[120,25,120,51,0],[121,25,121,86,0],[122,21,122,22,0],[124,25,124,107,0],[125,17,125,18,0],[126,13,126,14,0],[127,9,127,10,0],[131,46,131,95,0],[135,79,139,14,0],[143,17,143,64,0],[144,17,144,18,0],[145,21,145,41,0],[146,17,146,18,0]]);
+    </script>
+  </body>
+</html>

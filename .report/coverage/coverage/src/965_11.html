@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Edit/Blueprints/Sliders/SliderSelectionBlueprint.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Osu.Objects.Drawables;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Compose;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders
+{
+    public partial class SliderSelectionBlueprint : OsuSelectionBlueprint&lt;Slider&gt;
+    {
+        protected new DrawableSlider DrawableObject =&gt; (DrawableSlider)base.DrawableObject;
+
+        protected SliderBodyPiece BodyPiece { get; private set; } = null!;
+        protected SliderCircleOverlay HeadOverlay { get; private set; } = null!;
+        protected SliderCircleOverlay TailOverlay { get; private set; } = null!;
+
+        protected PathControlPointVisualiser&lt;Slider&gt;? ControlPointVisualiser { get; private set; }
+
+        [Resolved]
+        private IDistanceSnapProvider? distanceSnapProvider { get; set; }
+
+        [Resolved]
+        private IPlacementHandler? placementHandler { get; set; }
+
+        [Resolved]
+        private EditorBeatmap? editorBeatmap { get; set; }
+
+        [Resolved]
+        private IEditorChangeHandler? changeHandler { get; set; }
+
+        [Resolved]
+        private BindableBeatDivisor? beatDivisor { get; set; }
+
+        private PathControlPoint? placementControlPoint;
+
+        public override Quad SelectionQuad
+        {
+            get
+            {
+                var result = BodyPiece.ScreenSpaceDrawQuad.AABBFloat;
+
+                result = RectangleF.Union(result, HeadOverlay.VisibleQuad);
+                result = RectangleF.Union(result, TailOverlay.VisibleQuad);
+
+                if (ControlPointVisualiser != null)
+                {
+                    foreach (var piece in ControlPointVisualiser.Pieces)
+                        result = RectangleF.Union(result, piece.ScreenSpaceDrawQuad.AABBFloat);
+                }
+
+                return result;
+            }
+        }
+
+        private readonly BindableList&lt;PathControlPoint&gt; controlPoints = new BindableList&lt;PathControlPoint&gt;();
+        private readonly IBindable&lt;int&gt; pathVersion = new Bindable&lt;int&gt;();
+        private readonly BindableList&lt;HitObject&gt; selectedObjects = new BindableList&lt;HitObject&gt;();
+        private readonly Bindable&lt;bool&gt; showHitMarkers = new Bindable&lt;bool&gt;();
+
+        // Cached slider path which ignored the expected distance value.
+        private readonly Cached&lt;SliderPath&gt; fullPathCache = new Cached&lt;SliderPath&gt;();
+
+        private Vector2 lastRightClickPosition;
+
+        public SliderSelectionBlueprint(Slider slider)
+            : base(slider)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            InternalChildren = new Drawable[]
+            {
+                BodyPiece = new SliderBodyPiece(),
+                HeadOverlay = CreateCircleOverlay(HitObject, SliderPosition.Start),
+                TailOverlay = CreateCircleOverlay(HitObject, SliderPosition.End),
+            };
+
+            // tail will always have a non-null end drag marker.
+            Debug.Assert(TailOverlay.EndDragMarker != null);
+
+            TailOverlay.EndDragMarker.StartDrag += startAdjustingLength;
+            TailOverlay.EndDragMarker.Drag += adjustLength;
+            TailOverlay.EndDragMarker.EndDrag += endAdjustLength;
+
+            config.BindWith(OsuSetting.EditorShowHitMarkers, showHitMarkers);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            controlPoints.BindTo(HitObject.Path.ControlPoints);
+            controlPoints.CollectionChanged += (_, _) =&gt; fullPathCache.Invalidate();
+
+            pathVersion.BindTo(HitObject.Path.Version);
+            pathVersion.BindValueChanged(_ =&gt; editorBeatmap?.Update(HitObject));
+
+            BodyPiece.UpdateFrom(HitObject);
+
+            if (editorBeatmap != null)
+                selectedObjects.BindTo(editorBeatmap.SelectedHitObjects);
+            selectedObjects.BindCollectionChanged((_, _) =&gt; updateVisualDefinition(), true);
+            showHitMarkers.BindValueChanged(_ =&gt;
+            {
+                if (!showHitMarkers.Value)
+                    DrawableObject.RestoreHitAnimations();
+            });
+        }
+
+        public override bool HandleQuickDeletion()
+        {
+            var hoveredControlPoint = ControlPointVisualiser?.Pieces.FirstOrDefault(p =&gt; p.IsHovered);
+
+            if (hoveredControlPoint == null)
+                return false;
+
+            if (hoveredControlPoint.IsSelected.Value)
+                ControlPointVisualiser?.DeleteSelected();
+            else
+                ControlPointVisualiser?.Delete([hoveredControlPoint.ControlPoint]);
+
+            return true;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (IsSelected)
+                BodyPiece.UpdateFrom(HitObject);
+
+            if (showHitMarkers.Value)
+                DrawableObject.SuppressHitAnimations();
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            updateVisualDefinition();
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            updateVisualDefinition();
+            base.OnHoverLost(e);
+        }
+
+        protected override void OnSelected()
+        {
+            updateVisualDefinition();
+            base.OnSelected();
+        }
+
+        protected override void OnDeselected()
+        {
+            base.OnDeselected();
+
+            if (placementControlPoint != null)
+                endControlPointPlacement();
+
+            updateVisualDefinition();
+            BodyPiece.RecyclePath();
+        }
+
+        private void updateVisualDefinition()
+        {
+            // To reduce overhead of drawing these blueprints, only add extra detail when only this slider is selected.
+            if (IsSelected &amp;&amp; selectedObjects.Count &lt; 2)
+            {
+                if (ControlPointVisualiser == null)
+                {
+                    AddInternal(ControlPointVisualiser = new PathControlPointVisualiser&lt;Slider&gt;(HitObject, true)
+                    {
+                        RemoveControlPointsRequested = removeControlPoints,
+                        SplitControlPointsRequested = splitControlPoints
+                    });
+                }
+            }
+            else
+            {
+                ControlPointVisualiser?.Expire();
+                ControlPointVisualiser = null;
+            }
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            switch (e.Button)
+            {
+                case MouseButton.Right:
+                    lastRightClickPosition = e.MouseDownPosition;
+                    return false; // Allow right click to be handled by context menu
+
+                case MouseButton.Left:
+
+                    // If there&#39;s more than two objects selected, ctrl+click should deselect
+                    if (e.ControlPressed &amp;&amp; IsSelected &amp;&amp; selectedObjects.Count &lt; 2)
+                    {
+                        changeHandler?.BeginChange();
+                        placementControlPoint = addControlPoint(e.MousePosition);
+                        ControlPointVisualiser?.SetSelectionTo(placementControlPoint);
+                        return true; // Stop input from being handled and modifying the selection
+                    }
+
+                    break;
+            }
+
+            return false;
+        }
+
+        #region Length Adjustment (independent of path nodes)
+
+        private Vector2 lengthAdjustMouseOffset;
+        private double oldDuration;
+        private double oldVelocityMultiplier;
+        private double desiredDistance;
+        private bool isAdjustingLength;
+        private bool adjustVelocityMomentary;
+
+        private void startAdjustingLength(DragStartEvent e)
+        {
+            isAdjustingLength = true;
+            adjustVelocityMomentary = e.ShiftPressed;
+            lengthAdjustMouseOffset = ToLocalSpace(e.ScreenSpaceMouseDownPosition) - HitObject.Position - HitObject.Path.PositionAt(1);
+            oldDuration = HitObject.Path.Distance / HitObject.SliderVelocityMultiplier;
+            oldVelocityMultiplier = HitObject.SliderVelocityMultiplier;
+            changeHandler?.BeginChange();
+        }
+
+        private void endAdjustLength()
+        {
+            trimExcessControlPoints(HitObject.Path);
+            changeHandler?.EndChange();
+            isAdjustingLength = false;
+        }
+
+        private void adjustLength(MouseEvent e) =&gt; adjustLength(findClosestPathDistance(e), e.ShiftPressed);
+
+        private void adjustLength(double proposedDistance, bool adjustVelocity)
+        {
+            desiredDistance = proposedDistance;
+            double proposedVelocity = oldVelocityMultiplier;
+
+            if (adjustVelocity)
+            {
+                proposedVelocity = proposedDistance / oldDuration;
+                proposedDistance = Math.Clamp(proposedDistance, 0.1 * oldDuration, 10 * oldDuration);
+            }
+            else
+            {
+                double minDistance = distanceSnapProvider?.GetBeatSnapDistance() * oldVelocityMultiplier ?? 1;
+                // do not allow the slider to extend beyond the path&#39;s calculated distance.
+                // this can happen in two specific circumstances:
+                // - floating point issues (`minDistance` is just ever so slightly larger than the calculated distance)
+                // - the slider was placed with a higher beat snap active than the current one,
+                //   therefore snapping it to the current beat snap distance would mean extrapolating it beyond its actual shape as defined by its control points
+                minDistance = Math.Min(minDistance, HitObject.Path.CalculatedDistance);
+
+                // Add a small amount to the proposed distance to make it easier to snap to the full length of the slider.
+                proposedDistance = distanceSnapProvider?.FindSnappedDistance((float)proposedDistance + 1, HitObject.StartTime, HitObject) ?? proposedDistance;
+                proposedDistance = Math.Clamp(proposedDistance, minDistance, HitObject.Path.CalculatedDistance);
+            }
+
+            if (Precision.AlmostEquals(proposedDistance, HitObject.Path.Distance) &amp;&amp; Precision.AlmostEquals(proposedVelocity, HitObject.SliderVelocityMultiplier))
+                return;
+
+            HitObject.SliderVelocityMultiplier = proposedVelocity;
+            HitObject.Path.ExpectedDistance.Value = proposedDistance;
+            editorBeatmap?.Update(HitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Trims control points from the end of the slider path which are not required to reach the expected end of the slider.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sliderPath&quot;&gt;The slider path to trim control points of.&lt;/param&gt;
+        private void trimExcessControlPoints(SliderPath sliderPath)
+        {
+            if (!sliderPath.ExpectedDistance.Value.HasValue)
+                return;
+
+            double[] segmentEnds = sliderPath.GetSegmentEnds().ToArray();
+            int segmentIndex = 0;
+
+            for (int i = 1; i &lt; sliderPath.ControlPoints.Count - 1; i++)
+            {
+                if (!sliderPath.ControlPoints[i].Type.HasValue) continue;
+
+                if (Precision.AlmostBigger(segmentEnds[segmentIndex], 1, 1E-3))
+                {
+                    sliderPath.ControlPoints.RemoveRange(i + 1, sliderPath.ControlPoints.Count - i - 1);
+                    sliderPath.ControlPoints[^1].Type = null;
+                    break;
+                }
+
+                segmentIndex++;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Finds the expected distance value for which the slider end is closest to the mouse position.
+        /// &lt;/summary&gt;
+        private double findClosestPathDistance(MouseEvent e)
+        {
+            const double step1 = 10;
+            const double step2 = 0.1;
+            const double longer_distance_bias = 0.01;
+
+            var desiredPosition = ToLocalSpace(e.ScreenSpaceMousePosition) - HitObject.Position - lengthAdjustMouseOffset;
+
+            if (!fullPathCache.IsValid)
+                fullPathCache.Value = new SliderPath(HitObject.Path.ControlPoints.ToArray());
+
+            // Do a linear search to find the closest point on the path to the mouse position.
+            double bestValue = 0;
+            double minDistance = double.MaxValue;
+
+            for (double d = 0; d &lt;= fullPathCache.Value.CalculatedDistance; d += step1)
+            {
+                double t = d / fullPathCache.Value.CalculatedDistance;
+                double dist = Vector2.Distance(fullPathCache.Value.PositionAt(t), desiredPosition) - d * longer_distance_bias;
+
+                if (dist &gt;= minDistance) continue;
+
+                minDistance = dist;
+                bestValue = d;
+            }
+
+            // Do another linear search to fine-tune the result.
+            double maxValue = Math.Min(bestValue + step1, fullPathCache.Value.CalculatedDistance);
+
+            for (double d = bestValue - step1; d &lt;= maxValue; d += step2)
+            {
+                double t = d / fullPathCache.Value.CalculatedDistance;
+                double dist = Vector2.Distance(fullPathCache.Value.PositionAt(t), desiredPosition) - d * longer_distance_bias;
+
+                if (dist &gt;= minDistance) continue;
+
+                minDistance = dist;
+                bestValue = d;
+            }
+
+            return bestValue;
+        }
+
+        #endregion
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (placementControlPoint == null)
+                return base.OnDragStart(e);
+
+            ControlPointVisualiser?.DragStarted(placementControlPoint);
+            return true;
+        }
+
+        protected override void OnDrag(DragEvent e)
+        {
+            base.OnDrag(e);
+
+            if (placementControlPoint != null)
+                ControlPointVisualiser?.DragInProgress(e);
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            if (placementControlPoint != null)
+                endControlPointPlacement();
+        }
+
+        private void endControlPointPlacement()
+        {
+            if (IsDragged)
+                ControlPointVisualiser?.DragEnded();
+
+            placementControlPoint = null;
+            changeHandler?.EndChange();
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (!IsSelected)
+                return false;
+
+            if (e.Key == Key.F &amp;&amp; e.ControlPressed &amp;&amp; e.ShiftPressed)
+            {
+                convertToStream();
+                return true;
+            }
+
+            if (isAdjustingLength &amp;&amp; e.ShiftPressed != adjustVelocityMomentary)
+            {
+                adjustVelocityMomentary = e.ShiftPressed;
+                adjustLength(desiredDistance, adjustVelocityMomentary);
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override void OnKeyUp(KeyUpEvent e)
+        {
+            if (!IsSelected || !isAdjustingLength || e.ShiftPressed == adjustVelocityMomentary) return;
+
+            adjustVelocityMomentary = e.ShiftPressed;
+            adjustLength(desiredDistance, adjustVelocityMomentary);
+        }
+
+        private PathControlPoint addControlPoint(Vector2 position)
+        {
+            position -= HitObject.Position;
+
+            int insertionIndex = 0;
+            float minDistance = float.MaxValue;
+
+            for (int i = 0; i &lt; controlPoints.Count - 1; i++)
+            {
+                float dist = new Line(controlPoints[i].Position, controlPoints[i + 1].Position).DistanceToPoint(position);
+
+                if (dist &lt; minDistance)
+                {
+                    insertionIndex = i + 1;
+                    minDistance = dist;
+                }
+            }
+
+            var pathControlPoint = new PathControlPoint { Position = position };
+
+            // Move the control points from the insertion index onwards to make room for the insertion
+            controlPoints.Insert(insertionIndex, pathControlPoint);
+
+            ControlPointVisualiser?.EnsureValidPathTypes();
+
+            HitObject.SnapTo(distanceSnapProvider);
+
+            return pathControlPoint;
+        }
+
+        private void removeControlPoints(List&lt;PathControlPoint&gt; toRemove)
+        {
+            // Ensure that there are any points to be deleted
+            if (toRemove.Count == 0)
+                return;
+
+            foreach (var c in toRemove)
+            {
+                // The first control point in the slider must have a type, so take it from the previous &quot;first&quot; one
+                // Todo: Should be handled within SliderPath itself
+                if (c == controlPoints[0] &amp;&amp; controlPoints.Count &gt; 1 &amp;&amp; controlPoints[1].Type == null)
+                    controlPoints[1].Type = controlPoints[0].Type;
+
+                controlPoints.Remove(c);
+            }
+
+            ControlPointVisualiser?.EnsureValidPathTypes();
+
+            // Snap the slider to the current beat divisor before checking length validity.
+            HitObject.SnapTo(distanceSnapProvider);
+
+            // If there are 0 or 1 remaining control points, or the slider has an invalid length, it is in a degenerate form and should be deleted
+            if (controlPoints.Count &lt;= 1 || !HitObject.Path.HasValidLengthForPlacement)
+            {
+                placementHandler?.Delete(HitObject);
+                return;
+            }
+
+            // The path will have a non-zero offset if the head is removed, but sliders don&#39;t support this behaviour since the head is positioned at the slider&#39;s position
+            // So the slider needs to be offset by this amount instead, and all control points offset backwards such that the path is re-positioned at (0, 0)
+            Vector2 first = controlPoints[0].Position;
+            foreach (var c in controlPoints)
+                c.Position -= first;
+            HitObject.Position += first;
+        }
+
+        private void splitControlPoints(List&lt;PathControlPoint&gt; controlPointsToSplitAt)
+        {
+            if (editorBeatmap == null)
+                return;
+
+            // Arbitrary gap in milliseconds to put between split slider pieces
+            const double split_gap = 100;
+
+            // Ensure that there are any points to be split
+            if (controlPointsToSplitAt.Count == 0)
+                return;
+
+            editorBeatmap.SelectedHitObjects.Clear();
+
+            foreach (var splitPoint in controlPointsToSplitAt)
+            {
+                if (splitPoint == controlPoints[0] || splitPoint == controlPoints[^1] || splitPoint.Type == null)
+                    continue;
+
+                // Split off the section of slider before this control point so the remaining control points to split are in the latter part of the slider.
+                int index = controlPoints.IndexOf(splitPoint);
+
+                if (index &lt;= 0)
+                    continue;
+
+                // Extract the split portion and remove from the original slider.
+                var splitControlPoints = controlPoints.Take(index + 1).ToList();
+                controlPoints.RemoveRange(0, index);
+
+                var newSlider = new Slider
+                {
+                    StartTime = HitObject.StartTime,
+                    Position = HitObject.Position + splitControlPoints[0].Position,
+                    NewCombo = HitObject.NewCombo,
+                    Samples = HitObject.Samples.Select(s =&gt; s.With()).ToList(),
+                    RepeatCount = HitObject.RepeatCount,
+                    NodeSamples = HitObject.NodeSamples.Select(n =&gt; (IList&lt;HitSampleInfo&gt;)n.Select(s =&gt; s.With()).ToList()).ToList(),
+                    Path = new SliderPath(splitControlPoints.Select(o =&gt; new PathControlPoint(o.Position - splitControlPoints[0].Position, o == splitControlPoints[^1] ? null : o.Type)).ToArray())
+                };
+
+                // Increase the start time of the slider before adding the new slider so the new slider is immediately inserted at the correct index and internal state remains valid.
+                HitObject.StartTime += split_gap;
+
+                editorBeatmap.Add(newSlider);
+
+                HitObject.NewCombo = false;
+                HitObject.Path.ExpectedDistance.Value -= newSlider.Path.CalculatedDistance;
+                HitObject.StartTime += newSlider.SpanDuration;
+
+                // In case the remainder of the slider has no length left over, give it length anyways so we don&#39;t get a 0 length slider.
+                if (HitObject.Path.ExpectedDistance.Value &lt;= Precision.DOUBLE_EPSILON)
+                {
+                    HitObject.Path.ExpectedDistance.Value = null;
+                }
+            }
+
+            // Once all required pieces have been split off, the original slider has the final split.
+            // As a final step, we must reset its control points to have an origin of (0,0).
+            Vector2 first = controlPoints[0].Position;
+            foreach (var c in controlPoints)
+                c.Position -= first;
+            HitObject.Position += first;
+        }
+
+        // duplicated in `JuiceStreamSelectionBlueprint.convertToStream()`
+        // consider extracting common helper when applying changes here
+        private void convertToStream()
+        {
+            if (editorBeatmap == null || beatDivisor == null)
+                return;
+
+            var timingPoint = editorBeatmap.ControlPointInfo.TimingPointAt(HitObject.StartTime);
+            double streamSpacing = timingPoint.BeatLength / beatDivisor.Value;
+
+            changeHandler?.BeginChange();
+
+            int i = 0;
+            double time = HitObject.StartTime;
+
+            while (!Precision.DefinitelyBigger(time, HitObject.GetEndTime(), 1))
+            {
+                // positionWithRepeats is a fractional number in the range of [0, HitObject.SpanCount()]
+                // and indicates how many fractional spans of a slider have passed up to time.
+                double positionWithRepeats = (time - HitObject.StartTime) / HitObject.Duration * HitObject.SpanCount();
+                double pathPosition = positionWithRepeats - (int)positionWithRepeats;
+                // every second span is in the reverse direction - need to reverse the path position.
+                if (positionWithRepeats % 2 &gt;= 1)
+                    pathPosition = 1 - pathPosition;
+
+                Vector2 position = HitObject.Position + HitObject.Path.PositionAt(pathPosition);
+
+                editorBeatmap.Add(new HitCircle
+                {
+                    StartTime = time,
+                    Position = position,
+                    NewCombo = i == 0 &amp;&amp; HitObject.NewCombo,
+                    Samples = HitObject.HeadCircle.Samples.Select(s =&gt; s.With()).ToList()
+                });
+
+                i += 1;
+                time = HitObject.StartTime + i * streamSpacing;
+            }
+
+            editorBeatmap.Remove(HitObject);
+
+            changeHandler?.EndChange();
+        }
+
+        public override MenuItem[] ContextMenuItems =&gt; new MenuItem[]
+        {
+            new OsuMenuItem(&quot;Add control point&quot;, MenuItemType.Standard, () =&gt;
+            {
+                changeHandler?.BeginChange();
+                addControlPoint(lastRightClickPosition);
+                changeHandler?.EndChange();
+            })
+            {
+                Hotkey = new Hotkey(new KeyCombination(InputKey.Control, InputKey.MouseLeft))
+            },
+            new OsuMenuItem(&quot;Convert to stream&quot;, MenuItemType.Destructive, convertToStream)
+            {
+                Hotkey = new Hotkey(new KeyCombination(InputKey.Control, InputKey.Shift, InputKey.F))
+            },
+        };
+
+        // Always refer to the drawable object&#39;s slider body so subsequent movement deltas are calculated with updated positions.
+        public override Vector2 ScreenSpaceSelectionPoint =&gt; DrawableObject.SliderBody?.ToScreenSpace(DrawableObject.SliderBody.PathOffset)
+                                                             ?? BodyPiece.ToScreenSpace(BodyPiece.PathStartLocation);
+
+        protected override Vector2[] ScreenSpaceAdditionalNodes =&gt; getScreenSpaceControlPointNodes().Prepend(
+            DrawableObject.SliderBody?.ToScreenSpace(DrawableObject.SliderBody.PathEndOffset) ?? BodyPiece.ToScreenSpace(BodyPiece.PathEndLocation)
+        ).ToArray();
+
+        private IEnumerable&lt;Vector2&gt; getScreenSpaceControlPointNodes()
+        {
+            // Returns the positions of control points that produce visible kinks on the slider&#39;s path
+            // This excludes inherited control points from Bezier, B-Spline, Perfect, and Catmull curves
+            if (DrawableObject.SliderBody == null)
+                yield break;
+
+            PathType? currentPathType = null;
+
+            // Skip the last control point because its always either not on the slider path or exactly on the slider end
+            for (int i = 0; i &lt; DrawableObject.HitObject.Path.ControlPoints.Count - 1; i++)
+            {
+                var controlPoint = DrawableObject.HitObject.Path.ControlPoints[i];
+
+                if (controlPoint.Type is not null)
+                    currentPathType = controlPoint.Type;
+
+                // Skip the first control point because it is already covered by the slider head
+                if (i == 0)
+                    continue;
+
+                if (controlPoint.Type is null &amp;&amp; currentPathType != PathType.LINEAR)
+                    continue;
+
+                var screenSpacePosition = DrawableObject.SliderBody.ToScreenSpace(DrawableObject.SliderBody.PathOffset + controlPoint.Position);
+                yield return screenSpacePosition;
+            }
+        }
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+        {
+            if (BodyPiece.ReceivePositionalInputAt(screenSpacePos) &amp;&amp; (IsSelected || DrawableObject.Body.Alpha &gt; 0 || DrawableObject.HeadCircle.Alpha &gt; 0))
+                return true;
+
+            if (ControlPointVisualiser == null)
+                return false;
+
+            foreach (var p in ControlPointVisualiser.Pieces)
+            {
+                if (p.ReceivePositionalInputAt(screenSpacePos))
+                    return true;
+            }
+
+            return false;
+        }
+
+        protected virtual SliderCircleOverlay CreateCircleOverlay(Slider slider, SliderPosition position) =&gt; new SliderCircleOverlay(slider, position);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,56,35,91,0],[37,47,37,51,0],[37,52,37,64,0],[37,69,37,74,0],[38,53,38,57,0],[38,58,38,70,0],[38,75,38,80,0],[39,53,39,57,0],[39,58,39,70,0],[39,75,39,80,0],[41,80,41,84,0],[41,85,41,97,0],[44,63,44,67,0],[44,68,44,72,0],[47,55,47,59,0],[47,60,47,64,0],[50,48,50,52,0],[50,53,50,57,0],[53,55,53,59,0],[53,60,53,64,0],[56,52,56,56,0],[56,57,56,61,0],[63,13,63,14,0],[64,17,64,70,0],[66,17,66,76,0],[67,17,67,76,0],[69,17,69,52,0],[70,17,70,18,0],[71,21,71,28,0],[71,30,71,39,0],[71,40,71,42,0],[71,43,71,72,0],[72,25,72,96,0],[73,17,73,18,0],[75,17,75,31,0],[76,13,76,14,0],[79,9,79,110,0],[80,9,80,75,0],[81,9,81,98,0],[82,9,82,79,0],[85,9,85,86,0],[90,15,90,27,0],[91,9,91,10,0],[92,9,92,10,0],[96,9,96,10,0],[97,13,102,15,0],[105,13,105,61,0],[107,13,107,73,0],[108,13,108,60,0],[109,13,109,66,0],[111,13,111,78,0],[112,9,112,10,0],[115,9,115,10,0],[116,13,116,33,0],[118,13,118,64,0],[119,13,119,58,0],[119,58,119,84,0],[119,84,119,85,0],[121,13,121,56,0],[122,13,122,47,0],[122,47,122,79,0],[122,79,122,81,0],[124,13,124,45,0],[126,13,126,39,0],[127,17,127,74,0],[128,13,128,61,0],[128,61,128,85,0],[128,85,128,93,0],[129,13,130,13,0],[130,13,130,14,0],[130,14,131,17,0],[131,17,131,43,0],[131,43,132,21,0],[132,21,132,59,0],[132,59,133,13,0],[133,13,133,14,0],[133,14,133,16,0],[134,9,134,10,0],[137,9,137,10,0],[138,13,138,90,0],[138,90,138,101,0],[138,101,138,103,0],[140,13,140,45,0],[141,17,141,30,0],[143,13,143,54,0],[144,17,144,58,0],[146,17,146,84,0],[148,13,148,25,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,153,27,0],[155,13,155,28,0],[156,17,156,49,0],[158,13,158,38,0],[159,17,159,56,0],[160,9,160,10,0],[163,9,163,10,0],[164,13,164,38,0],[165,13,165,36,0],[166,9,166,10,0],[169,9,169,10,0],[170,13,170,38,0],[171,13,171,33,0],[172,9,172,10,0],[175,9,175,10,0],[176,13,176,38,0],[177,13,177,31,0],[178,9,178,10,0],[181,9,181,10,0],[182,13,182,33,0],[184,13,184,47,0],[185,17,185,44,0],[187,13,187,38,0],[188,13,188,37,0],[189,9,189,10,0],[192,9,192,10,0],[194,13,194,57,0],[195,13,195,14,0],[196,17,196,52,0],[197,17,197,18,0],[198,21,202,24,0],[203,17,203,18,0],[204,13,204,14,0],[206,13,206,14,0],[207,17,207,50,0],[208,17,208,47,0],[209,13,209,14,0],[210,9,210,10,0],[213,9,213,10,0],[214,13,214,30,0],[217,21,217,66,0],[218,21,218,34,0],[223,21,223,85,0],[224,21,224,22,0],[225,25,225,54,0],[226,25,226,82,0],[227,25,227,87,0],[228,25,228,37,0],[231,21,231,27,0],[234,13,234,26,0],[235,9,235,10,0],[247,9,247,10,0],[248,13,248,38,0],[249,13,249,54,0],[250,13,250,136,0],[251,13,251,88,0],[252,13,252,72,0],[253,13,253,42,0],[254,9,254,10,0],[257,9,257,10,0],[258,13,258,53,0],[259,13,259,40,0],[260,13,260,39,0],[261,9,261,10,0],[263,52,263,108,0],[266,9,266,10,0],[267,13,267,48,0],[268,13,268,61,0],[270,13,270,32,0],[271,13,271,14,0],[272,17,272,67,0],[273,17,273,102,0],[274,13,274,14,0],[276,13,276,14,0],[277,17,277,111,0],[283,17,283,88,0],[286,17,286,159,0],[287,17,287,113,0],[288,13,288,14,0],[290,13,290,163,0],[291,17,291,24,0],[293,13,293,67,0],[294,13,294,70,0],[295,13,295,46,0],[296,9,296,10,0],[303,9,303,10,0],[304,13,304,61,0],[305,17,305,24,0],[307,13,307,74,0],[308,13,308,34,0],[310,18,310,27,0],[310,29,310,67,0],[310,69,310,72,0],[311,13,311,14,0],[312,17,312,64,0],[312,65,312,74,0],[314,17,314,80,0],[315,17,315,18,0],[316,21,316,105,0],[317,21,317,62,0],[318,21,318,27,0],[321,17,321,32,0],[322,13,322,14,0],[323,9,323,10,0],[329,9,329,10,0],[334,13,334,123,0],[336,13,336,40,0],[337,17,337,94,0],[340,13,340,34,0],[341,13,341,50,0],[343,18,343,30,0],[343,32,343,75,0],[343,77,343,87,0],[344,13,344,14,0],[345,17,345,71,0],[346,17,346,127,0],[348,17,348,41,0],[348,42,348,51,0],[350,17,350,36,0],[351,17,351,31,0],[352,13,352,14,0],[355,13,355,99,0],[357,18,357,46,0],[357,48,357,61,0],[357,63,357,73,0],[358,13,358,14,0],[359,17,359,71,0],[360,17,360,127,0],[362,17,362,41,0],[362,42,362,51,0],[364,17,364,36,0],[365,17,365,31,0],[366,13,366,14,0],[368,13,368,30,0],[369,9,369,10,0],[374,9,374,10,0],[375,13,375,47,0],[376,17,376,44,0],[378,13,378,72,0],[379,13,379,25,0],[380,9,380,10,0],[383,9,383,10,0],[384,13,384,28,0],[386,13,386,47,0],[387,17,387,59,0],[388,9,388,10,0],[391,9,391,10,0],[392,13,392,47,0],[393,17,393,44,0],[394,9,394,10,0],[397,9,397,10,0],[398,13,398,27,0],[399,17,399,53,0],[401,13,401,42,0],[402,13,402,40,0],[403,9,403,10,0],[406,9,406,10,0],[407,13,407,29,0],[408,17,408,30,0],[410,13,410,70,0],[411,13,411,14,0],[412,17,412,35,0],[413,17,413,29,0],[416,13,416,80,0],[417,13,417,14,0],[418,17,418,58,0],[419,17,419,72,0],[420,17,420,29,0],[423,13,423,26,0],[424,9,424,10,0],[427,9,427,10,0],[428,13,428,96,0],[428,97,428,104,0],[430,13,430,54,0],[431,13,431,68,0],[432,9,432,10,0],[435,9,435,10,0],[436,13,436,44,0],[438,13,438,36,0],[439,13,439,48,0],[441,18,441,27,0],[441,29,441,56,0],[441,58,441,61,0],[442,13,442,14,0],[443,17,443,123,0],[445,17,445,40,0],[446,17,446,18,0],[447,21,447,44,0],[448,21,448,40,0],[449,17,449,18,0],[450,13,450,14,0],[452,13,452,81,0],[455,13,455,68,0],[457,13,457,60,0],[459,13,459,52,0],[461,13,461,37,0],[462,9,462,10,0],[465,9,465,10,0],[467,13,467,37,0],[468,17,468,24,0],[470,13,470,20,0],[470,22,470,27,0],[470,28,470,30,0],[470,31,470,39,0],[471,13,471,14,0],[474,17,474,103,0],[475,21,475,67,0],[477,17,477,41,0],[478,13,478,14,0],[480,13,480,60,0],[483,13,483,52,0],[486,13,486,88,0],[487,13,487,14,0],[488,17,488,53,0],[489,17,489,24,0],[494,13,494,55,0],[495,13,495,20,0],[495,22,495,27,0],[495,28,495,30,0],[495,31,495,44,0],[496,17,496,37,0],[497,13,497,41,0],[498,9,498,10,0],[501,9,501,10,0],[502,13,502,39,0],[503,17,503,24,0],[509,13,509,51,0],[510,17,510,24,0],[512,13,512,54,0],[514,13,514,20,0],[514,22,514,36,0],[514,37,514,39,0],[514,40,514,62,0],[515,13,515,14,0],[516,17,516,114,0],[517,21,517,30,0],[520,17,520,63,0],[522,17,522,32,0],[523,21,523,30,0],[526,17,526,81,0],[527,17,527,53,0],[529,17,534,61,0],[534,61,534,69,0],[534,69,536,69,0],[536,69,536,105,0],[536,105,536,113,0],[536,113,536,123,0],[536,123,537,74,0],[537,74,537,184,0],[537,184,538,19,0],[541,17,541,50,0],[543,17,543,46,0],[545,17,545,44,0],[546,17,546,92,0],[547,17,547,63,0],[550,17,550,87,0],[551,17,551,18,0],[552,21,552,66,0],[553,17,553,18,0],[554,13,554,14,0],[558,13,558,55,0],[559,13,559,20,0],[559,22,559,27,0],[559,28,559,30,0],[559,31,559,44,0],[560,17,560,37,0],[561,13,561,41,0],[562,9,562,10,0],[567,9,567,10,0],[568,13,568,62,0],[569,17,569,24,0],[571,13,571,97,0],[572,13,572,79,0],[574,13,574,42,0],[576,13,576,23,0],[577,13,577,47,0],[579,13,579,81,0],[580,13,580,14,0],[583,17,583,120,0],[584,17,584,86,0],[586,17,586,50,0],[587,21,587,53,0],[589,17,589,97,0],[591,17,596,72,0],[596,72,596,80,0],[596,80,597,20,0],[599,17,599,24,0],[600,17,600,64,0],[601,13,601,14,0],[603,13,603,45,0],[605,13,605,40,0],[606,9,606,10,0],[608,56,611,13,0],[611,13,611,14,0],[611,14,612,17,0],[612,17,612,46,0],[612,46,613,17,0],[613,17,613,57,0],[613,57,614,17,0],[614,17,614,44,0],[614,44,615,13,0],[615,13,615,14,0],[615,14,623,10,0],[626,62,627,117,0],[629,68,631,20,0],[634,9,634,10,0],[637,13,637,51,0],[638,17,638,29,0],[640,13,640,46,0],[643,18,643,27,0],[643,29,643,86,0],[643,88,643,91,0],[644,13,644,14,0],[645,17,645,83,0],[647,17,647,51,0],[648,21,648,57,0],[651,17,651,28,0],[652,21,652,30,0],[654,17,654,85,0],[655,21,655,30,0],[657,17,657,145,0],[658,17,658,50,0],[659,13,659,14,0],[660,9,660,10,0],[663,9,663,10,0],[664,13,664,156,0],[665,17,665,29,0],[667,13,667,48,0],[668,17,668,30,0],[670,13,670,20,0],[670,22,670,27,0],[670,28,670,30,0],[670,31,670,60,0],[671,13,671,14,0],[672,17,672,64,0],[673,21,673,33,0],[674,13,674,14,0],[676,13,676,26,0],[677,9,677,10,0],[679,110,679,151,0]]);
+    </script>
+  </body>
+</html>

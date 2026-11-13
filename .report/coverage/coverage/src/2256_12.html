@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/Playfield.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Game.Audio;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Skinning;
+using osuTK;
+using osu.Game.Rulesets.Objects.Pooling;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics.Primitives;
+
+namespace osu.Game.Rulesets.UI
+{
+    [Cached(typeof(IPooledHitObjectProvider))]
+    [Cached(typeof(IPooledSampleProvider))]
+    [Cached]
+    public abstract partial class Playfield : CompositeDrawable, IPooledHitObjectProvider, IPooledSampleProvider
+    {
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;DrawableHitObject&quot;/&gt; is judged.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject, JudgementResult&gt; NewResult;
+
+        /// &lt;summary&gt;
+        /// Invoked when a judgement result is reverted.
+        /// &lt;/summary&gt;
+        public event Action&lt;JudgementResult&gt; RevertResult;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;DrawableHitObject&quot;/&gt; contained in this Playfield.
+        /// &lt;/summary&gt;
+        public HitObjectContainer HitObjectContainer =&gt; hitObjectContainerLazy.Value;
+
+        private readonly Lazy&lt;HitObjectContainer&gt; hitObjectContainerLazy;
+
+        /// &lt;summary&gt;
+        /// A function that converts gamefield coordinates to screen space.
+        /// &lt;/summary&gt;
+        public Func&lt;Vector2, Vector2&gt; GamefieldToScreenSpace =&gt; HitObjectContainer.ToScreenSpace;
+
+        /// &lt;summary&gt;
+        /// A function that converts screen space coordinates to gamefield.
+        /// &lt;/summary&gt;
+        public Func&lt;Vector2, Vector2&gt; ScreenSpaceToGamefield =&gt; HitObjectContainer.ToLocalSpace;
+
+        /// &lt;summary&gt;
+        /// All the &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s contained in this &lt;see cref=&quot;Playfield&quot;/&gt; and all &lt;see cref=&quot;NestedPlayfields&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;DrawableHitObject&gt; AllHitObjects
+        {
+            get
+            {
+                if (HitObjectContainer == null)
+                    return Enumerable.Empty&lt;DrawableHitObject&gt;();
+
+                var enumerable = HitObjectContainer.Objects;
+
+                if (nestedPlayfields.Count != 0)
+                    enumerable = enumerable.Concat(NestedPlayfields.SelectMany(p =&gt; p.AllHitObjects));
+
+                return enumerable;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// All &lt;see cref=&quot;Playfield&quot;/&gt;s nested inside this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;Playfield&gt; NestedPlayfields =&gt; nestedPlayfields;
+
+        private readonly List&lt;Playfield&gt; nestedPlayfields = new List&lt;Playfield&gt;();
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;Playfield&quot;/&gt; is nested in another &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public bool IsNested { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether judgements should be displayed by this and and all nested &lt;see cref=&quot;Playfield&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        public readonly BindableBool DisplayJudgements = new BindableBool(true);
+
+        /// &lt;summary&gt;
+        /// A screen space draw quad which resembles the edges of the playfield for skinning purposes.
+        /// This will allow users / components to snap objects to the &quot;edge&quot; of the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Rulesets which reduce the visible area further than the full relative playfield space itself
+        /// should retarget this to the ScreenSpaceDrawQuad of the appropriate container.
+        /// &lt;/remarks&gt;
+        public virtual Quad SkinnableComponentScreenSpaceDrawQuad =&gt; ScreenSpaceDrawQuad;
+
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        protected IReadOnlyList&lt;Mod&gt; Mods { get; private set; }
+
+        private readonly HitObjectEntryManager entryManager = new HitObjectEntryManager();
+
+        private readonly Stack&lt;HitObjectLifetimeEntry&gt; judgedEntries;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected Playfield()
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            hitObjectContainerLazy = new Lazy&lt;HitObjectContainer&gt;(() =&gt; CreateHitObjectContainer().With(h =&gt;
+            {
+                h.NewResult += onNewResult;
+                h.HitObjectUsageBegan += o =&gt; HitObjectUsageBegan?.Invoke(o);
+                h.HitObjectUsageFinished += o =&gt; HitObjectUsageFinished?.Invoke(o);
+            }));
+
+            entryManager.OnEntryAdded += onEntryAdded;
+            entryManager.OnEntryRemoved += onEntryRemoved;
+
+            judgedEntries = new Stack&lt;HitObjectLifetimeEntry&gt;();
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Cursor = CreateCursor();
+
+            if (Cursor != null)
+            {
+                // initial showing of the cursor will be handed by MenuCursorContainer (via DrawableRuleset&#39;s IProvideCursor implementation).
+                Cursor.Hide();
+
+                AddInternal(Cursor);
+            }
+        }
+
+        private void onNewDrawableHitObject(DrawableHitObject d)
+        {
+            d.OnNestedDrawableCreated += onNewDrawableHitObject;
+
+            OnNewDrawableHitObject(d);
+
+            Debug.Assert(!d.IsInitialized);
+            d.IsInitialized = true;
+        }
+
+        /// &lt;summary&gt;
+        /// Performs post-processing tasks (if any) after all DrawableHitObjects are loaded into this Playfield.
+        /// &lt;/summary&gt;
+        public virtual void PostProcess() =&gt; NestedPlayfields.ForEach(p =&gt; p.PostProcess());
+
+        /// &lt;summary&gt;
+        /// Adds a DrawableHitObject to this Playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;h&quot;&gt;The DrawableHitObject to add.&lt;/param&gt;
+        public virtual void Add(DrawableHitObject h)
+        {
+            if (!h.IsInitialized)
+                onNewDrawableHitObject(h);
+
+            HitObjectContainer.Add(h);
+            OnHitObjectAdded(h.HitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Remove a DrawableHitObject from this Playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;h&quot;&gt;The DrawableHitObject to remove.&lt;/param&gt;
+        public virtual bool Remove(DrawableHitObject h)
+        {
+            if (!HitObjectContainer.Remove(h))
+                return false;
+
+            OnHitObjectRemoved(h.HitObject);
+            return false;
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; is added to this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The added &lt;see cref=&quot;HitObject&quot;/&gt;.&lt;/param&gt;
+        protected virtual void OnHitObjectAdded(HitObject hitObject)
+        {
+            preloadSamples(hitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; is removed from this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The removed &lt;see cref=&quot;HitObject&quot;/&gt;.&lt;/param&gt;
+        protected virtual void OnHitObjectRemoved(HitObject hitObject)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked before a new &lt;see cref=&quot;DrawableHitObject&quot;/&gt; is added to this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// It is invoked only once even if the drawable is pooled and used multiple times for different &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is also invoked for nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s.
+        /// &lt;/remarks&gt;
+        protected virtual void OnNewDrawableHitObject(DrawableHitObject drawableHitObject)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// The cursor currently being used by this &lt;see cref=&quot;Playfield&quot;/&gt;. May be null if no cursor is provided.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        public GameplayCursorContainer Cursor { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Provide a cursor which is to be used for gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The cursor, or null to show the menu cursor.&lt;/returns&gt;
+        protected virtual GameplayCursorContainer CreateCursor() =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Registers a &lt;see cref=&quot;Playfield&quot;/&gt; as a nested &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// This does not add the &lt;see cref=&quot;Playfield&quot;/&gt; to the draw hierarchy.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;otherPlayfield&quot;&gt;The &lt;see cref=&quot;Playfield&quot;/&gt; to add.&lt;/param&gt;
+        protected void AddNested(Playfield otherPlayfield)
+        {
+            otherPlayfield.IsNested = true;
+
+            otherPlayfield.DisplayJudgements.BindTo(DisplayJudgements);
+
+            otherPlayfield.NewResult += (d, r) =&gt; NewResult?.Invoke(d, r);
+            otherPlayfield.RevertResult += r =&gt; RevertResult?.Invoke(r);
+            otherPlayfield.HitObjectUsageBegan += h =&gt; HitObjectUsageBegan?.Invoke(h);
+            otherPlayfield.HitObjectUsageFinished += h =&gt; HitObjectUsageFinished?.Invoke(h);
+
+            nestedPlayfields.Add(otherPlayfield);
+        }
+
+        private Mod[] mods;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            mods = Mods?.ToArray();
+
+            // in the case a consumer forgets to add the HitObjectContainer, we will add it here.
+            if (HitObjectContainer.Parent == null)
+                AddInternal(HitObjectContainer);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!IsNested &amp;&amp; mods != null)
+            {
+                foreach (Mod mod in mods)
+                {
+                    if (mod is IUpdatableByPlayfield updatable)
+                        updatable.Update(this);
+                }
+            }
+
+            // When rewinding, revert future judgements in the reverse order.
+            while (judgedEntries.Count &gt; 0)
+            {
+                var result = judgedEntries.Peek().Result;
+                Debug.Assert(result?.RawTime != null);
+
+                if (Time.Current &gt;= result.RawTime.Value)
+                    break;
+
+                revertResult(judgedEntries.Pop());
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the container that will be used to contain the &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        protected virtual HitObjectContainer CreateHitObjectContainer() =&gt; new HitObjectContainer();
+
+        #region Pooling support
+
+        private readonly Dictionary&lt;Type, IDrawablePool&gt; pools = new Dictionary&lt;Type, IDrawablePool&gt;();
+
+        /// &lt;summary&gt;
+        /// Adds a &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt; for a pooled &lt;see cref=&quot;HitObject&quot;/&gt; to this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;&lt;/param&gt;
+        public virtual void Add(HitObject hitObject)
+        {
+            var entry = CreateLifetimeEntry(hitObject);
+            entryManager.Add(entry, null);
+        }
+
+        private void preloadSamples(HitObject hitObject)
+        {
+            // prepare sample pools ahead of time so we&#39;re not initialising at runtime.
+            foreach (var sample in hitObject.Samples)
+                prepareSamplePool(sample);
+
+            foreach (var sample in hitObject.AuxiliarySamples)
+                prepareSamplePool(sample);
+
+            foreach (var nestedObject in hitObject.NestedHitObjects)
+                preloadSamples(nestedObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt; for a pooled &lt;see cref=&quot;HitObject&quot;/&gt; from this &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;&lt;/param&gt;
+        /// &lt;returns&gt;Whether the &lt;see cref=&quot;HitObject&quot;/&gt; was successfully removed.&lt;/returns&gt;
+        public virtual bool Remove(HitObject hitObject)
+        {
+            if (entryManager.TryGet(hitObject, out var entry))
+            {
+                entryManager.Remove(entry);
+                return true;
+            }
+
+            return nestedPlayfields.Any(p =&gt; p.Remove(hitObject));
+        }
+
+        private void onEntryAdded(HitObjectLifetimeEntry entry, [CanBeNull] HitObject parentHitObject)
+        {
+            if (parentHitObject != null) return;
+
+            HitObjectContainer.Add(entry);
+            OnHitObjectAdded(entry.HitObject);
+        }
+
+        private void onEntryRemoved(HitObjectLifetimeEntry entry, [CanBeNull] HitObject parentHitObject)
+        {
+            if (parentHitObject != null) return;
+
+            HitObjectContainer.Remove(entry);
+            OnHitObjectRemoved(entry.HitObject);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt; for a given &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This may be overridden to provide custom lifetime control (e.g. via &lt;see cref=&quot;HitObjectLifetimeEntry.InitialLifetimeOffset&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to create the entry for.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt;.&lt;/returns&gt;
+        [NotNull]
+        protected virtual HitObjectLifetimeEntry CreateLifetimeEntry([NotNull] HitObject hitObject) =&gt; new HitObjectLifetimeEntry(hitObject);
+
+        /// &lt;summary&gt;
+        /// Registers a default &lt;see cref=&quot;DrawableHitObject&quot;/&gt; pool with this &lt;see cref=&quot;DrawableRuleset&quot;/&gt; which is to be used whenever
+        /// &lt;see cref=&quot;DrawableHitObject&quot;/&gt; representations are requested for the given &lt;typeparamref name=&quot;TObject&quot;/&gt; type.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;initialSize&quot;&gt;The number of &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s to be initially stored in the pool.&lt;/param&gt;
+        /// &lt;param name=&quot;maximumSize&quot;&gt;
+        /// The maximum number of &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s that can be stored in the pool.
+        /// If this limit is exceeded, every subsequent &lt;see cref=&quot;DrawableHitObject&quot;/&gt; will be created anew instead of being retrieved from the pool,
+        /// until some of the existing &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s are returned to the pool.
+        /// &lt;/param&gt;
+        /// &lt;typeparam name=&quot;TObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; type.&lt;/typeparam&gt;
+        /// &lt;typeparam name=&quot;TDrawable&quot;&gt;The &lt;see cref=&quot;DrawableHitObject&quot;/&gt; receiver for &lt;typeparamref name=&quot;TObject&quot;/&gt;s.&lt;/typeparam&gt;
+        public void RegisterPool&lt;TObject, TDrawable&gt;(int initialSize, int? maximumSize = null)
+            where TObject : HitObject
+            where TDrawable : DrawableHitObject, new()
+            =&gt; RegisterPool&lt;TObject, TDrawable&gt;(new DrawablePool&lt;TDrawable&gt;(initialSize, maximumSize));
+
+        /// &lt;summary&gt;
+        /// Registers a custom &lt;see cref=&quot;DrawableHitObject&quot;/&gt; pool with this &lt;see cref=&quot;DrawableRuleset&quot;/&gt; which is to be used whenever
+        /// &lt;see cref=&quot;DrawableHitObject&quot;/&gt; representations are requested for the given &lt;typeparamref name=&quot;TObject&quot;/&gt; type.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;pool&quot;&gt;The &lt;see cref=&quot;DrawablePool{T}&quot;/&gt; to register.&lt;/param&gt;
+        /// &lt;typeparam name=&quot;TObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; type.&lt;/typeparam&gt;
+        /// &lt;typeparam name=&quot;TDrawable&quot;&gt;The &lt;see cref=&quot;DrawableHitObject&quot;/&gt; receiver for &lt;typeparamref name=&quot;TObject&quot;/&gt;s.&lt;/typeparam&gt;
+        protected void RegisterPool&lt;TObject, TDrawable&gt;([NotNull] DrawablePool&lt;TDrawable&gt; pool)
+            where TObject : HitObject
+            where TDrawable : DrawableHitObject, new()
+        {
+            pools[typeof(TObject)] = pool;
+            AddInternal(pool);
+        }
+
+        DrawableHitObject IPooledHitObjectProvider.GetPooledDrawableRepresentation(HitObject hitObject, DrawableHitObject parent)
+        {
+            var pool = prepareDrawableHitObjectPool(hitObject);
+
+            return (DrawableHitObject)pool?.Get(d =&gt;
+            {
+                var dho = (DrawableHitObject)d;
+
+                if (!dho.IsInitialized)
+                {
+                    onNewDrawableHitObject(dho);
+
+                    // If this is the first time this DHO is being used, then apply the DHO mods.
+                    // This is done before Apply() so that the state is updated once when the hitobject is applied.
+                    if (mods != null)
+                    {
+                        foreach (Mod mod in mods)
+                        {
+                            if (mod is IApplicableToDrawableHitObject applicable)
+                                applicable.ApplyToDrawableHitObject(dho);
+                        }
+                    }
+                }
+
+                if (!entryManager.TryGet(hitObject, out var entry))
+                {
+                    entry = CreateLifetimeEntry(hitObject);
+                    entryManager.Add(entry, parent?.HitObject);
+                }
+
+                dho.ParentHitObject = parent;
+                dho.Apply(entry);
+            });
+        }
+
+        private IDrawablePool prepareDrawableHitObjectPool(HitObject hitObject)
+        {
+            var lookupType = hitObject.GetType();
+
+            IDrawablePool pool;
+
+            // Tests may add derived hitobject instances for which pools don&#39;t exist. Try to find any applicable pool and dynamically assign the type if the pool exists.
+            if (!pools.TryGetValue(lookupType, out pool))
+            {
+                foreach (var (t, p) in pools)
+                {
+                    if (!t.IsInstanceOfType(hitObject))
+                        continue;
+
+                    pools[lookupType] = pool = p;
+                    break;
+                }
+            }
+
+            return pool;
+        }
+
+        private readonly Dictionary&lt;ISampleInfo, DrawablePool&lt;PoolableSkinnableSample&gt;&gt; samplePools = new Dictionary&lt;ISampleInfo, DrawablePool&lt;PoolableSkinnableSample&gt;&gt;();
+
+        public PoolableSkinnableSample GetPooledSample(ISampleInfo sampleInfo) =&gt; prepareSamplePool(sampleInfo).Get();
+
+        private DrawablePool&lt;PoolableSkinnableSample&gt; prepareSamplePool(ISampleInfo sampleInfo)
+        {
+            if (samplePools.TryGetValue(sampleInfo, out var pool)) return pool;
+
+            AddInternal(samplePools[sampleInfo] = pool = new DrawableSamplePool(sampleInfo, 1));
+
+            return pool;
+        }
+
+        private partial class DrawableSamplePool : DrawablePool&lt;PoolableSkinnableSample&gt;
+        {
+            private readonly ISampleInfo sampleInfo;
+
+            public DrawableSamplePool(ISampleInfo sampleInfo, int initialSize, int? maximumSize = null)
+                : base(initialSize, maximumSize)
+            {
+                this.sampleInfo = sampleInfo;
+            }
+
+            protected override PoolableSkinnableSample CreateNewDrawable() =&gt; base.CreateNewDrawable().With(d =&gt; d.Apply(sampleInfo));
+        }
+
+        #endregion
+
+        private void onNewResult(DrawableHitObject drawable, JudgementResult result)
+        {
+            Debug.Assert(result != null &amp;&amp; drawable.Entry?.Result == result &amp;&amp; result.RawTime != null);
+            judgedEntries.Push(drawable.Entry.AsNonNull());
+
+            NewResult?.Invoke(drawable, result);
+        }
+
+        private void revertResult(HitObjectLifetimeEntry entry)
+        {
+            var result = entry.Result;
+            Debug.Assert(result != null);
+
+            RevertResult?.Invoke(result);
+            entry.OnRevertResult();
+
+            result.Reset();
+        }
+
+        #region Editor logic
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; becomes used by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If this &lt;see cref=&quot;HitObjectContainer&quot;/&gt; uses pooled objects, this represents the time when the &lt;see cref=&quot;HitObject&quot;/&gt;s become alive.
+        /// &lt;/remarks&gt;
+        internal event Action&lt;HitObject&gt; HitObjectUsageBegan;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; becomes unused by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If this &lt;see cref=&quot;HitObjectContainer&quot;/&gt; uses pooled objects, this represents the time when the &lt;see cref=&quot;HitObject&quot;/&gt;s become dead.
+        /// &lt;/remarks&gt;
+        internal event Action&lt;HitObject&gt; HitObjectUsageFinished;
+
+        /// &lt;summary&gt;
+        /// Sets whether to keep a given &lt;see cref=&quot;HitObject&quot;/&gt; always alive within this or any nested &lt;see cref=&quot;Playfield&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; to set.&lt;/param&gt;
+        /// &lt;param name=&quot;keepAlive&quot;&gt;Whether to keep &lt;paramref name=&quot;hitObject&quot;/&gt; always alive.&lt;/param&gt;
+        internal void SetKeepAlive(HitObject hitObject, bool keepAlive)
+        {
+            if (entryManager.TryGet(hitObject, out var entry))
+            {
+                entry.KeepAlive = keepAlive;
+                return;
+            }
+
+            foreach (var p in nestedPlayfields)
+                p.SetKeepAlive(hitObject, keepAlive);
+        }
+
+        /// &lt;summary&gt;
+        /// Keeps all &lt;see cref=&quot;HitObject&quot;/&gt;s alive within this and all nested &lt;see cref=&quot;Playfield&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        internal void KeepAllAlive()
+        {
+            foreach (var entry in entryManager.AllEntries)
+                entry.KeepAlive = true;
+
+            foreach (var p in nestedPlayfields)
+                p.KeepAllAlive();
+        }
+
+        /// &lt;summary&gt;
+        /// The amount of time prior to the current time within which &lt;see cref=&quot;HitObject&quot;/&gt;s should be considered alive.
+        /// &lt;/summary&gt;
+        internal double PastLifetimeExtension
+        {
+            get =&gt; HitObjectContainer.PastLifetimeExtension;
+            set
+            {
+                HitObjectContainer.PastLifetimeExtension = value;
+
+                foreach (var nested in nestedPlayfields)
+                    nested.PastLifetimeExtension = value;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The amount of time after the current time within which &lt;see cref=&quot;HitObject&quot;/&gt;s should be considered alive.
+        /// &lt;/summary&gt;
+        internal double FutureLifetimeExtension
+        {
+            get =&gt; HitObjectContainer.FutureLifetimeExtension;
+            set
+            {
+                HitObjectContainer.FutureLifetimeExtension = value;
+
+                foreach (var nested in nestedPlayfields)
+                    nested.FutureLifetimeExtension = value;
+            }
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[48,57,48,85,0],[55,65,55,97,0],[60,65,60,96,0],[68,13,68,14,0],[69,17,69,48,0],[70,21,70,66,0],[72,17,72,61,0],[74,17,74,49,0],[75,21,75,85,0],[75,85,75,100,0],[75,100,75,103,0],[77,17,77,35,0],[78,13,78,14,0],[84,59,84,75,0],[86,9,86,83,0],[91,32,91,36,0],[91,37,91,49,0],[96,9,96,81,0],[106,70,106,89,0],[110,45,110,49,0],[110,50,110,62,0],[112,9,112,91,0],[119,9,119,30,0],[120,9,120,10,0],[121,13,121,42,0],[123,13,123,73,0],[123,73,124,13,0],[124,13,124,14,0],[124,14,125,17,0],[125,17,125,44,0],[125,44,126,17,0],[126,17,126,47,0],[126,47,126,77,0],[126,77,126,78,0],[126,78,127,17,0],[127,17,127,50,0],[127,50,127,83,0],[127,83,127,84,0],[127,84,128,13,0],[128,13,128,14,0],[128,14,128,15,0],[128,15,128,17,0],[130,13,130,55,0],[131,13,131,59,0],[133,13,133,65,0],[134,9,134,10,0],[138,9,138,10,0],[139,13,139,37,0],[141,13,141,32,0],[142,13,142,14,0],[144,17,144,31,0],[146,17,146,37,0],[147,13,147,14,0],[148,9,148,10,0],[151,9,151,10,0],[152,13,152,65,0],[154,13,154,39,0],[156,13,156,44,0],[157,13,157,36,0],[158,9,158,10,0],[163,46,163,76,0],[163,76,163,91,0],[163,91,163,92,0],[170,9,170,10,0],[171,13,171,34,0],[172,17,172,43,0],[174,13,174,39,0],[175,13,175,43,0],[176,9,176,10,0],[183,9,183,10,0],[184,13,184,47,0],[185,17,185,30,0],[187,13,187,45,0],[188,13,188,26,0],[189,9,189,10,0],[196,9,196,10,0],[197,13,197,39,0],[198,9,198,10,0],[205,9,205,10,0],[206,9,206,10,0],[216,9,216,10,0],[217,9,217,10,0],[223,49,223,53,0],[223,54,223,66,0],[229,69,229,73,0],[237,9,237,10,0],[238,13,238,44,0],[240,13,240,72,0],[242,13,242,51,0],[242,51,242,74,0],[242,74,242,75,0],[243,13,243,49,0],[243,49,243,72,0],[243,72,243,73,0],[244,13,244,56,0],[244,56,244,86,0],[244,86,244,87,0],[245,13,245,59,0],[245,59,245,92,0],[245,92,245,93,0],[247,13,247,50,0],[248,9,248,10,0],[253,9,253,10,0],[254,13,254,33,0],[256,13,256,36,0],[259,13,259,51,0],[260,17,260,49,0],[261,9,261,10,0],[264,9,264,10,0],[265,13,265,27,0],[267,13,267,43,0],[268,13,268,14,0],[269,17,269,24,0],[269,26,269,33,0],[269,34,269,36,0],[269,37,269,41,0],[270,17,270,18,0],[271,21,271,64,0],[272,25,272,48,0],[273,17,273,18,0],[274,13,274,14,0],[277,13,277,44,0],[278,13,278,14,0],[279,17,279,58,0],[280,17,280,55,0],[282,17,282,58,0],[283,21,283,27,0],[285,17,285,51,0],[286,13,286,14,0],[287,9,287,10,0],[292,76,292,100,0],[296,9,296,104,0],[303,9,303,10,0],[304,13,304,56,0],[305,13,305,43,0],[306,9,306,10,0],[309,9,309,10,0],[311,13,311,20,0],[311,22,311,32,0],[311,33,311,35,0],[311,36,311,53,0],[312,17,312,43,0],[314,13,314,20,0],[314,22,314,32,0],[314,33,314,35,0],[314,36,314,62,0],[315,17,315,43,0],[317,13,317,20,0],[317,22,317,38,0],[317,39,317,41,0],[317,42,317,68,0],[318,17,318,46,0],[319,9,319,10,0],[327,9,327,10,0],[328,13,328,63,0],[329,13,329,14,0],[330,17,330,44,0],[331,17,331,29,0],[334,13,334,46,0],[334,46,334,65,0],[334,65,334,67,0],[335,9,335,10,0],[338,9,338,10,0],[339,13,339,41,0],[339,42,339,49,0],[341,13,341,43,0],[342,13,342,47,0],[343,9,343,10,0],[346,9,346,10,0],[347,13,347,41,0],[347,42,347,49,0],[349,13,349,46,0],[350,13,350,49,0],[351,9,351,10,0],[362,104,362,141,0],[379,16,379,103,0],[391,9,391,10,0],[392,13,392,43,0],[393,13,393,31,0],[394,9,394,10,0],[397,9,397,10,0],[398,13,398,64,0],[400,13,401,13,0],[401,13,401,14,0],[401,14,402,17,0],[402,17,402,48,0],[402,48,404,17,0],[404,17,404,40,0],[404,40,405,17,0],[405,17,405,18,0],[405,18,406,21,0],[406,21,406,49,0],[406,49,410,21,0],[410,21,410,38,0],[410,38,411,21,0],[411,21,411,22,0],[411,22,412,25,0],[412,25,412,32,0],[412,32,412,34,0],[412,34,412,41,0],[412,41,412,42,0],[412,42,412,44,0],[412,44,412,45,0],[412,45,412,49,0],[412,49,413,25,0],[413,25,413,26,0],[413,26,414,29,0],[414,29,414,82,0],[414,82,415,33,0],[415,33,415,74,0],[415,74,416,25,0],[416,25,416,26,0],[416,26,417,21,0],[417,21,417,22,0],[417,22,418,17,0],[418,17,418,18,0],[418,18,420,17,0],[420,17,420,68,0],[420,68,421,17,0],[421,17,421,18,0],[421,18,422,21,0],[422,21,422,60,0],[422,60,423,21,0],[423,21,423,64,0],[423,64,424,17,0],[424,17,424,18,0],[424,18,426,17,0],[426,17,426,46,0],[426,46,427,17,0],[427,17,427,34,0],[427,34,428,13,0],[428,13,428,14,0],[428,14,428,16,0],[429,9,429,10,0],[432,9,432,10,0],[433,13,433,50,0],[438,13,438,58,0],[439,13,439,14,0],[440,17,440,24,0],[440,26,440,36,0],[440,37,440,39,0],[440,40,440,45,0],[441,17,441,18,0],[442,21,442,56,0],[443,25,443,34,0],[445,21,445,50,0],[446,21,446,27,0],[448,13,448,14,0],[450,13,450,25,0],[451,9,451,10,0],[453,9,453,172,0],[455,83,455,118,0],[458,9,458,10,0],[459,13,459,67,0],[459,68,459,80,0],[461,13,461,97,0],[463,13,463,25,0],[464,9,464,10,0],[471,19,471,49,0],[472,13,472,14,0],[473,17,473,46,0],[474,13,474,14,0],[476,79,476,114,0],[476,114,476,133,0],[476,133,476,134,0],[482,9,482,10,0],[483,13,483,104,0],[484,13,484,60,0],[486,13,486,49,0],[487,9,487,10,0],[490,9,490,10,0],[491,13,491,39,0],[492,13,492,42,0],[494,13,494,42,0],[495,13,495,36,0],[497,13,497,28,0],[498,9,498,10,0],[524,9,524,10,0],[525,13,525,63,0],[526,13,526,14,0],[527,17,527,45,0],[528,17,528,24,0],[531,13,531,20,0],[531,22,531,27,0],[531,28,531,30,0],[531,31,531,47,0],[532,17,532,54,0],[533,9,533,10,0],[539,9,539,10,0],[540,13,540,20,0],[540,22,540,31,0],[540,32,540,34,0],[540,35,540,58,0],[541,17,541,40,0],[543,13,543,20,0],[543,22,543,27,0],[543,28,543,30,0],[543,31,543,47,0],[544,17,544,34,0],[545,9,545,10,0],[552,20,552,60,0],[554,13,554,14,0],[555,17,555,66,0],[557,17,557,24,0],[557,26,557,36,0],[557,37,557,39,0],[557,40,557,56,0],[558,21,558,58,0],[559,13,559,14,0],[567,20,567,62,0],[569,13,569,14,0],[570,17,570,68,0],[572,17,572,24,0],[572,26,572,36,0],[572,37,572,39,0],[572,40,572,56,0],[573,21,573,60,0],[574,13,574,14,0]]);
+    </script>
+  </body>
+</html>

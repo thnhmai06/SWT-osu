@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Taiko/Beatmaps/TaikoBeatmapConverter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Taiko.Objects;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Utils;
+using System.Threading;
+using osu.Game.Audio;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Rulesets.Objects.Legacy;
+
+namespace osu.Game.Rulesets.Taiko.Beatmaps
+{
+    internal class TaikoBeatmapConverter : BeatmapConverter&lt;TaikoHitObject&gt;
+    {
+        /// &lt;summary&gt;
+        /// A speed multiplier applied globally to osu!taiko.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// osu! is generally slower than taiko, so a factor was historically added to increase speed for converts.
+        /// This must be used everywhere slider length or beat length is used in taiko.
+        ///
+        /// Of note, this has never been exposed to the end user, and is considered a hidden internal multiplier.
+        /// &lt;/remarks&gt;
+        public const float VELOCITY_MULTIPLIER = 1.4f;
+
+        /// &lt;summary&gt;
+        /// Because swells are easier in taiko than spinners are in osu!,
+        /// legacy taiko multiplies a factor when converting the number of required hits.
+        /// &lt;/summary&gt;
+        private const float swell_hit_multiplier = 1.65f;
+
+        /// &lt;summary&gt;
+        /// Base osu! slider scoring distance.
+        /// &lt;/summary&gt;
+        private const float osu_base_scoring_distance = 100;
+
+        private readonly bool isForCurrentRuleset;
+
+        public TaikoBeatmapConverter(IBeatmap beatmap, Ruleset ruleset)
+            : base(beatmap, ruleset)
+        {
+            isForCurrentRuleset = beatmap.BeatmapInfo.Ruleset.Equals(ruleset.RulesetInfo);
+        }
+
+        public override bool CanConvert() =&gt; true;
+
+        protected override Beatmap&lt;TaikoHitObject&gt; ConvertBeatmap(IBeatmap original, CancellationToken cancellationToken)
+        {
+            Beatmap&lt;TaikoHitObject&gt; converted = base.ConvertBeatmap(original, cancellationToken);
+
+            if (original.BeatmapInfo.Ruleset.OnlineID == 0)
+            {
+                // Post processing step to transform standard slider velocity changes into scroll speed changes
+                double lastScrollSpeed = 1;
+
+                foreach (HitObject hitObject in original.HitObjects)
+                {
+                    if (hitObject is not IHasSliderVelocity hasSliderVelocity) continue;
+
+                    double nextScrollSpeed = hasSliderVelocity.SliderVelocityMultiplier;
+                    EffectControlPoint currentEffectPoint = converted.ControlPointInfo.EffectPointAt(hitObject.StartTime);
+
+                    if (!Precision.AlmostEquals(lastScrollSpeed, nextScrollSpeed, acceptableDifference: currentEffectPoint.ScrollSpeedBindable.Precision))
+                    {
+                        converted.ControlPointInfo.Add(hitObject.StartTime, new EffectControlPoint
+                        {
+                            KiaiMode = currentEffectPoint.KiaiMode,
+                            ScrollSpeed = lastScrollSpeed = nextScrollSpeed,
+                        });
+                    }
+                }
+            }
+
+            if (original.BeatmapInfo.Ruleset.OnlineID == 3)
+            {
+                // Post processing step to transform mania hit objects with the same start time into strong hits
+                converted.HitObjects = converted.HitObjects.GroupBy(t =&gt; t.StartTime).Select(x =&gt;
+                {
+                    TaikoHitObject first = x.First();
+                    if (x.Skip(1).Any() &amp;&amp; first is TaikoStrongableHitObject strong)
+                        strong.IsStrong = true;
+                    return first;
+                }).ToList();
+            }
+
+            // TODO: stable makes the last tick of a drumroll non-required when the next object is too close.
+            // This probably needs to be reimplemented:
+            //
+            // List&lt;HitObject&gt; hitobjects = hitObjectManager.hitObjects;
+            // int ind = hitobjects.IndexOf(this);
+            // if (i &lt; hitobjects.Count - 1 &amp;&amp; hitobjects[i + 1].HittableStartTime - (EndTime + (int)TickSpacing) &lt;= (int)TickSpacing)
+            //     lastTickHittable = false;
+
+            return converted;
+        }
+
+        protected override IEnumerable&lt;TaikoHitObject&gt; ConvertHitObject(HitObject obj, IBeatmap beatmap, CancellationToken cancellationToken)
+        {
+            // Old osu! used hit sounding to determine various hit type information
+            IList&lt;HitSampleInfo&gt; samples = obj.Samples;
+
+            switch (obj)
+            {
+                case IHasPath pathData:
+                {
+                    if (shouldConvertSliderToHits(obj, beatmap, pathData, out int taikoDuration, out double tickSpacing))
+                    {
+                        IList&lt;IList&lt;HitSampleInfo&gt;&gt; allSamples = obj is IHasPathWithRepeats curveData ? curveData.NodeSamples : new List&lt;IList&lt;HitSampleInfo&gt;&gt;(new[] { samples });
+
+                        int i = 0;
+
+                        for (double j = obj.StartTime; j &lt;= obj.StartTime + taikoDuration + tickSpacing / 8; j += tickSpacing)
+                        {
+                            IList&lt;HitSampleInfo&gt; currentSamples = allSamples[i];
+
+                            yield return new Hit
+                            {
+                                StartTime = j,
+                                Samples = currentSamples,
+                            };
+
+                            i = (i + 1) % allSamples.Count;
+
+                            if (Precision.AlmostEquals(0, tickSpacing))
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        yield return new DrumRoll
+                        {
+                            StartTime = obj.StartTime,
+                            Samples = obj.Samples,
+                            Duration = taikoDuration,
+                        };
+                    }
+
+                    break;
+                }
+
+                case IHasDuration endTimeData:
+                {
+                    double hitMultiplier = RequiredSwellHitsPerSecond(beatmap.Difficulty.OverallDifficulty);
+
+                    yield return new Swell
+                    {
+                        StartTime = obj.StartTime,
+                        Samples = obj.Samples,
+                        Duration = endTimeData.Duration,
+                        RequiredHits = (int)Math.Max(1, endTimeData.Duration / 1000 * hitMultiplier)
+                    };
+
+                    break;
+                }
+
+                default:
+                {
+                    yield return new Hit
+                    {
+                        StartTime = obj.StartTime,
+                        Samples = samples,
+                    };
+
+                    break;
+                }
+            }
+        }
+
+        public static double RequiredSwellHitsPerSecond(double overallDifficulty)
+            =&gt; IBeatmapDifficultyInfo.DifficultyRange(overallDifficulty, 3, 5, 7.5) * swell_hit_multiplier;
+
+        private bool shouldConvertSliderToHits(HitObject obj, IBeatmap beatmap, IHasPath pathData, out int taikoDuration, out double tickSpacing)
+        {
+            // DO NOT CHANGE OR REFACTOR ANYTHING IN HERE WITHOUT TESTING AGAINST _ALL_ BEATMAPS.
+            // Some of these calculations look redundant, but they are not - extremely small floating point errors are introduced to maintain 1:1 compatibility with stable.
+            // Rounding cannot be used as an alternative since the error deltas have been observed to be between 1e-2 and 1e-6.
+
+            // The true distance, accounting for any repeats. This ends up being the drum roll distance later
+            int spans = (obj as IHasRepeats)?.SpanCount() ?? 1;
+            double distance = pathData.Path.ExpectedDistance.Value ?? 0;
+
+            // Do not combine the following two lines!
+            distance *= VELOCITY_MULTIPLIER;
+            distance *= spans;
+
+            TimingControlPoint timingPoint = beatmap.ControlPointInfo.TimingPointAt(obj.StartTime);
+
+            double beatLength;
+
+            if (obj is IHasSliderVelocity hasSliderVelocity)
+                beatLength = LegacyRulesetExtensions.GetPrecisionAdjustedBeatLength(hasSliderVelocity, timingPoint, TaikoRuleset.SHORT_NAME);
+            else
+                beatLength = timingPoint.BeatLength;
+
+            double sliderScoringPointDistance = osu_base_scoring_distance * (beatmap.Difficulty.SliderMultiplier * VELOCITY_MULTIPLIER) / beatmap.Difficulty.SliderTickRate;
+
+            // The velocity and duration of the taiko hit object - calculated as the velocity of a drum roll.
+            double taikoVelocity = sliderScoringPointDistance * beatmap.Difficulty.SliderTickRate;
+            taikoDuration = (int)(distance / taikoVelocity * beatLength);
+
+            if (isForCurrentRuleset)
+            {
+                tickSpacing = 0;
+                return false;
+            }
+
+            double osuVelocity = taikoVelocity * (1000f / beatLength);
+
+            // osu-stable always uses the speed-adjusted beatlength to determine the osu! velocity, but only uses it for conversion if beatmap version &lt; 8
+            if (beatmap.BeatmapVersion &gt;= 8)
+                beatLength = timingPoint.BeatLength;
+
+            // If the drum roll is to be split into hit circles, assume the ticks are 1/8 spaced within the duration of one beat
+            tickSpacing = Math.Min(beatLength / beatmap.Difficulty.SliderTickRate, (double)taikoDuration / spans);
+
+            return tickSpacing &gt; 0
+                   &amp;&amp; distance / osuVelocity * 1000 &lt; 2 * beatLength;
+        }
+
+        protected override Beatmap&lt;TaikoHitObject&gt; CreateBeatmap() =&gt; new TaikoBeatmap();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[46,15,46,37,1],[47,9,47,10,1],[48,13,48,91,1],[49,9,49,10,1],[51,46,51,50,1],[54,9,54,10,1],[55,13,55,98,1],[57,13,57,60,1],[58,13,58,14,1],[60,17,60,44,1],[62,17,62,24,1],[62,26,62,45,1],[62,46,62,48,1],[62,49,62,68,1],[63,17,63,18,1],[64,21,64,79,1],[64,80,64,89,1],[66,21,66,89,1],[67,21,67,123,1],[69,21,69,155,1],[70,21,70,22,1],[71,25,75,28,1],[76,21,76,22,1],[77,17,77,18,1],[78,13,78,14,1],[80,13,80,60,1],[81,13,81,14,1],[83,17,83,74,1],[83,74,83,85,1],[83,85,84,17,1],[84,17,84,18,1],[84,18,85,21,1],[85,21,85,54,1],[85,54,86,21,1],[86,21,86,85,1],[86,85,87,25,1],[87,25,87,48,1],[87,48,88,21,1],[88,21,88,34,1],[88,34,89,17,1],[89,17,89,18,1],[89,18,89,29,1],[90,13,90,14,1],[100,13,100,30,1],[101,9,101,10,1],[104,9,104,10,1],[106,13,106,56,1],[108,13,108,25,1],[111,17,111,18,1],[112,21,112,122,1],[113,21,113,22,1],[114,25,114,179,1],[116,25,116,35,1],[118,30,118,54,1],[118,56,118,108,1],[118,110,118,126,1],[119,25,119,26,1],[120,29,120,81,1],[122,29,126,31,1],[128,29,128,60,1],[130,29,130,72,1],[131,33,131,39,1],[132,25,132,26,1],[133,21,133,22,1],[135,21,135,22,1],[136,25,141,27,1],[142,21,142,22,1],[144,21,144,27,1],[148,17,148,18,1],[149,21,149,109,1],[151,21,157,23,1],[159,21,159,27,1],[163,17,163,18,1],[164,21,168,23,1],[170,21,170,27,1],[173,9,173,10,1],[176,16,176,107,1],[179,9,179,10,1],[185,13,185,64,1],[186,13,186,73,1],[189,13,189,45,1],[190,13,190,31,1],[192,13,192,100,1],[196,13,196,61,1],[197,17,197,142,1],[199,17,199,53,1],[201,13,201,173,1],[204,13,204,99,1],[205,13,205,74,1],[207,13,207,37,1],[208,13,208,14,1],[209,17,209,33,1],[210,17,210,30,1],[213,13,213,71,1],[216,13,216,45,1],[217,17,217,53,1],[220,13,220,115,1],[222,13,223,70,1],[224,9,224,10,1],[226,71,226,89,1]]);
+    </script>
+  </body>
+</html>

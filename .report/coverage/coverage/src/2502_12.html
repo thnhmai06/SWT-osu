@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Volume/VolumeMeter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Globalization;
+using JetBrains.Annotations;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.Volume
+{
+    public partial class VolumeMeter : Container, IStateful&lt;SelectionState&gt;
+    {
+        private CircularProgress volumeCircle;
+        private CircularProgress volumeCircleGlow;
+
+        protected static readonly Vector2 LABEL_SIZE = new Vector2(120, 20);
+
+        public BindableDouble Bindable { get; } = new BindableDouble { MinValue = 0, MaxValue = 1, Precision = 0.01 };
+
+        protected readonly float CircleSize;
+
+        private readonly Color4 meterColour;
+        private readonly LocalisableString name;
+
+        private OsuSpriteText text;
+        private BufferedContainer maxGlow;
+
+        private Container selectedGlowContainer;
+
+        private Sample hoverSample;
+        private Sample notchSample;
+        private double sampleLastPlaybackTime;
+
+        [CanBeNull]
+        public event Action&lt;SelectionState&gt; StateChanged;
+
+        private SelectionState state;
+
+        public SelectionState State
+        {
+            get =&gt; state;
+            set
+            {
+                if (state == value)
+                    return;
+
+                state = value;
+                StateChanged?.Invoke(value);
+
+                updateSelectedState();
+            }
+        }
+
+        private const float transition_length = 500;
+
+        public VolumeMeter(LocalisableString name, float circleSize, Color4 meterColour)
+        {
+            CircleSize = circleSize;
+            this.meterColour = meterColour;
+            this.name = name;
+
+            AutoSizeAxes = Axes.Both;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, AudioManager audio)
+        {
+            hoverSample = audio.Samples.Get($@&quot;UI/{HoverSampleSet.Button.GetResourceName()}-hover&quot;);
+            notchSample = audio.Samples.Get(@&quot;UI/notch-tick&quot;);
+            sampleLastPlaybackTime = Time.Current;
+
+            Color4 backgroundColour = colours.Gray1;
+
+            CircularProgress bgProgress;
+
+            const float progress_start_radius = 0.75f;
+            const float progress_size = 0.03f;
+            const float progress_end_radius = progress_start_radius + progress_size;
+
+            const float blur_amount = 5;
+
+            Children = new Drawable[]
+            {
+                new Container
+                {
+                    Size = new Vector2(CircleSize),
+                    Children = new Drawable[]
+                    {
+                        new BufferedContainer
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                new Circle
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = backgroundColour,
+                                },
+                                new CircularContainer
+                                {
+                                    Masking = true,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Size = new Vector2(progress_end_radius),
+                                    Children = new Drawable[]
+                                    {
+                                        bgProgress = new CircularProgress
+                                        {
+                                            Anchor = Anchor.Centre,
+                                            Origin = Anchor.Centre,
+                                            RelativeSizeAxes = Axes.Both,
+                                            Rotation = 180,
+                                            Colour = backgroundColour,
+                                        },
+                                        new Container
+                                        {
+                                            Anchor = Anchor.Centre,
+                                            Origin = Anchor.Centre,
+                                            Name = @&quot;Progress under covers for smoothing&quot;,
+                                            RelativeSizeAxes = Axes.Both,
+                                            Rotation = 180,
+                                            Child = volumeCircle = new CircularProgress
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                            }
+                                        },
+                                    }
+                                },
+                                new Circle
+                                {
+                                    Name = @&quot;Inner Cover&quot;,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = backgroundColour,
+                                    Size = new Vector2(progress_start_radius),
+                                },
+                                new Container
+                                {
+                                    Name = @&quot;Progress overlay for glow&quot;,
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Size = new Vector2(progress_start_radius + progress_size / 1.5f),
+                                    Rotation = 180,
+                                    Padding = new MarginPadding(-Blur.KernelSize(blur_amount)),
+                                    Child = (volumeCircleGlow = new CircularProgress
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        InnerRadius = progress_size * 0.8f,
+                                    }).WithEffect(new GlowEffect
+                                    {
+                                        Colour = meterColour,
+                                        BlurSigma = new Vector2(blur_amount),
+                                        Strength = 5,
+                                        PadExtent = true
+                                    }),
+                                },
+                            },
+                        },
+                        selectedGlowContainer = new CircularContainer
+                        {
+                            Masking = true,
+                            RelativeSizeAxes = Axes.Both,
+                            Alpha = 0,
+                            Child = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Alpha = 0,
+                                AlwaysPresent = true,
+                            },
+                            EdgeEffect = new EdgeEffectParameters
+                            {
+                                Type = EdgeEffectType.Glow,
+                                Colour = meterColour.Opacity(0.1f),
+                                Radius = 10,
+                            }
+                        },
+                        maxGlow = (text = new OsuSpriteText
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Font = OsuFont.Numeric.With(size: 0.16f * CircleSize)
+                        }).WithEffect(new GlowEffect
+                        {
+                            Colour = Color4.Transparent,
+                            PadExtent = true,
+                        })
+                    }
+                },
+                new Container
+                {
+                    Size = LABEL_SIZE,
+                    AutoSizeAxes = Axes.X,
+                    CornerRadius = 10,
+                    Masking = true,
+                    Margin = new MarginPadding { Left = CircleSize + 10 },
+                    Origin = Anchor.CentreLeft,
+                    Anchor = Anchor.CentreLeft,
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = backgroundColour,
+                        },
+                        new OsuSpriteText
+                        {
+                            Margin = new MarginPadding
+                            {
+                                Horizontal = 32,
+                            },
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Font = OsuFont.GetFont(weight: FontWeight.Bold),
+                            Text = name
+                        }
+                    }
+                }
+            };
+
+            Bindable.BindValueChanged(volume =&gt; { this.TransformTo(nameof(DisplayVolume), volume.NewValue, 400, Easing.OutQuint); }, true);
+
+            bgProgress.Progress = 0.75f;
+        }
+
+        private int? displayVolumeInt;
+
+        private double displayVolume;
+
+        protected double DisplayVolume
+        {
+            get =&gt; displayVolume;
+            set
+            {
+                displayVolume = value;
+
+                int intValue = (int)Math.Round(displayVolume * 100);
+                bool intVolumeChanged = intValue != displayVolumeInt;
+
+                displayVolumeInt = intValue;
+
+                if (displayVolume &gt;= 0.995f)
+                {
+                    text.Text = &quot;MAX&quot;;
+                    maxGlow.EffectColour = meterColour.Opacity(2f);
+                }
+                else
+                {
+                    maxGlow.EffectColour = Color4.Transparent;
+                    text.Text = intValue.ToString(CultureInfo.CurrentCulture);
+                }
+
+                volumeCircle.Progress = displayVolume * 0.75f;
+                volumeCircleGlow.Progress = displayVolume * 0.75f;
+
+                if (intVolumeChanged &amp;&amp; IsLoaded)
+                    Scheduler.AddOnce(playTickSound);
+            }
+        }
+
+        private void playTickSound()
+        {
+            const int tick_debounce_time = 30;
+
+            if (Time.Current - sampleLastPlaybackTime &lt;= tick_debounce_time)
+                return;
+
+            var channel = notchSample.GetChannel();
+
+            channel.Frequency.Value = 0.99f + RNG.NextDouble(0.02f) + displayVolume * 0.1f;
+
+            // intentionally pitched down, even when hitting max.
+            if (displayVolumeInt == 0 || displayVolumeInt == 100)
+                channel.Frequency.Value -= 0.5f;
+
+            channel.Play();
+            sampleLastPlaybackTime = Time.Current;
+        }
+
+        public double Volume
+        {
+            get =&gt; Bindable.Value;
+            private set =&gt; Bindable.Value = value;
+        }
+
+        private const double adjust_step = 0.01;
+
+        public void Increase(double amount = 1, bool isPrecise = false) =&gt; adjust(amount, isPrecise);
+        public void Decrease(double amount = 1, bool isPrecise = false) =&gt; adjust(-amount, isPrecise);
+
+        // because volume precision is set to 0.01, this local is required to keep track of more precise adjustments and only apply when possible.
+        private double scrollAccumulation;
+
+        private double accelerationModifier = 1;
+
+        private const double max_acceleration = 5;
+        private const double acceleration_multiplier = 1.8;
+
+        private ScheduledDelegate accelerationDebounce;
+
+        private void resetAcceleration() =&gt; accelerationModifier = 1;
+
+        private float dragDelta;
+
+        protected override bool OnMouseDown(MouseDownEvent e) =&gt; true; // handle to prevent drawables behind from potentially receiving the mouse down
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            dragDelta = 0;
+            adjustFromDrag(e.Delta);
+            return true;
+        }
+
+        protected override void OnDrag(DragEvent e)
+        {
+            adjustFromDrag(e.Delta);
+            base.OnDrag(e);
+        }
+
+        private void adjustFromDrag(Vector2 delta)
+        {
+            const float mouse_drag_divisor = 200;
+
+            dragDelta += delta.Y / mouse_drag_divisor;
+
+            if (Math.Abs(dragDelta) &lt; 0.01) return;
+
+            Volume -= dragDelta;
+            dragDelta = 0;
+        }
+
+        private void adjust(double delta, bool isPrecise)
+        {
+            if (delta == 0)
+                return;
+
+            // every adjust increment increases the rate at which adjustments happen up to a cutoff.
+            // this debounce will reset on inactivity.
+            accelerationDebounce?.Cancel();
+            accelerationDebounce = Scheduler.AddDelayed(resetAcceleration, 150);
+
+            delta *= accelerationModifier;
+            accelerationModifier = Math.Min(max_acceleration, accelerationModifier * acceleration_multiplier);
+
+            double precision = Bindable.Precision;
+
+            if (isPrecise)
+            {
+                scrollAccumulation += delta * adjust_step;
+
+                while (Precision.AlmostBigger(Math.Abs(scrollAccumulation), precision))
+                {
+                    Volume += Math.Sign(scrollAccumulation) * precision;
+                    scrollAccumulation = scrollAccumulation &lt; 0 ? Math.Min(0, scrollAccumulation + precision) : Math.Max(0, scrollAccumulation - precision);
+                }
+            }
+            else
+            {
+                Volume += Math.Sign(delta) * Math.Max(precision, Math.Abs(delta * adjust_step));
+            }
+        }
+
+        protected override bool OnScroll(ScrollEvent e)
+        {
+            adjust(e.ScrollDelta.Y, e.IsPrecise);
+            return true;
+        }
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            State = SelectionState.Selected;
+            return base.OnMouseMove(e);
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            State = SelectionState.Selected;
+            return false;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        private void updateSelectedState()
+        {
+            switch (state)
+            {
+                case SelectionState.Selected:
+                    this.ScaleTo(1.04f, transition_length, Easing.OutExpo);
+                    selectedGlowContainer.FadeIn(transition_length, Easing.OutExpo);
+                    hoverSample?.Play();
+                    break;
+
+                case SelectionState.NotSelected:
+                    this.ScaleTo(1f, transition_length, Easing.OutExpo);
+                    selectedGlowContainer.FadeOut(transition_length, Easing.OutExpo);
+                    break;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[38,9,38,77,0],[40,42,40,46,0],[40,51,40,118,0],[63,20,63,25,0],[65,13,65,14,0],[66,17,66,36,0],[67,21,67,28,0],[69,17,69,31,0],[70,17,70,45,0],[72,17,72,39,0],[73,13,73,14,0],[78,9,78,89,0],[79,9,79,10,0],[80,13,80,37,0],[81,13,81,44,0],[82,13,82,30,0],[84,13,84,38,0],[85,9,85,10,0],[89,9,89,10,0],[90,13,90,101,0],[91,13,91,63,0],[92,13,92,51,0],[94,13,94,53,0],[104,13,243,15,0],[245,13,245,49,0],[245,49,245,50,0],[245,50,245,51,0],[245,51,245,130,0],[245,130,245,131,0],[245,131,245,132,0],[245,132,245,140,0],[247,13,247,41,0],[248,9,248,10,0],[256,20,256,33,0],[258,13,258,14,0],[259,17,259,39,0],[261,17,261,69,0],[262,17,262,70,0],[264,17,264,45,0],[266,17,266,45,0],[267,17,267,18,0],[268,21,268,39,0],[269,21,269,68,0],[270,17,270,18,0],[272,17,272,18,0],[273,21,273,63,0],[274,21,274,79,0],[275,17,275,18,0],[277,17,277,63,0],[278,17,278,67,0],[280,17,280,50,0],[281,21,281,54,0],[282,13,282,14,0],[286,9,286,10,0],[289,13,289,77,0],[290,17,290,24,0],[292,13,292,52,0],[294,13,294,92,0],[297,13,297,66,0],[298,17,298,49,0],[300,13,300,28,0],[301,13,301,51,0],[302,9,302,10,0],[306,20,306,34,0],[307,28,307,50,0],[312,76,312,101,0],[313,76,313,102,0],[318,9,318,49,0],[325,45,325,69,0],[329,66,329,70,0],[332,9,332,10,0],[333,13,333,27,0],[334,13,334,37,0],[335,13,335,25,0],[336,9,336,10,0],[339,9,339,10,0],[340,13,340,37,0],[341,13,341,28,0],[342,9,342,10,0],[345,9,345,10,0],[348,13,348,55,0],[350,13,350,44,0],[350,45,350,52,0],[352,13,352,33,0],[353,13,353,27,0],[354,9,354,10,0],[357,9,357,10,0],[358,13,358,28,0],[359,17,359,24,0],[363,13,363,44,0],[364,13,364,81,0],[366,13,366,43,0],[367,13,367,111,0],[369,13,369,51,0],[371,13,371,27,0],[372,13,372,14,0],[373,17,373,59,0],[375,17,375,88,0],[376,17,376,18,0],[377,21,377,73,0],[378,21,378,157,0],[379,17,379,18,0],[380,13,380,14,0],[382,13,382,14,0],[383,17,383,97,0],[384,13,384,14,0],[385,9,385,10,0],[388,9,388,10,0],[389,13,389,50,0],[390,13,390,25,0],[391,9,391,10,0],[394,9,394,10,0],[395,13,395,45,0],[396,13,396,40,0],[397,9,397,10,0],[400,9,400,10,0],[401,13,401,45,0],[402,13,402,26,0],[403,9,403,10,0],[406,9,406,10,0],[407,9,407,10,0],[410,9,410,10,0],[411,9,411,10,0],[414,9,414,10,0],[415,13,415,27,0],[418,21,418,76,0],[419,21,419,85,0],[420,21,420,41,0],[421,21,421,27,0],[424,21,424,73,0],[425,21,425,86,0],[426,21,426,27,0],[428,9,428,10,0]]);
+    </script>
+  </body>
+</html>

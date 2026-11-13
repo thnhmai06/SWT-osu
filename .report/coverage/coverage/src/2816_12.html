@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Dashboard/Friends/FriendsList.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.EnumExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Localisation;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Metadata;
+using osu.Game.Users;
+using osuTK;
+
+namespace osu.Game.Overlays.Dashboard.Friends
+{
+    public partial class FriendsList : CompositeDrawable
+    {
+        public readonly IBindable&lt;OnlineStatus&gt; StatusFilter = new Bindable&lt;OnlineStatus&gt;();
+        public readonly IBindable&lt;UserSortCriteria&gt; SortCriteria = new Bindable&lt;UserSortCriteria&gt;();
+        public readonly IBindable&lt;string&gt; SearchText = new Bindable&lt;string&gt;();
+
+        [Resolved]
+        private MetadataClient metadataClient { get; set; } = null!;
+
+        private readonly IBindableDictionary&lt;int, UserPresence&gt; friendPresences = new BindableDictionary&lt;int, UserPresence&gt;();
+        private readonly OverlayPanelDisplayStyle style;
+        private readonly APIUser[] friends;
+
+        private FriendsSearchContainer searchContainer = null!;
+
+        public FriendsList(OverlayPanelDisplayStyle style, APIUser[] friends)
+        {
+            this.style = style;
+            this.friends = friends;
+
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            InternalChild = searchContainer = new FriendsSearchContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Spacing = new Vector2(style == OverlayPanelDisplayStyle.Card ? 10 : 2),
+                SortCriteria = { BindTarget = SortCriteria },
+                ChildrenEnumerable = friends.Select(createUserPanel)
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            friendPresences.BindTo(metadataClient.FriendPresences);
+            friendPresences.BindCollectionChanged(onFriendPresencesChanged);
+
+            SearchText.BindValueChanged(onSearchTextChanged, true);
+            StatusFilter.BindValueChanged(onStatusFilterChanged, true);
+        }
+
+        private void onFriendPresencesChanged(object? sender, NotifyDictionaryChangedEventArgs&lt;int, UserPresence&gt; e)
+        {
+            switch (e.Action)
+            {
+                case NotifyDictionaryChangedAction.Add:
+                case NotifyDictionaryChangedAction.Remove:
+                    updatePanelVisibilities();
+                    break;
+            }
+        }
+
+        private void onSearchTextChanged(ValueChangedEvent&lt;string&gt; search)
+        {
+            searchContainer.SearchTerm = search.NewValue;
+        }
+
+        private void onStatusFilterChanged(ValueChangedEvent&lt;OnlineStatus&gt; status)
+        {
+            updatePanelVisibilities();
+        }
+
+        private void updatePanelVisibilities()
+        {
+            foreach (var panel in searchContainer)
+            {
+                switch (StatusFilter.Value)
+                {
+                    case OnlineStatus.All:
+                        panel.CanBeShown.Value = true;
+                        break;
+
+                    case OnlineStatus.Online:
+                        panel.CanBeShown.Value = friendPresences.ContainsKey(panel.User.OnlineID);
+                        break;
+
+                    case OnlineStatus.Offline:
+                        panel.CanBeShown.Value = !friendPresences.ContainsKey(panel.User.OnlineID);
+                        break;
+                }
+            }
+        }
+
+        private FilterableUserPanel createUserPanel(APIUser user)
+        {
+            UserPanel panel;
+
+            switch (style)
+            {
+                default:
+                case OverlayPanelDisplayStyle.Card:
+                    panel = new UserGridPanel(user);
+                    panel.Anchor = Anchor.TopCentre;
+                    panel.Origin = Anchor.TopCentre;
+                    panel.Width = 290;
+                    break;
+
+                case OverlayPanelDisplayStyle.List:
+                    panel = new UserListPanel(user);
+                    break;
+
+                case OverlayPanelDisplayStyle.Brick:
+                    panel = new UserBrickPanel(user);
+                    break;
+            }
+
+            return new FilterableUserPanel(panel);
+        }
+
+        private partial class FriendsSearchContainer : SearchContainer&lt;FilterableUserPanel&gt;
+        {
+            public readonly IBindable&lt;UserSortCriteria&gt; SortCriteria = new Bindable&lt;UserSortCriteria&gt;();
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+                SortCriteria.BindValueChanged(_ =&gt; InvalidateLayout(), true);
+            }
+
+            public override IEnumerable&lt;Drawable&gt; FlowingChildren
+            {
+                get
+                {
+                    IEnumerable&lt;FilterableUserPanel&gt; panels = base.FlowingChildren.OfType&lt;FilterableUserPanel&gt;();
+
+                    switch (SortCriteria.Value)
+                    {
+                        default:
+                        case UserSortCriteria.LastVisit:
+                            // Todo: Last visit time is not currently updated according to realtime user presence.
+                            return panels.OrderByDescending(panel =&gt; panel.User.LastVisit);
+
+                        case UserSortCriteria.Rank:
+                            // Todo: Statistics are not currently updated according to realtime user statistics, but it&#39;s also not currently displayed in the panels.
+                            return panels.OrderByDescending(panel =&gt; panel.User.Statistics.GlobalRank.HasValue).ThenBy(panel =&gt; panel.User.Statistics.GlobalRank ?? 0);
+
+                        case UserSortCriteria.Username:
+                            return panels.OrderBy(panel =&gt; panel.User.Username);
+                    }
+                }
+            }
+        }
+
+        public partial class FilterableUserPanel : CompositeDrawable, IConditionalFilterable
+        {
+            public readonly Bindable&lt;bool&gt; CanBeShown = new Bindable&lt;bool&gt;();
+
+            public APIUser User =&gt; panel.User;
+
+            private readonly UserPanel panel;
+
+            public FilterableUserPanel(UserPanel panel)
+            {
+                this.panel = panel;
+
+                Anchor = panel.Anchor;
+                Origin = panel.Origin;
+                RelativeSizeAxes = panel.RelativeSizeAxes;
+                AutoSizeAxes = panel.AutoSizeAxes;
+
+                if (!AutoSizeAxes.HasFlagFast(Axes.X))
+                    Width = panel.Width;
+
+                if (!AutoSizeAxes.HasFlagFast(Axes.Y))
+                    Height = panel.Height;
+
+                InternalChild = panel;
+            }
+
+            IBindable&lt;bool&gt; IConditionalFilterable.CanBeShown =&gt; CanBeShown;
+
+            IEnumerable&lt;LocalisableString&gt; IHasFilterTerms.FilterTerms =&gt; panel.FilterTerms;
+
+            bool IFilterable.MatchingFilter
+            {
+                set
+                {
+                    if (value)
+                        Show();
+                    else
+                        Hide();
+                }
+            }
+
+            bool IFilterable.FilteringActive
+            {
+                set { }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,9,21,93,0],[22,9,22,101,0],[23,9,23,79,0],[26,49,26,53,0],[26,54,26,58,0],[26,63,26,68,0],[28,9,28,127,0],[32,9,32,64,0],[34,9,34,78,0],[35,9,35,10,0],[36,13,36,32,0],[37,13,37,36,0],[39,13,39,39,0],[40,13,40,35,0],[41,9,41,10,0],[45,9,45,10,0],[46,13,53,15,0],[54,9,54,10,0],[57,9,57,10,0],[58,13,58,33,0],[60,13,60,68,0],[61,13,61,77,0],[63,13,63,68,0],[64,13,64,72,0],[65,9,65,10,0],[68,9,68,10,0],[69,13,69,30,0],[73,21,73,47,0],[74,21,74,27,0],[76,9,76,10,0],[79,9,79,10,0],[80,13,80,58,0],[81,9,81,10,0],[84,9,84,10,0],[85,13,85,39,0],[86,9,86,10,0],[89,9,89,10,0],[90,13,90,20,0],[90,22,90,31,0],[90,32,90,34,0],[90,35,90,50,0],[91,13,91,14,0],[92,17,92,44,0],[95,25,95,55,0],[96,25,96,31,0],[99,25,99,99,0],[100,25,100,31,0],[103,25,103,100,0],[104,25,104,31,0],[106,13,106,14,0],[107,9,107,10,0],[110,9,110,10,0],[113,13,113,27,0],[117,21,117,53,0],[118,21,118,53,0],[119,21,119,53,0],[120,21,120,39,0],[121,21,121,27,0],[124,21,124,53,0],[125,21,125,27,0],[128,21,128,54,0],[129,21,129,27,0],[132,13,132,51,0],[133,9,133,10,0],[137,13,137,105,0],[140,13,140,14,0],[141,17,141,37,0],[142,17,142,52,0],[142,52,142,70,0],[142,70,142,78,0],[143,13,143,14,0],[148,17,148,18,0],[149,21,149,114,0],[151,21,151,48,0],[156,29,156,70,0],[156,70,156,90,0],[156,90,156,92,0],[160,29,160,70,0],[160,70,160,111,0],[160,111,160,129,0],[160,129,160,166,0],[160,166,160,168,0],[163,29,163,60,0],[163,60,163,79,0],[163,79,163,81,0],[165,17,165,18,0],[171,13,171,78,0],[173,36,173,46,0],[177,13,177,56,0],[178,13,178,14,0],[179,17,179,36,0],[181,17,181,39,0],[182,17,182,39,0],[183,17,183,59,0],[184,17,184,51,0],[186,17,186,55,0],[187,21,187,41,0],[189,17,189,55,0],[190,21,190,43,0],[192,17,192,39,0],[193,13,193,14,0],[195,66,195,76,0],[197,75,197,92,0],[202,17,202,18,0],[203,21,203,31,0],[204,25,204,32,0],[206,25,206,32,0],[207,17,207,18,0],[212,21,212,22,0],[212,23,212,24,0]]);
+    </script>
+  </body>
+</html>

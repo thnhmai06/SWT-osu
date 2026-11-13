@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandOfCards.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Layout;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand
+{
+    /// &lt;summary&gt;
+    /// Drawable that layouts cards as if held in a player&#39;s hands.
+    /// &lt;/summary&gt;
+    [Cached]
+    public abstract partial class HandOfCards : CompositeDrawable
+    {
+        protected const float HOVER_SCALE = 1.2f;
+
+        private const float card_spacing = -15;
+
+        /// &lt;summary&gt;
+        /// Cards currently present in this &lt;see cref=&quot;HandOfCards&quot;/&gt;
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Entries are not sorted by display order
+        /// &lt;/remarks&gt;
+        public IEnumerable&lt;HandCard&gt; Cards =&gt; cardLookup.Values;
+
+        /// &lt;summary&gt;
+        /// Returns a list of the cards present in this &lt;see cref=&quot;HandOfCards&quot;/&gt; ordered by the cards&#39; &lt;see cref=&quot;HandCard.Order&quot;/&gt;
+        /// &lt;/summary&gt;
+        public List&lt;HandCard&gt; GetCardsInDisplayOrder() =&gt; Cards.OrderBy(static c =&gt; c.Order).ToList();
+
+        /// &lt;summary&gt;
+        /// How far a card slides upwards when hovered.
+        /// Used for making sure a card moves entirely into frame when the hand is partially off-screen.
+        /// &lt;/summary&gt;
+        public float HoverYOffset = 35;
+
+        /// &lt;summary&gt;
+        /// If true, card layout will be flipped on both axes for a card hand placed at the top edge of the screen, while keeping the cards upright.
+        /// Used for &lt;see cref=&quot;OpponentHandOfCards&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected virtual bool Flipped =&gt; false;
+
+        /// &lt;summary&gt;
+        /// Position to insert cards at so they are start moving from the bottom relative to the card layout
+        /// &lt;/summary&gt;
+        public Vector2 BottomCardInsertPosition =&gt; new Vector2(0, (DrawHeight + RankedPlayCard.SIZE.Y) / 2 * (Flipped ? -1 : 1));
+
+        private readonly CardContainer cardContainer;
+
+        private readonly Dictionary&lt;RankedPlayCardItem, HandCard&gt; cardLookup = new Dictionary&lt;RankedPlayCardItem, HandCard&gt;();
+
+        protected HandOfCards()
+        {
+            AddInternal(cardContainer = new CardContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+            });
+
+            AddLayout(layoutBacking);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!layoutBacking.IsValid)
+            {
+                updateLayout();
+                layoutBacking.Validate();
+            }
+        }
+
+        protected bool Contracted { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Contracts all cards towards the bottom (or top when &lt;see cref=&quot;Flipped&quot;/&gt;).
+        /// Cards will no longer get layouted after this method is called.
+        /// &lt;/summary&gt;
+        public void Contract()
+        {
+            Contracted = true;
+
+            double delay = 0;
+
+            foreach (var card in cardContainer)
+            {
+                Scheduler.AddDelayed(() =&gt;
+                {
+                    card.LayoutTarget = new CardLayout
+                    {
+                        Position = new Vector2(0, (DrawHeight + RankedPlayCard.SIZE.Y + 10) / 2 * (Flipped ? -1 : 1)),
+                        Rotation = 0,
+                        Scale = 1,
+                    };
+                }, delay);
+
+                delay += 50;
+            }
+        }
+
+        public void AddCard(RankedPlayCardWithPlaylistItem item, Action&lt;HandCard&gt;? setupAction = null) =&gt; AddCard(new RankedPlayCard(item), setupAction);
+
+        public void AddCard(RankedPlayCard card, Action&lt;HandCard&gt;? setupAction = null)
+        {
+            if (cardLookup.ContainsKey(card.Item.Card))
+                return;
+
+            var drawable = CreateHandCard(card);
+
+            cardLookup[card.Item.Card] = drawable;
+
+            drawable.Position = GetArcPosition(0);
+
+            if (card.Item.DisplayOrder != null)
+                drawable.Order = card.Item.DisplayOrder.Value;
+            else if (cardContainer.Count &gt; 0)
+                drawable.Order = cardContainer.Max(c =&gt; c.Order) + 1;
+
+            cardContainer.Add(drawable);
+            cardContainer.Sort();
+            InvalidateLayout();
+
+            setupAction?.Invoke(drawable);
+        }
+
+        public void Clear()
+        {
+            foreach (var card in Cards.ToArray())
+                RemoveCard(card.Item);
+        }
+
+        public bool RemoveCard(RankedPlayCardWithPlaylistItem item)
+        {
+            if (!cardLookup.Remove(item.Card, out var drawable))
+                return false;
+
+            cardContainer.Remove(drawable, true);
+            InvalidateLayout();
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a card and detaches it&#39;s contained card so it can be attached to a new card facade.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;item&quot;&gt;Item to remove the card for&lt;/param&gt;
+        /// &lt;param name=&quot;card&quot;&gt;Contained &lt;see cref=&quot;RankedPlayCard&quot;/&gt;&lt;/param&gt;
+        /// &lt;param name=&quot;screenSpaceDrawQuad&quot;&gt;&lt;see cref=&quot;Drawable.ScreenSpaceDrawQuad&quot;/&gt; of the removed card&lt;/param&gt;
+        /// &lt;returns&gt;Whether a card was found for the provided item&lt;/returns&gt;
+        public bool RemoveCard(RankedPlayCardWithPlaylistItem item, [MaybeNullWhen(false)] out RankedPlayCard card, out Quad screenSpaceDrawQuad)
+        {
+            if (!cardLookup.Remove(item.Card, out var drawable))
+            {
+                card = null;
+                screenSpaceDrawQuad = default;
+                return false;
+            }
+
+            screenSpaceDrawQuad = drawable.ScreenSpaceDrawQuad;
+            card = drawable.Detach();
+
+            cardContainer.Remove(drawable, true);
+            InvalidateLayout();
+
+            return true;
+        }
+
+        protected virtual HandCard CreateHandCard(RankedPlayCard card) =&gt; new HandCard(card, Flipped);
+
+        protected virtual void OnCardStateChanged(HandCard card, ValueChangedEvent&lt;RankedPlayCardState&gt; evt)
+        {
+            InvalidateLayout();
+            if (affectsDrawOrder(evt))
+                cardContainer.Sort();
+
+            // hovered state can be caused by keyboard focus, in which case we have to clean up after the other cards manually
+            if (evt.NewValue.Hovered)
+            {
+                foreach (var c in cardContainer)
+                {
+                    if (c != card)
+                        c.CardHovered = false;
+                }
+            }
+        }
+
+        private static bool affectsDrawOrder(ValueChangedEvent&lt;RankedPlayCardState&gt; evt) =&gt;
+            evt.OldValue.Order != evt.NewValue.Order ||
+            evt.OldValue.Dragged != evt.NewValue.Dragged;
+
+        #region Layout
+
+        private readonly LayoutValue layoutBacking = new LayoutValue(Invalidation.DrawSize | Invalidation.MiscGeometry);
+
+        /// &lt;summary&gt;
+        /// Invalidates the layout of the hand of cards, causing a relayout to occur.
+        /// &lt;/summary&gt;
+        protected void InvalidateLayout() =&gt; layoutBacking.Invalidate();
+
+        private void updateLayout()
+        {
+            if (Contracted)
+                return;
+
+            // card container draws dragged card on top so we need to sort those separately
+            var cards = GetCardsInDisplayOrder();
+
+            int activeCardIndex = GetActiveCardIndex(cards);
+
+            for (int i = 0; i &lt; cards.Count; i++)
+            {
+                var card = cards[i];
+
+                var layout = card.CardDragged
+                    ? CalculateDraggedCardLayout(card.DragPosition)
+                    : CalculateCardLayout(i, activeCardIndex);
+
+                if (Flipped)
+                    layout.Position *= -1;
+
+                card.LayoutTarget = layout;
+            }
+        }
+
+        protected int GetActiveCardIndex(IReadOnlyList&lt;HandCard&gt; cards)
+        {
+            // the mouse can temporarily leave the dragged card, so dragged card should take precedence
+            for (int i = 0; i &lt; cards.Count; i++)
+            {
+                if (cards[i].CardDragged)
+                    return i;
+            }
+
+            for (int i = 0; i &lt; cards.Count; i++)
+            {
+                if (cards[i].CardHovered)
+                    return i;
+            }
+
+            return -1;
+        }
+
+        protected CardLayout CalculateCardLayout(int index, int activeIndex)
+        {
+            float x = GetCardX(index, activeIndex);
+
+            var position = GetArcPosition(x);
+            float rotation = GetArcRotation(x);
+
+            if (index == activeIndex)
+                position += GetCardUpwardsDirection(rotation) * HoverYOffset;
+
+            return new CardLayout
+            {
+                Position = position,
+                Rotation = rotation,
+                Scale = index == activeIndex ? HOVER_SCALE : 1,
+            };
+        }
+
+        protected virtual CardLayout CalculateDraggedCardLayout(Vector2 dragPosition)
+        {
+            return new CardLayout
+            {
+                Position = dragPosition,
+                Rotation = 0,
+                Scale = HOVER_SCALE,
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Represents the total width of the layout for all cards in the hand.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Does not account for extra space needed for spreading the cards adjacent to the active card apart.
+        /// &lt;/remarks&gt;
+        protected float TotalLayoutWidth =&gt; cardContainer.Count * (RankedPlayCard.SIZE.X + card_spacing) - card_spacing;
+
+        protected float GetCardX(int index, int activeIndex)
+        {
+            float x = -TotalLayoutWidth / 2
+                      + index * (RankedPlayCard.SIZE.X + card_spacing)
+                      + RankedPlayCard.SIZE.X / 2;
+
+            if (activeIndex &lt; 0 || cardContainer.Count &lt;= 1)
+                return x;
+
+            // if a card is hovered or dragged, the adjacent cards should get spread apart
+            int distance = Math.Abs(index - activeIndex);
+            int direction = Math.Sign(index - activeIndex);
+
+            float baseOffset = RankedPlayCard.SIZE.X * 0.1f;
+
+            switch (direction)
+            {
+                case -1:
+                    if (cardContainer.Count == 2)
+                    {
+                        // special case for the left card when there&#39;s only 2 cards
+                        // too much offset looks kinda odd here so it&#39;s reduced
+                        x -= baseOffset + 3;
+                        break;
+                    }
+
+                    x -= baseOffset + 10 / MathF.Pow(distance, 2);
+                    break;
+
+                case 1:
+                    // cards right to the active card have a higher offset because they are partially
+                    // covering the cards to their left
+                    x += baseOffset + 20 / MathF.Pow(distance, 2);
+                    break;
+            }
+
+            return x;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the position of a card at a given &lt;paramref name=&quot;x&quot; /&gt; coordinate so all cards are laid out in an arc
+        /// &lt;/summary&gt;
+        protected Vector2 GetArcPosition(float x)
+        {
+            float offset = (DrawHeight - RankedPlayCard.SIZE.Y) / 2;
+
+            return new Vector2(x, MathF.Pow(MathF.Abs(x / 250), 2) * 20 + offset);
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the rotation of a card at a given &lt;paramref name=&quot;x&quot;/&gt; coordinate
+        /// &lt;/summary&gt;
+        protected static float GetArcRotation(float x) =&gt; x * 0.03f;
+
+        protected static Vector2 GetCardUpwardsDirection(float rotation)
+        {
+            float angle = MathHelper.DegreesToRadians(rotation - 90);
+
+            return new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+        }
+
+        private partial class CardContainer : Container&lt;HandCard&gt;
+        {
+            protected override int Compare(Drawable x, Drawable y)
+            {
+                if (x is HandCard c1 &amp;&amp; y is HandCard c2)
+                {
+                    // dragged cards should always be drawn on top
+                    int result = c1.CardDragged.CompareTo(c2.CardDragged);
+                    if (result != 0)
+                        return result;
+
+                    result = c1.Order.CompareTo(c2.Order);
+                    if (result != 0)
+                        return result;
+                }
+
+                return base.Compare(x, y);
+            }
+
+            public void Sort() =&gt; SortInternal();
+        }
+
+        public struct CardLayout
+        {
+            public required Vector2 Position { get; set; }
+            public required float Rotation { get; set; }
+            public required float Scale { get; set; }
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,47,37,64,0],[42,59,42,85,0],[42,85,42,92,0],[42,92,42,102,0],[48,9,48,40,0],[54,43,54,48,0],[59,52,59,129,0],[63,9,63,127,0],[65,9,65,32,0],[66,9,66,10,0],[67,13,70,16,0],[72,13,72,38,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,27,0],[79,13,79,40,0],[80,13,80,14,0],[81,17,81,32,0],[82,17,82,42,0],[83,13,83,14,0],[84,9,84,10,0],[86,37,86,41,0],[86,42,86,54,0],[93,9,93,10,0],[94,13,94,31,0],[96,13,96,30,0],[98,13,98,20,0],[98,22,98,30,0],[98,31,98,33,0],[98,34,98,47,0],[99,13,99,14,0],[100,17,101,17,0],[101,17,101,18,0],[101,18,102,21,0],[102,21,107,23,0],[107,23,108,17,0],[108,17,108,18,0],[108,18,108,27,0],[110,17,110,29,0],[111,13,111,14,0],[112,9,112,10,0],[114,107,114,153,0],[117,9,117,10,0],[118,13,118,56,0],[119,17,119,24,0],[121,13,121,49,0],[123,13,123,51,0],[125,13,125,51,0],[127,13,127,48,0],[128,17,128,63,0],[129,18,129,46,0],[130,17,130,57,0],[130,57,130,64,0],[130,64,130,70,0],[132,13,132,41,0],[133,13,133,34,0],[134,13,134,32,0],[136,13,136,43,0],[137,9,137,10,0],[140,9,140,10,0],[141,13,141,20,0],[141,22,141,30,0],[141,31,141,33,0],[141,34,141,49,0],[142,17,142,39,0],[143,9,143,10,0],[146,9,146,10,0],[147,13,147,65,0],[148,17,148,30,0],[150,13,150,50,0],[151,13,151,32,0],[152,13,152,25,0],[153,9,153,10,0],[163,9,163,10,0],[164,13,164,65,0],[165,13,165,14,0],[166,17,166,29,0],[167,17,167,47,0],[168,17,168,30,0],[171,13,171,64,0],[172,13,172,38,0],[174,13,174,50,0],[175,13,175,32,0],[177,13,177,25,0],[178,9,178,10,0],[180,75,180,102,0],[183,9,183,10,0],[184,13,184,32,0],[185,13,185,39,0],[186,17,186,38,0],[189,13,189,38,0],[190,13,190,14,0],[191,17,191,24,0],[191,26,191,31,0],[191,32,191,34,0],[191,35,191,48,0],[192,17,192,18,0],[193,21,193,35,0],[194,25,194,47,0],[195,17,195,18,0],[196,13,196,14,0],[197,9,197,10,0],[200,13,201,57,0],[205,9,205,121,0],[210,46,210,72,0],[213,9,213,10,0],[214,13,214,28,0],[215,17,215,24,0],[218,13,218,50,0],[220,13,220,61,0],[222,18,222,27,0],[222,29,222,44,0],[222,46,222,49,0],[223,13,223,14,0],[224,17,224,37,0],[226,17,228,63,0],[230,17,230,29,0],[231,21,231,43,0],[233,17,233,44,0],[234,13,234,14,0],[235,9,235,10,0],[238,9,238,10,0],[240,18,240,27,0],[240,29,240,44,0],[240,46,240,49,0],[241,13,241,14,0],[242,17,242,42,0],[243,21,243,30,0],[244,13,244,14,0],[246,18,246,27,0],[246,29,246,44,0],[246,46,246,49,0],[247,13,247,14,0],[248,17,248,42,0],[249,21,249,30,0],[250,13,250,14,0],[252,13,252,23,0],[253,9,253,10,0],[256,9,256,10,0],[257,13,257,52,0],[259,13,259,46,0],[260,13,260,48,0],[262,13,262,38,0],[263,17,263,78,0],[265,13,270,15,0],[271,9,271,10,0],[274,9,274,10,0],[275,13,280,15,0],[281,9,281,10,0],[289,45,289,120,0],[292,9,292,10,0],[293,13,295,51,0],[297,13,297,61,0],[298,17,298,26,0],[301,13,301,58,0],[302,13,302,60,0],[304,13,304,61,0],[306,13,306,31,0],[309,21,309,50,0],[310,21,310,22,0],[313,25,313,45,0],[314,25,314,31,0],[317,21,317,67,0],[318,21,318,27,0],[323,21,323,67,0],[324,21,324,27,0],[327,13,327,22,0],[328,9,328,10,0],[334,9,334,10,0],[335,13,335,69,0],[337,13,337,83,0],[338,9,338,10,0],[343,59,343,68,0],[346,9,346,10,0],[347,13,347,70,0],[349,13,349,68,0],[350,9,350,10,0],[355,13,355,14,0],[356,17,356,58,0],[357,17,357,18,0],[359,21,359,75,0],[360,21,360,37,0],[361,25,361,39,0],[363,21,363,59,0],[364,21,364,37,0],[365,25,365,39,0],[366,17,366,18,0],[368,17,368,43,0],[369,13,369,14,0],[371,35,371,49,0],[376,48,376,52,0],[376,53,376,57,0],[377,46,377,50,0],[377,51,377,55,0],[378,43,378,47,0],[378,48,378,52,0]]);
+    </script>
+  </body>
+</html>

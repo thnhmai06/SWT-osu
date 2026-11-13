@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/BackgroundDataStoreProcessor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Performance;
+using osu.Game.Rulesets;
+using osu.Game.Scoring;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Screens.Play;
+using Realms;
+
+namespace osu.Game.Database
+{
+    /// &lt;summary&gt;
+    /// Performs background updating of data stores at startup.
+    /// &lt;/summary&gt;
+    public partial class BackgroundDataStoreProcessor : Component
+    {
+        protected Task ProcessingTask { get; private set; } = null!;
+
+        [Resolved]
+        private RulesetStore rulesetStore { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        [Resolved]
+        private ScoreManager scoreManager { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realmAccess { get; set; } = null!;
+
+        [Resolved]
+        private IBeatmapUpdater beatmapUpdater { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; gameBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private ILocalUserPlayInfo? localUserPlayInfo { get; set; }
+
+        [Resolved]
+        private IHighPerformanceSessionManager? highPerformanceSessionManager { get; set; }
+
+        [Resolved]
+        private INotificationOverlay? notificationOverlay { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private Storage storage { get; set; } = null!;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        private LocalCachedBeatmapMetadataSource localMetadataSource = null!;
+
+        protected virtual int TimeToSleepDuringGameplay =&gt; 30000;
+
+        protected virtual bool SkipProcessing =&gt; DebugUtils.IsNUnitRunning;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (SkipProcessing)
+                return;
+
+            localMetadataSource = new LocalCachedBeatmapMetadataSource(storage);
+
+            ProcessingTask = Task.Factory.StartNew(() =&gt;
+            {
+                Logger.Log(&quot;Beginning background data store processing..&quot;);
+
+                clearOutdatedStarRatings();
+                populateMissingStarRatings();
+                processOnlineBeatmapSetsWithNoUpdate();
+                // Note that the previous method will also update these on a fresh run.
+                processBeatmapsWithMissingObjectCounts();
+                processScoresWithMissingStatistics();
+                // ordering significant, `upgradeModMultipliers()` should run first as it will handle all scores
+                // (rather than only lazer scores, if it was called after `convertLegacyTotalScoreToStandardised()`)
+                upgradeModMultipliers();
+                convertLegacyTotalScoreToStandardised();
+                upgradeScoreRanks();
+                backpopulateMissingSubmissionAndRankDates();
+                backpopulateUserTags();
+            }, TaskCreationOptions.LongRunning).ContinueWith(t =&gt;
+            {
+                if (t.Exception?.InnerException is ObjectDisposedException)
+                {
+                    Logger.Log(&quot;Finished background aborted during shutdown&quot;);
+                    return;
+                }
+
+                Logger.Log(&quot;Finished background data store processing!&quot;);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Check whether the databased difficulty calculation version matches the latest ruleset provided version.
+        /// If it doesn&#39;t, clear out any existing difficulties so they can be incrementally recalculated.
+        /// &lt;/summary&gt;
+        private void clearOutdatedStarRatings()
+        {
+            foreach (var ruleset in rulesetStore.AvailableRulesets)
+            {
+                // beatmap being passed in is arbitrary here. just needs to be non-null.
+                int currentVersion = ruleset.CreateInstance().CreateDifficultyCalculator(gameBeatmap.Value).Version;
+
+                if (ruleset.LastAppliedDifficultyVersion &lt; currentVersion)
+                {
+                    Logger.Log($&quot;Resetting star ratings for {ruleset.Name} (difficulty calculation version updated from {ruleset.LastAppliedDifficultyVersion} to {currentVersion})&quot;);
+
+                    int countReset = 0;
+
+                    realmAccess.Write(r =&gt;
+                    {
+                        foreach (var b in r.All&lt;BeatmapInfo&gt;())
+                        {
+                            if (b.Ruleset.ShortName == ruleset.ShortName)
+                            {
+                                b.StarRating = -1;
+                                countReset++;
+                            }
+                        }
+
+                        r.Find&lt;RulesetInfo&gt;(ruleset.ShortName)!.LastAppliedDifficultyVersion = currentVersion;
+                    });
+
+                    Logger.Log($&quot;Finished resetting {countReset} beatmap sets for {ruleset.Name}&quot;);
+                }
+            }
+        }
+
+        /// &lt;remarks&gt;
+        /// This is split out from &lt;see cref=&quot;processOnlineBeatmapSetsWithNoUpdate&quot;/&gt; as a separate process to prevent high server-side load
+        /// from the &lt;see cref=&quot;beatmapUpdater&quot;/&gt; firing online requests as part of the update.
+        /// Star rating recalculations can be ran strictly locally.
+        /// &lt;/remarks&gt;
+        private void populateMissingStarRatings()
+        {
+            HashSet&lt;Guid&gt; beatmapIds = new HashSet&lt;Guid&gt;();
+
+            Logger.Log(&quot;Querying for beatmaps with missing star ratings...&quot;);
+
+            realmAccess.Run(r =&gt;
+            {
+                foreach (var b in r.All&lt;BeatmapInfo&gt;().Where(b =&gt; b.StarRating &lt; 0 &amp;&amp; b.BeatmapSet != null))
+                    beatmapIds.Add(b.ID);
+            });
+
+            if (beatmapIds.Count == 0)
+                return;
+
+            Logger.Log($&quot;Found {beatmapIds.Count} beatmaps which require star rating reprocessing.&quot;);
+
+            var notification = showProgressNotification(beatmapIds.Count, &quot;Reprocessing star rating for beatmaps&quot;, &quot;beatmaps&#39; star ratings have been updated&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            Dictionary&lt;string, Ruleset&gt; rulesetCache = new Dictionary&lt;string, Ruleset&gt;();
+
+            Ruleset getRuleset(RulesetInfo rulesetInfo)
+            {
+                if (!rulesetCache.TryGetValue(rulesetInfo.ShortName, out var ruleset))
+                    ruleset = rulesetCache[rulesetInfo.ShortName] = rulesetInfo.CreateInstance();
+
+                return ruleset;
+            }
+
+            foreach (Guid id in beatmapIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, beatmapIds.Count);
+
+                sleepIfRequired();
+
+                var beatmap = realmAccess.Run(r =&gt; r.Find&lt;BeatmapInfo&gt;(id)?.Detach());
+
+                if (beatmap == null)
+                    return;
+
+                try
+                {
+                    var working = beatmapManager.GetWorkingBeatmap(beatmap);
+                    var ruleset = getRuleset(working.BeatmapInfo.Ruleset);
+
+                    Debug.Assert(ruleset != null);
+
+                    var calculator = ruleset.CreateDifficultyCalculator(working);
+
+                    double starRating = calculator.Calculate().StarRating;
+                    realmAccess.Write(r =&gt;
+                    {
+                        if (r.Find&lt;BeatmapInfo&gt;(id) is BeatmapInfo liveBeatmapInfo)
+                            liveBeatmapInfo.StarRating = starRating;
+                    });
+                    ((IWorkingBeatmapCache)beatmapManager).Invalidate(beatmap);
+                    ++processedCount;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($&quot;Background processing failed on {beatmap}: {e}&quot;);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, beatmapIds.Count, failedCount);
+        }
+
+        private void processOnlineBeatmapSetsWithNoUpdate()
+        {
+            HashSet&lt;Guid&gt; beatmapSetIds = new HashSet&lt;Guid&gt;();
+
+            Logger.Log(&quot;Querying for beatmap sets to reprocess...&quot;);
+
+            realmAccess.Run(r =&gt;
+            {
+                // BeatmapProcessor is responsible for both online and local processing.
+                // In the case a user isn&#39;t logged in, it won&#39;t update LastOnlineUpdate and therefore re-queue,
+                // causing overhead from the non-online processing to redundantly run every startup.
+                //
+                // We may eventually consider making the Process call more specific (or avoid this in any number
+                // of other possible ways), but for now avoid queueing if the user isn&#39;t logged in at startup.
+                if (api.IsLoggedIn)
+                {
+                    foreach (var b in r.All&lt;BeatmapInfo&gt;().Where(b =&gt; b.OnlineID &gt; 0 &amp;&amp; b.LastOnlineUpdate == null &amp;&amp; b.BeatmapSet != null))
+                        beatmapSetIds.Add(b.BeatmapSet!.ID);
+                }
+            });
+
+            if (beatmapSetIds.Count == 0)
+                return;
+
+            Logger.Log($&quot;Found {beatmapSetIds.Count} beatmap sets which require online updates.&quot;);
+
+            var notification = showProgressNotification(beatmapSetIds.Count, &quot;Updating online data for beatmaps&quot;, &quot;beatmaps&#39; online data have been updated&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in beatmapSetIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, beatmapSetIds.Count);
+
+                sleepIfRequired();
+
+                realmAccess.Run(r =&gt;
+                {
+                    var set = r.Find&lt;BeatmapSetInfo&gt;(id);
+
+                    if (set != null)
+                    {
+                        try
+                        {
+                            beatmapUpdater.Process(set);
+                            ++processedCount;
+                        }
+                        catch (Exception e)
+                        {
+                            Logger.Log($&quot;Background processing failed on {set}: {e}&quot;);
+                            ++failedCount;
+                        }
+                    }
+                });
+            }
+
+            completeNotification(notification, processedCount, beatmapSetIds.Count, failedCount);
+        }
+
+        private void processBeatmapsWithMissingObjectCounts()
+        {
+            Logger.Log(&quot;Querying for beatmaps with missing hitobject counts to reprocess...&quot;);
+
+            HashSet&lt;Guid&gt; beatmapIds = new HashSet&lt;Guid&gt;();
+
+            realmAccess.Run(r =&gt;
+            {
+                foreach (var b in r.All&lt;BeatmapInfo&gt;().Where(b =&gt; b.TotalObjectCount &lt; 0 || b.EndTimeObjectCount &lt; 0))
+                    beatmapIds.Add(b.ID);
+            });
+
+            if (beatmapIds.Count == 0)
+                return;
+
+            Logger.Log($&quot;Found {beatmapIds.Count} beatmaps which require statistics population.&quot;);
+
+            var notification = showProgressNotification(beatmapIds.Count, &quot;Populating missing statistics for beatmaps&quot;, &quot;beatmaps have been populated with missing statistics&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in beatmapIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, beatmapIds.Count);
+
+                sleepIfRequired();
+
+                realmAccess.Run(r =&gt;
+                {
+                    var beatmap = r.Find&lt;BeatmapInfo&gt;(id);
+
+                    if (beatmap != null)
+                    {
+                        try
+                        {
+                            beatmapUpdater.ProcessObjectCounts(beatmap);
+                            ++processedCount;
+                        }
+                        catch (Exception e)
+                        {
+                            Logger.Log($&quot;Background processing failed on {beatmap}: {e}&quot;);
+                            ++failedCount;
+                        }
+                    }
+                });
+            }
+
+            completeNotification(notification, processedCount, beatmapIds.Count, failedCount);
+        }
+
+        private void processScoresWithMissingStatistics()
+        {
+            HashSet&lt;Guid&gt; scoreIds = new HashSet&lt;Guid&gt;();
+
+            Logger.Log(&quot;Querying for scores to reprocess...&quot;);
+
+            realmAccess.Run(r =&gt;
+            {
+                foreach (var score in r.All&lt;ScoreInfo&gt;().Where(s =&gt; !s.BackgroundReprocessingFailed))
+                {
+                    if (score.BeatmapInfo != null
+                        &amp;&amp; score.Statistics.Sum(kvp =&gt; kvp.Value) &gt; 0
+                        &amp;&amp; score.MaximumStatistics.Sum(kvp =&gt; kvp.Value) == 0)
+                    {
+                        scoreIds.Add(score.ID);
+                    }
+                }
+            });
+
+            if (scoreIds.Count == 0)
+                return;
+
+            Logger.Log($&quot;Found {scoreIds.Count} scores which require statistics population.&quot;);
+
+            var notification = showProgressNotification(scoreIds.Count, &quot;Populating missing statistics for scores&quot;, &quot;scores have been populated with missing statistics&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in scoreIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, scoreIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    var score = scoreManager.Query(s =&gt; s.ID == id);
+
+                    if (score != null)
+                    {
+                        scoreManager.PopulateMaximumStatistics(score);
+
+                        // Can&#39;t use async overload because we&#39;re not on the update thread.
+                        // ReSharper disable once MethodHasAsyncOverload
+                        realmAccess.Write(r =&gt;
+                        {
+                            r.Find&lt;ScoreInfo&gt;(id)!.MaximumStatisticsJson = JsonConvert.SerializeObject(score.MaximumStatistics);
+                        });
+                    }
+
+                    ++processedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log(@$&quot;Failed to populate maximum statistics for {id}: {e}&quot;);
+                    realmAccess.Write(r =&gt; r.Find&lt;ScoreInfo&gt;(id)!.BackgroundReprocessingFailed = true);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, scoreIds.Count, failedCount);
+        }
+
+        private void upgradeModMultipliers()
+        {
+            Logger.Log(&quot;Querying for scores that need mod multiplier upgrade...&quot;);
+
+            HashSet&lt;Guid&gt; scoreIds = realmAccess.Run(r =&gt; new HashSet&lt;Guid&gt;(
+                r.All&lt;ScoreInfo&gt;()
+                 .Where(s =&gt; !s.BackgroundReprocessingFailed
+                             &amp;&amp; s.BeatmapInfo != null
+                             &amp;&amp; s.TotalScoreVersion &lt; 30000017 // version number represents version with latest mod multiplier change
+                             &amp;&amp; s.TotalScoreWithoutMods &gt; 0)
+                 .AsEnumerable()
+                 // must be done after materialisation, as realm doesn&#39;t want to support
+                 // nested property predicates
+                 .Where(s =&gt; s.Ruleset.IsLegacyRuleset())
+                 .Select(s =&gt; s.ID)));
+
+            Logger.Log($&quot;Found {scoreIds.Count} scores which require mod multiplier upgrade.&quot;);
+
+            if (scoreIds.Count == 0)
+                return;
+
+            var notification = showProgressNotification(scoreIds.Count, &quot;Upgrading scores to new mod multipliers&quot;, &quot;scores have been upgraded to the new mod multipliers&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in scoreIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, scoreIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    // Can&#39;t use async overload because we&#39;re not on the update thread.
+                    // ReSharper disable once MethodHasAsyncOverload
+                    realmAccess.Write(r =&gt;
+                    {
+                        ScoreInfo s = r.Find&lt;ScoreInfo&gt;(id)!;
+                        if (s.BeatmapInfo == null)
+                            return;
+
+                        StandardisedScoreMigrationTools.UpdateToLatestScoreMultipliers(s, s.BeatmapInfo.Difficulty);
+                        s.TotalScoreVersion = LegacyScoreEncoder.LATEST_VERSION;
+                    });
+
+                    ++processedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($&quot;Failed to upgrade mod multipliers for {id}: {e}&quot;);
+                    realmAccess.Write(r =&gt; r.Find&lt;ScoreInfo&gt;(id)!.BackgroundReprocessingFailed = true);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, scoreIds.Count, failedCount);
+        }
+
+        private void convertLegacyTotalScoreToStandardised()
+        {
+            Logger.Log(&quot;Querying for scores that need total score conversion...&quot;);
+
+            HashSet&lt;Guid&gt; scoreIds = realmAccess.Run(r =&gt; new HashSet&lt;Guid&gt;(
+                r.All&lt;ScoreInfo&gt;()
+                 .Where(s =&gt; !s.BackgroundReprocessingFailed
+                             &amp;&amp; s.BeatmapInfo != null
+                             &amp;&amp; s.IsLegacyScore
+                             &amp;&amp; s.TotalScoreVersion &lt; LegacyScoreEncoder.LATEST_VERSION)
+                 .AsEnumerable()
+                 // must be done after materialisation, as realm doesn&#39;t want to support
+                 // nested property predicates
+                 .Where(s =&gt; s.Ruleset.IsLegacyRuleset())
+                 .Select(s =&gt; s.ID)));
+
+            Logger.Log($&quot;Found {scoreIds.Count} scores which require total score conversion.&quot;);
+
+            if (scoreIds.Count == 0)
+                return;
+
+            var notification = showProgressNotification(scoreIds.Count, &quot;Upgrading scores to new scoring algorithm&quot;, &quot;scores have been upgraded to the new scoring algorithm&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in scoreIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, scoreIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    // Can&#39;t use async overload because we&#39;re not on the update thread.
+                    // ReSharper disable once MethodHasAsyncOverload
+                    realmAccess.Write(r =&gt;
+                    {
+                        ScoreInfo s = r.Find&lt;ScoreInfo&gt;(id)!;
+                        StandardisedScoreMigrationTools.UpdateFromLegacy(s, beatmapManager.GetWorkingBeatmap(s.BeatmapInfo));
+                        s.TotalScoreVersion = LegacyScoreEncoder.LATEST_VERSION;
+                    });
+
+                    ++processedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($&quot;Failed to convert total score for {id}: {e}&quot;);
+                    realmAccess.Write(r =&gt; r.Find&lt;ScoreInfo&gt;(id)!.BackgroundReprocessingFailed = true);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, scoreIds.Count, failedCount);
+        }
+
+        private void upgradeScoreRanks()
+        {
+            Logger.Log(&quot;Querying for scores that need rank upgrades...&quot;);
+
+            HashSet&lt;Guid&gt; scoreIds = realmAccess.Run(r =&gt; new HashSet&lt;Guid&gt;(
+                r.All&lt;ScoreInfo&gt;()
+                 .Where(s =&gt; s.TotalScoreVersion &lt; 30000013 &amp;&amp; !s.BackgroundReprocessingFailed) // last total score version with a significant change to ranks
+                 .AsEnumerable()
+                 // must be done after materialisation, as realm doesn&#39;t support
+                 // filtering on nested property predicates or projection via `.Select()`
+                 .Where(s =&gt; s.Ruleset.IsLegacyRuleset())
+                 .Select(s =&gt; s.ID)));
+
+            Logger.Log($&quot;Found {scoreIds.Count} scores which require rank upgrades.&quot;);
+
+            if (scoreIds.Count == 0)
+                return;
+
+            var notification = showProgressNotification(scoreIds.Count, &quot;Adjusting ranks of scores&quot;, &quot;scores now have more correct ranks.&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in scoreIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, scoreIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    // Can&#39;t use async overload because we&#39;re not on the update thread.
+                    // ReSharper disable once MethodHasAsyncOverload
+                    realmAccess.Write(r =&gt;
+                    {
+                        ScoreInfo s = r.Find&lt;ScoreInfo&gt;(id)!;
+                        s.Rank = StandardisedScoreMigrationTools.ComputeRank(s);
+                        s.TotalScoreVersion = LegacyScoreEncoder.LATEST_VERSION;
+                    });
+
+                    ++processedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($&quot;Failed to update rank score {id}: {e}&quot;);
+                    realmAccess.Write(r =&gt; r.Find&lt;ScoreInfo&gt;(id)!.BackgroundReprocessingFailed = true);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, scoreIds.Count, failedCount);
+        }
+
+        private void backpopulateMissingSubmissionAndRankDates()
+        {
+            if (!localMetadataSource.Available)
+            {
+                Logger.Log(&quot;Cannot backpopulate missing submission/rank dates because the local metadata cache is missing.&quot;);
+                return;
+            }
+
+            try
+            {
+                if (!localMetadataSource.IsAtLeastVersion(2))
+                {
+                    Logger.Log(&quot;Cannot backpopulate missing submission/rank dates because the local metadata cache is too old.&quot;);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Error when trying to query version of local metadata cache: {ex}&quot;);
+                return;
+            }
+
+            Logger.Log(&quot;Querying for beatmap sets that contain missing submission/rank date...&quot;);
+
+            // find all ranked beatmap sets with missing date ranked or date submitted that have at least one difficulty ranked as well.
+            // the reason for checking ranked status of the difficulties is that they can be locally modified or unknown too, and for those the lookup is likely to fail.
+            // this is because metadata lookups are primarily based on file hash, so they will fail to match if the beatmap does not match the online version
+            // (which is likely to be the case if the beatmap is locally modified or unknown).
+            // that said, one difficulty in ranked state is enough for the backpopulation to work.
+            HashSet&lt;Guid&gt; beatmapSetIds = realmAccess.Run(r =&gt; new HashSet&lt;Guid&gt;(
+                r.All&lt;BeatmapSetInfo&gt;()
+                 .Filter($@&quot;{nameof(BeatmapSetInfo.StatusInt)} &gt; 0 &amp;&amp; ({nameof(BeatmapSetInfo.DateRanked)} == null || {nameof(BeatmapSetInfo.DateSubmitted)} == null) &quot;
+                         + $@&quot;&amp;&amp; ANY {nameof(BeatmapSetInfo.Beatmaps)}.{nameof(BeatmapInfo.StatusInt)} &gt; 0&quot;)
+                 .AsEnumerable()
+                 .Select(b =&gt; b.ID)));
+
+            if (beatmapSetIds.Count == 0)
+                return;
+
+            Logger.Log($&quot;Found {beatmapSetIds.Count} beatmap sets with missing submission/rank date.&quot;);
+
+            var notification = showProgressNotification(beatmapSetIds.Count, &quot;Populating missing submission and rank dates&quot;, &quot;beatmap sets now have correct submission and rank dates.&quot;);
+
+            int processedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in beatmapSetIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, beatmapSetIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    // Can&#39;t use async overload because we&#39;re not on the update thread.
+                    // ReSharper disable once MethodHasAsyncOverload
+                    bool succeeded = realmAccess.Write(r =&gt;
+                    {
+                        BeatmapSetInfo beatmapSet = r.Find&lt;BeatmapSetInfo&gt;(id)!;
+
+                        var beatmap = beatmapSet.Beatmaps.First(b =&gt; b.Status &gt;= BeatmapOnlineStatus.Ranked);
+
+                        bool lookupSucceeded = localMetadataSource.TryLookup(beatmap, out var result);
+
+                        if (lookupSucceeded)
+                        {
+                            Debug.Assert(result != null);
+                            beatmapSet.DateRanked = result.DateRanked;
+                            beatmapSet.DateSubmitted = result.DateSubmitted;
+                            return true;
+                        }
+
+                        Logger.Log($&quot;Could not find {beatmapSet.GetDisplayString()} in local cache while backpopulating missing submission/rank date&quot;);
+                        return false;
+                    });
+
+                    if (succeeded)
+                        ++processedCount;
+                    else
+                        ++failedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($&quot;Failed to update ranked/submitted dates for beatmap set {id}: {e}&quot;);
+                    ++failedCount;
+                }
+            }
+
+            completeNotification(notification, processedCount, beatmapSetIds.Count, failedCount);
+        }
+
+        private void backpopulateUserTags()
+        {
+            if (!localMetadataSource.Available || !localMetadataSource.IsAtLeastVersion(3))
+            {
+                Logger.Log(@&quot;Local metadata cache doesn&#39;t exist, or has too low version to backpopulate user tags, attempting refetch...&quot;);
+                localMetadataSource.FetchCache().WaitSafely();
+
+                if (!localMetadataSource.Available || !localMetadataSource.IsAtLeastVersion(3))
+                {
+                    Logger.Log(@&quot;Local metadata cache refetch failed. Aborting user tags backpopulation.&quot;);
+                    return;
+                }
+            }
+
+            var lastPopulation = config.Get&lt;DateTime?&gt;(OsuSetting.LastOnlineTagsPopulation);
+            // dropping time data here completely is intentional, because storing the date to config is a lossy operation
+            // (truncates some ticks off of the date when it&#39;s being converted to string and back).
+            // therefore, if precision isn&#39;t explicitly constrained, the condition below would always fail just because the date stored to config
+            // is less accurate than the cache file&#39;s fetch date which is stored with higher precision in the filesystem metadata.
+            var metadataSourceFetchDate = localMetadataSource.GetCacheFetchDate()?.Date;
+
+            if (metadataSourceFetchDate &lt;= lastPopulation)
+            {
+                Logger.Log(
+                    $@&quot;Skipping user tag population because the local metadata source hasn&#39;t been updated since the last time user tags were checked ({lastPopulation.Value.ToString(&quot;yyyy-MM-dd HH:mm:ss&quot;, CultureInfo.InvariantCulture)})&quot;);
+                return;
+            }
+
+            Logger.Log(@&quot;Updating user tags&quot;);
+
+            // while this is constrained to run every month or so (every time a new online.db cache is retrieved), there&#39;s some chance that this will still run much too often and be annoying to users.
+            // if that turns out to be the case we may need a better way to debounce this (or just delete the backpopulation logic after some time has passed?)
+            HashSet&lt;Guid&gt; beatmapIds = realmAccess.Run(r =&gt; new HashSet&lt;Guid&gt;(
+                r.All&lt;BeatmapInfo&gt;()
+                 .Filter($&quot;{nameof(BeatmapInfo.StatusInt)} IN {{ 1,2,4 }}&quot;)
+                 .AsEnumerable()
+                 .Select(b =&gt; b.ID)));
+
+            if (beatmapIds.Count == 0)
+                return;
+
+            Logger.Log($@&quot;Checking for tag updates for {beatmapIds.Count} beatmaps.&quot;);
+
+            var notification = showProgressNotification(beatmapIds.Count, @&quot;Updating user tags&quot;,
+                @&quot;beatmaps have had their tags updated. This runs once a month to allow searching user tags.&quot;);
+
+            int processedCount = 0;
+            int updatedCount = 0;
+            int failedCount = 0;
+
+            foreach (var id in beatmapIds)
+            {
+                if (notification?.State == ProgressNotificationState.Cancelled)
+                    break;
+
+                updateNotificationProgress(notification, processedCount, beatmapIds.Count);
+
+                sleepIfRequired();
+
+                try
+                {
+                    var beatmap = realmAccess.Run(r =&gt; r.Find&lt;BeatmapInfo&gt;(id)?.Detach());
+
+                    if (beatmap == null) continue;
+
+                    bool lookupSucceeded = localMetadataSource.TryLookup(beatmap, out var result);
+
+                    if (lookupSucceeded)
+                    {
+                        Debug.Assert(result != null);
+
+                        HashSet&lt;string&gt; userTags = result.UserTags.ToHashSet();
+
+                        if (!userTags.SetEquals(beatmap.Metadata.UserTags))
+                        {
+                            ++updatedCount;
+                            realmAccess.Write(r =&gt;
+                            {
+                                beatmap = r.Find&lt;BeatmapInfo&gt;(id);
+
+                                if (beatmap == null)
+                                    return;
+
+                                beatmap.Metadata.UserTags.Clear();
+                                beatmap.Metadata.UserTags.AddRange(userTags);
+                            });
+                        }
+                    }
+                    else
+                    {
+                        Logger.Log(@$&quot;Could not find {beatmap.GetDisplayString()} in local cache while backpopulating missing user tags&quot;);
+                    }
+
+                    ++processedCount;
+                }
+                catch (ObjectDisposedException)
+                {
+                    throw;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log(@$&quot;Failed to update user tags for beatmap {id}: {e}&quot;);
+                    ++failedCount;
+                }
+            }
+
+            // Report the updated item count rather than the total processed. Users don&#39;t really care about noops here.
+            completeNotification(notification, updatedCount, updatedCount, failedCount);
+
+            config.SetValue(OsuSetting.LastOnlineTagsPopulation, metadataSourceFetchDate);
+        }
+
+        private void updateNotificationProgress(ProgressNotification? notification, int processedCount, int totalCount)
+        {
+            if (notification == null)
+                return;
+
+            notification.Text = notification.Text.ToString().Split(&#39;(&#39;).First().TrimEnd() + $&quot; ({processedCount} of {totalCount})&quot;;
+            notification.Progress = (float)processedCount / totalCount;
+
+            if (processedCount % 100 == 0)
+                Logger.Log(notification.Text.ToString());
+        }
+
+        private void completeNotification(ProgressNotification? notification, int processedCount, int totalCount, int? failedCount = null)
+        {
+            if (notification == null)
+                return;
+
+            if (totalCount == 0)
+            {
+                notification.CompleteSilently();
+            }
+            else if (processedCount == totalCount)
+            {
+                notification.CompletionText = $&quot;{processedCount} {notification.CompletionText}&quot;;
+                notification.Progress = 1;
+                notification.State = ProgressNotificationState.Completed;
+            }
+            else
+            {
+                notification.Text = $&quot;{processedCount} of {totalCount} {notification.CompletionText}&quot;;
+
+                // We may have arrived here due to user cancellation or completion with failures.
+                if (failedCount &gt; 0)
+                    notification.Text += $&quot; Check logs for issues with {failedCount} failed items.&quot;;
+
+                notification.State = ProgressNotificationState.Cancelled;
+            }
+        }
+
+        private ProgressNotification? showProgressNotification(int totalCount, string running, string completed)
+        {
+            if (notificationOverlay == null)
+                return null;
+
+            if (totalCount &lt; 10)
+                return null;
+
+            ProgressNotification notification = new ProgressNotification
+            {
+                Text = running,
+                CompletionText = completed,
+                State = ProgressNotificationState.Active
+            };
+
+            notificationOverlay?.Post(notification);
+
+            return notification;
+        }
+
+        private void sleepIfRequired()
+        {
+            // Importantly, also sleep if high performance session is active.
+            // If we don&#39;t do this, memory usage can become runaway due to GC running in a more lenient mode.
+            while (localUserPlayInfo?.PlayingState.Value != LocalUserPlayingState.NotPlaying || highPerformanceSessionManager?.IsSessionActive == true)
+            {
+                Logger.Log(&quot;Background processing sleeping due to active gameplay...&quot;);
+                Thread.Sleep(TimeToSleepDuringGameplay);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,41,39,45,0],[39,46,39,58,0],[39,63,39,68,0],[42,45,42,49,0],[42,50,42,54,0],[42,59,42,64,0],[45,49,45,53,0],[45,54,45,58,0],[45,63,45,68,0],[48,45,48,49,0],[48,50,48,54,0],[48,59,48,64,0],[51,43,51,47,0],[51,48,51,52,0],[51,57,51,62,0],[54,50,54,54,0],[54,55,54,59,0],[54,64,54,69,0],[57,57,57,61,0],[57,62,57,66,0],[57,71,57,76,0],[60,57,60,61,0],[60,62,60,66,0],[63,81,63,85,0],[63,86,63,90,0],[66,61,66,65,0],[66,66,66,70,0],[69,36,69,40,0],[69,41,69,45,0],[69,50,69,55,0],[72,35,72,39,0],[72,40,72,44,0],[72,49,72,54,0],[75,43,75,47,0],[75,48,75,52,0],[75,57,75,62,0],[77,9,77,78,0],[79,60,79,65,0],[81,50,81,75,0],[84,9,84,10,0],[85,13,85,33,0],[87,13,87,32,0],[88,17,88,24,0],[90,13,90,81,0],[92,13,93,13,0],[93,13,93,14,0],[93,14,94,17,0],[94,17,94,76,0],[94,76,96,17,0],[96,17,96,44,0],[96,44,97,17,0],[97,17,97,46,0],[97,46,98,17,0],[98,17,98,56,0],[98,56,100,17,0],[100,17,100,58,0],[100,58,101,17,0],[101,17,101,54,0],[101,54,104,17,0],[104,17,104,41,0],[104,41,105,17,0],[105,17,105,57,0],[105,57,106,17,0],[106,17,106,37,0],[106,37,107,17,0],[107,17,107,61,0],[107,61,108,17,0],[108,17,108,40,0],[108,40,109,13,0],[109,13,109,14,0],[109,14,110,13,0],[110,13,110,14,0],[110,14,111,17,0],[111,17,111,76,0],[111,76,112,17,0],[112,17,112,18,0],[112,18,113,21,0],[113,21,113,79,0],[113,79,114,21,0],[114,21,114,28,0],[114,28,117,17,0],[117,17,117,74,0],[117,74,118,13,0],[118,13,118,14,0],[118,14,118,16,0],[119,9,119,10,0],[126,9,126,10,0],[127,13,127,20,0],[127,22,127,33,0],[127,34,127,36,0],[127,37,127,67,0],[128,13,128,14,0],[130,17,130,117,0],[132,17,132,75,0],[133,17,133,18,0],[134,21,134,183,0],[136,21,136,40,0],[138,21,139,21,0],[139,21,139,22,0],[139,22,140,25,0],[140,25,140,32,0],[140,32,140,34,0],[140,34,140,39,0],[140,39,140,40,0],[140,40,140,42,0],[140,42,140,43,0],[140,43,140,63,0],[140,63,141,25,0],[141,25,141,26,0],[141,26,142,29,0],[142,29,142,74,0],[142,74,143,29,0],[143,29,143,30,0],[143,30,144,33,0],[144,33,144,51,0],[144,51,145,33,0],[145,33,145,46,0],[145,46,146,29,0],[146,29,146,30,0],[146,30,147,25,0],[147,25,147,26,0],[147,26,149,25,0],[149,25,149,111,0],[149,111,150,21,0],[150,21,150,22,0],[150,22,150,24,0],[152,21,152,100,0],[153,17,153,18,0],[154,13,154,14,0],[155,9,155,10,0],[163,9,163,10,0],[164,13,164,60,0],[166,13,166,78,0],[168,13,169,13,0],[169,13,169,14,0],[169,14,170,17,0],[170,17,170,24,0],[170,24,170,26,0],[170,26,170,31,0],[170,31,170,32,0],[170,32,170,34,0],[170,34,170,35,0],[170,35,170,108,0],[170,108,171,21,0],[171,21,171,42,0],[171,42,172,13,0],[172,13,172,14,0],[172,14,172,16,0],[174,13,174,39,0],[175,17,175,24,0],[177,13,177,102,0],[179,13,179,160,0],[181,13,181,36,0],[182,13,182,33,0],[184,13,184,90,0],[187,13,187,14,0],[188,17,188,87,0],[189,21,189,98,0],[191,17,191,32,0],[192,13,192,14,0],[194,13,194,20,0],[194,22,194,29,0],[194,30,194,32,0],[194,33,194,43,0],[195,13,195,14,0],[196,17,196,80,0],[197,21,197,27,0],[199,17,199,92,0],[201,17,201,35,0],[203,17,203,52,0],[203,52,203,85,0],[203,85,203,87,0],[205,17,205,37,0],[206,21,206,28,0],[209,17,209,18,0],[210,21,210,77,0],[211,21,211,75,0],[213,21,213,51,0],[215,21,215,82,0],[217,21,217,75,0],[218,21,219,21,0],[219,21,219,22,0],[219,22,220,25,0],[220,25,220,84,0],[220,84,221,29,0],[221,29,221,69,0],[221,69,222,21,0],[222,21,222,22,0],[222,22,222,24,0],[223,21,223,80,0],[224,21,224,38,0],[225,17,225,18,0],[226,17,226,36,0],[227,17,227,18,0],[228,21,228,83,0],[229,21,229,35,0],[230,17,230,18,0],[231,13,231,14,0],[233,13,233,95,0],[234,9,234,10,0],[237,9,237,10,0],[238,13,238,63,0],[240,13,240,69,0],[242,13,243,13,0],[243,13,243,14,0],[243,14,250,17,0],[250,17,250,36,0],[250,36,251,17,0],[251,17,251,18,0],[251,18,252,21,0],[252,21,252,28,0],[252,28,252,30,0],[252,30,252,35,0],[252,35,252,36,0],[252,36,252,38,0],[252,38,252,39,0],[252,39,252,140,0],[252,140,253,25,0],[253,25,253,61,0],[253,61,254,17,0],[254,17,254,18,0],[254,18,255,13,0],[255,13,255,14,0],[255,14,255,16,0],[257,13,257,42,0],[258,17,258,24,0],[260,13,260,99,0],[262,13,262,158,0],[264,13,264,36,0],[265,13,265,33,0],[267,13,267,20,0],[267,22,267,28,0],[267,29,267,31,0],[267,32,267,45,0],[268,13,268,14,0],[269,17,269,80,0],[270,21,270,27,0],[272,17,272,95,0],[274,17,274,35,0],[276,17,277,17,0],[277,17,277,18,0],[277,18,278,21,0],[278,21,278,58,0],[278,58,280,21,0],[280,21,280,37,0],[280,37,281,21,0],[281,21,281,22,0],[281,22,283,25,0],[283,25,283,26,0],[283,26,284,29,0],[284,29,284,57,0],[284,57,285,29,0],[285,29,285,46,0],[285,46,286,25,0],[286,25,286,26,0],[286,26,287,25,0],[287,25,287,44,0],[287,44,288,25,0],[288,25,288,26,0],[288,26,289,29,0],[289,29,289,87,0],[289,87,290,29,0],[290,29,290,43,0],[290,43,291,25,0],[291,25,291,26,0],[291,26,292,21,0],[292,21,292,22,0],[292,22,293,17,0],[293,17,293,18,0],[293,18,293,20,0],[294,13,294,14,0],[296,13,296,98,0],[297,9,297,10,0],[300,9,300,10,0],[301,13,301,95,0],[303,13,303,60,0],[305,13,306,13,0],[306,13,306,14,0],[306,14,307,17,0],[307,17,307,24,0],[307,24,307,26,0],[307,26,307,31,0],[307,31,307,32,0],[307,32,307,34,0],[307,34,307,35,0],[307,35,307,118,0],[307,118,308,21,0],[308,21,308,42,0],[308,42,309,13,0],[309,13,309,14,0],[309,14,309,16,0],[311,13,311,39,0],[312,17,312,24,0],[314,13,314,99,0],[316,13,316,177,0],[318,13,318,36,0],[319,13,319,33,0],[321,13,321,20,0],[321,22,321,28,0],[321,29,321,31,0],[321,32,321,42,0],[322,13,322,14,0],[323,17,323,80,0],[324,21,324,27,0],[326,17,326,92,0],[328,17,328,35,0],[330,17,331,17,0],[331,17,331,18,0],[331,18,332,21,0],[332,21,332,59,0],[332,59,334,21,0],[334,21,334,41,0],[334,41,335,21,0],[335,21,335,22,0],[335,22,337,25,0],[337,25,337,26,0],[337,26,338,29,0],[338,29,338,73,0],[338,73,339,29,0],[339,29,339,46,0],[339,46,340,25,0],[340,25,340,26,0],[340,26,341,25,0],[341,25,341,44,0],[341,44,342,25,0],[342,25,342,26,0],[342,26,343,29,0],[343,29,343,91,0],[343,91,344,29,0],[344,29,344,43,0],[344,43,345,25,0],[345,25,345,26,0],[345,26,346,21,0],[346,21,346,22,0],[346,22,347,17,0],[347,17,347,18,0],[347,18,347,20,0],[348,13,348,14,0],[350,13,350,95,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,58,0],[357,13,357,63,0],[359,13,360,13,0],[360,13,360,14,0],[360,14,361,17,0],[361,17,361,24,0],[361,24,361,26,0],[361,26,361,35,0],[361,35,361,36,0],[361,36,361,38,0],[361,38,361,39,0],[361,39,361,101,0],[361,101,362,17,0],[362,17,362,18,0],[362,18,363,21,0],[363,21,364,56,0],[364,56,364,65,0],[364,65,365,63,0],[365,63,365,72,0],[365,72,365,79,0],[365,79,366,21,0],[366,21,366,22,0],[366,22,367,25,0],[367,25,367,48,0],[367,48,368,21,0],[368,21,368,22,0],[368,22,369,17,0],[369,17,369,18,0],[369,18,370,13,0],[370,13,370,14,0],[370,14,370,16,0],[372,13,372,37,0],[373,17,373,24,0],[375,13,375,95,0],[377,13,377,171,0],[379,13,379,36,0],[380,13,380,33,0],[382,13,382,20,0],[382,22,382,28,0],[382,29,382,31,0],[382,32,382,40,0],[383,13,383,14,0],[384,17,384,80,0],[385,21,385,27,0],[387,17,387,90,0],[389,17,389,35,0],[392,17,392,18,0],[393,21,393,69,0],[395,21,395,39,0],[396,21,396,22,0],[397,25,397,71,0],[401,25,402,25,0],[402,25,402,26,0],[402,26,403,29,0],[403,29,403,129,0],[403,129,404,25,0],[404,25,404,26,0],[404,26,404,28,0],[405,21,405,22,0],[407,21,407,38,0],[408,17,408,18,0],[409,17,409,48,0],[410,17,410,18,0],[411,21,411,27,0],[413,17,413,36,0],[414,17,414,18,0],[415,21,415,89,0],[416,21,416,44,0],[416,44,416,102,0],[416,102,416,104,0],[417,21,417,35,0],[418,17,418,18,0],[419,13,419,14,0],[421,13,421,93,0],[422,9,422,10,0],[425,9,425,10,0],[426,13,426,83,0],[428,13,428,59,0],[428,59,437,30,0],[437,30,437,57,0],[437,57,438,31,0],[438,31,438,35,0],[438,35,438,37,0],[438,37,438,39,0],[440,13,440,96,0],[442,13,442,37,0],[443,17,443,24,0],[445,13,445,172,0],[447,13,447,36,0],[448,13,448,33,0],[450,13,450,20,0],[450,22,450,28,0],[450,29,450,31,0],[450,32,450,40,0],[451,13,451,14,0],[452,17,452,80,0],[453,21,453,27,0],[455,17,455,90,0],[457,17,457,35,0],[460,17,460,18,0],[463,21,464,21,0],[464,21,464,22,0],[464,22,465,25,0],[465,25,465,62,0],[465,62,466,25,0],[466,25,466,51,0],[466,51,467,29,0],[467,29,467,36,0],[467,36,469,25,0],[469,25,469,117,0],[469,117,470,25,0],[470,25,470,81,0],[470,81,471,21,0],[471,21,471,22,0],[471,22,471,24,0],[473,21,473,38,0],[474,17,474,18,0],[475,17,475,48,0],[476,17,476,18,0],[477,21,477,27,0],[479,17,479,36,0],[480,17,480,18,0],[481,21,481,84,0],[482,21,482,44,0],[482,44,482,102,0],[482,102,482,104,0],[483,21,483,35,0],[484,17,484,18,0],[485,13,485,14,0],[487,13,487,93,0],[488,9,488,10,0],[491,9,491,10,0],[492,13,492,83,0],[494,13,494,59,0],[494,59,503,30,0],[503,30,503,57,0],[503,57,504,31,0],[504,31,504,35,0],[504,35,504,37,0],[504,37,504,39,0],[506,13,506,96,0],[508,13,508,37,0],[509,17,509,24,0],[511,13,511,176,0],[513,13,513,36,0],[514,13,514,33,0],[516,13,516,20,0],[516,22,516,28,0],[516,29,516,31,0],[516,32,516,40,0],[517,13,517,14,0],[518,17,518,80,0],[519,21,519,27,0],[521,17,521,90,0],[523,17,523,35,0],[526,17,526,18,0],[529,21,530,21,0],[530,21,530,22,0],[530,22,531,25,0],[531,25,531,62,0],[531,62,532,25,0],[532,25,532,126,0],[532,126,533,25,0],[533,25,533,81,0],[533,81,534,21,0],[534,21,534,22,0],[534,22,534,24,0],[536,21,536,38,0],[537,17,537,18,0],[538,17,538,48,0],[539,17,539,18,0],[540,21,540,27,0],[542,17,542,36,0],[543,17,543,18,0],[544,21,544,80,0],[545,21,545,44,0],[545,44,545,102,0],[545,102,545,104,0],[546,21,546,35,0],[547,17,547,18,0],[548,13,548,14,0],[550,13,550,93,0],[551,9,551,10,0],[554,9,554,10,0],[555,13,555,74,0],[557,13,557,59,0],[557,59,563,30,0],[563,30,563,57,0],[563,57,564,31,0],[564,31,564,35,0],[564,35,564,37,0],[564,37,564,39,0],[566,13,566,87,0],[568,13,568,37,0],[569,17,569,24,0],[571,13,571,141,0],[573,13,573,36,0],[574,13,574,33,0],[576,13,576,20,0],[576,22,576,28,0],[576,29,576,31,0],[576,32,576,40,0],[577,13,577,14,0],[578,17,578,80,0],[579,21,579,27,0],[581,17,581,90,0],[583,17,583,35,0],[586,17,586,18,0],[589,21,590,21,0],[590,21,590,22,0],[590,22,591,25,0],[591,25,591,62,0],[591,62,592,25,0],[592,25,592,81,0],[592,81,593,25,0],[593,25,593,81,0],[593,81,594,21,0],[594,21,594,22,0],[594,22,594,24,0],[596,21,596,38,0],[597,17,597,18,0],[598,17,598,48,0],[599,17,599,18,0],[600,21,600,27,0],[602,17,602,36,0],[603,17,603,18,0],[604,21,604,74,0],[605,21,605,44,0],[605,44,605,102,0],[605,102,605,104,0],[606,21,606,35,0],[607,17,607,18,0],[608,13,608,14,0],[610,13,610,93,0],[611,9,611,10,0],[614,9,614,10,0],[615,13,615,48,0],[616,13,616,14,0],[617,17,617,126,0],[618,17,618,24,0],[622,13,622,14,0],[623,17,623,62,0],[624,17,624,18,0],[625,21,625,130,0],[626,21,626,28,0],[628,13,628,14,0],[629,13,629,33,0],[630,13,630,14,0],[631,17,631,97,0],[632,17,632,24,0],[635,13,635,98,0],[642,13,642,64,0],[642,64,647,31,0],[647,31,647,35,0],[647,35,647,37,0],[647,37,647,39,0],[649,13,649,42,0],[650,17,650,24,0],[652,13,652,104,0],[654,13,654,186,0],[656,13,656,36,0],[657,13,657,33,0],[659,13,659,20,0],[659,22,659,28,0],[659,29,659,31,0],[659,32,659,45,0],[660,13,660,14,0],[661,17,661,80,0],[662,21,662,27,0],[664,17,664,95,0],[666,17,666,35,0],[669,17,669,18,0],[672,21,673,21,0],[673,21,673,22,0],[673,22,674,25,0],[674,25,674,81,0],[674,81,676,25,0],[676,25,676,70,0],[676,70,676,108,0],[676,108,676,110,0],[676,110,678,25,0],[678,25,678,103,0],[678,103,680,25,0],[680,25,680,45,0],[680,45,681,25,0],[681,25,681,26,0],[681,26,682,29,0],[682,29,682,58,0],[682,58,683,29,0],[683,29,683,71,0],[683,71,684,29,0],[684,29,684,77,0],[684,77,685,29,0],[685,29,685,41,0],[685,41,688,25,0],[688,25,688,152,0],[688,152,689,25,0],[689,25,689,38,0],[689,38,690,21,0],[690,21,690,22,0],[690,22,690,24,0],[692,21,692,35,0],[693,25,693,42,0],[695,25,695,39,0],[696,17,696,18,0],[697,17,697,48,0],[698,17,698,18,0],[699,21,699,27,0],[701,17,701,36,0],[702,17,702,18,0],[703,21,703,102,0],[704,21,704,35,0],[705,17,705,18,0],[706,13,706,14,0],[708,13,708,98,0],[709,9,709,10,0],[712,9,712,10,0],[713,13,713,92,0],[714,13,714,14,0],[715,17,715,140,0],[716,17,716,63,0],[718,17,718,96,0],[719,17,719,18,0],[720,21,720,108,0],[721,21,721,28,0],[723,13,723,14,0],[725,13,725,93,0],[730,13,730,89,0],[732,13,732,59,0],[733,13,733,14,0],[734,17,735,239,0],[736,17,736,24,0],[739,13,739,47,0],[743,13,743,61,0],[743,61,747,31,0],[747,31,747,35,0],[747,35,747,37,0],[747,37,747,39,0],[749,13,749,39,0],[750,17,750,24,0],[752,13,752,87,0],[754,13,755,112,0],[757,13,757,36,0],[758,13,758,34,0],[759,13,759,33,0],[761,13,761,20,0],[761,22,761,28,0],[761,29,761,31,0],[761,32,761,42,0],[762,13,762,14,0],[763,17,763,80,0],[764,21,764,27,0],[766,17,766,92,0],[768,17,768,35,0],[771,17,771,18,0],[772,21,772,56,0],[772,56,772,89,0],[772,89,772,91,0],[774,21,774,41,0],[774,42,774,51,0],[776,21,776,99,0],[778,21,778,41,0],[779,21,779,22,0],[780,25,780,54,0],[782,25,782,80,0],[784,25,784,76,0],[785,25,785,26,0],[786,29,786,44,0],[787,29,788,29,0],[788,29,788,30,0],[788,30,789,33,0],[789,33,789,67,0],[789,67,791,33,0],[791,33,791,53,0],[791,53,792,37,0],[792,37,792,44,0],[792,44,794,33,0],[794,33,794,67,0],[794,67,795,33,0],[795,33,795,78,0],[795,78,796,29,0],[796,29,796,30,0],[796,30,796,32,0],[797,25,797,26,0],[798,21,798,22,0],[800,21,800,22,0],[801,25,801,139,0],[802,21,802,22,0],[804,21,804,38,0],[805,17,805,18,0],[806,17,806,48,0],[807,17,807,18,0],[808,21,808,27,0],[810,17,810,36,0],[811,17,811,18,0],[812,21,812,86,0],[813,21,813,35,0],[814,17,814,18,0],[815,13,815,14,0],[818,13,818,89,0],[820,13,820,91,0],[821,9,821,10,0],[824,9,824,10,0],[825,13,825,38,0],[826,17,826,24,0],[828,13,828,132,0],[829,13,829,72,0],[831,13,831,43,0],[832,17,832,58,0],[833,9,833,10,0],[836,9,836,10,0],[837,13,837,38,0],[838,17,838,24,0],[840,13,840,33,0],[841,13,841,14,0],[842,17,842,49,0],[843,13,843,14,0],[844,18,844,51,0],[845,13,845,14,0],[846,17,846,97,0],[847,17,847,43,0],[848,17,848,74,0],[849,13,849,14,0],[851,13,851,14,0],[852,17,852,103,0],[855,17,855,37,0],[856,21,856,101,0],[858,17,858,74,0],[859,13,859,14,0],[860,9,860,10,0],[863,9,863,10,0],[864,13,864,45,0],[865,17,865,29,0],[867,13,867,33,0],[868,17,868,29,0],[870,13,875,15,0],[877,13,877,53,0],[879,13,879,33,0],[880,9,880,10,0],[883,9,883,10,0],[886,13,886,152,0],[887,13,887,14,0],[888,17,888,88,0],[889,17,889,57,0],[890,13,890,14,0],[891,9,891,10,0]]);
+    </script>
+  </body>
+</html>

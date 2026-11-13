@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/Timeline/Timeline.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Audio;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Overlays;
+using osu.Game.Rulesets.Edit;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Edit.Compose.Components.Timeline
+{
+    [Cached]
+    public partial class Timeline : ZoomableScrollContainer
+    {
+        private const float timeline_height = 80;
+
+        private readonly Drawable userContent;
+
+        private bool alwaysShowControlPoints;
+
+        public bool AlwaysShowControlPoints
+        {
+            get =&gt; alwaysShowControlPoints;
+            set
+            {
+                if (value == alwaysShowControlPoints)
+                    return;
+
+                alwaysShowControlPoints = value;
+                controlPointsVisible.TriggerChange();
+            }
+        }
+
+        [Resolved]
+        private EditorClock editorClock { get; set; } = null!;
+
+        [Resolved]
+        private EditorBeatmap editorBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        /// &lt;summary&gt;
+        /// The timeline&#39;s scroll position in the last frame.
+        /// &lt;/summary&gt;
+        private double lastScrollPosition;
+
+        /// &lt;summary&gt;
+        /// The track time in the last frame.
+        /// &lt;/summary&gt;
+        private double lastTrackTime;
+
+        /// &lt;summary&gt;
+        /// Whether the user is currently dragging the timeline.
+        /// &lt;/summary&gt;
+        private bool handlingDragInput;
+
+        /// &lt;summary&gt;
+        /// Whether the track was playing before a user drag event.
+        /// &lt;/summary&gt;
+        private bool trackWasPlaying;
+
+        /// &lt;summary&gt;
+        /// The timeline zoom level at a 1x zoom scale.
+        /// &lt;/summary&gt;
+        private float defaultTimelineZoom;
+
+        private WaveformGraph waveform = null!;
+
+        private TimelineTickDisplay ticks = null!;
+
+        private TimelineTimingChangeDisplay controlPoints = null!;
+
+        private Bindable&lt;float&gt; waveformOpacity = null!;
+        private Bindable&lt;bool&gt; controlPointsVisible = null!;
+        private Bindable&lt;bool&gt; ticksVisible = null!;
+
+        private double trackLengthForZoom;
+
+        public Timeline(Drawable userContent)
+        {
+            this.userContent = userContent;
+
+            RelativeSizeAxes = Axes.X;
+            Height = timeline_height;
+
+            ZoomDuration = 200;
+            ZoomEasing = Easing.OutQuint;
+            ScrollbarVisible = false;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, OverlayColourProvider colourProvider, OsuConfigManager config)
+        {
+            CentreMarker centreMarker;
+
+            // We don&#39;t want the centre marker to scroll
+            AddInternal(centreMarker = new CentreMarker
+            {
+                Anchor = Anchor.TopCentre,
+                Origin = Anchor.TopCentre,
+                Width = 8,
+                TriangleHeightRatio = 0.8f,
+                Colour = colourProvider.Colour2
+            });
+
+            AddRange(new Drawable[]
+            {
+                ticks = new TimelineTickDisplay(),
+                new Box
+                {
+                    Name = &quot;zero marker&quot;,
+                    RelativeSizeAxes = Axes.Y,
+                    Width = TimelineTickDisplay.TICK_WIDTH / 2,
+                    Origin = Anchor.TopCentre,
+                    Colour = colourProvider.Background1,
+                },
+                controlPoints = new TimelineTimingChangeDisplay
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Height = timeline_height,
+                    Children = new[]
+                    {
+                        waveform = new WaveformGraph
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            BaseColour = colours.Blue.Opacity(0.2f),
+                            LowColour = colours.BlueLighter,
+                            MidColour = colours.BlueDark,
+                            HighColour = colours.BlueDarker,
+                        },
+                        centreMarker.CreateProxy(),
+                        ticks.CreateProxy(),
+                        userContent,
+                    }
+                },
+            });
+
+            waveformOpacity = config.GetBindable&lt;float&gt;(OsuSetting.EditorWaveformOpacity);
+            controlPointsVisible = config.GetBindable&lt;bool&gt;(OsuSetting.EditorTimelineShowTimingChanges);
+            ticksVisible = config.GetBindable&lt;bool&gt;(OsuSetting.EditorTimelineShowTicks);
+
+            editorClock.TrackChanged += updateWaveform;
+            updateWaveform();
+
+            Zoom = (float)(defaultTimelineZoom * editorBeatmap.TimelineZoom);
+        }
+
+        private void updateWaveform()
+        {
+            waveform.Waveform = beatmap.Value.Waveform;
+            Scheduler.AddOnce(applyVisualOffset, beatmap);
+        }
+
+        private void applyVisualOffset(IBindable&lt;WorkingBeatmap&gt; beatmap)
+        {
+            waveform.RelativePositionAxes = Axes.X;
+
+            if (beatmap.Value.Track.Length &gt; 0)
+                waveform.X = -(float)(Editor.WAVEFORM_VISUAL_OFFSET / beatmap.Value.Track.Length);
+            else
+            {
+                // sometimes this can be the case immediately after a track switch.
+                // reschedule with the hope that the track length eventually populates.
+                Scheduler.AddOnce(applyVisualOffset, beatmap);
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            waveformOpacity.BindValueChanged(_ =&gt; updateWaveformOpacity(), true);
+
+            ticksVisible.BindValueChanged(visible =&gt; ticks.FadeTo(visible.NewValue ? 1 : 0, 200, Easing.OutQuint), true);
+
+            controlPointsVisible.BindValueChanged(visible =&gt;
+            {
+                if (visible.NewValue || alwaysShowControlPoints)
+                    controlPoints.FadeIn(400, Easing.OutQuint);
+                else
+                    controlPoints.FadeOut(200, Easing.OutQuint);
+            }, true);
+        }
+
+        private void updateWaveformOpacity() =&gt;
+            waveform.FadeTo(waveformOpacity.Value, 200, Easing.OutQuint);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // The extrema of track time should be positioned at the centre of the container when scrolled to the start or end
+            Content.Margin = new MarginPadding { Horizontal = DrawWidth / 2 };
+
+            // This needs to happen after transforms are updated, but before the scroll position is updated in base.UpdateAfterChildren
+            if (editorClock.IsRunning)
+                scrollToTrackTime();
+
+            if (editorClock.TrackLength != trackLengthForZoom)
+            {
+                defaultTimelineZoom = getZoomLevelForVisibleMilliseconds(6000);
+
+                float minimumZoom = getZoomLevelForVisibleMilliseconds(10000);
+                float maximumZoom = getZoomLevelForVisibleMilliseconds(500);
+
+                float initialZoom = (float)Math.Clamp(defaultTimelineZoom * (editorBeatmap.TimelineZoom == 0 ? 1 : editorBeatmap.TimelineZoom), minimumZoom, maximumZoom);
+
+                SetupZoom(initialZoom, minimumZoom, maximumZoom);
+
+                float getZoomLevelForVisibleMilliseconds(double milliseconds) =&gt; Math.Max(1, (float)(editorClock.TrackLength / milliseconds));
+
+                trackLengthForZoom = editorClock.TrackLength;
+            }
+        }
+
+        protected override bool OnScroll(ScrollEvent e)
+        {
+            // if this is not a precision scroll event, let the editor handle the seek itself (for snapping support)
+            if (!e.AltPressed &amp;&amp; !e.IsPrecise)
+                return false;
+
+            return base.OnScroll(e);
+        }
+
+        protected override void OnZoomChanged()
+        {
+            base.OnZoomChanged();
+            editorBeatmap.TimelineZoom = Zoom / defaultTimelineZoom;
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (handlingDragInput)
+                seekTrackToCurrent();
+            else if (!editorClock.IsRunning)
+            {
+                // The track isn&#39;t running. There are three cases we have to be wary of:
+                // 1) The user flick-drags on this timeline and we are applying an interpolated seek on the clock, until interrupted by 2 or 3.
+                // 2) The user changes the track time through some other means (scrolling in the editor or overview timeline; clicking a hitobject etc.). We want the timeline to track the clock&#39;s time.
+                // 3) An ongoing seek transform is running from an external seek. We want the timeline to track the clock&#39;s time.
+
+                // The simplest way to cover the first two cases is by checking whether the scroll position has changed and the audio hasn&#39;t been changed externally
+                // Checking IsSeeking covers the third case, where the transform may not have been applied yet.
+                if (Current != lastScrollPosition &amp;&amp; editorClock.CurrentTime == lastTrackTime &amp;&amp; !editorClock.IsSeeking)
+                    seekTrackToCurrent();
+                else
+                    scrollToTrackTime();
+            }
+
+            lastScrollPosition = Current;
+            lastTrackTime = editorClock.CurrentTime;
+        }
+
+        private void seekTrackToCurrent()
+        {
+            double target = TimeAtPosition(Current);
+            editorClock.Seek(Math.Min(editorClock.TrackLength, target));
+        }
+
+        private void scrollToTrackTime()
+        {
+            if (editorClock.TrackLength == 0)
+                return;
+
+            // covers the case where the user starts playback after a drag is in progress.
+            // we want to ensure the clock is always stopped during drags to avoid weird audio playback.
+            if (handlingDragInput)
+                editorClock.Stop();
+
+            float position = PositionAtTime(editorClock.CurrentTime);
+            ScrollTo(position, false);
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            if (base.OnMouseDown(e))
+                beginUserDrag();
+
+            // handling right button as well breaks context menus inside the timeline, only handle left button for now.
+            return e.Button == MouseButton.Left;
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            endUserDrag();
+            base.OnMouseUp(e);
+        }
+
+        private void beginUserDrag()
+        {
+            handlingDragInput = true;
+            trackWasPlaying = editorClock.IsRunning;
+            editorClock.Stop();
+        }
+
+        private void endUserDrag()
+        {
+            handlingDragInput = false;
+            if (trackWasPlaying)
+                editorClock.Start();
+        }
+
+        [Resolved]
+        private IBeatSnapProvider beatSnapProvider { get; set; } = null!;
+
+        /// &lt;summary&gt;
+        /// The total amount of time visible on the timeline.
+        /// &lt;/summary&gt;
+        public double VisibleRange =&gt; editorClock.TrackLength / Zoom;
+
+        public double TimeAtPosition(double x)
+        {
+            return x / Content.DrawWidth * editorClock.TrackLength;
+        }
+
+        public float PositionAtTime(double time)
+        {
+            return (float)(time / editorClock.TrackLength * Content.DrawWidth);
+        }
+
+        public SnapResult FindSnappedPositionAndTime(Vector2 screenSpacePosition)
+        {
+            double time = TimeAtPosition(Content.ToLocalSpace(screenSpacePosition).X);
+            return new SnapResult(screenSpacePosition, beatSnapProvider.SnapTime(time));
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (editorClock.IsNotNull())
+                editorClock.TrackChanged -= updateWaveform;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,20,35,43,0],[37,13,37,14,0],[38,17,38,54,0],[39,21,39,28,0],[41,17,41,49,0],[42,17,42,54,0],[43,13,43,14,0],[47,43,47,47,0],[47,48,47,52,0],[47,57,47,62,0],[50,47,50,51,0],[50,52,50,56,0],[50,61,50,66,0],[53,53,53,57,0],[53,58,53,62,0],[53,67,53,72,0],[80,9,80,48,0],[82,9,82,51,0],[84,9,84,67,0],[86,9,86,57,0],[87,9,87,61,0],[88,9,88,53,0],[92,9,92,46,0],[93,9,93,10,0],[94,13,94,44,0],[96,13,96,39,0],[97,13,97,38,0],[99,13,99,32,0],[100,13,100,42,0],[101,13,101,38,0],[102,9,102,10,0],[106,9,106,10,0],[110,13,117,16,0],[119,13,155,16,0],[157,13,157,91,0],[158,13,158,105,0],[159,13,159,89,0],[161,13,161,56,0],[162,13,162,30,0],[164,13,164,78,0],[165,9,165,10,0],[168,9,168,10,0],[169,13,169,56,0],[170,13,170,59,0],[171,9,171,10,0],[174,9,174,10,0],[175,13,175,52,0],[177,13,177,48,0],[178,17,178,99,0],[180,13,180,14,0],[183,17,183,63,0],[184,13,184,14,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,33,0],[191,13,191,51,0],[191,51,191,74,0],[191,74,191,82,0],[193,13,193,54,0],[193,54,193,114,0],[193,114,193,122,0],[195,13,196,13,0],[196,13,196,14,0],[196,14,197,17,0],[197,17,197,65,0],[197,65,198,21,0],[198,21,198,64,0],[198,64,200,21,0],[200,21,200,65,0],[200,65,201,13,0],[201,13,201,14,0],[201,14,201,22,0],[202,9,202,10,0],[205,13,205,73,0],[208,9,208,10,0],[209,13,209,27,0],[212,13,212,79,0],[215,13,215,39,0],[216,17,216,37,0],[218,13,218,63,0],[219,13,219,14,0],[220,17,220,80,0],[222,17,222,79,0],[223,17,223,77,0],[225,17,225,171,0],[227,17,227,66,0],[229,82,229,142,0],[231,17,231,62,0],[232,13,232,14,0],[233,9,233,10,0],[236,9,236,10,0],[238,13,238,47,0],[239,17,239,30,0],[241,13,241,37,0],[242,9,242,10,0],[245,9,245,10,0],[246,13,246,34,0],[247,13,247,69,0],[248,9,248,10,0],[251,9,251,10,0],[252,13,252,40,0],[254,13,254,35,0],[255,17,255,38,0],[256,18,256,45,0],[257,13,257,14,0],[265,17,265,121,0],[266,21,266,42,0],[268,21,268,41,0],[269,13,269,14,0],[271,13,271,42,0],[272,13,272,53,0],[273,9,273,10,0],[276,9,276,10,0],[277,13,277,53,0],[278,13,278,73,0],[279,9,279,10,0],[282,9,282,10,0],[283,13,283,46,0],[284,17,284,24,0],[288,13,288,35,0],[289,17,289,36,0],[291,13,291,70,0],[292,13,292,39,0],[293,9,293,10,0],[296,9,296,10,0],[297,13,297,37,0],[298,17,298,33,0],[301,13,301,49,0],[302,9,302,10,0],[305,9,305,10,0],[306,13,306,27,0],[307,13,307,31,0],[308,9,308,10,0],[311,9,311,10,0],[312,13,312,38,0],[313,13,313,53,0],[314,13,314,32,0],[315,9,315,10,0],[318,9,318,10,0],[319,13,319,39,0],[320,13,320,33,0],[321,17,321,37,0],[322,9,322,10,0],[325,54,325,58,0],[325,59,325,63,0],[325,68,325,73,0],[330,39,330,69,0],[333,9,333,10,0],[334,13,334,68,0],[335,9,335,10,0],[338,9,338,10,0],[339,13,339,80,0],[340,9,340,10,0],[343,9,343,10,0],[344,13,344,87,0],[345,13,345,89,0],[346,9,346,10,0],[349,9,349,10,0],[350,13,350,39,0],[352,13,352,41,0],[353,17,353,60,0],[354,9,354,10,0]]);
+    </script>
+  </body>
+</html>

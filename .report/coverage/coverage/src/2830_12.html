@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Comments/CommentsContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Framework.Graphics;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics.Shapes;
+using osu.Game.Online.API.Requests.Responses;
+using System.Threading;
+using System.Linq;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Threading;
+using System.Collections.Generic;
+using JetBrains.Annotations;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Users.Drawables;
+using osuTK;
+
+namespace osu.Game.Overlays.Comments
+{
+    [Cached]
+    public partial class CommentsContainer : CompositeDrawable
+    {
+        private readonly Bindable&lt;CommentableType&gt; type = new Bindable&lt;CommentableType&gt;();
+        private readonly BindableLong id = new BindableLong();
+        public IBindable&lt;CommentableType&gt; Type =&gt; type;
+        public IBindable&lt;long&gt; Id =&gt; id;
+
+        public readonly Bindable&lt;CommentsSortCriteria&gt; Sort = new Bindable&lt;CommentsSortCriteria&gt;();
+        public readonly BindableBool ShowDeleted = new BindableBool();
+
+        protected readonly IBindable&lt;APIUser&gt; User = new Bindable&lt;APIUser&gt;();
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        private GetCommentsRequest request;
+        private ScheduledDelegate scheduledCommentsLoad;
+        private CancellationTokenSource loadCancellation;
+        private int currentPage;
+
+        private FillFlowContainer pinnedContent;
+        private NewCommentEditor newCommentEditor;
+        private FillFlowContainer content;
+        private DeletedCommentsCounter deletedCommentsCounter;
+        private CommentsShowMoreButton moreButton;
+        private TotalCommentsCounter commentCounter;
+        private UpdateableAvatar avatar;
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider)
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            AddRangeInternal(new Drawable[]
+            {
+                new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colourProvider.Background5
+                },
+                new FillFlowContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        commentCounter = new TotalCommentsCounter(),
+                        new Container
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = colourProvider.Background4,
+                                },
+                                pinnedContent = new FillFlowContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Direction = FillDirection.Vertical,
+                                },
+                            },
+                        },
+                        new Container
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Padding = new MarginPadding { Horizontal = WaveOverlayContainer.HORIZONTAL_PADDING, Vertical = 20 },
+                            Children = new Drawable[]
+                            {
+                                avatar = new UpdateableAvatar(api.LocalUser.Value, isInteractive: false)
+                                {
+                                    Size = new Vector2(50),
+                                    CornerExponent = 2,
+                                    CornerRadius = 25,
+                                    Masking = true,
+                                },
+                                new Container
+                                {
+                                    Padding = new MarginPadding { Left = 60 },
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Child = newCommentEditor = new NewCommentEditor
+                                    {
+                                        OnPost = prependPostedComments
+                                    }
+                                }
+                            }
+                        },
+                        new CommentsHeader
+                        {
+                            Sort = { BindTarget = Sort },
+                            ShowDeleted = { BindTarget = ShowDeleted }
+                        },
+                        content = new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                        },
+                        new Container
+                        {
+                            Name = @&quot;Footer&quot;,
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Children = new Drawable[]
+                            {
+                                new FillFlowContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Direction = FillDirection.Vertical,
+                                    Margin = new MarginPadding { Bottom = 20 },
+                                    Children = new Drawable[]
+                                    {
+                                        deletedCommentsCounter = new DeletedCommentsCounter
+                                        {
+                                            ShowDeleted = { BindTarget = ShowDeleted },
+                                            Margin = new MarginPadding
+                                            {
+                                                Horizontal = WaveOverlayContainer.HORIZONTAL_PADDING,
+                                                Vertical = 10
+                                            }
+                                        },
+                                        new Container
+                                        {
+                                            AutoSizeAxes = Axes.Y,
+                                            RelativeSizeAxes = Axes.X,
+                                            Child = moreButton = new CommentsShowMoreButton
+                                            {
+                                                Anchor = Anchor.Centre,
+                                                Origin = Anchor.Centre,
+                                                Margin = new MarginPadding
+                                                {
+                                                    Vertical = 10
+                                                },
+                                                Action = getComments,
+                                                IsLoading = true,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            User.BindTo(api.LocalUser);
+        }
+
+        protected override void LoadComplete()
+        {
+            User.BindValueChanged(_ =&gt; refetchComments());
+            User.BindValueChanged(e =&gt; avatar.User = e.NewValue, true);
+            Sort.BindValueChanged(_ =&gt; refetchComments(), true);
+            base.LoadComplete();
+        }
+
+        /// &lt;param name=&quot;type&quot;&gt;The type of resource to get comments for.&lt;/param&gt;
+        /// &lt;param name=&quot;id&quot;&gt;The id of the resource to get comments for.&lt;/param&gt;
+        public void ShowComments(CommentableType type, long id)
+        {
+            this.type.Value = type;
+            this.id.Value = id;
+
+            if (!IsLoaded)
+                return;
+
+            // only reset when changing ID/type. other refetch ops are generally just changing sort order.
+            commentCounter.Current.Value = 0;
+
+            refetchComments();
+        }
+
+        private void refetchComments()
+        {
+            ClearComments();
+            getComments();
+        }
+
+        private void getComments()
+        {
+            if (id.Value &lt;= 0)
+                return;
+
+            request?.Cancel();
+            loadCancellation?.Cancel();
+            scheduledCommentsLoad?.Cancel();
+            request = new GetCommentsRequest(id.Value, type.Value, Sort.Value, currentPage++, 0);
+            request.Success += res =&gt; scheduledCommentsLoad = Schedule(() =&gt; OnSuccess(res));
+            api.PerformAsync(request);
+        }
+
+        protected void ClearComments()
+        {
+            currentPage = 1;
+            deletedCommentsCounter.Count.Value = 0;
+            moreButton.Show();
+            moreButton.IsLoading = true;
+            pinnedContent.Clear();
+            content.Clear();
+            CommentDictionary.Clear();
+        }
+
+        protected readonly Dictionary&lt;long, DrawableComment&gt; CommentDictionary = new Dictionary&lt;long, DrawableComment&gt;();
+
+        protected void OnSuccess(CommentBundle response)
+        {
+            commentCounter.Current.Value = response.Total;
+            newCommentEditor.CommentableMeta.Value = response.CommentableMeta.SingleOrDefault(m =&gt; m.Id == id.Value &amp;&amp; string.Equals(m.Type, type.Value.ToString().ToSnakeCase(), StringComparison.OrdinalIgnoreCase));
+
+            if (!response.Comments.Any())
+            {
+                content.Add(new NoCommentsPlaceholder());
+                moreButton.Hide();
+                return;
+            }
+
+            AppendComments(response);
+        }
+
+        /// &lt;summary&gt;
+        /// Appends retrieved comments to the subtree rooted of comments in this page.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;bundle&quot;&gt;The bundle of comments to add.&lt;/param&gt;
+        protected void AppendComments([NotNull] CommentBundle bundle)
+        {
+            var topLevelComments = new List&lt;DrawableComment&gt;();
+            var orphaned = new List&lt;Comment&gt;();
+
+            foreach (var comment in bundle.Comments.Concat(bundle.IncludedComments).Concat(bundle.PinnedComments))
+            {
+                // Exclude possible duplicated comments.
+                if (CommentDictionary.ContainsKey(comment.Id))
+                    continue;
+
+                addNewComment(comment);
+            }
+
+            // Comments whose parents were seen later than themselves can now be added.
+            foreach (var o in orphaned)
+                addNewComment(o);
+
+            if (topLevelComments.Any())
+            {
+                LoadComponentsAsync(topLevelComments, loaded =&gt;
+                {
+                    pinnedContent.AddRange(loaded.Where(d =&gt; d.Comment.Pinned));
+                    content.AddRange(loaded.Where(d =&gt; !d.Comment.Pinned));
+                    deletedCommentsCounter.Count.Value += topLevelComments.Select(d =&gt; d.Comment).Count(c =&gt; c.IsDeleted &amp;&amp; c.IsTopLevel);
+
+                    if (bundle.HasMore)
+                    {
+                        int loadedTopLevelComments = 0;
+                        pinnedContent.Children.OfType&lt;DrawableComment&gt;().ForEach(_ =&gt; loadedTopLevelComments++);
+                        content.Children.OfType&lt;DrawableComment&gt;().ForEach(_ =&gt; loadedTopLevelComments++);
+
+                        moreButton.Current.Value = bundle.TopLevelCount - loadedTopLevelComments;
+                        moreButton.IsLoading = false;
+                    }
+                    else
+                    {
+                        moreButton.Hide();
+                    }
+                }, (loadCancellation = new CancellationTokenSource()).Token);
+            }
+
+            void addNewComment(Comment comment)
+            {
+                var drawableComment = GetDrawableComment(comment, bundle.CommentableMeta);
+
+                if (comment.ParentId == null)
+                {
+                    // Comments that have no parent are added as top-level comments to the flow.
+                    topLevelComments.Add(drawableComment);
+                }
+                else if (CommentDictionary.TryGetValue(comment.ParentId.Value, out var parentDrawable))
+                {
+                    // The comment&#39;s parent has already been seen, so the parent&lt;-&gt; child links can be added.
+                    comment.ParentComment = parentDrawable.Comment;
+                    parentDrawable.Replies.Add(drawableComment);
+                }
+                else
+                {
+                    // The comment&#39;s parent has not been seen yet, so keep it orphaned for the time being. This can occur if the comments arrive out of order.
+                    // Since this comment has now been seen, any further children can be added to it without being orphaned themselves.
+                    orphaned.Add(comment);
+                }
+            }
+        }
+
+        private void prependPostedComments(CommentBundle bundle)
+        {
+            var topLevelComments = new List&lt;DrawableComment&gt;();
+
+            foreach (var comment in bundle.Comments)
+            {
+                // Exclude possible duplicated comments.
+                if (CommentDictionary.ContainsKey(comment.Id))
+                    continue;
+
+                topLevelComments.Add(GetDrawableComment(comment, bundle.CommentableMeta));
+            }
+
+            if (topLevelComments.Any())
+            {
+                LoadComponentsAsync(topLevelComments, loaded =&gt;
+                {
+                    if (content.Count &gt; 0 &amp;&amp; content[0] is NoCommentsPlaceholder placeholder)
+                        content.Remove(placeholder, true);
+
+                    foreach (var comment in loaded)
+                    {
+                        content.Insert((int)-Clock.CurrentTime, comment);
+                    }
+                }, (loadCancellation = new CancellationTokenSource()).Token);
+            }
+        }
+
+        public DrawableComment GetDrawableComment(Comment comment, IReadOnlyList&lt;CommentableMeta&gt; meta)
+        {
+            if (CommentDictionary.TryGetValue(comment.Id, out var existing))
+                return existing;
+
+            return CommentDictionary[comment.Id] = new DrawableComment(comment, meta)
+            {
+                ShowDeleted = { BindTarget = ShowDeleted },
+                Sort = { BindTarget = Sort },
+                RepliesRequested = onCommentRepliesRequested
+            };
+        }
+
+        private void onCommentRepliesRequested(DrawableComment drawableComment, int page)
+        {
+            var req = new GetCommentsRequest(id.Value, type.Value, Sort.Value, page, drawableComment.Comment.Id);
+
+            req.Success += response =&gt; Schedule(() =&gt; AppendComments(response));
+
+            api.PerformAsync(req);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            request?.Cancel();
+            loadCancellation?.Cancel();
+            base.Dispose(isDisposing);
+        }
+
+        internal partial class NoCommentsPlaceholder : CompositeDrawable
+        {
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                Height = 80;
+                RelativeSizeAxes = Axes.X;
+                AddRangeInternal(new Drawable[]
+                {
+                    new OsuSpriteText
+                    {
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        Margin = new MarginPadding { Left = WaveOverlayContainer.HORIZONTAL_PADDING },
+                        Text = CommentsStrings.Empty
+                    }
+                });
+            }
+        }
+
+        private partial class NewCommentEditor : CommentEditor
+        {
+            [Resolved]
+            private CommentsContainer commentsContainer { get; set; }
+
+            public Action&lt;CommentBundle&gt; OnPost;
+
+            //TODO should match web, left empty due to no multiline support
+            protected override LocalisableString FooterText =&gt; default;
+
+            protected override LocalisableString GetButtonText(bool isLoggedIn) =&gt;
+                isLoggedIn ? CommonStrings.ButtonsPost : CommentsStrings.GuestButtonNew;
+
+            protected override LocalisableString GetPlaceholderText() =&gt; CommentsStrings.PlaceholderNew;
+
+            protected override void OnCommit(string text)
+            {
+                ShowLoadingSpinner = true;
+                CommentPostRequest req = new CommentPostRequest(commentsContainer.Type.Value, commentsContainer.Id.Value, text);
+                req.Failure += e =&gt; Schedule(() =&gt;
+                {
+                    ShowLoadingSpinner = false;
+                    Logger.Error(e, &quot;Posting comment failed.&quot;);
+                });
+                req.Success += cb =&gt; Schedule(() =&gt;
+                {
+                    ShowLoadingSpinner = false;
+                    Current.Value = string.Empty;
+                    OnPost?.Invoke(cb);
+                });
+                API.Queue(req);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,9,34,91,0],[35,9,35,63,0],[36,51,36,55,0],[37,38,37,40,0],[39,9,39,100,0],[40,9,40,71,0],[42,9,42,78,0],[45,36,45,40,0],[45,41,45,45,0],[62,9,62,10,0],[63,13,63,39,0],[64,13,64,35,0],[66,13,183,16,0],[185,13,185,40,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,40,0],[190,40,190,57,0],[190,57,190,59,0],[191,13,191,40,0],[191,40,191,64,0],[191,64,191,72,0],[192,13,192,40,0],[192,40,192,57,0],[192,57,192,65,0],[193,13,193,33,0],[194,9,194,10,0],[199,9,199,10,0],[200,13,200,36,0],[201,13,201,32,0],[203,13,203,27,0],[204,17,204,24,0],[207,13,207,46,0],[209,13,209,31,0],[210,9,210,10,0],[213,9,213,10,0],[214,13,214,29,0],[215,13,215,27,0],[216,9,216,10,0],[219,9,219,10,0],[220,13,220,31,0],[221,17,221,24,0],[223,13,223,31,0],[224,13,224,40,0],[225,13,225,45,0],[226,13,226,98,0],[227,13,227,39,0],[227,39,227,78,0],[227,78,227,92,0],[227,92,227,93,0],[227,93,227,94,0],[228,13,228,39,0],[229,9,229,10,0],[232,9,232,10,0],[233,13,233,29,0],[234,13,234,52,0],[235,13,235,31,0],[236,13,236,41,0],[237,13,237,35,0],[238,13,238,29,0],[239,13,239,39,0],[240,9,240,10,0],[242,9,242,122,0],[245,9,245,10,0],[246,13,246,59,0],[247,13,247,100,0],[247,100,247,214,0],[247,214,247,216,0],[249,13,249,42,0],[250,13,250,14,0],[251,17,251,58,0],[252,17,252,35,0],[253,17,253,24,0],[256,13,256,38,0],[257,9,257,10,0],[264,9,264,10,0],[265,13,265,64,0],[266,13,266,48,0],[268,13,268,20,0],[268,22,268,33,0],[268,34,268,36,0],[268,37,268,114,0],[269,13,269,14,0],[271,17,271,63,0],[272,21,272,30,0],[274,17,274,40,0],[275,13,275,14,0],[278,13,278,20,0],[278,22,278,27,0],[278,28,278,30,0],[278,31,278,39,0],[279,17,279,34,0],[281,13,281,40,0],[282,13,282,14,0],[283,17,284,17,0],[284,17,284,18,0],[284,18,285,21,0],[285,21,285,62,0],[285,62,285,78,0],[285,78,285,81,0],[285,81,286,21,0],[286,21,286,56,0],[286,56,286,73,0],[286,73,286,76,0],[286,76,287,21,0],[287,21,287,88,0],[287,88,287,97,0],[287,97,287,110,0],[287,110,287,137,0],[287,137,287,139,0],[287,139,289,21,0],[289,21,289,40,0],[289,40,290,21,0],[290,21,290,22,0],[290,22,291,25,0],[291,25,291,56,0],[291,56,292,25,0],[292,25,292,87,0],[292,87,292,111,0],[292,111,292,113,0],[292,113,293,25,0],[293,25,293,81,0],[293,81,293,105,0],[293,105,293,107,0],[293,107,295,25,0],[295,25,295,98,0],[295,98,296,25,0],[296,25,296,54,0],[296,54,297,21,0],[297,21,297,22,0],[297,22,299,21,0],[299,21,299,22,0],[299,22,300,25,0],[300,25,300,43,0],[300,43,301,21,0],[301,21,301,22,0],[301,22,302,17,0],[302,17,302,18,0],[302,18,302,78,0],[303,13,303,14,0],[306,13,306,14,0],[307,17,307,91,0],[309,17,309,46,0],[310,17,310,18,0],[312,21,312,59,0],[313,17,313,18,0],[314,22,314,104,0],[315,17,315,18,0],[317,21,317,68,0],[318,21,318,65,0],[319,17,319,18,0],[321,17,321,18,0],[324,21,324,43,0],[325,17,325,18,0],[326,13,326,14,0],[327,9,327,10,0],[330,9,330,10,0],[331,13,331,64,0],[333,13,333,20,0],[333,22,333,33,0],[333,34,333,36,0],[333,37,333,52,0],[334,13,334,14,0],[336,17,336,63,0],[337,21,337,30,0],[339,17,339,91,0],[340,13,340,14,0],[342,13,342,40,0],[343,13,343,14,0],[344,17,345,17,0],[345,17,345,18,0],[345,18,346,21,0],[346,21,346,94,0],[346,94,347,25,0],[347,25,347,59,0],[347,59,349,21,0],[349,21,349,28,0],[349,28,349,30,0],[349,30,349,41,0],[349,41,349,42,0],[349,42,349,44,0],[349,44,349,45,0],[349,45,349,51,0],[349,51,350,21,0],[350,21,350,22,0],[350,22,351,25,0],[351,25,351,74,0],[351,74,352,21,0],[352,21,352,22,0],[352,22,353,17,0],[353,17,353,18,0],[353,18,353,78,0],[354,13,354,14,0],[355,9,355,10,0],[358,9,358,10,0],[359,13,359,77,0],[360,17,360,33,0],[362,13,367,15,0],[368,9,368,10,0],[371,9,371,10,0],[372,13,372,114,0],[374,13,374,40,0],[374,40,374,55,0],[374,55,374,79,0],[374,79,374,80,0],[374,80,374,81,0],[376,13,376,35,0],[377,9,377,10,0],[380,9,380,10,0],[381,13,381,31,0],[382,13,382,40,0],[383,13,383,39,0],[384,9,384,10,0],[390,13,390,14,0],[391,17,391,29,0],[392,17,392,43,0],[393,17,402,20,0],[403,13,403,14,0],[409,59,409,63,0],[409,64,409,68,0],[414,64,414,71,0],[417,17,417,88,0],[419,74,419,104,0],[422,13,422,14,0],[423,17,423,43,0],[424,17,424,129,0],[425,17,425,37,0],[425,37,426,17,0],[426,17,426,18,0],[426,18,427,21,0],[427,21,427,48,0],[427,48,428,21,0],[428,21,428,64,0],[428,64,429,17,0],[429,17,429,18,0],[429,18,429,19,0],[429,19,429,20,0],[430,17,430,38,0],[430,38,431,17,0],[431,17,431,18,0],[431,18,432,21,0],[432,21,432,48,0],[432,48,433,21,0],[433,21,433,50,0],[433,50,434,21,0],[434,21,434,40,0],[434,40,435,17,0],[435,17,435,18,0],[435,18,435,19,0],[435,19,435,20,0],[436,17,436,32,0],[437,13,437,14,0]]);
+    </script>
+  </body>
+</html>

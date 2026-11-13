@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/ScorePanelList.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input.Events;
+using osu.Game.Graphics.Containers;
+using osu.Game.Scoring;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Ranking
+{
+    public partial class ScorePanelList : CompositeDrawable
+    {
+        /// &lt;summary&gt;
+        /// Normal spacing between all panels.
+        /// &lt;/summary&gt;
+        private const float panel_spacing = 5;
+
+        /// &lt;summary&gt;
+        /// Spacing around both sides of the expanded panel. This is added on top of &lt;see cref=&quot;panel_spacing&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private const float expanded_panel_spacing = 15;
+
+        /// &lt;summary&gt;
+        /// Minimum distance from either end point of the list that the list can be considered scrolled to the end point.
+        /// &lt;/summary&gt;
+        private const float scroll_endpoint_distance = 100;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;ScorePanelList&quot;/&gt; can be scrolled and is currently scrolled to the start.
+        /// &lt;/summary&gt;
+        public bool IsScrolledToStart =&gt; flow.Count &gt; 0 &amp;&amp; AllPanelsVisible &amp;&amp; scroll.ScrollableExtent &gt; 0 &amp;&amp; scroll.Current &lt;= scroll_endpoint_distance;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;ScorePanelList&quot;/&gt; can be scrolled and is currently scrolled to the end.
+        /// &lt;/summary&gt;
+        public bool IsScrolledToEnd =&gt; flow.Count &gt; 0 &amp;&amp; AllPanelsVisible &amp;&amp; scroll.ScrollableExtent &gt; 0 &amp;&amp; scroll.IsScrolledToEnd(scroll_endpoint_distance);
+
+        public bool AllPanelsVisible =&gt; flow.All(p =&gt; p.IsPresent);
+
+        public bool IsEmpty =&gt; flow.Count == 0;
+
+        /// &lt;summary&gt;
+        /// The current scroll position.
+        /// &lt;/summary&gt;
+        public double Current =&gt; scroll.Current;
+
+        /// &lt;summary&gt;
+        /// The scrollable extent.
+        /// &lt;/summary&gt;
+        public double ScrollableExtent =&gt; scroll.ScrollableExtent;
+
+        /// &lt;summary&gt;
+        /// An action to be invoked if a &lt;see cref=&quot;ScorePanel&quot;/&gt; is clicked while in an expanded state.
+        /// &lt;/summary&gt;
+        public Action? PostExpandAction;
+
+        public readonly Bindable&lt;ScoreInfo?&gt; SelectedScore = new Bindable&lt;ScoreInfo?&gt;();
+
+        private readonly CancellationTokenSource loadCancellationSource = new CancellationTokenSource();
+        private readonly Flow flow;
+        private readonly Scroll scroll;
+        private ScorePanel? expandedPanel;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;ScorePanelList&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public ScorePanelList()
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChild = scroll = new Scroll
+            {
+                RelativeSizeAxes = Axes.Both,
+                Child = flow = new Flow
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Direction = FillDirection.Horizontal,
+                    Spacing = new Vector2(panel_spacing, 0),
+                    AutoSizeAxes = Axes.Both,
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            foreach (var d in flow)
+                displayScore(d);
+
+            SelectedScore.BindValueChanged(selectedScoreChanged, true);
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a &lt;see cref=&quot;ScoreInfo&quot;/&gt; to this list.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;ScoreInfo&quot;/&gt; to add.&lt;/param&gt;
+        /// &lt;param name=&quot;isNewLocalScore&quot;&gt;Whether this is a score that has just been achieved locally. Controls whether flair is added to the display or not.&lt;/param&gt;
+        public ScorePanel AddScore(ScoreInfo score, bool isNewLocalScore = false)
+        {
+            var panel = new ScorePanel(score, isNewLocalScore)
+            {
+                Anchor = Anchor.CentreLeft,
+                Origin = Anchor.CentreLeft,
+                PostExpandAction = () =&gt; PostExpandAction?.Invoke()
+            }.With(p =&gt;
+            {
+                p.StateChanged += s =&gt;
+                {
+                    if (s == PanelState.Expanded)
+                        SelectedScore.Value = p.Score;
+                };
+            });
+
+            var trackingContainer = panel.CreateTrackingContainer().With(d =&gt;
+            {
+                d.Anchor = Anchor.Centre;
+                d.Origin = Anchor.Centre;
+                d.Hide();
+            });
+
+            flow.Add(trackingContainer);
+
+            if (IsLoaded)
+                displayScore(trackingContainer);
+
+            return panel;
+        }
+
+        private void displayScore(ScorePanelTrackingContainer trackingContainer)
+        {
+            if (!IsLoaded)
+                return;
+
+            var score = trackingContainer.Panel.Score;
+
+            flow.SetLayoutPosition(trackingContainer, score.TotalScore);
+
+            trackingContainer.Show();
+
+            if (SelectedScore.Value?.Equals(score) == true)
+            {
+                SelectedScore.TriggerChange();
+            }
+            else
+            {
+                // We want the scroll position to remain relative to the expanded panel. When a new panel is added after the expanded panel, nothing needs to be done.
+                // But when a panel is added before the expanded panel, we need to offset the scroll position by the width of the new panel.
+                if (expandedPanel != null &amp;&amp; flow.GetPanelIndex(score) &lt; flow.GetPanelIndex(expandedPanel.Score))
+                {
+                    // A somewhat hacky property is used here because we need to:
+                    // 1) Scroll after the scroll container&#39;s visible range is updated.
+                    // 2) Scroll before the scroll container&#39;s scroll position is updated.
+                    // Without this, we would have a 1-frame positioning error which looks very jarring.
+                    scroll.InstantScrollTarget = (scroll.InstantScrollTarget ?? scroll.Target) + ScorePanel.CONTRACTED_WIDTH + panel_spacing;
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Brings a &lt;see cref=&quot;ScoreInfo&quot;/&gt; to the centre of the screen and expands it.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;ScoreInfo&quot;/&gt; to present.&lt;/param&gt;
+        private void selectedScoreChanged(ValueChangedEvent&lt;ScoreInfo?&gt; score)
+        {
+            // avoid contracting panels unnecessarily when TriggerChange is fired manually.
+            if (score.OldValue != null &amp;&amp; !score.OldValue.Equals(score.NewValue))
+            {
+                // Contract the old panel.
+                foreach (var t in flow.Where(t =&gt; t.Panel.Score.Equals(score.OldValue)))
+                {
+                    t.Panel.State = PanelState.Contracted;
+                    t.Margin = new MarginPadding();
+                }
+            }
+
+            // Find the panel corresponding to the new score.
+            var expandedTrackingComponent = flow.SingleOrDefault(t =&gt; t.Panel.Score.Equals(score.NewValue));
+            expandedPanel = expandedTrackingComponent?.Panel;
+
+            if (expandedPanel == null)
+                return;
+
+            Debug.Assert(expandedTrackingComponent != null);
+
+            // Expand the new panel.
+            expandedTrackingComponent.Margin = new MarginPadding { Horizontal = expanded_panel_spacing };
+            expandedPanel.State = PanelState.Expanded;
+
+            // requires schedule after children to ensure the flow (and thus ScrollContainer&#39;s ScrollableExtent) has been updated.
+            ScheduleAfterChildren(() =&gt;
+            {
+                // Scroll to the new panel. This is done manually since we need:
+                // 1) To scroll after the scroll container&#39;s visible range is updated.
+                // 2) To account for the centre anchor/origins of panels.
+                // In the end, it&#39;s easier to compute the scroll position manually.
+                float scrollOffset = flow.GetPanelIndex(expandedPanel.Score) * (ScorePanel.CONTRACTED_WIDTH + panel_spacing);
+                scroll.ScrollTo(scrollOffset);
+            });
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            float offset = DrawWidth / 2f;
+
+            // Add padding to both sides such that the centre of an expanded panel on either side is in the middle of the screen.
+
+            if (SelectedScore.Value != null)
+            {
+                // The expanded panel has extra padding applied to it, so it needs to be included into the offset.
+                offset -= ScorePanel.EXPANDED_WIDTH / 2f + expanded_panel_spacing;
+            }
+            else
+                offset -= ScorePanel.CONTRACTED_WIDTH / 2f;
+
+            flow.Padding = new MarginPadding { Horizontal = offset };
+        }
+
+        private bool handleInput = true;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;ScorePanelList&quot;/&gt; or any of the &lt;see cref=&quot;ScorePanel&quot;/&gt;s contained should handle scroll or click input.
+        /// Setting to &lt;c&gt;false&lt;/c&gt; will also hide the scrollbar.
+        /// &lt;/summary&gt;
+        public bool HandleInput
+        {
+            get =&gt; handleInput;
+            set
+            {
+                handleInput = value;
+                scroll.ScrollbarVisible = value;
+            }
+        }
+
+        public override bool PropagatePositionalInputSubTree =&gt; HandleInput &amp;&amp; base.PropagatePositionalInputSubTree;
+
+        public override bool PropagateNonPositionalInputSubTree =&gt; HandleInput &amp;&amp; base.PropagateNonPositionalInputSubTree;
+
+        /// &lt;summary&gt;
+        /// Enumerates all &lt;see cref=&quot;ScorePanel&quot;/&gt;s contained in this &lt;see cref=&quot;ScorePanelList&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;ScorePanel&gt; GetScorePanels() =&gt; flow.Select(t =&gt; t.Panel);
+
+        /// &lt;summary&gt;
+        /// Finds the &lt;see cref=&quot;ScorePanel&quot;/&gt; corresponding to a &lt;see cref=&quot;ScoreInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;ScoreInfo&quot;/&gt; to find the corresponding &lt;see cref=&quot;ScorePanel&quot;/&gt; for.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;ScorePanel&quot;/&gt;.&lt;/returns&gt;
+        public ScorePanel GetPanelForScore(ScoreInfo score) =&gt; flow.Single(t =&gt; t.Panel.Score.Equals(score)).Panel;
+
+        /// &lt;summary&gt;
+        /// Detaches a &lt;see cref=&quot;ScorePanel&quot;/&gt; from its &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt;, allowing the panel to be moved elsewhere in the hierarchy.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;panel&quot;&gt;The &lt;see cref=&quot;ScorePanel&quot;/&gt; to detach.&lt;/param&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If &lt;paramref name=&quot;panel&quot;/&gt; is not a part of this &lt;see cref=&quot;ScorePanelList&quot;/&gt;.&lt;/exception&gt;
+        public void Detach(ScorePanel panel)
+        {
+            var container = flow.SingleOrDefault(t =&gt; t.Panel == panel);
+            if (container == null)
+                throw new InvalidOperationException(&quot;Panel is not contained by the score panel list.&quot;);
+
+            container.Detach();
+        }
+
+        /// &lt;summary&gt;
+        /// Attaches a &lt;see cref=&quot;ScorePanel&quot;/&gt; to its &lt;see cref=&quot;ScorePanelTrackingContainer&quot;/&gt; in this &lt;see cref=&quot;ScorePanelList&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;panel&quot;&gt;The &lt;see cref=&quot;ScorePanel&quot;/&gt; to attach.&lt;/param&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;If &lt;paramref name=&quot;panel&quot;/&gt; is not a part of this &lt;see cref=&quot;ScorePanelList&quot;/&gt;.&lt;/exception&gt;
+        public void Attach(ScorePanel panel)
+        {
+            var container = flow.SingleOrDefault(t =&gt; t.Panel == panel);
+            if (container == null)
+                throw new InvalidOperationException(&quot;Panel is not contained by the score panel list.&quot;);
+
+            container.Attach();
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (expandedPanel == null)
+                return base.OnKeyDown(e);
+
+            switch (e.Key)
+            {
+                case Key.Left:
+                    var previousScore = flow.GetPreviousScore(expandedPanel.Score);
+                    if (previousScore != null)
+                        SelectedScore.Value = previousScore;
+                    return true;
+
+                case Key.Right:
+                    var nextScore = flow.GetNextScore(expandedPanel.Score);
+                    if (nextScore != null)
+                        SelectedScore.Value = nextScore;
+                    return true;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            loadCancellationSource.Cancel();
+        }
+
+        private partial class Flow : FillFlowContainer&lt;ScorePanelTrackingContainer&gt;
+        {
+            public override IEnumerable&lt;Drawable&gt; FlowingChildren =&gt; applySorting(AliveInternalChildren);
+
+            public int GetPanelIndex(ScoreInfo score) =&gt; applySorting(Children).TakeWhile(s =&gt; !s.Panel.Score.Equals(score)).Count();
+
+            public ScoreInfo? GetPreviousScore(ScoreInfo score) =&gt; applySorting(Children).TakeWhile(s =&gt; !s.Panel.Score.Equals(score)).LastOrDefault()?.Panel.Score;
+
+            public ScoreInfo? GetNextScore(ScoreInfo score) =&gt; applySorting(Children).SkipWhile(s =&gt; !s.Panel.Score.Equals(score)).ElementAtOrDefault(1)?.Panel.Score;
+
+            private IEnumerable&lt;ScorePanelTrackingContainer&gt; applySorting(IEnumerable&lt;Drawable&gt; drawables) =&gt; drawables.OfType&lt;ScorePanelTrackingContainer&gt;()
+                                                                                                                       .OrderByDescending(GetLayoutPosition)
+                                                                                                                       .ThenBy(s =&gt; s.Panel.Score.OnlineID);
+        }
+
+        private partial class Scroll : OsuScrollContainer
+        {
+            public new double Target =&gt; base.Target;
+
+            public Scroll()
+                : base(Direction.Horizontal)
+            {
+            }
+
+            /// &lt;summary&gt;
+            /// The target that will be scrolled to instantaneously next frame.
+            /// &lt;/summary&gt;
+            public double? InstantScrollTarget;
+
+            protected override void UpdateAfterChildren()
+            {
+                if (InstantScrollTarget != null)
+                {
+                    ScrollTo(InstantScrollTarget.Value, false);
+                    InstantScrollTarget = null;
+                }
+
+                base.UpdateAfterChildren();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,42,40,153,0],[45,40,45,157,0],[47,41,47,55,0],[47,55,47,66,0],[47,66,47,67,0],[49,32,49,47,0],[54,34,54,48,0],[59,43,59,66,0],[66,9,66,89,0],[68,9,68,105,0],[76,9,76,32,0],[77,9,77,10,0],[78,13,78,42,0],[80,13,91,15,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,33,0],[98,13,98,20,0],[98,22,98,27,0],[98,28,98,30,0],[98,31,98,35,0],[99,17,99,33,0],[101,13,101,72,0],[102,9,102,10,0],[110,9,110,10,0],[111,13,115,42,0],[115,42,115,68,0],[115,68,117,13,0],[117,13,117,14,0],[117,14,118,17,0],[118,17,119,17,0],[119,17,119,18,0],[119,18,120,21,0],[120,21,120,50,0],[120,50,121,25,0],[121,25,121,55,0],[121,55,122,17,0],[122,17,122,18,0],[122,18,122,19,0],[122,19,123,13,0],[123,13,123,14,0],[123,14,123,16,0],[125,13,126,13,0],[126,13,126,14,0],[126,14,127,17,0],[127,17,127,42,0],[127,42,128,17,0],[128,17,128,42,0],[128,42,129,17,0],[129,17,129,26,0],[129,26,130,13,0],[130,13,130,14,0],[130,14,130,16,0],[132,13,132,41,0],[134,13,134,26,0],[135,17,135,49,0],[137,13,137,26,0],[138,9,138,10,0],[141,9,141,10,0],[142,13,142,27,0],[143,17,143,24,0],[145,13,145,55,0],[147,13,147,73,0],[149,13,149,38,0],[151,13,151,60,0],[152,13,152,14,0],[153,17,153,47,0],[154,13,154,14,0],[156,13,156,14,0],[159,17,159,114,0],[160,17,160,18,0],[165,21,165,142,0],[166,17,166,18,0],[167,13,167,14,0],[168,9,168,10,0],[175,9,175,10,0],[177,13,177,82,0],[178,13,178,14,0],[180,17,180,24,0],[180,26,180,31,0],[180,32,180,34,0],[180,35,180,51,0],[180,51,180,87,0],[180,87,180,88,0],[181,17,181,18,0],[182,21,182,59,0],[183,21,183,52,0],[184,17,184,18,0],[185,13,185,14,0],[188,13,188,71,0],[188,71,188,107,0],[188,107,188,109,0],[189,13,189,62,0],[191,13,191,39,0],[192,17,192,24,0],[194,13,194,61,0],[197,13,197,106,0],[198,13,198,55,0],[201,13,202,13,0],[202,13,202,14,0],[202,14,207,17,0],[207,17,207,126,0],[207,126,208,17,0],[208,17,208,47,0],[208,47,209,13,0],[209,13,209,14,0],[209,14,209,16,0],[210,9,210,10,0],[213,9,213,10,0],[214,13,214,27,0],[216,13,216,43,0],[220,13,220,45,0],[221,13,221,14,0],[223,17,223,83,0],[224,13,224,14,0],[226,17,226,60,0],[228,13,228,70,0],[229,9,229,10,0],[231,9,231,41,0],[239,20,239,31,0],[241,13,241,14,0],[242,17,242,37,0],[243,17,243,49,0],[244,13,244,14,0],[247,65,247,116,0],[249,68,249,122,0],[254,60,254,77,0],[254,77,254,84,0],[254,84,254,85,0],[261,64,261,81,0],[261,81,261,108,0],[261,108,261,115,0],[269,9,269,10,0],[270,13,270,55,0],[270,55,270,71,0],[270,71,270,73,0],[271,13,271,35,0],[272,17,272,104,0],[274,13,274,32,0],[275,9,275,10,0],[283,9,283,10,0],[284,13,284,55,0],[284,55,284,71,0],[284,71,284,73,0],[285,13,285,35,0],[286,17,286,104,0],[288,13,288,32,0],[289,9,289,10,0],[292,9,292,10,0],[293,13,293,39,0],[294,17,294,42,0],[296,13,296,27,0],[299,21,299,84,0],[300,21,300,47,0],[301,25,301,61,0],[302,21,302,33,0],[305,21,305,76,0],[306,21,306,43,0],[307,25,307,57,0],[308,21,308,33,0],[311,13,311,38,0],[312,9,312,10,0],[315,9,315,10,0],[316,13,316,39,0],[317,13,317,45,0],[318,9,318,10,0],[322,70,322,105,0],[324,58,324,96,0],[324,96,324,124,0],[324,124,324,133,0],[326,68,326,106,0],[326,106,326,134,0],[326,134,326,164,0],[328,64,328,102,0],[328,102,328,130,0],[328,130,328,166,0],[330,111,332,133,0],[332,133,332,155,0],[332,155,332,156,0],[337,41,337,52,0],[340,19,340,45,0],[341,13,341,14,0],[342,13,342,14,0],[350,13,350,14,0],[351,17,351,49,0],[352,17,352,18,0],[353,21,353,64,0],[354,21,354,48,0],[355,17,355,18,0],[357,17,357,44,0],[358,13,358,14,0]]);
+    </script>
+  </body>
+</html>

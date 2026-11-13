@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Storyboards/Drawables/StoryboardTriggerController.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using System.Text.RegularExpressions;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Game.Audio;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Play;
+using osu.Game.Storyboards.Commands;
+
+namespace osu.Game.Storyboards.Drawables
+{
+    public partial class StoryboardTriggerController : Component
+    {
+        public Bindable&lt;bool&gt; Passing
+        {
+            get =&gt; passing.Current;
+            set =&gt; passing.Current = value;
+        }
+
+        private readonly BindableWithCurrent&lt;bool&gt; passing = new BindableWithCurrent&lt;bool&gt;();
+        private readonly IBindable&lt;JudgementResult&gt; lastJudgementResult = new Bindable&lt;JudgementResult&gt;();
+        private readonly IBindable&lt;ISampleInfo[]?&gt; lastPlayedSamples = new Bindable&lt;ISampleInfo[]?&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load(GameplayState? gameplayState)
+        {
+            if (gameplayState != null)
+            {
+                lastJudgementResult.BindTo(gameplayState.LastJudgementResult);
+                lastPlayedSamples.BindTo(gameplayState.LastPlayedSamples);
+            }
+        }
+
+        public void Bind&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerGroup triggerGroup)
+            where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            switch (triggerGroup.TriggerName)
+            {
+                case @&quot;Passing&quot;:
+                    bindPassing(drawable, triggerGroup, true);
+                    break;
+
+                case @&quot;Failing&quot;:
+                    bindPassing(drawable, triggerGroup, false);
+                    break;
+
+                case @&quot;HitObjectHit&quot;:
+                    bindHitObjectHit(drawable, triggerGroup);
+                    break;
+
+                case string s when s.StartsWith(HitSampleTriggerDefinition.PREFIX, StringComparison.OrdinalIgnoreCase):
+                    bindHitSample(drawable, triggerGroup);
+                    break;
+            }
+        }
+
+        private void bindPassing&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerGroup triggerGroup, bool passing)
+            where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            this.passing.BindValueChanged(val =&gt;
+            {
+                if (val.NewValue != passing)
+                    return;
+
+                playTrigger(drawable, triggerGroup);
+            });
+        }
+
+        private void bindHitObjectHit&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerGroup triggerGroup) where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            lastJudgementResult.BindValueChanged(val =&gt;
+            {
+                if (val.NewValue.IsNotNull() &amp;&amp; val.NewValue.IsHit &amp;&amp; val.NewValue.Type.IsScorable())
+                    playTrigger(drawable, triggerGroup);
+            });
+        }
+
+        #region Hit sample triggers
+
+        private void bindHitSample&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerGroup triggerGroup) where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            if (!HitSampleTriggerDefinition.TryParse(triggerGroup.TriggerName, out var definition))
+                return;
+
+            lastPlayedSamples.BindValueChanged(val =&gt;
+            {
+                if (val.NewValue == null)
+                    return;
+
+                if (!triggerGroup.ActiveAt(drawable.Time.Current))
+                    return;
+
+                if (definition.Value.Matches(val.NewValue.OfType&lt;HitSampleInfo&gt;()))
+                    playTrigger(drawable, triggerGroup);
+            });
+        }
+
+        private readonly struct HitSampleTriggerDefinition
+        {
+            public const string PREFIX = @&quot;HitSound&quot;;
+
+            public string RawName { get; init; }
+            public string? NormalBank { get; init; }
+            public string? AdditionBank { get; init; }
+            public string? AdditionName { get; init; }
+            public string? Suffix { get; init; }
+
+            public override string ToString() =&gt; RawName;
+
+            private static readonly Regex parse_regex = new Regex(
+                @$&quot;(?i)^{PREFIX}(?&lt;bank1&gt;(All|Normal|Soft|Drum))?(?&lt;bank2&gt;(All|Normal|Soft|Drum))?(?&lt;name&gt;(Whistle|Clap|Finish))?(?&lt;suffix&gt;\d+)?$&quot;,
+                RegexOptions.Compiled);
+
+            public static bool TryParse(string triggerName, [NotNullWhen(true)] out HitSampleTriggerDefinition? result)
+            {
+                var match = parse_regex.Match(triggerName);
+
+                if (!match.Success)
+                {
+                    result = null;
+                    return false;
+                }
+
+                string? name = match.Groups[@&quot;name&quot;].Success ? match.Groups[@&quot;name&quot;].Value : null;
+                string? bank1 = match.Groups[@&quot;bank1&quot;].Success ? match.Groups[@&quot;bank1&quot;].Value : null;
+                string? bank2 = match.Groups[@&quot;bank2&quot;].Success ? match.Groups[@&quot;bank2&quot;].Value : null;
+                string? suffix = match.Groups[@&quot;suffix&quot;].Success ? match.Groups[@&quot;suffix&quot;].Value : null;
+
+                // https://github.com/peppy/osu-stable-reference/blob/baa8705f782c0de2b10a7387d78014c61c8b17fb/osu!/GameplayElements/Events/Trigger/EventTriggerHitSound.cs#L70-L80
+                bool bank1IsAddition = bank1 != null &amp;&amp; bank2 == null &amp;&amp; name != null;
+
+                // remap names from the regex onto `HitSampleInfo` constants.
+                // this simplifies logic later, and is faster than string checks at time of trigger.
+                name = name?.ToLowerInvariant() switch
+                {
+                    @&quot;whistle&quot; =&gt; HitSampleInfo.HIT_WHISTLE,
+                    @&quot;clap&quot; =&gt; HitSampleInfo.HIT_CLAP,
+                    @&quot;finish&quot; =&gt; HitSampleInfo.HIT_FINISH,
+                    _ =&gt; null,
+                };
+                bank1 = mapBankName(bank1);
+                bank2 = mapBankName(bank2);
+
+                var trigger = new HitSampleTriggerDefinition
+                {
+                    RawName = triggerName,
+                    AdditionName = name,
+                    NormalBank = bank1IsAddition ? bank2 : bank1,
+                    AdditionBank = bank1IsAddition ? bank1 : bank2,
+                    Suffix = suffix,
+                };
+
+                result = trigger;
+                return true;
+
+                string? mapBankName(string? triggerBank) =&gt;
+                    triggerBank?.ToLowerInvariant() switch
+                    {
+                        @&quot;normal&quot; =&gt; HitSampleInfo.BANK_NORMAL,
+                        @&quot;soft&quot; =&gt; HitSampleInfo.BANK_SOFT,
+                        @&quot;drum&quot; =&gt; HitSampleInfo.BANK_DRUM,
+                        _ =&gt; null, // &quot;all&quot; falls into this case which is intended as it means no filter anyway.
+                    };
+            }
+
+            public bool Matches(IEnumerable&lt;HitSampleInfo&gt; hitSamples)
+            {
+                // lazer treats &quot;addition bank&quot; and &quot;addition samples&quot; slightly differently than stable does.
+                // in stable, &quot;normal bank&quot; and &quot;addition bank&quot; were just properties of a hitsound.
+                // a hitsound did not *need* to have an addition sound to have a defined bank for it.
+                // contrary to this, lazer will just not emit an addition `HitSampleInfo` at all,
+                // and because `HitSampleInfo` is what stores the bank, there is nowhere for the addition bank definition to go.
+                // this is why the behaviour of the trigger as written below is not 100% accurate to stable.
+                // the difference is perceivable the most on triggers like `HitSoundAllSoft` which will sometimes not trigger
+                // on objects that do not have an addition sound, even if the &quot;soft&quot; bank should be inherited via a &quot;green line&quot; or baseline beatmap sample set.
+
+                // if the addition name is specified, it must be found among the samples.
+                bool foundAddition = AdditionName == null;
+                // if the addition bank is specified, at least one addition sound must use this bank.
+                bool additionBankCorrect = AdditionBank == null;
+
+                foreach (var hitSampleInfo in hitSamples)
+                {
+                    if (hitSampleInfo.Name == HitSampleInfo.HIT_NORMAL)
+                    {
+                        if (NormalBank != null &amp;&amp; hitSampleInfo.Bank != NormalBank)
+                            return false;
+                    }
+                    else
+                    {
+                        if (AdditionName != null &amp;&amp; hitSampleInfo.Name == AdditionName)
+                            foundAddition = true;
+
+                        if (AdditionBank != null &amp;&amp; hitSampleInfo.Bank == AdditionBank)
+                            additionBankCorrect = true;
+                    }
+
+                    if (Suffix != null &amp;&amp; !string.Equals(Suffix, hitSampleInfo.Suffix, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
+                return foundAddition &amp;&amp; additionBankCorrect;
+            }
+        }
+
+        #endregion
+
+        private static void playTrigger&lt;TDrawable&gt;(TDrawable drawable, StoryboardTriggerGroup triggerGroup)
+            where TDrawable : Drawable, IFlippable, IVectorScalable
+        {
+            if (!triggerGroup.ActiveAt(drawable.Time.Current))
+                return;
+
+            foreach (var command in triggerGroup.AllCommands.OrderBy(c =&gt; c.StartTime))
+            {
+                using (drawable.BeginDelayedSequence(command.StartTime))
+                    command.ApplyTransforms(drawable);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,20,25,35,0],[26,20,26,43,0],[29,9,29,94,0],[30,9,30,107,0],[31,9,31,103,0],[35,9,35,10,0],[36,13,36,39,0],[37,13,37,14,0],[38,17,38,79,0],[39,17,39,75,0],[40,13,40,14,0],[41,9,41,10,0],[45,9,45,10,0],[46,13,46,46,0],[49,21,49,63,0],[50,21,50,27,0],[53,21,53,64,0],[54,21,54,27,0],[57,21,57,62,0],[58,21,58,27,0],[60,31,60,119,0],[61,21,61,59,0],[62,21,62,27,0],[64,9,64,10,0],[68,9,68,10,0],[69,13,70,13,0],[70,13,70,14,0],[70,14,71,17,0],[71,17,71,45,0],[71,45,72,21,0],[72,21,72,28,0],[72,28,74,17,0],[74,17,74,53,0],[74,53,75,13,0],[75,13,75,14,0],[75,14,75,16,0],[76,9,76,10,0],[79,9,79,10,0],[80,13,81,13,0],[81,13,81,14,0],[81,14,82,17,0],[82,17,82,102,0],[82,102,83,21,0],[83,21,83,57,0],[83,57,84,13,0],[84,13,84,14,0],[84,14,84,16,0],[85,9,85,10,0],[90,9,90,10,0],[91,13,91,100,0],[92,17,92,24,0],[94,13,95,13,0],[95,13,95,14,0],[95,14,96,17,0],[96,17,96,42,0],[96,42,97,21,0],[97,21,97,28,0],[97,28,99,17,0],[99,17,99,67,0],[99,67,100,21,0],[100,21,100,28,0],[100,28,102,17,0],[102,17,102,84,0],[102,84,103,21,0],[103,21,103,57,0],[103,57,104,13,0],[104,13,104,14,0],[104,14,104,16,0],[105,9,105,10,0],[111,37,111,41,0],[111,42,111,47,0],[112,41,112,45,0],[112,46,112,51,0],[113,43,113,47,0],[113,48,113,53,0],[114,43,114,47,0],[114,48,114,53,0],[115,37,115,41,0],[115,42,115,47,0],[117,50,117,57,0],[119,13,121,40,0],[124,13,124,14,0],[125,17,125,60,0],[127,17,127,36,0],[128,17,128,18,0],[129,21,129,35,0],[130,21,130,34,0],[133,17,133,99,0],[134,17,134,102,0],[135,17,135,102,0],[136,17,136,105,0],[139,17,139,87,0],[143,17,145,35,0],[145,35,145,60,0],[145,60,146,32,0],[146,32,146,54,0],[146,54,147,34,0],[147,34,147,58,0],[147,58,148,26,0],[148,26,148,30,0],[148,30,149,19,0],[150,17,150,44,0],[151,17,151,44,0],[153,17,160,19,0],[162,17,162,34,0],[163,17,163,29,0],[166,21,168,38,0],[168,38,168,63,0],[168,63,169,36,0],[169,36,169,59,0],[169,59,170,36,0],[170,36,170,59,0],[170,59,171,30,0],[171,30,171,34,0],[171,34,172,22,0],[173,13,173,14,0],[176,13,176,14,0],[187,17,187,59,0],[189,17,189,65,0],[191,17,191,24,0],[191,26,191,43,0],[191,44,191,46,0],[191,47,191,57,0],[192,17,192,18,0],[193,21,193,72,0],[194,21,194,22,0],[195,25,195,84,0],[196,29,196,42,0],[197,21,197,22,0],[199,21,199,22,0],[200,25,200,88,0],[201,29,201,50,0],[203,25,203,88,0],[204,29,204,56,0],[205,21,205,22,0],[207,21,207,124,0],[208,25,208,38,0],[209,17,209,18,0],[211,17,211,61,0],[212,13,212,14,0],[219,9,219,10,0],[220,13,220,63,0],[221,17,221,24,0],[223,13,223,20,0],[223,22,223,33,0],[223,34,223,36,0],[223,37,223,75,0],[223,75,223,86,0],[223,86,223,87,0],[224,13,224,14,0],[225,17,225,73,0],[226,21,226,55,0],[227,13,227,14,0],[228,9,228,10,0]]);
+    </script>
+  </body>
+</html>

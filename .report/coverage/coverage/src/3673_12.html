@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/Formats/LegacyStoryboardDecoder.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using osu.Framework.Graphics;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.IO;
+using osu.Game.Storyboards;
+using osu.Game.Storyboards.Commands;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Beatmaps.Formats
+{
+    public class LegacyStoryboardDecoder : LegacyDecoder&lt;Storyboard&gt;
+    {
+        private StoryboardSprite? storyboardSprite;
+        private StoryboardCommandGroup? currentCommandsGroup;
+
+        private Storyboard storyboard = null!;
+
+        private readonly Dictionary&lt;string, string&gt; variables = new Dictionary&lt;string, string&gt;();
+
+        public LegacyStoryboardDecoder(int version = LATEST_VERSION)
+            : base(version)
+        {
+        }
+
+        public static void Register()
+        {
+            // note that this isn&#39;t completely correct
+            AddDecoder&lt;Storyboard&gt;(@&quot;osu file format v&quot;, m =&gt; new LegacyStoryboardDecoder(Parsing.ParseInt(m.Split(&#39;v&#39;).Last())));
+            AddDecoder&lt;Storyboard&gt;(@&quot;[Events]&quot;, _ =&gt; new LegacyStoryboardDecoder());
+            SetFallbackDecoder&lt;Storyboard&gt;(() =&gt; new LegacyStoryboardDecoder());
+        }
+
+        protected override Storyboard CreateTemplateObject()
+        {
+            var sb = base.CreateTemplateObject();
+
+            var beatmap = new Beatmap();
+            LegacyBeatmapDecoder.ApplyLegacyDefaults(beatmap);
+            sb.Beatmap = beatmap;
+
+            return sb;
+        }
+
+        protected override void ParseStreamInto(LineBufferedReader stream, bool isPrimaryStream, Storyboard storyboard)
+        {
+            this.storyboard = storyboard;
+            base.ParseStreamInto(stream, isPrimaryStream, storyboard);
+        }
+
+        protected override void ParseLine(Storyboard storyboard, Section section, string line, bool isPrimaryStream)
+        {
+            switch (section)
+            {
+                case Section.General:
+                    handleGeneral(storyboard, line);
+                    return;
+
+                case Section.Events:
+                    handleEvents(line, isPrimaryStream);
+                    return;
+
+                case Section.Variables:
+                    handleVariables(line);
+                    return;
+            }
+
+            base.ParseLine(storyboard, section, line, isPrimaryStream);
+        }
+
+        private void handleGeneral(Storyboard storyboard, string line)
+        {
+            var pair = SplitKeyVal(line);
+
+            switch (pair.Key)
+            {
+                case &quot;UseSkinSprites&quot;:
+                    storyboard.UseSkinSprites = pair.Value == &quot;1&quot;;
+                    break;
+
+                case @&quot;WidescreenStoryboard&quot;:
+                    storyboard.Beatmap.WidescreenStoryboard = Parsing.ParseInt(pair.Value) == 1;
+                    break;
+            }
+        }
+
+        private void handleEvents(string line, bool isPrimaryStream)
+        {
+            decodeVariables(ref line);
+
+            int depth = 0;
+
+            foreach (char c in line)
+            {
+                if (c == &#39; &#39; || c == &#39;_&#39;)
+                    depth++;
+                else
+                    break;
+            }
+
+            line = line.Substring(depth);
+
+            string[] split = line.Split(&#39;,&#39;);
+
+            if (depth == 0)
+            {
+                storyboardSprite = null;
+
+                if (!Enum.TryParse(split[0], out LegacyEventType type))
+                    throw new InvalidDataException($@&quot;Unknown event type: {split[0]}&quot;);
+
+                var source = isPrimaryStream ? StoryboardElementSource.Beatmap : StoryboardElementSource.Shared;
+
+                switch (type)
+                {
+                    case LegacyEventType.Background:
+                    {
+                        // the actual filename is handled in `LegacyBeatmapDecoder`.
+                        // this only handles the background offset, because it does not logically belong in `Beatmap` or related classes.
+                        if (split.Length &gt; 4)
+                        {
+                            float x = Parsing.ParseFloat(split[3]);
+                            float y = Parsing.ParseFloat(split[4]);
+                            storyboard.BackgroundOffset = new Vector2(x, y);
+                        }
+
+                        break;
+                    }
+
+                    case LegacyEventType.Video:
+                    {
+                        int offset = Parsing.ParseInt(split[1]);
+                        string path = CleanFilename(split[2]);
+
+                        // See handling in LegacyBeatmapDecoder for the special case where a video type is used but
+                        // the file extension is not a valid video.
+                        //
+                        // This avoids potential weird crashes when ffmpeg attempts to parse an image file as a video
+                        // (see https://github.com/ppy/osu/issues/22829#issuecomment-1465552451).
+                        if (!SupportedExtensions.VIDEO_EXTENSIONS.Contains(Path.GetExtension(path).ToLowerInvariant()))
+                            break;
+
+                        storyboard.GetLayer(&quot;Video&quot;).Add(storyboardSprite = new StoryboardVideo(source, path, offset));
+                        break;
+                    }
+
+                    case LegacyEventType.Sprite:
+                    {
+                        string layer = parseLayer(split[1]);
+                        var origin = parseOrigin(split[2]);
+                        string path = CleanFilename(split[3]);
+                        float x = Parsing.ParseFloat(split[4], Parsing.MAX_COORDINATE_VALUE);
+                        float y = Parsing.ParseFloat(split[5], Parsing.MAX_COORDINATE_VALUE);
+                        storyboardSprite = new StoryboardSprite(source, path, origin, new Vector2(x, y));
+                        storyboard.GetLayer(layer).Add(storyboardSprite);
+                        break;
+                    }
+
+                    case LegacyEventType.Animation:
+                    {
+                        string layer = parseLayer(split[1]);
+                        var origin = parseOrigin(split[2]);
+                        string path = CleanFilename(split[3]);
+                        float x = Parsing.ParseFloat(split[4], Parsing.MAX_COORDINATE_VALUE);
+                        float y = Parsing.ParseFloat(split[5], Parsing.MAX_COORDINATE_VALUE);
+                        int frameCount = Parsing.ParseInt(split[6]);
+                        double frameDelay = Parsing.ParseDouble(split[7]);
+
+                        if (FormatVersion &lt; 6)
+                            // this is random as hell but taken straight from osu-stable.
+                            frameDelay = Math.Round(0.015 * frameDelay) * 1.186 * (1000 / 60f);
+
+                        var loopType = split.Length &gt; 8 ? parseAnimationLoopType(split[8]) : AnimationLoopType.LoopForever;
+                        storyboardSprite = new StoryboardAnimation(source, path, origin, new Vector2(x, y), frameCount, frameDelay, loopType);
+                        storyboard.GetLayer(layer).Add(storyboardSprite);
+                        break;
+                    }
+
+                    case LegacyEventType.Sample:
+                    {
+                        double time = Parsing.ParseDouble(split[1]);
+                        string layer = parseLayer(split[2]);
+                        string path = CleanFilename(split[3]);
+                        float volume = split.Length &gt; 4 ? Parsing.ParseFloat(split[4]) : 100;
+                        storyboard.GetLayer(layer).Add(new StoryboardSampleInfo(source, path, time, (int)volume));
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                if (depth &lt; 2)
+                    currentCommandsGroup = storyboardSprite?.Commands;
+
+                string commandType = split[0];
+
+                switch (commandType)
+                {
+                    case &quot;T&quot;:
+                    {
+                        string triggerName = split[1];
+                        double startTime = split.Length &gt; 2 ? Parsing.ParseDouble(split[2]) : double.MinValue;
+                        double endTime = split.Length &gt; 3 ? Parsing.ParseDouble(split[3]) : double.MaxValue;
+                        // negation as per https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L736
+                        int groupNumber = split.Length &gt; 4 ? -Parsing.ParseInt(split[4]) : 0;
+                        currentCommandsGroup = storyboardSprite?.AddTriggerGroup(triggerName, startTime, endTime, groupNumber);
+                        break;
+                    }
+
+                    case &quot;L&quot;:
+                    {
+                        double startTime = Parsing.ParseDouble(split[1]);
+                        int repeatCount = Parsing.ParseInt(split[2]);
+                        currentCommandsGroup = storyboardSprite?.AddLoopingGroup(startTime, Math.Max(0, repeatCount - 1));
+                        break;
+                    }
+
+                    default:
+                    {
+                        if (string.IsNullOrEmpty(split[3]))
+                            split[3] = split[2];
+
+                        var easing = (Easing)Parsing.ParseInt(split[1]);
+                        double startTime = Parsing.ParseDouble(split[2]);
+                        double endTime = Parsing.ParseDouble(split[3]);
+
+                        switch (commandType)
+                        {
+                            case &quot;F&quot;:
+                            {
+                                float startValue = Parsing.ParseFloat(split[4]);
+                                float endValue = split.Length &gt; 5 ? Parsing.ParseFloat(split[5]) : startValue;
+                                currentCommandsGroup?.AddAlpha(easing, startTime, endTime, startValue, endValue);
+                                break;
+                            }
+
+                            case &quot;S&quot;:
+                            {
+                                float startValue = Parsing.ParseFloat(split[4]);
+                                float endValue = split.Length &gt; 5 ? Parsing.ParseFloat(split[5]) : startValue;
+                                currentCommandsGroup?.AddScale(easing, startTime, endTime, startValue, endValue);
+                                break;
+                            }
+
+                            case &quot;V&quot;:
+                            {
+                                float startX = Parsing.ParseFloat(split[4]);
+                                float startY = Parsing.ParseFloat(split[5]);
+                                float endX = split.Length &gt; 6 ? Parsing.ParseFloat(split[6]) : startX;
+                                float endY = split.Length &gt; 7 ? Parsing.ParseFloat(split[7]) : startY;
+                                currentCommandsGroup?.AddVectorScale(easing, startTime, endTime, new Vector2(startX, startY), new Vector2(endX, endY));
+                                break;
+                            }
+
+                            case &quot;R&quot;:
+                            {
+                                float startValue = Parsing.ParseFloat(split[4]);
+                                float endValue = split.Length &gt; 5 ? Parsing.ParseFloat(split[5]) : startValue;
+                                currentCommandsGroup?.AddRotation(easing, startTime, endTime, float.RadiansToDegrees(startValue), float.RadiansToDegrees(endValue));
+                                break;
+                            }
+
+                            case &quot;M&quot;:
+                            {
+                                float startX = Parsing.ParseFloat(split[4]);
+                                float startY = Parsing.ParseFloat(split[5]);
+                                float endX = split.Length &gt; 6 ? Parsing.ParseFloat(split[6]) : startX;
+                                float endY = split.Length &gt; 7 ? Parsing.ParseFloat(split[7]) : startY;
+                                currentCommandsGroup?.AddX(easing, startTime, endTime, startX, endX);
+                                currentCommandsGroup?.AddY(easing, startTime, endTime, startY, endY);
+                                break;
+                            }
+
+                            case &quot;MX&quot;:
+                            {
+                                float startValue = Parsing.ParseFloat(split[4]);
+                                float endValue = split.Length &gt; 5 ? Parsing.ParseFloat(split[5]) : startValue;
+                                currentCommandsGroup?.AddX(easing, startTime, endTime, startValue, endValue);
+                                break;
+                            }
+
+                            case &quot;MY&quot;:
+                            {
+                                float startValue = Parsing.ParseFloat(split[4]);
+                                float endValue = split.Length &gt; 5 ? Parsing.ParseFloat(split[5]) : startValue;
+                                currentCommandsGroup?.AddY(easing, startTime, endTime, startValue, endValue);
+                                break;
+                            }
+
+                            case &quot;C&quot;:
+                            {
+                                float startRed = Parsing.ParseFloat(split[4]);
+                                float startGreen = Parsing.ParseFloat(split[5]);
+                                float startBlue = Parsing.ParseFloat(split[6]);
+                                float endRed = split.Length &gt; 7 ? Parsing.ParseFloat(split[7]) : startRed;
+                                float endGreen = split.Length &gt; 8 ? Parsing.ParseFloat(split[8]) : startGreen;
+                                float endBlue = split.Length &gt; 9 ? Parsing.ParseFloat(split[9]) : startBlue;
+                                currentCommandsGroup?.AddColour(easing, startTime, endTime,
+                                    new Color4(startRed / 255f, startGreen / 255f, startBlue / 255f, 1),
+                                    new Color4(endRed / 255f, endGreen / 255f, endBlue / 255f, 1));
+                                break;
+                            }
+
+                            case &quot;P&quot;:
+                            {
+                                string type = split[4];
+
+                                switch (type)
+                                {
+                                    case &quot;A&quot;:
+                                        currentCommandsGroup?.AddBlendingParameters(easing, startTime, endTime, BlendingParameters.Additive,
+                                            startTime == endTime ? BlendingParameters.Additive : BlendingParameters.Inherit);
+                                        break;
+
+                                    case &quot;H&quot;:
+                                        currentCommandsGroup?.AddFlipH(easing, startTime, endTime, true, startTime == endTime);
+                                        break;
+
+                                    case &quot;V&quot;:
+                                        currentCommandsGroup?.AddFlipV(easing, startTime, endTime, true, startTime == endTime);
+                                        break;
+                                }
+
+                                break;
+                            }
+
+                            default:
+                                throw new InvalidDataException($@&quot;Unknown command type: {commandType}&quot;);
+                        }
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        private string parseLayer(string value) =&gt; Enum.Parse&lt;LegacyStoryLayer&gt;(value).ToString();
+
+        private Anchor parseOrigin(string value)
+        {
+            var origin = Enum.Parse&lt;LegacyOrigins&gt;(value);
+
+            switch (origin)
+            {
+                case LegacyOrigins.TopLeft:
+                    return Anchor.TopLeft;
+
+                case LegacyOrigins.TopCentre:
+                    return Anchor.TopCentre;
+
+                case LegacyOrigins.TopRight:
+                    return Anchor.TopRight;
+
+                case LegacyOrigins.CentreLeft:
+                    return Anchor.CentreLeft;
+
+                case LegacyOrigins.Centre:
+                    return Anchor.Centre;
+
+                case LegacyOrigins.CentreRight:
+                    return Anchor.CentreRight;
+
+                case LegacyOrigins.BottomLeft:
+                    return Anchor.BottomLeft;
+
+                case LegacyOrigins.BottomCentre:
+                    return Anchor.BottomCentre;
+
+                case LegacyOrigins.BottomRight:
+                    return Anchor.BottomRight;
+
+                default:
+                    return Anchor.TopLeft;
+            }
+        }
+
+        private AnimationLoopType parseAnimationLoopType(string value)
+        {
+            var parsed = Enum.Parse&lt;AnimationLoopType&gt;(value);
+            return Enum.IsDefined(parsed) ? parsed : AnimationLoopType.LoopForever;
+        }
+
+        private void handleVariables(string line)
+        {
+            var pair = SplitKeyVal(line, &#39;=&#39;, false);
+            variables[pair.Key] = pair.Value;
+        }
+
+        /// &lt;summary&gt;
+        /// Decodes any beatmap variables present in a line into their real values.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Each defined variable is substituted a single time. Storyboard variables are plain text
+        /// substitutions and are not expected to reference other variables, so a single pass resolves
+        /// every well-formed reference. This intentionally avoids repeatedly re-scanning the line,
+        /// which would otherwise never terminate for a self-referential definition (e.g. &lt;c&gt;$a=x$a&lt;/c&gt;).
+        /// &lt;/remarks&gt;
+        /// &lt;seealso href=&quot;https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameplayElements/HitObjectManager_LoadSave.cs#L1105-L1110&quot;/&gt;
+        /// &lt;param name=&quot;line&quot;&gt;The line which may contains variables.&lt;/param&gt;
+        private void decodeVariables(ref string line)
+        {
+            if (!line.Contains(&#39;$&#39;))
+                return;
+
+            foreach (var v in variables)
+                line = line.Replace(v.Key, v.Value);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,47,0],[26,9,26,98,0],[29,15,29,28,0],[30,9,30,10,0],[31,9,31,10,0],[34,9,34,10,1],[36,13,36,63,1],[36,63,36,129,0],[36,129,36,131,1],[37,13,37,54,1],[37,54,37,83,0],[37,83,37,85,1],[38,13,38,50,1],[38,50,38,79,0],[38,79,38,81,1],[39,9,39,10,1],[42,9,42,10,0],[43,13,43,50,0],[45,13,45,41,0],[46,13,46,63,0],[47,13,47,34,0],[49,13,49,23,0],[50,9,50,10,0],[53,9,53,10,0],[54,13,54,42,0],[55,13,55,71,0],[56,9,56,10,0],[59,9,59,10,0],[60,13,60,29,0],[63,21,63,53,0],[64,21,64,28,0],[67,21,67,57,0],[68,21,68,28,0],[71,21,71,43,0],[72,21,72,28,0],[75,13,75,72,0],[76,9,76,10,0],[79,9,79,10,0],[80,13,80,42,0],[82,13,82,30,0],[85,21,85,67,0],[86,21,86,27,0],[89,21,89,97,0],[90,21,90,27,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,39,0],[98,13,98,27,0],[100,13,100,20,0],[100,22,100,28,0],[100,29,100,31,0],[100,32,100,36,0],[101,13,101,14,0],[102,17,102,42,0],[103,21,103,29,0],[105,21,105,27,0],[106,13,106,14,0],[108,13,108,42,0],[110,13,110,46,0],[112,13,112,28,0],[113,13,113,14,0],[114,17,114,41,0],[116,17,116,72,0],[117,21,117,88,0],[119,17,119,113,0],[121,17,121,30,0],[124,21,124,22,0],[127,25,127,46,0],[128,25,128,26,0],[129,29,129,68,0],[130,29,130,68,0],[131,29,131,77,0],[132,25,132,26,0],[134,25,134,31,0],[138,21,138,22,0],[139,25,139,65,0],[140,25,140,63,0],[147,25,147,120,0],[148,29,148,35,0],[150,25,150,120,0],[151,25,151,31,0],[155,21,155,22,0],[156,25,156,61,0],[157,25,157,60,0],[158,25,158,63,0],[159,25,159,94,0],[160,25,160,94,0],[161,25,161,106,0],[162,25,162,74,0],[163,25,163,31,0],[167,21,167,22,0],[168,25,168,61,0],[169,25,169,60,0],[170,25,170,63,0],[171,25,171,94,0],[172,25,172,94,0],[173,25,173,69,0],[174,25,174,75,0],[176,25,176,47,0],[178,29,178,96,0],[180,25,180,124,0],[181,25,181,143,0],[182,25,182,74,0],[183,25,183,31,0],[187,21,187,22,0],[188,25,188,69,0],[189,25,189,61,0],[190,25,190,63,0],[191,25,191,94,0],[192,25,192,115,0],[193,25,193,31,0],[196,13,196,14,0],[198,13,198,14,0],[199,17,199,31,0],[200,21,200,71,0],[202,17,202,47,0],[204,17,204,37,0],[207,21,207,22,0],[208,25,208,55,0],[209,25,209,111,0],[210,25,210,109,0],[212,25,212,94,0],[213,25,213,128,0],[214,25,214,31,0],[218,21,218,22,0],[219,25,219,74,0],[220,25,220,70,0],[221,25,221,123,0],[222,25,222,31,0],[226,21,226,22,0],[227,25,227,60,0],[228,29,228,49,0],[230,25,230,73,0],[231,25,231,74,0],[232,25,232,72,0],[234,25,234,45,0],[237,29,237,30,0],[238,33,238,81,0],[239,33,239,111,0],[240,33,240,114,0],[241,33,241,39,0],[245,29,245,30,0],[246,33,246,81,0],[247,33,247,111,0],[248,33,248,114,0],[249,33,249,39,0],[253,29,253,30,0],[254,33,254,77,0],[255,33,255,77,0],[256,33,256,103,0],[257,33,257,103,0],[258,33,258,152,0],[259,33,259,39,0],[263,29,263,30,0],[264,33,264,81,0],[265,33,265,111,0],[266,33,266,165,0],[267,33,267,39,0],[271,29,271,30,0],[272,33,272,77,0],[273,33,273,77,0],[274,33,274,103,0],[275,33,275,103,0],[276,33,276,102,0],[277,33,277,102,0],[278,33,278,39,0],[282,29,282,30,0],[283,33,283,81,0],[284,33,284,111,0],[285,33,285,110,0],[286,33,286,39,0],[290,29,290,30,0],[291,33,291,81,0],[292,33,292,111,0],[293,33,293,110,0],[294,33,294,39,0],[298,29,298,30,0],[299,33,299,79,0],[300,33,300,81,0],[301,33,301,80,0],[302,33,302,107,0],[303,33,303,111,0],[304,33,304,109,0],[305,33,307,100,0],[308,33,308,39,0],[312,29,312,30,0],[313,33,313,56,0],[315,33,315,46,0],[318,41,319,126,0],[320,41,320,47,0],[323,41,323,128,0],[324,41,324,47,0],[327,41,327,128,0],[328,41,328,47,0],[331,33,331,39,0],[335,33,335,105,0],[338,25,338,31,0],[341,13,341,14,0],[342,9,342,10,0],[344,52,344,98,0],[347,9,347,10,0],[348,13,348,59,0],[350,13,350,28,0],[353,21,353,43,0],[356,21,356,45,0],[359,21,359,44,0],[362,21,362,46,0],[365,21,365,42,0],[368,21,368,47,0],[371,21,371,46,0],[374,21,374,48,0],[377,21,377,47,0],[380,21,380,43,0],[382,9,382,10,0],[385,9,385,10,0],[386,13,386,63,0],[387,13,387,84,0],[388,9,388,10,0],[391,9,391,10,0],[392,13,392,54,0],[393,13,393,46,0],[394,9,394,10,0],[408,9,408,10,0],[409,13,409,37,0],[410,17,410,24,0],[412,13,412,20,0],[412,22,412,27,0],[412,28,412,30,0],[412,31,412,40,0],[413,17,413,53,0],[414,9,414,10,0]]);
+    </script>
+  </body>
+</html>

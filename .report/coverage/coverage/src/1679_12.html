@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/PlayerLoader.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using ManagedBass.Fx;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Transforms;
+using osu.Framework.Input;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Audio.Effects;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Input;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Leaderboards;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Overlays.Volume;
+using osu.Game.Performance;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Screens.Footer;
+using osu.Game.Screens.Menu;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Screens.Play.Leaderboards;
+using osu.Game.Screens.Play.PlayerSettings;
+using osu.Game.Skinning;
+using osu.Game.Users;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+using NotificationsStrings = osu.Game.Localisation.NotificationsStrings;
+
+namespace osu.Game.Screens.Play
+{
+    public partial class PlayerLoader : ScreenWithBeatmapBackground
+    {
+        protected const float BACKGROUND_BLUR = 15;
+
+        protected const double CONTENT_OUT_DURATION = 300;
+
+        protected virtual double PlayerPushDelay =&gt; 1800 + disclaimers.Count * 500;
+
+        public override bool HideOverlaysOnEnter =&gt; hideOverlays;
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        public override bool? AllowGlobalTrackControl =&gt; false;
+
+        // this makes the game stay in portrait mode when restarting gameplay rather than switching back to landscape.
+        public override bool RequiresPortraitOrientation =&gt; CurrentPlayer?.RequiresPortraitOrientation == true;
+
+        public override float BackgroundParallaxAmount =&gt; QuickRestart ? 0 : 1;
+
+        // Here because IsHovered will not update unless we do so.
+        public override bool HandlePositionalInput =&gt; true;
+
+        // We show the previous screen status
+        protected override UserActivity? InitialActivity =&gt; null;
+
+        protected BeatmapMetadataDisplay MetadataInfo { get; private set; } = null!;
+
+        /// &lt;summary&gt;
+        /// A fill flow containing the player settings groups, exposed for the ability to hide it from inheritors of the player loader.
+        /// &lt;/summary&gt;
+        protected FillFlowContainer&lt;PlayerSettingsGroup&gt; PlayerSettings { get; private set; } = null!;
+
+        protected VisualSettings VisualSettings { get; private set; } = null!;
+
+        protected AudioSettings AudioSettings { get; private set; } = null!;
+
+        protected Task? LoadTask { get; private set; }
+
+        protected Task? DisposalTask { get; private set; }
+
+        /// &lt;summary&gt;
+        /// By default, the loader screen will block until the window is focused.
+        /// Can be overridden by setting this to &lt;c&gt;false&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        protected bool WindowShouldBeActiveForGameplayStart { get; init; } = true;
+
+        private FillFlowContainer disclaimers = null!;
+        private GridContainer sideContent = null!;
+
+        private Bindable&lt;bool&gt; showStoryboards = null!;
+
+        private bool backgroundBrightnessReduction;
+
+        private readonly BindableDouble volumeAdjustment = new BindableDouble(1);
+
+        private AudioFilter? lowPassFilter;
+        private AudioFilter? highPassFilter;
+
+        private SkinnableSound sampleRestart = null!;
+
+        private Box? quickRestartBlackLayer;
+
+        private ScheduledDelegate? quickRestartBackButtonRestore;
+
+        [Cached]
+        private OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Purple);
+
+        [Resolved]
+        private GameHost host { get; set; } = null!;
+
+        private const double quick_restart_initial_delay = 500;
+
+        protected bool BackgroundBrightnessReduction
+        {
+            set
+            {
+                if (value == backgroundBrightnessReduction)
+                    return;
+
+                backgroundBrightnessReduction = value;
+
+                ApplyToBackground(b =&gt; b.FadeColour(OsuColour.Gray(backgroundBrightnessReduction ? 0.8f : 1), 200));
+            }
+        }
+
+        protected virtual bool ReadyForGameplay =&gt;
+            (!WindowShouldBeActiveForGameplayStart || host.IsActive.Value) &amp;&amp;
+            // not ready if the user is hovering one of the panes (logo is excluded), unless they are idle.
+            (IsHovered || osuLogo?.IsHovered == true || idleTracker.IsIdle.Value)
+            // not ready if the user is dragging a slider or otherwise.
+            &amp;&amp; (inputManager.DraggedDrawable == null || inputManager.DraggedDrawable is OsuLogo)
+            // not ready if a focused overlay is visible, like settings.
+            &amp;&amp; inputManager.FocusedDrawable is not OsuFocusedOverlayContainer
+            // or if a child of a focused overlay is focused, like settings&#39; search textbox.
+            &amp;&amp; inputManager.FocusedDrawable?.FindClosestParent&lt;OsuFocusedOverlayContainer&gt;() == null;
+
+        private bool holdForMenuExitButton =&gt; !AllowUserExit;
+
+        private readonly Func&lt;Player&gt; createPlayer;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;Player&quot;/&gt; instance being loaded by this screen.
+        /// &lt;/summary&gt;
+        public Player? CurrentPlayer { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether the current player instance has been consumed via &lt;see cref=&quot;consumePlayer&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private bool playerConsumed;
+
+        private LogoTrackingContainer content = null!;
+        private IDisposable? logoTracking;
+
+        private bool hideOverlays;
+
+        private InputManager inputManager = null!;
+
+        private IdleTracker idleTracker = null!;
+
+        private ScheduledDelegate? scheduledPushPlayer;
+
+        private PlayerLoaderDisclaimer? epilepsyWarning;
+
+        protected bool QuickRestart { get; private set; }
+
+        private IDisposable? highPerformanceSession;
+
+        [Resolved]
+        private INotificationOverlay? notificationOverlay { get; set; }
+
+        [Resolved]
+        private VolumeOverlay? volumeOverlay { get; set; }
+
+        [Resolved]
+        private AudioManager audioManager { get; set; } = null!;
+
+        [Resolved]
+        private BatteryInfo? batteryInfo { get; set; }
+
+        [Resolved]
+        private IHighPerformanceSessionManager? highPerformanceSessionManager { get; set; }
+
+        [Resolved]
+        private LeaderboardManager? leaderboardManager { get; set; }
+
+        public PlayerLoader(Func&lt;Player&gt; createPlayer)
+        {
+            this.createPlayer = createPlayer;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(SessionStatics sessionStatics, OsuConfigManager config, IAPIProvider api)
+        {
+            muteWarningShownOnce = sessionStatics.GetBindable&lt;bool&gt;(Static.MutedAudioNotificationShownOnce);
+            batteryWarningShownOnce = sessionStatics.GetBindable&lt;bool&gt;(Static.LowBatteryNotificationShownOnce);
+            showStoryboards = config.GetBindable&lt;bool&gt;(OsuSetting.ShowStoryboard);
+
+            const float padding = 25;
+
+            InternalChildren = new Drawable[]
+            {
+                new GlobalScrollAdjustsVolume(),
+                (content = new LogoTrackingContainer
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    RelativeSizeAxes = Axes.Both,
+                }).WithChildren(new Drawable[]
+                {
+                    MetadataInfo = new BeatmapMetadataDisplay(Beatmap.Value, Mods, content.LogoFacade)
+                    {
+                        Alpha = 0,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    },
+                }),
+                disclaimers = new FillFlowContainer
+                {
+                    Anchor = Anchor.TopLeft,
+                    Origin = Anchor.TopLeft,
+                    Width = SettingsToolboxGroup.CONTAINER_WIDTH + padding * 2,
+                    AutoSizeAxes = Axes.Y,
+                    AutoSizeDuration = 250,
+                    AutoSizeEasing = Easing.OutQuint,
+                    Direction = FillDirection.Vertical,
+                    Padding = new MarginPadding(padding),
+                    Spacing = new Vector2(20),
+                },
+                sideContent = new GridContainer
+                {
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    RelativeSizeAxes = Axes.Y,
+                    Width = SettingsToolboxGroup.CONTAINER_WIDTH + padding * 2,
+                    Padding = new MarginPadding
+                    {
+                        Bottom = ScreenFooter.HEIGHT
+                    },
+                    RowDimensions =
+                    [
+                        new Dimension(),
+                        new Dimension(GridSizeMode.AutoSize)
+                    ],
+                    Content = new[]
+                    {
+                        new Drawable[]
+                        {
+                            new OsuScrollContainer
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Child = PlayerSettings = new FillFlowContainer&lt;PlayerSettingsGroup&gt;
+                                {
+                                    AutoSizeAxes = Axes.Both,
+                                    Direction = FillDirection.Vertical,
+                                    Spacing = new Vector2(0, 20),
+                                    Padding = new MarginPadding
+                                    {
+                                        Horizontal = padding,
+                                        Vertical = padding,
+                                    },
+                                    Children = new PlayerSettingsGroup[]
+                                    {
+                                        VisualSettings = new VisualSettings(),
+                                        AudioSettings = new AudioSettings(),
+                                        new InputSettings()
+                                    }
+                                },
+                            }
+                        },
+                        new Drawable[]
+                        {
+                            new Container
+                            {
+                                Anchor = Anchor.TopRight,
+                                Origin = Anchor.TopRight,
+                                Alpha = holdForMenuExitButton ? 1 : 0,
+                                AutoSizeAxes = Axes.Both,
+                                Child = new HoldForMenuButton(true)
+                                {
+                                    Margin = new MarginPadding
+                                    {
+                                        Top = 20,
+                                        Horizontal = padding,
+                                        Bottom = padding,
+                                    },
+                                    Action = () =&gt;
+                                    {
+                                        if (this.IsCurrentScreen())
+                                            this.Exit();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                idleTracker = new IdleTracker(1500),
+                sampleRestart = new SkinnableSound(new SampleInfo(@&quot;Gameplay/restart&quot;, @&quot;pause-retry-click&quot;))
+            };
+
+            if (Beatmap.Value.Beatmap.EpilepsyWarning)
+            {
+                disclaimers.Add(epilepsyWarning = new PlayerLoaderDisclaimer(PlayerLoaderStrings.EpilepsyWarningTitle, PlayerLoaderStrings.EpilepsyWarningContent));
+            }
+
+            if (!string.IsNullOrEmpty(api.ScoreProcessingNoticeUrl))
+            {
+                disclaimers.Add(new PlayerLoaderDisclaimer(
+                    UsersStrings.ShowScoreProcessingTitle(UsersStrings.ShowScoreProcessingTitleLink),
+                    UsersStrings.ShowScoreProcessingMessage
+                )
+                {
+                    Action = () =&gt; (Game as OsuGame)?.OpenUrlExternally(api.ScoreProcessingNoticeUrl),
+                    IsImportant = true,
+                });
+            }
+
+            switch (Beatmap.Value.BeatmapInfo.Status)
+            {
+                case BeatmapOnlineStatus.Loved:
+                    disclaimers.Add(new PlayerLoaderDisclaimer(PlayerLoaderStrings.LovedBeatmapDisclaimerTitle, PlayerLoaderStrings.LovedBeatmapDisclaimerContent));
+                    break;
+
+                case BeatmapOnlineStatus.Qualified:
+                    disclaimers.Add(new PlayerLoaderDisclaimer(PlayerLoaderStrings.QualifiedBeatmapDisclaimerTitle, PlayerLoaderStrings.QualifiedBeatmapDisclaimerContent));
+                    break;
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            inputManager = GetContainingInputManager()!;
+
+            showStoryboards.BindValueChanged(val =&gt; epilepsyWarning?.FadeTo(val.NewValue ? 1 : 0, 250, Easing.OutQuint), true);
+            epilepsyWarning?.FinishTransforms(true);
+
+            // this re-fetch has two purposes:
+            // - is a safety against potential unexpected screen transitions, making sure that the leaderboard
+            //   displayed during gameplay definitely matches the beatmap and ruleset being played
+            //   (as the solo gameplay leaderboard provider uses the global leaderboard manager to populate itself)
+            // - the sort mode is not specified and defaults to `Score` which is good because gameplay leaderboards only support sorting by score.
+            //   this may change at some point in the future, at which point specifying a sort mode should be considered.
+            refetchLeaderboard(force: false);
+        }
+
+        private void refetchLeaderboard(bool force)
+        {
+            leaderboardManager?.FetchWithCriteria(new LeaderboardCriteria(
+                Beatmap.Value.BeatmapInfo,
+                Ruleset.Value,
+                leaderboardManager?.CurrentCriteria?.Scope ?? BeatmapLeaderboardScope.Global,
+                leaderboardManager?.CurrentCriteria?.ExactMods), force);
+        }
+
+        #region Screen handling
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            Beatmap.Value.Track.AddAdjustment(AdjustableProperty.Volume, volumeAdjustment);
+
+            // Start side content off-screen.
+            disclaimers.MoveToX(-disclaimers.DrawWidth);
+            sideContent.MoveToX(sideContent.DrawWidth);
+
+            content.ScaleTo(0.7f);
+
+            const double metadata_delay = 500;
+
+            MetadataInfo.Delay(metadata_delay).FadeIn(500, Easing.OutQuint);
+            contentIn(metadata_delay + 250);
+
+            // after an initial delay, start the debounced load check.
+            // this will continue to execute even after resuming back on restart.
+            Scheduler.Add(new ScheduledDelegate(pushWhenLoaded, Clock.CurrentTime + PlayerPushDelay, 0));
+
+            showMuteWarningIfNeeded();
+            showBatteryWarningIfNeeded();
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            Debug.Assert(CurrentPlayer != null);
+
+            endHighPerformance();
+
+            // prepare for a retry.
+            CurrentPlayer = null;
+            playerConsumed = false;
+            cancelLoad();
+
+            sampleRestart.Play();
+
+            contentIn();
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            quickRestartBlackLayer?.FadeOut(500, Easing.OutQuint).Expire();
+            quickRestartBlackLayer = null;
+
+            BackgroundBrightnessReduction = false;
+
+            // we&#39;re moving to player, so a period of silence is upcoming.
+            // stop the track before removing adjustment to avoid a volume spike.
+            Beatmap.Value.Track.Stop();
+            Beatmap.Value.Track.RemoveAdjustment(AdjustableProperty.Volume, volumeAdjustment);
+
+            lowPassFilter?.RemoveAndDisposeImmediately();
+            highPassFilter?.RemoveAndDisposeImmediately();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            cancelLoad();
+            ContentOut();
+
+            quickRestartBlackLayer?.FadeOut(100, Easing.OutQuint).Expire();
+            quickRestartBlackLayer = null;
+
+            // Ensure the screen doesn&#39;t expire until all the outwards fade operations have completed.
+            this.Delay(CONTENT_OUT_DURATION).FadeOut();
+
+            ApplyToBackground(b =&gt; b.IgnoreUserSettings.Value = true);
+
+            BackgroundBrightnessReduction = false;
+            Beatmap.Value.Track.RemoveAdjustment(AdjustableProperty.Volume, volumeAdjustment);
+
+            endHighPerformance();
+
+            return base.OnExiting(e);
+        }
+
+        private OsuLogo? osuLogo;
+
+        protected override void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            base.LogoArriving(logo, resuming);
+
+            osuLogo = logo;
+
+            const double duration = 300;
+
+            if (!resuming) logo.MoveTo(new Vector2(0.5f), duration, Easing.OutQuint);
+
+            logo.ScaleTo(new Vector2(0.15f), duration, Easing.OutQuint);
+
+            if (QuickRestart)
+            {
+                logo.Delay(quick_restart_initial_delay)
+                    .FadeIn(350);
+            }
+            else
+                logo.FadeIn(350);
+
+            Scheduler.AddDelayed(() =&gt;
+            {
+                if (this.IsCurrentScreen())
+                    logoTracking = content.StartTracking(logo, resuming ? 0 : 500, Easing.InOutExpo);
+            }, resuming ? 0 : 250);
+        }
+
+        protected override void LogoExiting(OsuLogo logo)
+        {
+            base.LogoExiting(logo);
+
+            logoTracking?.Dispose();
+            logoTracking = null;
+
+            osuLogo = null;
+        }
+
+        protected override void LogoSuspending(OsuLogo logo)
+        {
+            base.LogoSuspending(logo);
+
+            logoTracking?.Dispose();
+            logoTracking = null;
+
+            logo
+                .FadeOut(CONTENT_OUT_DURATION / 2, Easing.OutQuint)
+                .ScaleTo(logo.Scale * 0.8f, CONTENT_OUT_DURATION * 2, Easing.OutQuint);
+
+            osuLogo = null;
+        }
+
+        #endregion
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!this.IsCurrentScreen())
+                return;
+
+            MetadataInfo.UserBlocked = !ReadyForGameplay &amp;&amp; CurrentPlayer?.LoadState == LoadState.Ready;
+
+            // We need to perform this check here rather than in OnHover as any number of children of VisualSettings
+            // may also be handling the hover events.
+            if (inputManager.HoveredDrawables.Contains(VisualSettings) || QuickRestart)
+            {
+                // Preview user-defined background dim and blur when hovered on the visual settings panel.
+                ApplyToBackground(b =&gt;
+                {
+                    b.IgnoreUserSettings.Value = false;
+                    b.BlurAmount.Value = 0;
+                });
+
+                BackgroundBrightnessReduction = false;
+            }
+            else
+            {
+                ApplyToBackground(b =&gt;
+                {
+                    // Returns background dim and blur to the values specified by PlayerLoader.
+                    b.IgnoreUserSettings.Value = true;
+                    b.BlurAmount.Value = BACKGROUND_BLUR;
+                });
+
+                BackgroundBrightnessReduction = true;
+            }
+        }
+
+        private Player consumePlayer()
+        {
+            Debug.Assert(!playerConsumed);
+            Debug.Assert(CurrentPlayer != null);
+
+            playerConsumed = true;
+            return CurrentPlayer;
+        }
+
+        private void prepareNewPlayer()
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            CurrentPlayer = createPlayer();
+            CurrentPlayer.Configuration.AutomaticallySkipIntro |= QuickRestart;
+            CurrentPlayer.RestartCount = restartCount++;
+            CurrentPlayer.PrepareLoaderForRestart = prepareForRestart;
+
+            LoadTask = LoadComponentAsync(CurrentPlayer, _ =&gt;
+            {
+                MetadataInfo.Loading = false;
+                OnPlayerLoaded();
+            });
+        }
+
+        protected virtual void OnPlayerLoaded()
+        {
+        }
+
+        private void prepareForRestart(bool quickRestartRequested)
+        {
+            QuickRestart = quickRestartRequested;
+            hideOverlays = true;
+            ValidForResume = true;
+            // when retrying, it is desired to refetch the global state leaderboard so that the user&#39;s previous score can show up on the leaderboard, if it needs to.
+            // that said, only do this when the user is *not* quick-retrying.
+            // this avoids the quick retry becoming longer than it needs to (because an extra API request has to complete before gameplay can start),
+            // and if the user is quick-retrying, their last score is most likely not important for global leaderboards, or the user won&#39;t care.
+            refetchLeaderboard(force: !quickRestartRequested);
+        }
+
+        private void contentIn(double delayBeforeSideDisplays = 0)
+        {
+            MetadataInfo.Loading = true;
+
+            if (QuickRestart)
+            {
+                BackButtonVisibility.Value = false;
+
+                // A quick restart starts by triggering a fade to black
+                AddInternal(quickRestartBlackLayer = new Box
+                {
+                    Colour = Color4.Black,
+                    RelativeSizeAxes = Axes.Both,
+                    Depth = float.MaxValue
+                });
+
+                quickRestartBlackLayer
+                    .Delay(50)
+                    .FadeOut(5000, Easing.OutQuint);
+
+                prepareNewPlayer();
+
+                content
+                    .Delay(quick_restart_initial_delay)
+                    .ScaleTo(1)
+                    .FadeInFromZero(500, Easing.OutQuint);
+
+                quickRestartBackButtonRestore?.Cancel();
+                quickRestartBackButtonRestore = Scheduler.AddDelayed(() =&gt; BackButtonVisibility.Value = true, quick_restart_initial_delay);
+            }
+            else
+            {
+                content.FadeInFromZero(500, Easing.OutQuint);
+
+                content
+                    .ScaleTo(0.7f)
+                    .ScaleTo(1, 650, Easing.OutQuint)
+                    .Then()
+                    .Schedule(prepareNewPlayer);
+
+                using (BeginDelayedSequence(delayBeforeSideDisplays))
+                {
+                    sideContent.FadeInFromZero(500, Easing.Out)
+                               .MoveToX(0, 500, Easing.OutQuint);
+
+                    disclaimers.FadeInFromZero(500, Easing.Out)
+                               .MoveToX(0, 500, Easing.OutQuint);
+                }
+            }
+
+            AddRangeInternal(new[]
+            {
+                lowPassFilter = new AudioFilter(audioManager.TrackMixer),
+                highPassFilter = new AudioFilter(audioManager.TrackMixer, BQFType.HighPass),
+            });
+
+            lowPassFilter.CutoffTo(1000, 650, Easing.OutQuint);
+            highPassFilter.CutoffTo(300).Then().CutoffTo(0, 1250); // 1250 is to line up with the appearance of MetadataInfo (750 delay + 500 fade-in)
+
+            ApplyToBackground(b =&gt; b.FadeColour(Color4.White, 800, Easing.OutQuint));
+        }
+
+        protected virtual void ContentOut()
+        {
+            // Ensure the logo is no longer tracking before we scale the content
+            logoTracking?.Dispose();
+            logoTracking = null;
+
+            content.ScaleTo(0.7f, CONTENT_OUT_DURATION * 2, Easing.OutQuint);
+            content.FadeOut(CONTENT_OUT_DURATION, Easing.OutQuint)
+                   // Safety for filter potentially getting stuck in applied state due to
+                   // transforms on `this` causing children to no longer be updated.
+                   .OnComplete(_ =&gt;
+                   {
+                       highPassFilter?.RemoveAndDisposeImmediately();
+                       highPassFilter = null;
+
+                       lowPassFilter?.RemoveAndDisposeImmediately();
+                       lowPassFilter = null;
+                   });
+
+            disclaimers.FadeOut(CONTENT_OUT_DURATION, Easing.Out)
+                       .MoveToX(-disclaimers.DrawWidth, CONTENT_OUT_DURATION * 2, Easing.OutQuint);
+            sideContent.FadeOut(CONTENT_OUT_DURATION, Easing.OutQuint)
+                       .MoveToX(sideContent.DrawWidth, CONTENT_OUT_DURATION * 2, Easing.OutQuint);
+
+            lowPassFilter?.CutoffTo(AudioFilter.MAX_LOWPASS_CUTOFF, CONTENT_OUT_DURATION);
+            highPassFilter?.CutoffTo(0, CONTENT_OUT_DURATION);
+        }
+
+        private void pushWhenLoaded()
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            if (!this.IsCurrentScreen()) return;
+
+            bool readyForPush =
+                !playerConsumed
+                // don&#39;t push unless the player is completely loaded
+                &amp;&amp; CurrentPlayer?.LoadState == LoadState.Ready
+                // don&#39;t push unless the player is ready to start gameplay
+                &amp;&amp; ReadyForGameplay;
+
+            if (!readyForPush)
+            {
+                // as the pushDebounce below has a delay, we need to keep checking and cancel a future debounce
+                // if we become unready for push during the delay.
+                cancelLoad();
+                return;
+            }
+
+            // if a push has already been scheduled, no further action is required.
+            // this value is reset via cancelLoad() to allow a second usage of the same PlayerLoader screen.
+            if (scheduledPushPlayer != null)
+                return;
+
+            // Now that everything&#39;s been loaded, we can safely switch to a higher performance session without incurring too much overhead.
+            // Doing this prior to the game being pushed gives us a bit of time to stabilise into the high performance mode before gameplay starts.
+            highPerformanceSession ??= highPerformanceSessionManager?.BeginSession();
+
+            scheduledPushPlayer = Scheduler.AddDelayed(() =&gt;
+                {
+                    // ensure that once we have reached this &quot;point of no return&quot;, readyForPush will be false for all future checks (until a new player instance is prepared).
+                    Player consumedPlayer = consumePlayer();
+
+                    consumedPlayer.OnShowingResults += endHighPerformance;
+
+                    ContentOut();
+
+                    TransformSequence&lt;PlayerLoader&gt; pushSequence = this.Delay(0);
+
+                    // This goes hand-in-hand with the restoration of low pass filter in contentOut().
+                    this.TransformBindableTo(volumeAdjustment, 0, CONTENT_OUT_DURATION, Easing.OutCubic);
+
+                    pushSequence.Schedule(() =&gt;
+                    {
+                        if (!this.IsCurrentScreen()) return;
+
+                        LoadTask = null;
+
+                        // By default, we want to load the player and never be returned to.
+                        // Note that this may change if the player we load requested a re-run.
+                        ValidForResume = false;
+
+                        if (consumedPlayer.LoadedBeatmapSuccessfully)
+                            this.Push(consumedPlayer);
+                        else
+                            this.Exit();
+                    });
+                },
+                // When a quick restart is activated, the metadata content will display some time later if it&#39;s taking too long.
+                // To avoid it appearing too briefly, if it begins to fade in let&#39;s induce a standard delay.
+                QuickRestart &amp;&amp; content.Alpha == 0 ? 0 : 500);
+        }
+
+        private void cancelLoad()
+        {
+            scheduledPushPlayer?.Cancel();
+            scheduledPushPlayer = null;
+        }
+
+        private void endHighPerformance()
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            highPerformanceSession?.Dispose();
+            highPerformanceSession = null;
+        }
+
+        #region Disposal
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (isDisposing)
+            {
+                // if the player never got pushed, we should explicitly dispose it.
+                DisposalTask = LoadTask?.ContinueWith(_ =&gt; CurrentPlayer?.Dispose());
+            }
+
+            // This is only a failsafe; should be disposed more immediately by `endHighPerformance` call.
+            highPerformanceSession?.Dispose();
+        }
+
+        #endregion
+
+        #region Mute warning
+
+        private Bindable&lt;bool&gt; muteWarningShownOnce = null!;
+
+        private int restartCount;
+
+        private const double volume_requirement = 0.01;
+
+        private void showMuteWarningIfNeeded()
+        {
+            if (!muteWarningShownOnce.Value)
+            {
+                double aggregateVolumeTrack = audioManager.Volume.Value * audioManager.VolumeTrack.Value;
+
+                // Checks if the notification has not been shown yet and also if master volume is muted, track/music volume is muted or if the whole game is muted.
+                if (volumeOverlay?.IsMuted.Value == true || Precision.AlmostBigger(volume_requirement, aggregateVolumeTrack))
+                {
+                    notificationOverlay?.Post(new MutedNotification());
+                    muteWarningShownOnce.Value = true;
+                }
+            }
+        }
+
+        private partial class MutedNotification : SimpleNotification
+        {
+            public MutedNotification()
+            {
+                Text = NotificationsStrings.GameVolumeTooLow;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, AudioManager audioManager, INotificationOverlay notificationOverlay, VolumeOverlay volumeOverlay)
+            {
+                Icon = FontAwesome.Solid.VolumeMute;
+                IconContent.Colour = colours.RedDark;
+
+                Activated = delegate
+                {
+                    notificationOverlay.Hide();
+
+                    volumeOverlay.IsMuted.Value = false;
+
+                    // Check values before resetting, as the user may have only had mute enabled, in which case we might not need to adjust volumes.
+                    // Note that we only restore halfway to ensure the user isn&#39;t suddenly overloaded by unexpectedly high volume.
+                    audioManager.Volume.Value = Math.Max(audioManager.Volume.Value, 0.5);
+                    audioManager.VolumeTrack.Value = Math.Max(audioManager.VolumeTrack.Value, 0.5);
+
+                    return true;
+                };
+            }
+        }
+
+        #endregion
+
+        #region Low battery warning
+
+        /// &lt;summary&gt;
+        /// This is intentionally higher than 20%, which is usually when OS level notifications
+        /// interrupt the active application to warn the user.
+        /// &lt;/summary&gt;
+        private const double low_battery_threshold = 0.25;
+
+        private Bindable&lt;bool&gt; batteryWarningShownOnce = null!;
+
+        private void showBatteryWarningIfNeeded()
+        {
+            if (batteryInfo == null) return;
+
+            if (!batteryWarningShownOnce.Value)
+            {
+                if (batteryInfo.OnBattery &amp;&amp; batteryInfo.ChargeLevel &lt;= low_battery_threshold)
+                {
+                    notificationOverlay?.Post(new BatteryWarningNotification());
+                    batteryWarningShownOnce.Value = true;
+                }
+            }
+        }
+
+        private partial class BatteryWarningNotification : SimpleNotification
+        {
+            public BatteryWarningNotification()
+            {
+                Text = NotificationsStrings.BatteryLow;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, INotificationOverlay notificationOverlay)
+            {
+                Icon = FontAwesome.Solid.BatteryQuarter;
+                IconContent.Colour = colours.RedDark;
+
+                Activated = delegate
+                {
+                    notificationOverlay.Hide();
+                    return true;
+                };
+            }
+        }
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[57,53,57,83,0],[59,53,59,65,0],[61,71,61,75,0],[63,58,63,63,0],[66,61,66,111,0],[68,59,68,79,0],[71,55,71,59,0],[74,61,74,65,0],[76,57,76,61,0],[76,62,76,74,0],[76,79,76,84,0],[81,75,81,79,0],[81,80,81,92,0],[81,97,81,102,0],[83,51,83,55,0],[83,56,83,68,0],[83,73,83,78,0],[85,49,85,53,0],[85,54,85,66,0],[85,71,85,76,0],[87,36,87,40,0],[87,41,87,53,0],[89,40,89,44,0],[89,45,89,57,0],[95,63,95,67,0],[95,68,95,73,0],[95,78,95,82,0],[97,9,97,55,0],[98,9,98,51,0],[100,9,100,56,0],[104,9,104,82,0],[109,9,109,54,0],[116,9,116,110,0],[119,33,119,37,0],[119,38,119,42,0],[119,47,119,52,0],[126,13,126,14,0],[127,17,127,60,0],[128,21,128,28,0],[130,17,130,55,0],[132,17,132,40,0],[132,40,132,115,0],[132,115,132,117,0],[133,13,133,14,0],[137,13,145,101,0],[147,47,147,61,0],[154,40,154,44,0],[154,45,154,57,0],[161,9,161,55,0],[166,9,166,51,0],[168,9,168,49,0],[174,39,174,43,0],[174,44,174,56,0],[179,61,179,65,0],[179,66,179,70,0],[182,48,182,52,0],[182,53,182,57,0],[185,45,185,49,0],[185,50,185,54,0],[185,59,185,64,0],[188,44,188,48,0],[188,49,188,53,0],[191,81,191,85,0],[191,86,191,90,0],[194,58,194,62,0],[194,63,194,67,0],[196,9,196,55,0],[197,9,197,10,0],[198,13,198,46,0],[199,9,199,10,0],[203,9,203,10,0],[204,13,204,109,0],[205,13,205,112,0],[206,13,206,83,0],[210,13,297,37,0],[297,37,297,38,0],[297,38,298,41,0],[298,41,298,68,0],[298,68,299,45,0],[299,45,299,57,0],[299,57,300,37,0],[300,37,300,38,0],[300,38,308,15,0],[310,13,310,55,0],[311,13,311,14,0],[312,17,312,165,0],[313,13,313,14,0],[315,13,315,69,0],[316,13,316,14,0],[317,17,322,36,0],[322,36,322,102,0],[322,102,324,20,0],[325,13,325,14,0],[327,13,327,54,0],[330,21,330,165,0],[331,21,331,27,0],[334,21,334,173,0],[335,21,335,27,0],[337,9,337,10,0],[340,9,340,10,0],[341,13,341,33,0],[343,13,343,57,0],[345,13,345,53,0],[345,53,345,120,0],[345,120,345,128,0],[346,13,346,53,0],[354,13,354,46,0],[355,9,355,10,0],[358,9,358,10,0],[359,13,363,73,0],[364,9,364,10,0],[369,9,369,10,0],[370,13,370,32,0],[372,13,372,92,0],[375,13,375,57,0],[376,13,376,56,0],[378,13,378,35,0],[382,13,382,77,0],[383,13,383,45,0],[387,13,387,106,0],[389,13,389,39,0],[390,13,390,42,0],[391,9,391,10,0],[394,9,394,10,0],[395,13,395,32,0],[397,13,397,49,0],[399,13,399,34,0],[402,13,402,34,0],[403,13,403,36,0],[404,13,404,26,0],[406,13,406,34,0],[408,13,408,25,0],[409,9,409,10,0],[412,9,412,10,0],[413,13,413,34,0],[415,13,415,76,0],[416,13,416,43,0],[418,13,418,51,0],[422,13,422,40,0],[423,13,423,95,0],[425,13,425,58,0],[426,13,426,59,0],[427,9,427,10,0],[430,9,430,10,0],[431,13,431,26,0],[432,13,432,26,0],[434,13,434,76,0],[435,13,435,43,0],[438,13,438,56,0],[440,13,440,36,0],[440,36,440,69,0],[440,69,440,71,0],[442,13,442,51,0],[443,13,443,95,0],[445,13,445,34,0],[447,13,447,38,0],[448,9,448,10,0],[453,9,453,10,0],[454,13,454,47,0],[456,13,456,28,0],[460,13,460,27,0],[460,28,460,86,0],[462,13,462,73,0],[464,13,464,30,0],[465,13,465,14,0],[466,17,467,34,0],[468,13,468,14,0],[470,17,470,34,0],[472,13,473,13,0],[473,13,473,14,0],[473,14,474,17,0],[474,17,474,44,0],[474,44,475,21,0],[475,21,475,102,0],[475,102,476,13,0],[476,13,476,14,0],[476,14,476,36,0],[477,9,477,10,0],[480,9,480,10,0],[481,13,481,36,0],[483,13,483,37,0],[484,13,484,33,0],[486,13,486,28,0],[487,9,487,10,0],[490,9,490,10,0],[491,13,491,39,0],[493,13,493,37,0],[494,13,494,33,0],[496,13,498,88,0],[500,13,500,28,0],[501,9,501,10,0],[506,9,506,10,0],[507,13,507,27,0],[509,13,509,41,0],[510,17,510,24,0],[512,13,512,105,0],[516,13,516,88,0],[517,13,517,14,0],[519,17,520,17,0],[520,17,520,18,0],[520,18,521,21,0],[521,21,521,56,0],[521,56,522,21,0],[522,21,522,44,0],[522,44,523,17,0],[523,17,523,18,0],[523,18,523,20,0],[525,17,525,55,0],[526,13,526,14,0],[528,13,528,14,0],[529,17,530,17,0],[530,17,530,18,0],[530,18,532,21,0],[532,21,532,55,0],[532,55,533,21,0],[533,21,533,58,0],[533,58,534,17,0],[534,17,534,18,0],[534,18,534,20,0],[536,17,536,54,0],[537,13,537,14,0],[538,9,538,10,0],[541,9,541,10,0],[542,13,542,43,0],[543,13,543,49,0],[545,13,545,35,0],[546,13,546,34,0],[547,9,547,10,0],[550,9,550,10,0],[551,13,551,41,0],[552,17,552,24,0],[554,13,554,44,0],[555,13,555,80,0],[556,13,556,57,0],[557,13,557,71,0],[559,13,560,13,0],[560,13,560,14,0],[560,14,561,17,0],[561,17,561,46,0],[561,46,562,17,0],[562,17,562,34,0],[562,34,563,13,0],[563,13,563,14,0],[563,14,563,16,0],[564,9,564,10,0],[567,9,567,10,0],[568,9,568,10,0],[571,9,571,10,0],[572,13,572,50,0],[573,13,573,33,0],[574,13,574,35,0],[579,13,579,63,0],[580,9,580,10,0],[583,9,583,10,0],[584,13,584,41,0],[586,13,586,30,0],[587,13,587,14,0],[588,17,588,52,0],[591,17,596,20,0],[598,17,600,53,0],[602,17,602,36,0],[604,17,607,59,0],[609,17,609,57,0],[610,17,610,76,0],[610,76,610,109,0],[610,109,610,140,0],[611,13,611,14,0],[613,13,613,14,0],[614,17,614,62,0],[616,17,620,49,0],[622,17,622,70,0],[623,17,623,18,0],[624,21,625,66,0],[627,21,628,66,0],[629,17,629,18,0],[630,13,630,14,0],[632,13,636,16,0],[638,13,638,64,0],[639,13,639,67,0],[641,13,641,36,0],[641,36,641,84,0],[641,84,641,86,0],[642,9,642,10,0],[645,9,645,10,0],[647,13,647,37,0],[648,13,648,33,0],[650,13,650,78,0],[651,13,655,20,0],[655,20,655,21,0],[655,21,656,24,0],[656,24,656,70,0],[656,70,657,24,0],[657,24,657,46,0],[657,46,659,24,0],[659,24,659,69,0],[659,69,660,24,0],[660,24,660,45,0],[660,45,661,20,0],[661,20,661,21,0],[661,21,661,23,0],[663,13,664,100,0],[665,13,666,99,0],[668,13,668,91,0],[669,13,669,63,0],[670,9,670,10,0],[673,9,673,10,0],[674,13,674,55,0],[676,13,676,41,0],[676,42,676,49,0],[678,13,683,37,0],[685,13,685,31,0],[686,13,686,14,0],[689,17,689,30,0],[690,17,690,24,0],[695,13,695,45,0],[696,17,696,24,0],[700,13,700,86,0],[702,13,703,17,0],[703,17,703,18,0],[703,18,705,21,0],[705,21,705,61,0],[705,61,707,21,0],[707,21,707,75,0],[707,75,709,21,0],[709,21,709,34,0],[709,34,711,21,0],[711,21,711,82,0],[711,82,714,21,0],[714,21,714,106,0],[714,106,716,21,0],[716,21,717,21,0],[717,21,717,22,0],[717,22,718,25,0],[718,25,718,53,0],[718,53,718,54,0],[718,54,718,61,0],[718,61,720,25,0],[720,25,720,41,0],[720,41,724,25,0],[724,25,724,48,0],[724,48,726,25,0],[726,25,726,70,0],[726,70,727,29,0],[727,29,727,55,0],[727,55,729,29,0],[729,29,729,41,0],[729,41,730,21,0],[730,21,730,22,0],[730,22,730,24,0],[730,24,731,17,0],[731,17,731,18,0],[731,18,734,63,0],[735,9,735,10,0],[738,9,738,10,0],[739,13,739,43,0],[740,13,740,40,0],[741,9,741,10,0],[744,9,744,10,0],[745,13,745,55,0],[747,13,747,47,0],[748,13,748,43,0],[749,9,749,10,0],[754,9,754,10,0],[755,13,755,39,0],[757,13,757,29,0],[758,13,758,14,0],[760,17,760,60,0],[760,60,760,84,0],[760,84,760,86,0],[761,13,761,14,0],[764,13,764,47,0],[765,9,765,10,0],[771,9,771,61,0],[778,9,778,10,0],[779,13,779,45,0],[780,13,780,14,0],[781,17,781,106,0],[784,17,784,126,0],[785,17,785,18,0],[786,21,786,72,0],[787,21,787,55,0],[788,17,788,18,0],[789,13,789,14,0],[790,9,790,10,0],[794,13,794,39,0],[795,13,795,14,0],[796,17,796,62,0],[797,13,797,14,0],[801,13,801,14,0],[802,17,802,53,0],[803,17,803,54,0],[805,17,806,17,0],[806,17,806,18,0],[806,18,807,21,0],[807,21,807,48,0],[807,48,809,21,0],[809,21,809,57,0],[809,57,813,21,0],[813,21,813,90,0],[813,90,814,21,0],[814,21,814,100,0],[814,100,816,21,0],[816,21,816,33,0],[816,33,817,17,0],[817,17,817,18,0],[817,18,817,19,0],[818,13,818,14,0],[831,9,831,64,0],[834,9,834,10,0],[835,13,835,37,0],[835,38,835,45,0],[837,13,837,48,0],[838,13,838,14,0],[839,17,839,95,0],[840,17,840,18,0],[841,21,841,81,0],[842,21,842,58,0],[843,17,843,18,0],[844,13,844,14,0],[845,9,845,10,0],[849,13,849,48,0],[850,13,850,14,0],[851,17,851,56,0],[852,13,852,14,0],[856,13,856,14,0],[857,17,857,57,0],[858,17,858,54,0],[860,17,861,17,0],[861,17,861,18,0],[861,18,862,21,0],[862,21,862,48,0],[862,48,863,21,0],[863,21,863,33,0],[863,33,864,17,0],[864,17,864,18,0],[864,18,864,19,0],[865,13,865,14,0]]);
+    </script>
+  </body>
+</html>

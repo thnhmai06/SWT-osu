@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/BeatmapUpdaterMetadataLookup.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Platform;
+using osu.Game.Extensions;
+using osu.Game.Online.API;
+
+namespace osu.Game.Beatmaps
+{
+    /// &lt;summary&gt;
+    /// A component which handles population of online IDs for beatmaps using a two part lookup procedure.
+    /// &lt;/summary&gt;
+    public class BeatmapUpdaterMetadataLookup : IDisposable
+    {
+        private readonly IOnlineBeatmapMetadataSource apiMetadataSource;
+        private readonly IOnlineBeatmapMetadataSource localCachedMetadataSource;
+
+        public BeatmapUpdaterMetadataLookup(IAPIProvider api, Storage storage)
+            : this(new APIBeatmapMetadataSource(api), new LocalCachedBeatmapMetadataSource(storage))
+        {
+        }
+
+        internal BeatmapUpdaterMetadataLookup(IOnlineBeatmapMetadataSource apiMetadataSource, IOnlineBeatmapMetadataSource localCachedMetadataSource)
+        {
+            this.apiMetadataSource = apiMetadataSource;
+            this.localCachedMetadataSource = localCachedMetadataSource;
+        }
+
+        /// &lt;summary&gt;
+        /// Queue an update for a beatmap set.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This may happen during initial import, or at a later stage in response to a user action or server event.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;beatmapSet&quot;&gt;The beatmap set to update. Updates will be applied directly (so a transaction should be started if this instance is managed).&lt;/param&gt;
+        /// &lt;param name=&quot;preferOnlineFetch&quot;&gt;Whether metadata from an online source should be preferred. If &lt;c&gt;true&lt;/c&gt;, the local cache will be skipped to ensure the freshest data state possible.&lt;/param&gt;
+        public void Update(BeatmapSetInfo beatmapSet, bool preferOnlineFetch)
+        {
+            var lookupResults = new List&lt;OnlineBeatmapMetadata?&gt;();
+
+            foreach (var beatmapInfo in beatmapSet.Beatmaps)
+            {
+                // note that these lookups DO NOT ACTUALLY FULLY GUARANTEE that the beatmap is what it claims it is,
+                // i.e. the correctness of this lookup should be treated as APPROXIMATE AT WORST.
+                // this is because the beatmap filename is used as a fallback in some scenarios where the MD5 of the beatmap may mismatch.
+                // this is considered to be an acceptable casualty so that things can continue to work as expected for users in some rare scenarios
+                // (stale beatmap files in beatmap packs, beatmap mirror desyncs).
+                // however, all this means that other places such as score submission ARE EXPECTED TO VERIFY THE MD5 OF THE BEATMAP AGAINST THE ONLINE ONE EXPLICITLY AGAIN.
+                //
+                // additionally note that the online ID stored to the map is EXPLICITLY NOT USED because some users in a silly attempt to &quot;fix&quot; things for themselves on stable
+                // would reuse online IDs of already submitted beatmaps, which means that information is pretty much expected to be bogus in a nonzero number of beatmapsets.
+                if (!tryLookup(beatmapInfo, preferOnlineFetch, out var res))
+                    continue;
+
+                if (res == null)
+                {
+                    beatmapInfo.ResetOnlineInfo();
+                    lookupResults.Add(null); // mark lookup failure
+                    continue;
+                }
+
+                lookupResults.Add(res);
+
+                beatmapInfo.OnlineID = res.BeatmapID;
+                beatmapInfo.OnlineMD5Hash = res.MD5Hash;
+                beatmapInfo.LastOnlineUpdate = res.LastUpdated;
+
+                Debug.Assert(beatmapInfo.BeatmapSet != null);
+                beatmapInfo.BeatmapSet.OnlineID = res.BeatmapSetID;
+
+                // Some metadata should only be applied if there&#39;s no local changes.
+                if (beatmapInfo.MatchesOnlineVersion)
+                {
+                    beatmapInfo.Status = res.BeatmapStatus;
+                    beatmapInfo.Metadata.Author.OnlineID = res.AuthorID;
+                    beatmapInfo.Metadata.UserTags.Clear();
+                    beatmapInfo.Metadata.UserTags.AddRange(res.UserTags);
+                }
+            }
+
+            if (beatmapSet.Beatmaps.All(b =&gt; b.MatchesOnlineVersion)
+                &amp;&amp; lookupResults.All(r =&gt; r != null)
+                &amp;&amp; lookupResults.Select(r =&gt; r!.BeatmapSetID).Distinct().Count() == 1)
+            {
+                var representative = lookupResults.First()!;
+
+                beatmapSet.Status = representative.BeatmapSetStatus ?? BeatmapOnlineStatus.None;
+                beatmapSet.DateRanked = representative.DateRanked;
+                beatmapSet.DateSubmitted = representative.DateSubmitted;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to retrieve the &lt;see cref=&quot;OnlineBeatmapMetadata&quot;/&gt; for the given &lt;paramref name=&quot;beatmapInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmapInfo&quot;&gt;The beatmap to perform the online lookup for.&lt;/param&gt;
+        /// &lt;param name=&quot;preferOnlineFetch&quot;&gt;Whether online sources should be preferred for the lookup.&lt;/param&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The result of the lookup. Can be &lt;see langword=&quot;null&quot;/&gt; if no matching beatmap was found (or the lookup failed).&lt;/param&gt;
+        /// &lt;returns&gt;
+        /// &lt;see langword=&quot;true&quot;/&gt; if any of the metadata sources were available and returned a valid &lt;paramref name=&quot;result&quot;/&gt;.
+        /// &lt;see langword=&quot;false&quot;/&gt; if none of the metadata sources were available, or if there was insufficient data to return a valid &lt;paramref name=&quot;result&quot;/&gt;.
+        /// &lt;/returns&gt;
+        /// &lt;remarks&gt;
+        /// There are two cases wherein this method will return &lt;see langword=&quot;false&quot;/&gt;:
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;If neither the local cache or the API are available to query.&lt;/item&gt;
+        /// &lt;item&gt;If the API is not available to query, and a positive match was not made in the local cache.&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// In either case, the online ID read from the .osu file will be preserved, which may not necessarily be what we want.
+        /// TODO: reconsider this if/when a better flow for queueing online retrieval is implemented.
+        /// &lt;/remarks&gt;
+        private bool tryLookup(BeatmapInfo beatmapInfo, bool preferOnlineFetch, out OnlineBeatmapMetadata? result)
+        {
+            bool useLocalCache = !apiMetadataSource.Available || !preferOnlineFetch;
+            if (useLocalCache &amp;&amp; localCachedMetadataSource.TryLookup(beatmapInfo, out result))
+                return true;
+
+            if (apiMetadataSource.TryLookup(beatmapInfo, out result))
+                return true;
+
+            result = null;
+            return false;
+        }
+
+        public void Dispose()
+        {
+            apiMetadataSource.Dispose();
+            localCachedMetadataSource.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,15,23,101,0],[24,9,24,10,0],[25,9,25,10,0],[27,9,27,150,0],[28,9,28,10,0],[29,13,29,56,0],[30,13,30,72,0],[31,9,31,10,0],[42,9,42,10,0],[43,13,43,68,0],[45,13,45,20,0],[45,22,45,37,0],[45,38,45,40,0],[45,41,45,60,0],[46,13,46,14,0],[56,17,56,77,0],[57,21,57,30,0],[59,17,59,33,0],[60,17,60,18,0],[61,21,61,51,0],[62,21,62,45,0],[63,21,63,30,0],[66,17,66,40,0],[68,17,68,54,0],[69,17,69,57,0],[70,17,70,64,0],[72,17,72,62,0],[73,17,73,68,0],[76,17,76,54,0],[77,17,77,18,0],[78,21,78,60,0],[79,21,79,73,0],[80,21,80,59,0],[81,21,81,74,0],[82,17,82,18,0],[83,13,83,14,0],[85,13,85,46,0],[85,46,85,68,0],[85,68,86,43,0],[86,43,86,52,0],[86,52,87,46,0],[87,46,87,61,0],[87,61,87,87,0],[88,13,88,14,0],[89,17,89,61,0],[91,17,91,97,0],[92,17,92,67,0],[93,17,93,73,0],[94,13,94,14,0],[95,9,95,10,0],[117,9,117,10,0],[118,13,118,85,0],[119,13,119,95,0],[120,17,120,29,0],[122,13,122,70,0],[123,17,123,29,0],[125,13,125,27,0],[126,13,126,26,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,41,0],[132,13,132,49,0],[133,9,133,10,0]]);
+    </script>
+  </body>
+</html>

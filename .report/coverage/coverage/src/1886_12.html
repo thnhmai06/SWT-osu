@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/ResultsScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay
+{
+    public partial class ResultsScreen : RankedPlaySubScreen
+    {
+        public override LocalisableString StageHeading =&gt; &quot;Results&quot;;
+
+        public override bool ShowBeatmapBackground =&gt; true;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        [Resolved]
+        private ScoreManager scoreManager { get; set; } = null!;
+
+        [Resolved]
+        private RulesetStore rulesets { get; set; } = null!;
+
+        [Resolved]
+        private RankedPlayMatchInfo matchInfo { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; globalBeatmap { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; globalRuleset { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; globalMods { get; set; } = null!;
+
+        private LoadingSpinner loadingSpinner = null!;
+        private MainPanel? mainPanel;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            CornerPieceVisibility.Value = Visibility.Hidden;
+
+            AddRangeInternal(new Drawable[]
+            {
+                loadingSpinner = new LoadingSpinner
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre
+                },
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            loadingSpinner.Show();
+
+            fetchFinalScores().FireAndForget();
+        }
+
+        private async Task fetchFinalScores()
+        {
+            try
+            {
+                if (client.Room == null)
+                    return;
+
+                TaskCompletionSource&lt;List&lt;MultiplayerScore&gt;&gt; scoreLookup = new TaskCompletionSource&lt;List&lt;MultiplayerScore&gt;&gt;();
+
+                var request = new IndexPlaylistScoresRequest(client.Room.RoomID, client.Room.Settings.PlaylistItemId);
+
+                request.Success += req =&gt; scoreLookup.SetResult(req.Scores);
+                request.Failure += scoreLookup.SetException;
+
+                api.Queue(request);
+
+                List&lt;MultiplayerScore&gt; apiScores = await scoreLookup.Task.ConfigureAwait(false);
+
+                ScoreInfo[] scores = apiScores.Select(s =&gt; s.CreateScoreInfo(scoreManager, rulesets, globalBeatmap.Value.BeatmapInfo)).ToArray();
+
+                Debug.Assert(scores.Length &lt;= 2);
+
+                int localUserId = api.LocalUser.Value.OnlineID;
+                int opponentId = matchInfo.RoomState.Users.Keys.Single(it =&gt; it != localUserId);
+
+                ScoreInfo playerScore = scores.SingleOrDefault(s =&gt; s.UserID == localUserId) ?? new ScoreInfo
+                {
+                    Rank = ScoreRank.F,
+                    Ruleset = globalRuleset.Value,
+                    User = new APIUser { Id = localUserId }
+                };
+
+                ScoreInfo opponentScore = scores.SingleOrDefault(s =&gt; s.UserID == opponentId) ?? new ScoreInfo
+                {
+                    Rank = ScoreRank.F,
+                    Ruleset = globalRuleset.Value,
+                    User = new APIUser { Id = opponentId }
+                };
+
+                // Should complete instantaneously due to prior lookups.
+                APIBeatmap beatmap = (await beatmapLookupCache.GetBeatmapAsync(globalBeatmap.Value.BeatmapInfo.OnlineID).ConfigureAwait(false))!;
+
+                Schedule(() =&gt;
+                {
+                    LoadComponentAsync(new MainPanel
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        // A little bit of room for the countdown timer...
+                        Margin = new MarginPadding { Top = 45 },
+                        PlayerScore = playerScore,
+                        OpponentScore = opponentScore,
+                        PlayerDamageInfo = matchInfo.RoomState.Users[localUserId].DamageInfo!,
+                        OpponentDamageInfo = matchInfo.RoomState.Users[opponentId].DamageInfo!,
+                        Beatmap = beatmap,
+                        Mods = globalMods.Value.ToArray(),
+                    }, loaded =&gt;
+                    {
+                        AddInternal(loaded);
+                        mainPanel = loaded;
+                    });
+                });
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;Failed to load scores for playlist item.&quot;);
+                throw;
+            }
+            finally
+            {
+                Scheduler.Add(() =&gt; loadingSpinner.Hide());
+            }
+        }
+
+        public override void OnExiting(RankedPlaySubScreen? next)
+        {
+            mainPanel?.StopAllSamples();
+            base.OnExiting(next);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,59,30,68,0],[32,55,32,59,0],[35,36,35,40,0],[35,41,35,45,0],[35,50,35,55,0],[38,44,38,48,0],[38,49,38,53,0],[38,58,38,63,0],[41,45,41,49,0],[41,50,41,54,0],[41,59,41,64,0],[44,41,44,45,0],[44,46,44,50,0],[44,55,44,60,0],[47,49,47,53,0],[47,54,47,58,0],[47,63,47,68,0],[50,57,50,61,0],[50,62,50,66,0],[50,71,50,76,0],[53,59,53,63,0],[53,64,53,68,0],[53,73,53,78,0],[56,56,56,60,0],[56,61,56,65,0],[56,70,56,75,0],[59,60,59,64,0],[59,65,59,69,0],[59,74,59,79,0],[61,9,61,55,0],[66,9,66,10,0],[67,13,67,61,0],[69,13,76,16,0],[77,9,77,10,0],[80,9,80,10,0],[81,13,81,33,0],[83,13,83,35,0],[85,13,85,48,0],[86,9,86,10,0],[89,9,89,10,0],[91,13,91,14,0],[92,17,92,41,0],[93,21,93,28,0],[95,17,95,127,0],[97,17,97,119,0],[99,17,99,43,0],[99,43,99,76,0],[99,76,99,77,0],[100,17,100,61,0],[102,17,102,36,0],[104,17,104,97,0],[106,17,106,60,0],[106,60,106,134,0],[106,134,106,146,0],[108,17,108,50,0],[110,17,110,64,0],[111,17,111,78,0],[111,78,111,95,0],[111,95,111,97,0],[113,17,113,69,0],[113,69,113,92,0],[113,92,118,19,0],[120,17,120,71,0],[120,71,120,93,0],[120,93,125,19,0],[128,17,128,146,0],[130,17,131,17,0],[131,17,131,18,0],[131,18,132,21,0],[132,21,144,21,0],[144,21,144,22,0],[144,22,145,25,0],[145,25,145,45,0],[145,45,146,25,0],[146,25,146,44,0],[146,44,147,21,0],[147,21,147,22,0],[147,22,147,24,0],[147,24,148,17,0],[148,17,148,18,0],[148,18,148,20,0],[149,13,149,14,0],[150,13,150,32,0],[151,13,151,14,0],[152,17,152,77,0],[153,17,153,23,0],[156,13,156,14,0],[157,17,157,37,0],[157,37,157,58,0],[157,58,157,60,0],[158,13,158,14,0],[159,9,159,10,0],[162,9,162,10,0],[163,13,163,41,0],[164,13,164,34,0],[165,9,165,10,0]]);
+    </script>
+  </body>
+</html>

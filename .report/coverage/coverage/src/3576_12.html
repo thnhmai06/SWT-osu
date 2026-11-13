@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Database/LegacyImportManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.IO;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Settings.Sections.Maintenance;
+using osu.Game.Scoring;
+using osu.Game.Skinning;
+
+namespace osu.Game.Database
+{
+    /// &lt;summary&gt;
+    /// Handles migration of legacy user data from osu-stable.
+    /// &lt;/summary&gt;
+    public partial class LegacyImportManager : Component
+    {
+        [Resolved]
+        private SkinManager skins { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private ScoreManager scores { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private IDialogOverlay dialogOverlay { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realmAccess { get; set; } = null!;
+
+        [Resolved]
+        private GameHost gameHost { get; set; } = null!;
+
+        [Resolved]
+        private INotificationOverlay? notifications { get; set; }
+
+        private StableStorage? cachedStorage;
+
+        public bool SupportsImportFromStable =&gt; RuntimeInfo.IsDesktop;
+
+        public void UpdateStorage(string stablePath) =&gt; cachedStorage = new StableStorage(stablePath, gameHost as DesktopGameHost);
+
+        /// &lt;summary&gt;
+        /// Checks whether a valid location to run a stable import from can be determined starting from the supplied &lt;paramref name=&quot;directory&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;directory&quot;&gt;The directory to check for stable import eligibility.&lt;/param&gt;
+        /// &lt;param name=&quot;stableRoot&quot;&gt;
+        /// If the return value is &lt;see langword=&quot;true&quot;/&gt;,
+        /// this parameter will contain the &lt;see cref=&quot;DirectoryInfo&quot;/&gt; to use as the root directory for importing.
+        /// &lt;/param&gt;
+        public bool IsUsableForStableImport(DirectoryInfo? directory, [NotNullWhen(true)] out DirectoryInfo? stableRoot)
+        {
+            if (directory == null)
+            {
+                stableRoot = null;
+                return false;
+            }
+
+            // A full stable installation will have a configuration file present.
+            // This is the best case scenario, as it may contain a custom beatmap directory we need to traverse to.
+            if (directory.GetFiles(@&quot;osu!.*.cfg&quot;).Any())
+            {
+                stableRoot = directory;
+                return true;
+            }
+
+            // The user may only have their songs or skins folders left.
+            // We still want to allow them to import based on this.
+            if (directory.GetDirectories(@&quot;Songs&quot;).Any() || directory.GetDirectories(@&quot;Skins&quot;).Any())
+            {
+                stableRoot = directory;
+                return true;
+            }
+
+            // The user may have traversed *inside* their songs or skins folders.
+            if (directory.Parent != null &amp;&amp; (directory.Name == @&quot;Songs&quot; || directory.Name == @&quot;Skins&quot;))
+            {
+                stableRoot = directory.Parent;
+                return true;
+            }
+
+            stableRoot = null;
+            return false;
+        }
+
+        public bool CheckSongsFolderHardLinkAvailability()
+        {
+            var stableStorage = GetCurrentStableStorage();
+
+            if (stableStorage == null || gameHost is not DesktopGameHost desktopGameHost)
+                return false;
+
+            string testExistingPath = stableStorage.GetSongStorage().GetFullPath(string.Empty);
+            string testDestinationPath = desktopGameHost.Storage.GetFullPath(string.Empty);
+
+            return HardLinkHelper.CheckAvailability(testDestinationPath, testExistingPath);
+        }
+
+        public virtual async Task&lt;int&gt; GetImportCount(StableContent content, CancellationToken cancellationToken)
+        {
+            var stableStorage = GetCurrentStableStorage();
+
+            if (stableStorage == null)
+                return 0;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            switch (content)
+            {
+                case StableContent.Beatmaps:
+                    return await new LegacyBeatmapImporter(beatmaps).GetAvailableCount(stableStorage).ConfigureAwait(false);
+
+                case StableContent.Skins:
+                    return await new LegacySkinImporter(skins).GetAvailableCount(stableStorage).ConfigureAwait(false);
+
+                case StableContent.Collections:
+                    return await new LegacyCollectionImporter(realmAccess).GetAvailableCount(stableStorage).ConfigureAwait(false);
+
+                case StableContent.Scores:
+                    return await new LegacyScoreImporter(scores).GetAvailableCount(stableStorage).ConfigureAwait(false);
+
+                default:
+                    throw new ArgumentException($&quot;Only one {nameof(StableContent)} flag should be specified.&quot;);
+            }
+        }
+
+        public async Task ImportFromStableAsync(StableContent content, bool interactiveLocateIfNotFound = true)
+        {
+            var stableStorage = GetCurrentStableStorage();
+
+            if (stableStorage == null)
+            {
+                if (!interactiveLocateIfNotFound)
+                    return;
+
+                var taskCompletionSource = new TaskCompletionSource&lt;string&gt;(TaskCreationOptions.RunContinuationsAsynchronously);
+                Schedule(() =&gt; dialogOverlay.Push(new StableDirectoryLocationDialog(taskCompletionSource)));
+                string stablePath = await taskCompletionSource.Task.ConfigureAwait(false);
+
+                UpdateStorage(stablePath);
+                stableStorage = GetCurrentStableStorage();
+            }
+
+            if (stableStorage == null)
+                return;
+
+            var importTasks = new List&lt;Task&gt;();
+
+            Task beatmapImportTask = Task.CompletedTask;
+            if (content.HasFlag(StableContent.Beatmaps))
+                importTasks.Add(beatmapImportTask = new LegacyBeatmapImporter(beatmaps).ImportFromStableAsync(stableStorage));
+
+            if (content.HasFlag(StableContent.Skins))
+                importTasks.Add(new LegacySkinImporter(skins).ImportFromStableAsync(stableStorage));
+
+            if (content.HasFlag(StableContent.Collections))
+            {
+                importTasks.Add(beatmapImportTask.ContinueWith(_ =&gt; new LegacyCollectionImporter(realmAccess)
+                {
+                    // Other legacy importers import via model managers which handle the posting of notifications.
+                    // Collections are an exception.
+                    PostNotification = n =&gt; notifications?.Post(n)
+                }.ImportFromStorage(stableStorage), TaskContinuationOptions.OnlyOnRanToCompletion));
+            }
+
+            if (content.HasFlag(StableContent.Scores))
+                importTasks.Add(beatmapImportTask.ContinueWith(_ =&gt; new LegacyScoreImporter(scores).ImportFromStableAsync(stableStorage), TaskContinuationOptions.OnlyOnRanToCompletion));
+
+            await Task.WhenAll(importTasks.ToArray()).ConfigureAwait(false);
+        }
+
+        public StableStorage? GetCurrentStableStorage()
+        {
+            if (cachedStorage != null)
+                return cachedStorage;
+
+            var stableStorage = game?.GetStorageForStableInstall();
+            if (stableStorage != null)
+                return cachedStorage = stableStorage;
+
+            return null;
+        }
+    }
+
+    [Flags]
+    public enum StableContent
+    {
+        Beatmaps = 1 &lt;&lt; 0,
+        Scores = 1 &lt;&lt; 1,
+        Skins = 1 &lt;&lt; 2,
+        Collections = 1 &lt;&lt; 3,
+        All = Beatmaps | Scores | Skins | Collections
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,37,30,41,0],[30,42,30,46,0],[30,51,30,56,0],[33,43,33,47,0],[33,48,33,52,0],[33,57,33,62,0],[36,39,36,43,0],[36,44,36,48,0],[36,53,36,58,0],[39,33,39,37,0],[39,38,39,42,0],[42,48,42,52,0],[42,53,42,57,0],[42,62,42,67,0],[45,43,45,47,0],[45,48,45,52,0],[45,57,45,62,0],[48,37,48,41,0],[48,42,48,46,0],[48,51,48,56,0],[51,55,51,59,0],[51,60,51,64,0],[55,49,55,70,0],[57,57,57,131,0],[68,9,68,10,0],[69,13,69,35,0],[70,13,70,14,0],[71,17,71,35,0],[72,17,72,30,0],[77,13,77,57,0],[78,13,78,14,0],[79,17,79,40,0],[80,17,80,29,0],[85,13,85,102,0],[86,13,86,14,0],[87,17,87,40,0],[88,17,88,29,0],[92,13,92,104,0],[93,13,93,14,0],[94,17,94,47,0],[95,17,95,29,0],[98,13,98,31,0],[99,13,99,26,0],[100,9,100,10,0],[103,9,103,10,0],[104,13,104,59,0],[106,13,106,90,0],[107,17,107,30,0],[109,13,109,96,0],[110,13,110,92,0],[112,13,112,92,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,59,0],[119,13,119,39,0],[120,17,120,26,0],[122,13,122,62,0],[124,13,124,29,0],[127,21,127,125,0],[130,21,130,119,0],[133,21,133,131,0],[136,21,136,121,0],[139,21,139,112,0],[141,9,141,10,0],[144,9,144,10,0],[145,13,145,59,0],[147,13,147,39,0],[148,13,148,14,0],[149,17,149,50,0],[150,21,150,28,0],[152,17,152,129,0],[153,17,153,32,0],[153,32,153,107,0],[153,107,153,109,0],[154,17,154,91,0],[156,17,156,43,0],[157,17,157,59,0],[158,13,158,14,0],[160,13,160,39,0],[161,17,161,24,0],[163,13,163,48,0],[165,13,165,57,0],[166,13,166,57,0],[167,17,167,127,0],[169,13,169,54,0],[170,17,170,101,0],[172,13,172,60,0],[173,13,173,14,0],[174,17,174,69,0],[174,69,178,45,0],[178,45,178,67,0],[178,67,179,51,0],[179,51,179,101,0],[180,13,180,14,0],[182,13,182,55,0],[183,17,183,69,0],[183,69,183,137,0],[183,137,183,187,0],[185,13,185,77,0],[186,9,186,10,0],[189,9,189,10,0],[190,13,190,39,0],[191,17,191,38,0],[193,13,193,68,0],[194,13,194,39,0],[195,17,195,54,0],[197,13,197,25,0],[198,9,198,10,0]]);
+    </script>
+  </body>
+</html>

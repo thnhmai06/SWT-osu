@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/SliderEventGenerator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+
+namespace osu.Game.Rulesets.Objects
+{
+    public static class SliderEventGenerator
+    {
+        /// &lt;summary&gt;
+        /// Historically, slider&#39;s final tick (aka the place where the slider would receive a final judgement) was offset by -36 ms. Originally this was
+        /// done to workaround a technical detail (unimportant), but over the years it has become an expectation of players that you don&#39;t need to hold
+        /// until the true end of the slider. This very small amount of leniency makes it easier to jump away from fast sliders to the next hit object.
+        ///
+        /// After discussion on how this should be handled going forward, players have unanimously stated that this lenience should remain in some way.
+        /// These days, this is implemented in the drawable implementation of Slider in the osu! ruleset.
+        ///
+        /// We need to keep the &lt;see cref=&quot;SliderEventType.LegacyLastTick&quot;/&gt; *only* for osu!catch conversion, which relies on it to generate tiny ticks
+        /// correctly.
+        /// &lt;/summary&gt;
+        public const double TAIL_LENIENCY = -36;
+
+        public static IEnumerable&lt;SliderEventDescriptor&gt; Generate(double startTime, double spanDuration, double velocity, double tickDistance, double totalDistance, int spanCount,
+                                                                  CancellationToken cancellationToken = default)
+        {
+            // A very lenient maximum length of a slider for ticks to be generated.
+            // This exists for edge cases such as /b/1573664 where the beatmap has been edited by the user, and should never be reached in normal usage.
+            const double max_length = 100000;
+
+            double length = Math.Min(max_length, totalDistance);
+            tickDistance = Math.Clamp(tickDistance, 0, length);
+
+            double minDistanceFromEnd = velocity * 10;
+
+            yield return new SliderEventDescriptor
+            {
+                Type = SliderEventType.Head,
+                SpanIndex = 0,
+                SpanStartTime = startTime,
+                Time = startTime,
+                PathProgress = 0,
+            };
+
+            for (int span = 0; span &lt; spanCount; span++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                double spanStartTime = startTime + span * spanDuration;
+                bool reversed = span % 2 == 1;
+
+                if (tickDistance != 0)
+                {
+                    var ticks = generateTicks(span, spanStartTime, spanDuration, reversed, length, tickDistance, minDistanceFromEnd, cancellationToken);
+
+                    if (reversed)
+                    {
+                        // For repeat spans, ticks are returned in reverse-StartTime order, which is undesirable for some rulesets
+                        ticks = ticks.Reverse();
+                    }
+
+                    foreach (var e in ticks)
+                        yield return e;
+                }
+
+                if (span &lt; spanCount - 1)
+                {
+                    yield return new SliderEventDescriptor
+                    {
+                        Type = SliderEventType.Repeat,
+                        SpanIndex = span,
+                        SpanStartTime = startTime + span * spanDuration,
+                        Time = spanStartTime + spanDuration,
+                        PathProgress = (span + 1) % 2,
+                    };
+                }
+            }
+
+            double totalDuration = spanCount * spanDuration;
+
+            // Okay, I&#39;ll level with you. I made a mistake. It was 2007.
+            // Times were simpler. osu! was but in its infancy and sliders were a new concept.
+            // A hack was made, which has unfortunately lived through until this day.
+            //
+            // This legacy tick is used for some calculations and judgements where audio output is not required.
+            // Generally we are keeping this around just for difficulty compatibility.
+            // Optimistically we do not want to ever use this for anything user-facing going forwards.
+
+            int finalSpanIndex = spanCount - 1;
+            double finalSpanStartTime = startTime + finalSpanIndex * spanDuration;
+
+            // Note that `finalSpanStartTime + spanDuration ≈ startTime + totalDuration`, but we write it like this to match floating point precision
+            // of stable.
+            //
+            // So thinking about this in a saner way, the time of the LegacyLastTick is
+            //
+            // `slider.StartTime + max(slider.Duration / 2, slider.Duration - 36)`
+            //
+            // As a slider gets shorter than 72 ms, the leniency offered falls below the 36 ms `TAIL_LENIENCY` constant.
+            double legacyLastTickTime = Math.Max(startTime + totalDuration / 2, (finalSpanStartTime + spanDuration) + TAIL_LENIENCY);
+            double legacyLastTickProgress = (legacyLastTickTime - finalSpanStartTime) / spanDuration;
+
+            if (spanCount % 2 == 0) legacyLastTickProgress = 1 - legacyLastTickProgress;
+
+            yield return new SliderEventDescriptor
+            {
+                Type = SliderEventType.LegacyLastTick,
+                SpanIndex = finalSpanIndex,
+                SpanStartTime = finalSpanStartTime,
+                Time = legacyLastTickTime,
+                PathProgress = legacyLastTickProgress,
+            };
+
+            yield return new SliderEventDescriptor
+            {
+                Type = SliderEventType.Tail,
+                SpanIndex = finalSpanIndex,
+                SpanStartTime = startTime + (spanCount - 1) * spanDuration,
+                Time = startTime + totalDuration,
+                PathProgress = spanCount % 2,
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Generates the ticks for a span of the slider.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;spanIndex&quot;&gt;The span index.&lt;/param&gt;
+        /// &lt;param name=&quot;spanStartTime&quot;&gt;The start time of the span.&lt;/param&gt;
+        /// &lt;param name=&quot;spanDuration&quot;&gt;The duration of the span.&lt;/param&gt;
+        /// &lt;param name=&quot;reversed&quot;&gt;Whether the span is reversed.&lt;/param&gt;
+        /// &lt;param name=&quot;length&quot;&gt;The length of the path.&lt;/param&gt;
+        /// &lt;param name=&quot;tickDistance&quot;&gt;The distance between each tick.&lt;/param&gt;
+        /// &lt;param name=&quot;minDistanceFromEnd&quot;&gt;The distance from the end of the path at which ticks are not allowed to be added.&lt;/param&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;The cancellation token.&lt;/param&gt;
+        /// &lt;returns&gt;A &lt;see cref=&quot;SliderEventDescriptor&quot;/&gt; for each tick. If &lt;paramref name=&quot;reversed&quot;/&gt; is true, the ticks will be returned in reverse-StartTime order.&lt;/returns&gt;
+        private static IEnumerable&lt;SliderEventDescriptor&gt; generateTicks(int spanIndex, double spanStartTime, double spanDuration, bool reversed, double length, double tickDistance,
+                                                                        double minDistanceFromEnd, CancellationToken cancellationToken = default)
+        {
+            for (double d = tickDistance; d &lt;= length; d += tickDistance)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (d &gt;= length - minDistanceFromEnd)
+                    break;
+
+                // Always generate ticks from the start of the path rather than the span to ensure that ticks in repeat spans are positioned identically to those in non-repeat spans
+                double pathProgress = d / length;
+                double timeProgress = reversed ? 1 - pathProgress : pathProgress;
+
+                yield return new SliderEventDescriptor
+                {
+                    Type = SliderEventType.Tick,
+                    SpanIndex = spanIndex,
+                    SpanStartTime = spanStartTime,
+                    Time = spanStartTime + timeProgress * spanDuration,
+                    PathProgress = pathProgress,
+                };
+            }
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Describes a point in time on a slider given special meaning.
+    /// Should be used by rulesets to visualise the slider.
+    /// &lt;/summary&gt;
+    public struct SliderEventDescriptor
+    {
+        /// &lt;summary&gt;
+        /// The type of event.
+        /// &lt;/summary&gt;
+        public SliderEventType Type;
+
+        /// &lt;summary&gt;
+        /// The time of this event.
+        /// &lt;/summary&gt;
+        public double Time;
+
+        /// &lt;summary&gt;
+        /// The zero-based index of the span. In the case of repeat sliders, this will increase after each &lt;see cref=&quot;SliderEventType.Repeat&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public int SpanIndex;
+
+        /// &lt;summary&gt;
+        /// The time at which the contained &lt;see cref=&quot;SpanIndex&quot;/&gt; begins.
+        /// &lt;/summary&gt;
+        public double SpanStartTime;
+
+        /// &lt;summary&gt;
+        /// The progress along the slider&#39;s &lt;see cref=&quot;SliderPath&quot;/&gt; at which this event occurs.
+        /// &lt;/summary&gt;
+        public double PathProgress;
+    }
+
+    public enum SliderEventType
+    {
+        Tick,
+
+        /// &lt;summary&gt;
+        /// Occurs just before the tail. See &lt;see cref=&quot;SliderEventGenerator.TAIL_LENIENCY&quot;/&gt;.
+        /// Should generally be ignored.
+        /// &lt;/summary&gt;
+        LegacyLastTick,
+        Head,
+        Tail,
+        Repeat
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,9,28,10,1],[33,13,33,65,1],[34,13,34,64,1],[36,13,36,55,1],[38,13,45,15,1],[47,18,47,30,1],[47,32,47,48,1],[47,50,47,56,1],[48,13,48,14,1],[49,17,49,66,1],[51,17,51,72,1],[52,17,52,47,1],[54,17,54,39,1],[55,17,55,18,1],[56,21,56,153,1],[58,21,58,34,1],[59,21,59,22,1],[61,25,61,49,1],[62,21,62,22,1],[64,21,64,28,1],[64,30,64,35,1],[64,36,64,38,1],[64,39,64,44,1],[65,25,65,40,1],[66,17,66,18,1],[68,17,68,42,1],[69,17,69,18,1],[70,21,77,23,1],[78,17,78,18,1],[79,13,79,14,1],[81,13,81,61,1],[91,13,91,48,1],[92,13,92,83,1],[102,13,102,134,1],[103,13,103,102,1],[105,13,105,36,1],[105,37,105,89,1],[107,13,114,15,1],[116,13,123,15,1],[124,9,124,10,1],[140,9,140,10,1],[141,18,141,41,1],[141,43,141,54,1],[141,56,141,73,1],[142,13,142,14,1],[143,17,143,66,1],[145,17,145,54,1],[146,21,146,27,1],[149,17,149,50,1],[150,17,150,82,1],[152,17,159,19,1],[160,13,160,14,1],[161,9,161,10,1]]);
+    </script>
+  </body>
+</html>

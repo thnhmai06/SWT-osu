@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Settings/Sections/Input/TabletSettings.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Handlers;
+using osu.Framework.Input.Handlers.Tablet;
+using osu.Framework.Localisation;
+using osu.Framework.Platform;
+using osu.Framework.Threading;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterfaceV2;
+using osuTK;
+using osu.Game.Localisation;
+using osu.Game.Online.Chat;
+
+namespace osu.Game.Overlays.Settings.Sections.Input
+{
+    public partial class TabletSettings : InputSubsection
+    {
+        public override IEnumerable&lt;LocalisableString&gt; FilterTerms =&gt; base.FilterTerms.Concat(new LocalisableString[] { &quot;area&quot; });
+
+        public TabletAreaSelection AreaSelection { get; private set; }
+
+        private readonly ITabletHandler tabletHandler;
+
+        private readonly Bindable&lt;bool&gt; enabled = new BindableBool(true);
+
+        private readonly Bindable&lt;Vector2&gt; areaOffset = new Bindable&lt;Vector2&gt;();
+        private readonly Bindable&lt;Vector2&gt; areaSize = new Bindable&lt;Vector2&gt;();
+        private readonly Bindable&lt;Vector2&gt; outputAreaSize = new Bindable&lt;Vector2&gt;();
+        private readonly Bindable&lt;Vector2&gt; outputAreaOffset = new Bindable&lt;Vector2&gt;();
+        private readonly IBindable&lt;TabletInfo&gt; tablet = new Bindable&lt;TabletInfo&gt;();
+
+        private readonly BindableNumber&lt;float&gt; offsetX = new BindableNumber&lt;float&gt; { MinValue = 0, Precision = 1 };
+        private readonly BindableNumber&lt;float&gt; offsetY = new BindableNumber&lt;float&gt; { MinValue = 0, Precision = 1 };
+
+        private readonly BindableNumber&lt;float&gt; sizeX = new BindableNumber&lt;float&gt; { MinValue = 10, Precision = 1 };
+        private readonly BindableNumber&lt;float&gt; sizeY = new BindableNumber&lt;float&gt; { MinValue = 10, Precision = 1 };
+
+        private readonly BindableNumber&lt;float&gt; rotation = new BindableNumber&lt;float&gt; { MinValue = 0, MaxValue = 360, Precision = 1 };
+
+        private readonly BindableNumber&lt;float&gt; pressureThreshold = new BindableNumber&lt;float&gt; { MinValue = 0.0f, MaxValue = 1.0f, Precision = 0.005f };
+
+        private Bindable&lt;ScalingMode&gt; scalingMode = null!;
+        private Bindable&lt;float&gt; scalingSizeX = null!;
+        private Bindable&lt;float&gt; scalingSizeY = null!;
+
+        [Resolved]
+        private GameHost host { get; set; }
+
+        /// &lt;summary&gt;
+        /// Based on ultrawide monitor configurations, plus a bit of lenience for users which are intentionally aiming for higher horizontal velocity.
+        /// &lt;/summary&gt;
+        private const float largest_feasible_aspect_ratio = 32f / 9;
+
+        private readonly BindableNumber&lt;float&gt; aspectRatio = new BindableFloat(1)
+        {
+            MinValue = 1 / largest_feasible_aspect_ratio,
+            MaxValue = largest_feasible_aspect_ratio,
+            Precision = 0.01f,
+        };
+
+        private readonly BindableBool aspectLock = new BindableBool();
+
+        private ScheduledDelegate aspectRatioApplication;
+
+        private FillFlowContainer mainSettings;
+
+        private Drawable noTabletMessage;
+
+        protected override LocalisableString Header =&gt; TabletSettingsStrings.Tablet;
+
+        public TabletSettings(ITabletHandler tabletHandler)
+            : base((InputHandler)tabletHandler)
+        {
+            this.tabletHandler = tabletHandler;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, LocalisationManager localisation, OsuConfigManager osuConfig, OverlayColourProvider colourProvider)
+        {
+            scalingMode = osuConfig.GetBindable&lt;ScalingMode&gt;(OsuSetting.Scaling);
+            scalingSizeX = osuConfig.GetBindable&lt;float&gt;(OsuSetting.ScalingSizeX);
+            scalingSizeY = osuConfig.GetBindable&lt;float&gt;(OsuSetting.ScalingSizeY);
+
+            AddRange(new[]
+            {
+                noTabletMessage = new NoTabletMessage(),
+                mainSettings = new FillFlowContainer
+                {
+                    Alpha = 0,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Spacing = new Vector2(0, SettingsSection.ITEM_SPACING_V2),
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        AreaSelection = new TabletAreaSelection(tabletHandler)
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            Height = 300,
+                        },
+                        new DangerousSettingsButtonV2
+                        {
+                            Text = TabletSettingsStrings.ResetToFullArea,
+                            Action = () =&gt;
+                            {
+                                aspectLock.Value = false;
+
+                                areaOffset.SetDefault();
+                                areaSize.SetDefault();
+                            },
+                        },
+                        new SettingsButtonV2
+                        {
+                            Text = TabletSettingsStrings.ConformToCurrentGameAspectRatio,
+                            Action = () =&gt;
+                            {
+                                float gameplayWidth = host.Window.ClientSize.Width;
+                                float gameplayHeight = host.Window.ClientSize.Height;
+
+                                if (scalingMode.Value == ScalingMode.Everything)
+                                {
+                                    gameplayWidth *= scalingSizeX.Value;
+                                    gameplayHeight *= scalingSizeY.Value;
+                                }
+
+                                forceAspectRatio(gameplayWidth / gameplayHeight);
+                            },
+                        },
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = TabletSettingsStrings.XOffset,
+                            Current = offsetX,
+                        }),
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = TabletSettingsStrings.YOffset,
+                            Current = offsetY,
+                        }),
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = TabletSettingsStrings.Rotation,
+                            Current = rotation,
+                        }),
+                        new RotationPresetButtons(tabletHandler)
+                        {
+                            Padding = SettingsPanel.CONTENT_PADDING,
+                        },
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = TabletSettingsStrings.AspectRatio,
+                            Current = aspectRatio,
+                        }),
+                        new SettingsItemV2(new FormCheckBox
+                        {
+                            Caption = TabletSettingsStrings.LockAspectRatio,
+                            Current = aspectLock,
+                        }),
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = CommonStrings.Width,
+                            Current = sizeX,
+                        }),
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = CommonStrings.Height,
+                            Current = sizeY,
+                        }),
+                        new SettingsItemV2(new FormSliderBar&lt;float&gt;
+                        {
+                            TransferValueOnCommit = true,
+                            Caption = TabletSettingsStrings.TipPressureForClick,
+                            Current = pressureThreshold,
+                            DisplayAsPercentage = true,
+                        }),
+                    }
+                },
+            });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            enabled.BindTo(tabletHandler.Enabled);
+            enabled.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateVisibility));
+
+            rotation.BindTo(tabletHandler.Rotation);
+
+            areaOffset.BindTo(tabletHandler.AreaOffset);
+            areaOffset.BindValueChanged(val =&gt; Schedule(() =&gt;
+            {
+                offsetX.Value = val.NewValue.X;
+                offsetY.Value = val.NewValue.Y;
+            }), true);
+
+            offsetX.BindValueChanged(val =&gt; areaOffset.Value = new Vector2(val.NewValue, areaOffset.Value.Y));
+            offsetY.BindValueChanged(val =&gt; areaOffset.Value = new Vector2(areaOffset.Value.X, val.NewValue));
+
+            areaSize.BindTo(tabletHandler.AreaSize);
+            areaSize.BindValueChanged(val =&gt; Schedule(() =&gt;
+            {
+                sizeX.Value = val.NewValue.X;
+                sizeY.Value = val.NewValue.Y;
+            }), true);
+
+            outputAreaSize.BindTo(tabletHandler.OutputAreaSize);
+            outputAreaOffset.BindTo(tabletHandler.OutputAreaOffset);
+
+            sizeX.BindValueChanged(val =&gt;
+            {
+                areaSize.Value = new Vector2(val.NewValue, areaSize.Value.Y);
+
+                aspectRatioApplication?.Cancel();
+                aspectRatioApplication = Schedule(() =&gt; applyAspectRatio(sizeX));
+            });
+
+            sizeY.BindValueChanged(val =&gt;
+            {
+                areaSize.Value = new Vector2(areaSize.Value.X, val.NewValue);
+
+                aspectRatioApplication?.Cancel();
+                aspectRatioApplication = Schedule(() =&gt; applyAspectRatio(sizeY));
+            });
+
+            updateAspectRatio();
+            aspectRatio.BindValueChanged(aspect =&gt;
+            {
+                aspectRatioApplication?.Cancel();
+                aspectRatioApplication = Schedule(() =&gt; forceAspectRatio(aspect.NewValue));
+            });
+
+            pressureThreshold.BindTo(tabletHandler.PressureThreshold);
+
+            tablet.BindTo(tabletHandler.Tablet);
+            tablet.BindValueChanged(val =&gt; Schedule(() =&gt;
+            {
+                Scheduler.AddOnce(updateVisibility);
+
+                var tab = val.NewValue;
+
+                bool tabletFound = tab != null;
+                if (!tabletFound)
+                    return;
+
+                offsetX.MaxValue = tab.Size.X;
+                offsetX.Default = tab.Size.X / 2;
+                sizeX.Default = sizeX.MaxValue = tab.Size.X;
+
+                offsetY.MaxValue = tab.Size.Y;
+                offsetY.Default = tab.Size.Y / 2;
+                sizeY.Default = sizeY.MaxValue = tab.Size.Y;
+
+                areaSize.Default = new Vector2(sizeX.Default, sizeY.Default);
+                areaOffset.Default = new Vector2(offsetX.Default, offsetY.Default);
+            }), true);
+        }
+
+        private void updateVisibility()
+        {
+            mainSettings.Hide();
+            noTabletMessage.Hide();
+
+            if (!tabletHandler.Enabled.Value)
+                return;
+
+            if (tablet.Value != null)
+                mainSettings.Show();
+            else
+                noTabletMessage.Show();
+        }
+
+        private void applyAspectRatio(BindableNumber&lt;float&gt; sizeChanged)
+        {
+            try
+            {
+                if (!aspectLock.Value)
+                {
+                    float proposedAspectRatio = currentAspectRatio;
+
+                    if (proposedAspectRatio &gt;= aspectRatio.MinValue &amp;&amp; proposedAspectRatio &lt;= aspectRatio.MaxValue)
+                    {
+                        // aspect ratio was in a valid range.
+                        updateAspectRatio();
+                        return;
+                    }
+                }
+
+                // if lock is applied (or the specified values were out of range) aim to adjust the axis the user was not adjusting to conform.
+                if (sizeChanged == sizeX)
+                    sizeY.Value = getHeight(areaSize.Value.X, aspectRatio.Value);
+                else
+                    sizeX.Value = getWidth(areaSize.Value.Y, aspectRatio.Value);
+            }
+            finally
+            {
+                // cancel any event which may have fired while updating variables as a result of aspect ratio limitations.
+                // this avoids a potential feedback loop.
+                aspectRatioApplication?.Cancel();
+            }
+        }
+
+        private void forceAspectRatio(float aspectRatio)
+        {
+            aspectLock.Value = false;
+
+            float proposedHeight = getHeight(sizeX.Value, aspectRatio);
+
+            if (proposedHeight &lt; sizeY.MaxValue)
+                sizeY.Value = proposedHeight;
+            else
+                sizeX.Value = getWidth(sizeY.Value, aspectRatio);
+
+            updateAspectRatio();
+
+            aspectRatioApplication?.Cancel();
+            aspectLock.Value = true;
+        }
+
+        private void updateAspectRatio() =&gt; aspectRatio.Value = currentAspectRatio;
+
+        private float currentAspectRatio =&gt; sizeX.Value / sizeY.Value;
+
+        private static float getHeight(float width, float aspectRatio) =&gt; width / aspectRatio;
+
+        private static float getWidth(float height, float aspectRatio) =&gt; height * aspectRatio;
+
+        private partial class NoTabletMessage : CompositeDrawable
+        {
+            private IBindable&lt;string&gt; noTabletDetectedText = new Bindable&lt;string&gt;();
+            private LinkFlowContainer linkContainer;
+
+            [Resolved]
+            private LocalisationManager localisation { get; set; }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, OverlayColourProvider colourProvider)
+            {
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+                Padding = SettingsPanel.CONTENT_PADDING;
+
+                InternalChild = new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Masking = true,
+                    CornerRadius = 5,
+                    CornerExponent = 2.5f,
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colourProvider.Dark2,
+                        },
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(5f),
+                            Padding = new MarginPadding { Horizontal = 8, Vertical = 10 },
+                            Children = new Drawable[]
+                            {
+                                new OsuSpriteText
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    Text = TabletSettingsStrings.NoTabletDetected,
+                                    Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold),
+                                    Colour = colourProvider.Content2,
+                                },
+                                linkContainer = new LinkFlowContainer(cp =&gt;
+                                {
+                                    cp.Colour = colours.Orange1;
+                                    cp.Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold);
+                                })
+                                {
+                                    TextAnchor = Anchor.TopCentre,
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                },
+                            }
+                        },
+                    },
+                };
+
+                const string url = @&quot;https://opentabletdriver.net/Wiki/FAQ/General&quot;;
+                noTabletDetectedText = localisation.GetLocalisedBindableString(TabletSettingsStrings.NoTabletDetectedDescription(url));
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                noTabletDetectedText.BindValueChanged(_ =&gt;
+                {
+                    linkContainer.Clear();
+                    linkContainer.NewLine();
+
+                    var formattedSource = MessageFormatter.FormatText(noTabletDetectedText.Value);
+
+                    linkContainer.AddLinks(formattedSource.Text, formattedSource.Links);
+                }, true);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,71,31,130,0],[33,52,33,56,0],[33,57,33,69,0],[37,9,37,74,0],[39,9,39,81,0],[40,9,40,79,0],[41,9,41,85,0],[42,9,42,87,0],[43,9,43,84,0],[45,9,45,116,0],[46,9,46,116,0],[48,9,48,115,0],[49,9,49,115,0],[51,9,51,133,0],[53,9,53,151,0],[55,9,55,59,0],[56,9,56,54,0],[57,9,57,54,0],[60,33,60,37,0],[60,38,60,42,0],[67,9,72,11,0],[74,9,74,71,0],[82,56,82,84,0],[85,15,85,48,0],[86,9,86,10,0],[87,13,87,48,0],[88,9,88,10,0],[92,9,92,10,0],[93,13,93,82,0],[94,13,94,82,0],[95,13,95,82,0],[97,13,118,29,0],[118,29,118,30,0],[118,30,119,33,0],[119,33,119,58,0],[119,58,121,33,0],[121,33,121,57,0],[121,57,122,33,0],[122,33,122,55,0],[122,55,123,29,0],[123,29,123,30,0],[123,30,129,29,0],[129,29,129,30,0],[129,30,130,33,0],[130,33,130,84,0],[130,84,131,33,0],[131,33,131,86,0],[131,86,133,33,0],[133,33,133,81,0],[133,81,134,33,0],[134,33,134,34,0],[134,34,135,37,0],[135,37,135,73,0],[135,73,136,37,0],[136,37,136,74,0],[136,74,137,33,0],[137,33,137,34,0],[137,34,139,33,0],[139,33,139,82,0],[139,82,140,29,0],[140,29,140,30,0],[140,30,196,16,0],[197,9,197,10,0],[200,9,200,10,0],[201,13,201,33,0],[203,13,203,51,0],[204,13,204,43,0],[204,43,204,78,0],[204,78,204,80,0],[206,13,206,53,0],[208,13,208,57,0],[209,13,209,48,0],[209,48,210,13,0],[210,13,210,14,0],[210,14,211,17,0],[211,17,211,48,0],[211,48,212,17,0],[212,17,212,48,0],[212,48,213,13,0],[213,13,213,14,0],[213,14,213,15,0],[213,15,213,23,0],[215,13,215,45,0],[215,45,215,109,0],[215,109,215,111,0],[216,13,216,45,0],[216,45,216,109,0],[216,109,216,111,0],[218,13,218,53,0],[219,13,219,46,0],[219,46,220,13,0],[220,13,220,14,0],[220,14,221,17,0],[221,17,221,46,0],[221,46,222,17,0],[222,17,222,46,0],[222,46,223,13,0],[223,13,223,14,0],[223,14,223,15,0],[223,15,223,23,0],[225,13,225,65,0],[226,13,226,69,0],[228,13,229,13,0],[229,13,229,14,0],[229,14,230,17,0],[230,17,230,78,0],[230,78,232,17,0],[232,17,232,50,0],[232,50,233,17,0],[233,17,233,57,0],[233,57,233,80,0],[233,80,233,82,0],[233,82,234,13,0],[234,13,234,14,0],[234,14,234,16,0],[236,13,237,13,0],[237,13,237,14,0],[237,14,238,17,0],[238,17,238,78,0],[238,78,240,17,0],[240,17,240,50,0],[240,50,241,17,0],[241,17,241,57,0],[241,57,241,80,0],[241,80,241,82,0],[241,82,242,13,0],[242,13,242,14,0],[242,14,242,16,0],[244,13,244,33,0],[245,13,246,13,0],[246,13,246,14,0],[246,14,247,17,0],[247,17,247,50,0],[247,50,248,17,0],[248,17,248,57,0],[248,57,248,90,0],[248,90,248,92,0],[248,92,249,13,0],[249,13,249,14,0],[249,14,249,16,0],[251,13,251,71,0],[253,13,253,49,0],[254,13,254,44,0],[254,44,255,13,0],[255,13,255,14,0],[255,14,256,17,0],[256,17,256,53,0],[256,53,258,17,0],[258,17,258,40,0],[258,40,260,17,0],[260,17,260,48,0],[260,48,261,17,0],[261,17,261,34,0],[261,34,262,21,0],[262,21,262,28,0],[262,28,264,17,0],[264,17,264,47,0],[264,47,265,17,0],[265,17,265,50,0],[265,50,266,17,0],[266,17,266,61,0],[266,61,268,17,0],[268,17,268,47,0],[268,47,269,17,0],[269,17,269,50,0],[269,50,270,17,0],[270,17,270,61,0],[270,61,272,17,0],[272,17,272,78,0],[272,78,273,17,0],[273,17,273,84,0],[273,84,274,13,0],[274,13,274,14,0],[274,14,274,15,0],[274,15,274,23,0],[275,9,275,10,0],[278,9,278,10,0],[279,13,279,33,0],[280,13,280,36,0],[282,13,282,46,0],[283,17,283,24,0],[285,13,285,38,0],[286,17,286,37,0],[288,17,288,40,0],[289,9,289,10,0],[292,9,292,10,0],[294,13,294,14,0],[295,17,295,39,0],[296,17,296,18,0],[297,21,297,68,0],[299,21,299,116,0],[300,21,300,22,0],[302,25,302,45,0],[303,25,303,32,0],[305,17,305,18,0],[308,17,308,42,0],[309,21,309,82,0],[311,21,311,81,0],[312,13,312,14,0],[314,13,314,14,0],[317,17,317,50,0],[318,13,318,14,0],[319,9,319,10,0],[322,9,322,10,0],[323,13,323,38,0],[325,13,325,72,0],[327,13,327,49,0],[328,17,328,46,0],[330,17,330,66,0],[332,13,332,33,0],[334,13,334,46,0],[335,13,335,37,0],[336,9,336,10,0],[338,45,338,83,0],[340,45,340,70,0],[342,75,342,94,0],[344,75,344,95,0],[348,13,348,85,0],[352,56,352,60,0],[352,61,352,65,0],[356,13,356,14,0],[357,17,357,43,0],[358,17,358,39,0],[359,17,359,57,0],[361,17,393,33,0],[393,33,393,34,0],[393,34,394,37,0],[394,37,394,65,0],[394,65,395,37,0],[395,37,395,104,0],[395,104,396,33,0],[396,33,396,34,0],[396,34,407,19,0],[410,17,410,136,0],[411,13,411,14,0],[414,13,414,14,0],[415,17,415,37,0],[417,17,418,17,0],[418,17,418,18,0],[418,18,419,21,0],[419,21,419,43,0],[419,43,420,21,0],[420,21,420,45,0],[420,45,422,21,0],[422,21,422,99,0],[422,99,424,21,0],[424,21,424,89,0],[424,89,425,17,0],[425,17,425,18,0],[425,18,425,26,0],[426,13,426,14,0]]);
+    </script>
+  </body>
+</html>

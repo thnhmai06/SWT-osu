@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/GameplayClockContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Timing;
+using osu.Game.Beatmaps;
+
+namespace osu.Game.Screens.Play
+{
+    /// &lt;summary&gt;
+    /// Encapsulates gameplay timing logic and provides a &lt;see cref=&quot;IGameplayClock&quot;/&gt; via DI for gameplay components to use.
+    /// &lt;/summary&gt;
+    [Cached(typeof(IGameplayClock))]
+    [Cached(typeof(GameplayClockContainer))]
+    public partial class GameplayClockContainer : Container, IAdjustableClock, IGameplayClock
+    {
+        public IBindable&lt;bool&gt; IsPaused =&gt; isPaused;
+
+        public bool IsRewinding =&gt; GameplayClock.IsRewinding;
+
+        /// &lt;summary&gt;
+        /// Invoked when a seek has been performed via &lt;see cref=&quot;Seek&quot;/&gt;
+        /// &lt;/summary&gt;
+        public event Action? OnSeek;
+
+        /// &lt;summary&gt;
+        /// The time from which the clock should start. Will be seeked to on calling &lt;see cref=&quot;Reset&quot;/&gt;.
+        /// Can be adjusted by calling &lt;see cref=&quot;Reset&quot;/&gt; with a time value.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// By default, a value of zero will be used.
+        /// Importantly, the value will be inferred from the current beatmap in &lt;see cref=&quot;MasterGameplayClockContainer&quot;/&gt; by default.
+        /// &lt;/remarks&gt;
+        public double StartTime { get; protected set; }
+
+        public double GameplayStartTime { get; protected set; }
+
+        public IAdjustableAudioComponent AdjustmentsFromMods { get; } = new AudioAdjustments();
+
+        private readonly BindableBool isPaused = new BindableBool(true);
+
+        /// &lt;summary&gt;
+        /// The adjustable source clock used for gameplay. Should be used for seeks and clock control.
+        /// This is the final source exposed to gameplay components &lt;see cref=&quot;IGameplayClock&quot;/&gt; via delegation in this class.
+        /// &lt;/summary&gt;
+        protected readonly FramedBeatmapClock GameplayClock;
+
+        protected override Container&lt;Drawable&gt; Content { get; } = new Container { RelativeSizeAxes = Axes.Both };
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;GameplayClockContainer&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sourceClock&quot;&gt;The source &lt;see cref=&quot;IClock&quot;/&gt; used for timing.&lt;/param&gt;
+        /// &lt;param name=&quot;applyOffsets&quot;&gt;Whether to apply platform, user and beatmap offsets to the mix.&lt;/param&gt;
+        /// &lt;param name=&quot;requireDecoupling&quot;&gt;Whether decoupling logic should be applied on the source clock.&lt;/param&gt;
+        public GameplayClockContainer(IClock sourceClock, bool applyOffsets, bool requireDecoupling)
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            InternalChildren = new Drawable[]
+            {
+                GameplayClock = new FramedBeatmapClock(applyOffsets, requireDecoupling, sourceClock),
+                Content
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Starts gameplay and marks un-paused state.
+        /// &lt;/summary&gt;
+        public void Start()
+        {
+            if (!isPaused.Value)
+                return;
+
+            isPaused.Value = false;
+
+            // The case which caused this to be added is FrameStabilityContainer, which manages its own current and elapsed time.
+            // Because we generally update our own current time quicker than children can query it (via Start/Seek/Update),
+            // this means that the first frame ever exposed to children may have a non-zero current time.
+            //
+            // If the child component is not aware of the parent ElapsedFrameTime (which is the case for FrameStabilityContainer)
+            // they will take on the new CurrentTime with a zero elapsed time. This can in turn cause components to behave incorrectly
+            // if they are intending to trigger events at the precise StartTime (ie. DrawableStoryboardSample).
+            //
+            // By scheduling the start call, children are guaranteed to receive one frame at the original start time, allowing
+            // then to progress with a correct locally calculated elapsed time.
+            SchedulerAfterChildren.Add(() =&gt;
+            {
+                if (isPaused.Value)
+                    return;
+
+                StartGameplayClock();
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Seek to a specific time in gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The destination time to seek to.&lt;/param&gt;
+        public virtual void Seek(double time)
+        {
+            Logger.Log($&quot;{nameof(GameplayClockContainer)} seeking to {time}&quot;);
+
+            GameplayClock.Seek(time);
+
+            OnSeek?.Invoke();
+        }
+
+        /// &lt;summary&gt;
+        /// Stops gameplay and marks paused state.
+        /// &lt;/summary&gt;
+        public void Stop()
+        {
+            if (isPaused.Value)
+                return;
+
+            isPaused.Value = true;
+            StopGameplayClock();
+        }
+
+        protected virtual void StartGameplayClock()
+        {
+            Logger.Log($&quot;{nameof(GameplayClockContainer)} started via call to {nameof(StartGameplayClock)}&quot;);
+            GameplayClock.Start();
+        }
+
+        protected virtual void StopGameplayClock()
+        {
+            Logger.Log($&quot;{nameof(GameplayClockContainer)} stopped via call to {nameof(StopGameplayClock)}&quot;);
+            GameplayClock.Stop();
+        }
+
+        /// &lt;summary&gt;
+        /// Resets this &lt;see cref=&quot;GameplayClockContainer&quot;/&gt; and the source to an initial state ready for gameplay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to seek to on resetting. If &lt;c&gt;null&lt;/c&gt;, the existing &lt;see cref=&quot;StartTime&quot;/&gt; will be used.&lt;/param&gt;
+        /// &lt;param name=&quot;startClock&quot;&gt;Whether to start the clock immediately. If &lt;c&gt;false&lt;/c&gt; and the clock was already paused, the clock will remain paused after this call.
+        /// &lt;/param&gt;
+        public void Reset(double? time = null, bool startClock = false)
+        {
+            bool wasPaused = isPaused.Value;
+
+            // The intention of the Reset method is to get things into a known sane state.
+            // As such, we intentionally stop the underlying clock directly here, bypassing Stop/StopGameplayClock.
+            // This is to avoid any kind of isPaused state checks and frequency ramping (as provided by MasterGameplayClockContainer).
+            GameplayClock.Stop();
+
+            if (time != null)
+                StartTime = time.Value;
+
+            Seek(StartTime);
+
+            if (!wasPaused || startClock)
+                Start();
+        }
+
+        /// &lt;summary&gt;
+        /// Changes the source clock.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sourceClock&quot;&gt;The new source.&lt;/param&gt;
+        protected void ChangeSource(IClock sourceClock) =&gt; GameplayClock.ChangeSource(sourceClock);
+
+        #region IAdjustableClock
+
+        bool IAdjustableClock.Seek(double position)
+        {
+            Seek(position);
+            return true;
+        }
+
+        void IAdjustableClock.Reset() =&gt; Reset();
+
+        public virtual void ResetSpeedAdjustments()
+        {
+        }
+
+        double IAdjustableClock.Rate
+        {
+            get =&gt; GameplayClock.Rate;
+            set =&gt; throw new NotSupportedException();
+        }
+
+        public double Rate =&gt; GameplayClock.Rate;
+
+        public double CurrentTime =&gt; GameplayClock.CurrentTime;
+
+        public bool IsRunning =&gt; GameplayClock.IsRunning;
+
+        #endregion
+
+        public void ProcessFrame()
+        {
+            // Handled via update. Don&#39;t process here to safeguard from external usages potentially processing frames additional times.
+        }
+
+        public double ElapsedFrameTime =&gt; GameplayClock.ElapsedFrameTime;
+
+        public double FramesPerSecond =&gt; GameplayClock.FramesPerSecond;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,44,23,52,0],[25,36,25,61,0],[40,35,40,39,0],[40,40,40,54,0],[42,43,42,47,0],[42,48,42,62,0],[44,64,44,68,0],[44,73,44,95,0],[46,9,46,73,0],[54,58,54,62,0],[54,67,54,113,0],[62,9,62,101,0],[63,9,63,10,0],[64,13,64,42,0],[66,13,70,15,0],[71,9,71,10,0],[77,9,77,10,0],[78,13,78,33,0],[79,17,79,24,0],[81,13,81,36,0],[93,13,94,13,0],[94,13,94,14,0],[94,14,95,17,0],[95,17,95,36,0],[95,36,96,21,0],[96,21,96,28,0],[96,28,98,17,0],[98,17,98,38,0],[98,38,99,13,0],[99,13,99,14,0],[99,14,99,16,0],[100,9,100,10,0],[107,9,107,10,0],[108,13,108,79,0],[110,13,110,38,0],[112,13,112,30,0],[113,9,113,10,0],[119,9,119,10,0],[120,13,120,32,0],[121,17,121,24,0],[123,13,123,35,0],[124,13,124,33,0],[125,9,125,10,0],[128,9,128,10,0],[129,13,129,110,0],[130,13,130,35,0],[131,9,131,10,0],[134,9,134,10,0],[135,13,135,109,0],[136,13,136,34,0],[137,9,137,10,0],[146,9,146,10,0],[147,13,147,45,0],[152,13,152,34,0],[154,13,154,30,0],[155,17,155,40,0],[157,13,157,29,0],[159,13,159,42,0],[160,17,160,25,0],[161,9,161,10,0],[167,60,167,99,0],[172,9,172,10,0],[173,13,173,28,0],[174,13,174,25,0],[175,9,175,10,0],[177,42,177,49,0],[180,9,180,10,0],[181,9,181,10,0],[185,20,185,38,0],[186,20,186,53,0],[189,31,189,49,0],[191,38,191,63,0],[193,34,193,57,0],[198,9,198,10,0],[200,9,200,10,0],[202,43,202,73,0],[204,42,204,71,0]]);
+    </script>
+  </body>
+</html>

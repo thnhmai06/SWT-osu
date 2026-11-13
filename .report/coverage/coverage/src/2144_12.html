@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/CircularDistanceSnapGrid.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects.Types;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Edit.Compose.Components
+{
+    public abstract partial class CircularDistanceSnapGrid : DistanceSnapGrid
+    {
+        protected CircularDistanceSnapGrid(Vector2 startPosition, double startTime, double? endTime = null, IHasSliderVelocity? sliderVelocitySource = null)
+            : base(startPosition, startTime, endTime, sliderVelocitySource)
+        {
+        }
+
+        protected override void CreateContent()
+        {
+            const float crosshair_thickness = 1;
+            const float crosshair_max_size = 10;
+
+            AddRangeInternal(new[]
+            {
+                new Box
+                {
+                    Origin = Anchor.Centre,
+                    Position = StartPosition,
+                    Width = crosshair_thickness,
+                    EdgeSmoothness = new Vector2(1),
+                    Height = Math.Min(crosshair_max_size, DistanceBetweenTicks * 2),
+                },
+                new Box
+                {
+                    Origin = Anchor.Centre,
+                    Position = StartPosition,
+                    EdgeSmoothness = new Vector2(1),
+                    Width = Math.Min(crosshair_max_size, DistanceBetweenTicks * 2),
+                    Height = crosshair_thickness,
+                }
+            });
+
+            float dx = Math.Max(StartPosition.X, DrawWidth - StartPosition.X);
+            float dy = Math.Max(StartPosition.Y, DrawHeight - StartPosition.Y);
+            float maxDistance = new Vector2(dx, dy).Length;
+            int requiredCircles = Math.Min(MaxIntervals, (int)(maxDistance / DistanceBetweenTicks));
+
+            // We need to offset the drawn lines to the next valid snap for the currently selected divisor.
+            //
+            // Picture the scenario where the user has just placed an object on a 1/2 snap, then changes to
+            // 1/3 snap and expects to be able to place the next object on a valid 1/3 snap, regardless of the
+            // fact that the 1/2 snap reference object is not valid for 1/3 snapping.
+            float offset = (float)(SnapProvider.FindSnappedDistance(0, StartTime, SliderVelocitySource) * DistanceSpacingMultiplier.Value);
+
+            for (int i = 0; i &lt; requiredCircles; i++)
+            {
+                const float thickness = 4;
+                float diameter = (offset + (i + 1) * DistanceBetweenTicks + thickness / 2) * 2;
+
+                AddInternal(new Ring(StartTime, GetColourForIndexFromPlacement(i), SliderVelocitySource)
+                {
+                    Position = StartPosition,
+                    Origin = Anchor.Centre,
+                    Size = new Vector2(diameter),
+                    InnerRadius = thickness * 1f / diameter,
+                });
+            }
+        }
+
+        public override (Vector2 position, double time) GetSnappedPosition(Vector2 position, double? fixedTime = null)
+        {
+            if (MaxIntervals == 0)
+                return (StartPosition, StartTime);
+
+            // This grid implementation factors in the user&#39;s distance spacing specification,
+            // which is usually not considered by an `IDistanceSnapProvider`.
+            float distanceSpacingMultiplier = (float)DistanceSpacingMultiplier.Value;
+
+            Vector2 travelVector = (position - StartPosition);
+
+            // We need a non-zero travel vector in order to find a valid direction.
+            if (travelVector == Vector2.Zero)
+                travelVector = new Vector2(0, -1);
+
+            float travelLength = travelVector.Length;
+
+            // FindSnappedDistance will always round down, but we want to potentially round upwards.
+            travelLength += DistanceBetweenTicks / 2;
+
+            // We never want to snap towards zero.
+            if (travelLength &lt; DistanceBetweenTicks)
+                travelLength = DistanceBetweenTicks;
+
+            float snappedDistance = fixedTime != null
+                ? SnapProvider.DurationToDistance(fixedTime.Value - StartTime, StartTime, SliderVelocitySource)
+                // When interacting with the resolved snap provider, the distance spacing multiplier should first be removed
+                // to allow for snapping at a non-multiplied ratio.
+                : SnapProvider.FindSnappedDistance(travelLength / distanceSpacingMultiplier, StartTime, SliderVelocitySource);
+
+            double snappedTime = StartTime + SnapProvider.DistanceToDuration(snappedDistance, StartTime, SliderVelocitySource);
+
+            if (snappedTime &gt; LatestEndTime)
+            {
+                double tickLength = Beatmap.GetBeatLengthAtTime(StartTime);
+
+                snappedDistance = SnapProvider.DurationToDistance(MaxIntervals * tickLength, StartTime, SliderVelocitySource);
+                snappedTime = StartTime + SnapProvider.DistanceToDuration(snappedDistance, StartTime, SliderVelocitySource);
+            }
+
+            // The multiplier can then be reapplied to the final position.
+            Vector2 snappedPosition = StartPosition + travelVector.Normalized() * snappedDistance * distanceSpacingMultiplier;
+
+            return (snappedPosition, snappedTime);
+        }
+
+        private partial class Ring : CircularProgress
+        {
+            [Resolved]
+            private IDistanceSnapProvider snapProvider { get; set; } = null!;
+
+            [Resolved]
+            private EditorClock? editorClock { get; set; }
+
+            private readonly double startTime;
+            private readonly IHasSliderVelocity? sliderVelocitySource;
+
+            private readonly Color4 baseColour;
+
+            public Ring(double startTime, Color4 baseColour, IHasSliderVelocity? sliderVelocitySource)
+            {
+                this.startTime = startTime;
+                this.sliderVelocitySource = sliderVelocitySource;
+
+                Colour = this.baseColour = baseColour;
+
+                Progress = 1;
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                if (editorClock == null)
+                    return;
+
+                float distanceSpacingMultiplier = (float)snapProvider.DistanceSpacingMultiplier.Value;
+                double timeFromReferencePoint = editorClock.CurrentTime - startTime;
+
+                float distanceForCurrentTime = snapProvider.DurationToDistance(timeFromReferencePoint, startTime, sliderVelocitySource)
+                                               * distanceSpacingMultiplier;
+
+                float timeBasedAlpha = 1 - Math.Clamp(Math.Abs(distanceForCurrentTime - Size.X / 2) / 30, 0, 1);
+
+                Colour = baseColour.Opacity(Math.Max(baseColour.A, timeBasedAlpha));
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,15,20,76,0],[21,9,21,10,0],[22,9,22,10,0],[25,9,25,10,0],[29,13,47,16,0],[49,13,49,79,0],[50,13,50,80,0],[51,13,51,60,0],[52,13,52,101,0],[59,13,59,140,0],[61,18,61,27,0],[61,29,61,48,0],[61,50,61,53,0],[62,13,62,14,0],[64,17,64,96,0],[66,17,72,20,0],[73,13,73,14,0],[74,9,74,10,0],[77,9,77,10,0],[78,13,78,35,0],[79,17,79,51,0],[83,13,83,86,0],[85,13,85,63,0],[88,13,88,46,0],[89,17,89,51,0],[91,13,91,54,0],[94,13,94,54,0],[97,13,97,53,0],[98,17,98,53,0],[100,13,104,127,0],[106,13,106,128,0],[108,13,108,45,0],[109,13,109,14,0],[110,17,110,76,0],[112,17,112,127,0],[113,17,113,125,0],[114,13,114,14,0],[117,13,117,127,0],[119,13,119,51,0],[120,9,120,10,0],[125,58,125,62,0],[125,63,125,67,0],[125,72,125,77,0],[128,48,128,52,0],[128,53,128,57,0],[135,13,135,103,0],[136,13,136,14,0],[137,17,137,44,0],[138,17,138,66,0],[140,17,140,55,0],[142,17,142,30,0],[143,13,143,14,0],[146,13,146,14,0],[147,17,147,31,0],[149,17,149,41,0],[150,21,150,28,0],[152,17,152,103,0],[153,17,153,85,0],[155,17,156,76,0],[158,17,158,113,0],[160,17,160,85,0],[161,13,161,14,0]]);
+    </script>
+  </body>
+</html>

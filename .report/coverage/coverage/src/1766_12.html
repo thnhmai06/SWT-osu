@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/SpectatorList.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Specialized;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Localisation.HUD;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Spectator;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public partial class SpectatorList : CompositeDrawable, ISerialisableDrawable
+    {
+        private const int max_spectators_displayed = 10;
+
+        public Bindable&lt;Typeface&gt; HeaderFont { get; } = new Bindable&lt;Typeface&gt;(Typeface.Torus);
+        public BindableColour4 HeaderColour { get; } = new BindableColour4(Colour4.White);
+
+        private IBindableList&lt;SpectatorUser&gt; watchingUsers { get; } = new BindableList&lt;SpectatorUser&gt;();
+        private IBindableList&lt;int&gt; multiplayerPlayers { get; } = new BindableList&lt;int&gt;();
+        private BindableList&lt;SpectatorUser&gt; actualSpectators { get; } = new BindableList&lt;SpectatorUser&gt;();
+
+        private Bindable&lt;LocalUserPlayingState&gt; userPlayingState { get; } = new Bindable&lt;LocalUserPlayingState&gt;();
+
+        private OsuSpriteText header = null!;
+        private FillFlowContainer mainFlow = null!;
+        private FillFlowContainer&lt;SpectatorListEntry&gt; spectatorsFlow = null!;
+        private DrawablePool&lt;SpectatorListEntry&gt; pool = null!;
+
+        [Resolved]
+        private SpectatorClient client { get; set; } = null!;
+
+        [Resolved]
+        private GameplayState gameplayState { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient multiplayerClient { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours)
+        {
+            AutoSizeAxes = Axes.Y;
+
+            InternalChildren = new[]
+            {
+                Empty().With(t =&gt; t.Size = new Vector2(100, 50)),
+                mainFlow = new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        header = new OsuSpriteText
+                        {
+                            Colour = colours.Blue0,
+                            Font = OsuFont.GetFont(size: 12, weight: FontWeight.Bold),
+                        },
+                        spectatorsFlow = new FillFlowContainer&lt;SpectatorListEntry&gt;
+                        {
+                            AutoSizeAxes = Axes.Both,
+                            Direction = FillDirection.Vertical,
+                        }
+                    }
+                },
+                pool = new DrawablePool&lt;SpectatorListEntry&gt;(max_spectators_displayed),
+            };
+
+            HeaderColour.Value = header.Colour;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            ((IBindable&lt;LocalUserPlayingState&gt;)userPlayingState).BindTo(gameplayState.PlayingState);
+
+            multiplayerPlayers.BindTo(multiplayerClient.CurrentMatchPlayingUserIds);
+            multiplayerPlayers.BindCollectionChanged((_, _) =&gt; removePlayersFromMultiplayerRoom());
+
+            watchingUsers.BindTo(client.WatchingUsers);
+            watchingUsers.BindCollectionChanged(onWatchingUsersChanged, true);
+
+            actualSpectators.BindCollectionChanged(onSpectatorsChanged, true);
+            userPlayingState.BindValueChanged(_ =&gt; updateVisibility());
+
+            HeaderFont.BindValueChanged(_ =&gt; updateAppearance());
+            HeaderColour.BindValueChanged(_ =&gt; updateAppearance(), true);
+            FinishTransforms(true);
+
+            this.FadeInFromZero(200, Easing.OutQuint);
+        }
+
+        private void onWatchingUsersChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                {
+                    for (int i = 0; i &lt; e.NewItems!.Count; i++)
+                        actualSpectators.Add((SpectatorUser)e.NewItems![i]!);
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Remove:
+                {
+                    for (int i = 0; i &lt; e.OldItems!.Count; i++)
+                        actualSpectators.Remove((SpectatorUser)e.OldItems![i]!);
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Reset:
+                {
+                    actualSpectators.Clear();
+                    break;
+                }
+
+                default:
+                    throw new NotSupportedException();
+            }
+
+            removePlayersFromMultiplayerRoom();
+        }
+
+        private void removePlayersFromMultiplayerRoom()
+        {
+            // the multiplayer gameplay leaderboard relies on calling `SpectatorClient.WatchUser()` to get updates on users&#39; total scores.
+            // this has an unfortunate side effect of other players showing up in `SpectatorClient.WatchingUsers`.
+            //
+            // we do not generally wish to display other players in the room as spectators due to that implementation detail,
+            // therefore this code is intended to filter out those players on the client side.
+            actualSpectators.RemoveAll(s =&gt; multiplayerPlayers.Contains(s.OnlineID));
+        }
+
+        private void onSpectatorsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                {
+                    for (int i = 0; i &lt; e.NewItems!.Count; i++)
+                    {
+                        var spectator = (SpectatorUser)e.NewItems![i]!;
+                        int index = Math.Max(e.NewStartingIndex, 0) + i;
+
+                        if (index &gt;= max_spectators_displayed)
+                            break;
+
+                        addNewSpectatorToList(index, spectator);
+                    }
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Remove:
+                {
+                    spectatorsFlow.RemoveAll(entry =&gt; e.OldItems!.Contains(entry.Current.Value), false);
+
+                    for (int i = 0; i &lt; spectatorsFlow.Count; i++)
+                        spectatorsFlow.SetLayoutPosition(spectatorsFlow[i], i);
+
+                    if (actualSpectators.Count &gt;= max_spectators_displayed &amp;&amp; spectatorsFlow.Count &lt; max_spectators_displayed)
+                    {
+                        for (int i = spectatorsFlow.Count; i &lt; max_spectators_displayed; i++)
+                            addNewSpectatorToList(i, actualSpectators[i]);
+                    }
+
+                    break;
+                }
+
+                case NotifyCollectionChangedAction.Reset:
+                {
+                    spectatorsFlow.Clear(false);
+                    break;
+                }
+
+                default:
+                    throw new NotSupportedException();
+            }
+
+            header.Text = SpectatorListStrings.SpectatorCount(actualSpectators.Count).ToUpper();
+            updateVisibility();
+
+            for (int i = 0; i &lt; spectatorsFlow.Count; i++)
+            {
+                spectatorsFlow[i].Colour = i &lt; max_spectators_displayed - 1
+                    ? Color4.White
+                    : ColourInfo.GradientVertical(Color4.White, Color4.White.Opacity(0));
+            }
+        }
+
+        private void addNewSpectatorToList(int i, SpectatorUser spectator)
+        {
+            var entry = pool.Get(entry =&gt;
+            {
+                entry.Current.Value = spectator;
+                entry.UserPlayingState = userPlayingState;
+            });
+
+            spectatorsFlow.Insert(i, entry);
+        }
+
+        private void updateVisibility()
+        {
+            // We don&#39;t want to show spectators when we are watching a replay.
+            mainFlow.FadeTo(actualSpectators.Count &gt; 0 &amp;&amp; userPlayingState.Value != LocalUserPlayingState.NotPlaying ? 1 : 0, 250, Easing.OutQuint);
+        }
+
+        private void updateAppearance()
+        {
+            header.Font = OsuFont.GetFont(HeaderFont.Value, 12, FontWeight.Bold);
+            header.Colour = HeaderColour.Value;
+
+            Width = header.DrawWidth;
+        }
+
+        private partial class SpectatorListEntry : PoolableDrawable
+        {
+            public Bindable&lt;SpectatorUser&gt; Current { get; } = new Bindable&lt;SpectatorUser&gt;();
+
+            private readonly BindableWithCurrent&lt;LocalUserPlayingState&gt; current = new BindableWithCurrent&lt;LocalUserPlayingState&gt;();
+
+            public Bindable&lt;LocalUserPlayingState&gt; UserPlayingState
+            {
+                get =&gt; current.Current;
+                set =&gt; current.Current = value;
+            }
+
+            private OsuSpriteText username = null!;
+            private DrawableLinkCompiler? linkCompiler;
+
+            [Resolved]
+            private OsuGame? game { get; set; }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                AutoSizeAxes = Axes.Both;
+
+                InternalChildren = new Drawable[]
+                {
+                    username = new OsuSpriteText(),
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+                UserPlayingState.BindValueChanged(_ =&gt; updateEnabledState());
+                Current.BindValueChanged(_ =&gt; updateState(), true);
+            }
+
+            protected override void PrepareForUse()
+            {
+                base.PrepareForUse();
+
+                username.MoveToX(10)
+                        .Then()
+                        .MoveToX(0, 400, Easing.OutQuint);
+
+                this.FadeInFromZero(400, Easing.OutQuint);
+            }
+
+            private void updateState()
+            {
+                username.Text = Current.Value.Username;
+                linkCompiler?.Expire();
+                AddInternal(linkCompiler = new DrawableLinkCompiler([username])
+                {
+                    IdleColour = Colour4.White,
+                    Action = () =&gt; game?.HandleLink(new LinkDetails(LinkAction.OpenUserProfile, Current.Value)),
+                });
+                updateEnabledState();
+            }
+
+            private void updateEnabledState()
+            {
+                linkCompiler?.Enabled.Value = UserPlayingState.Value != LocalUserPlayingState.Playing;
+            }
+        }
+
+        public bool UsesFixedAnchor { get; set; }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,48,31,52,0],[31,57,31,95,0],[32,47,32,51,0],[32,56,32,90,0],[34,62,34,66,0],[34,71,34,104,0],[35,57,35,61,0],[35,66,35,89,0],[36,64,36,68,0],[36,73,36,106,0],[38,68,38,72,0],[38,77,38,114,0],[40,9,40,46,0],[41,9,41,52,0],[42,9,42,78,0],[43,9,43,63,0],[46,42,46,46,0],[46,47,46,51,0],[46,56,46,61,0],[49,47,49,51,0],[49,52,49,56,0],[49,61,49,66,0],[52,55,52,59,0],[52,60,52,64,0],[52,69,52,74,0],[56,9,56,10,0],[57,13,57,35,0],[59,13,61,35,0],[61,35,61,64,0],[61,64,81,15,0],[83,13,83,48,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,33,0],[90,13,90,101,0],[92,13,92,85,0],[93,13,93,64,0],[93,64,93,98,0],[93,98,93,100,0],[95,13,95,56,0],[96,13,96,79,0],[98,13,98,79,0],[99,13,99,52,0],[99,52,99,70,0],[99,70,99,72,0],[101,13,101,46,0],[101,46,101,64,0],[101,64,101,66,0],[102,13,102,48,0],[102,48,102,66,0],[102,66,102,74,0],[103,13,103,36,0],[105,13,105,55,0],[106,9,106,10,0],[109,9,109,10,0],[110,13,110,30,0],[113,17,113,18,0],[114,26,114,35,0],[114,37,114,58,0],[114,60,114,63,0],[115,25,115,78,0],[117,21,117,27,0],[121,17,121,18,0],[122,26,122,35,0],[122,37,122,58,0],[122,60,122,63,0],[123,25,123,81,0],[125,21,125,27,0],[129,17,129,18,0],[130,21,130,46,0],[131,21,131,27,0],[135,21,135,55,0],[138,13,138,48,0],[139,9,139,10,0],[142,9,142,10,0],[148,13,148,45,0],[148,45,148,84,0],[148,84,148,86,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,153,30,0],[156,17,156,18,0],[157,26,157,35,0],[157,37,157,58,0],[157,60,157,63,0],[158,21,158,22,0],[159,25,159,72,0],[160,25,160,73,0],[162,25,162,63,0],[163,29,163,35,0],[165,25,165,65,0],[166,21,166,22,0],[168,21,168,27,0],[172,17,172,18,0],[173,21,173,55,0],[173,55,173,96,0],[173,96,173,105,0],[175,26,175,35,0],[175,37,175,61,0],[175,63,175,66,0],[176,25,176,80,0],[178,21,178,127,0],[179,21,179,22,0],[180,30,180,58,0],[180,60,180,88,0],[180,90,180,93,0],[181,29,181,75,0],[182,21,182,22,0],[184,21,184,27,0],[188,17,188,18,0],[189,21,189,49,0],[190,21,190,27,0],[194,21,194,55,0],[197,13,197,97,0],[198,13,198,32,0],[200,18,200,27,0],[200,29,200,53,0],[200,55,200,58,0],[201,13,201,14,0],[202,17,204,90,0],[205,13,205,14,0],[206,9,206,10,0],[209,9,209,10,0],[210,13,211,13,0],[211,13,211,14,0],[211,14,212,17,0],[212,17,212,49,0],[212,49,213,17,0],[213,17,213,59,0],[213,59,214,13,0],[214,13,214,14,0],[214,14,214,16,0],[216,13,216,45,0],[217,9,217,10,0],[220,9,220,10,0],[222,13,222,149,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,82,0],[228,13,228,48,0],[230,13,230,38,0],[231,9,231,10,0],[235,54,235,58,0],[235,63,235,92,0],[237,13,237,132,0],[241,24,241,39,0],[242,24,242,47,0],[245,13,245,52,0],[249,37,249,41,0],[249,42,249,46,0],[253,13,253,14,0],[254,17,254,42,0],[256,17,259,19,0],[260,13,260,14,0],[263,13,263,14,0],[264,17,264,37,0],[265,17,265,56,0],[265,56,265,76,0],[265,76,265,78,0],[266,17,266,47,0],[266,47,266,60,0],[266,60,266,68,0],[267,13,267,14,0],[270,13,270,14,0],[271,17,271,38,0],[273,17,275,59,0],[277,17,277,59,0],[278,13,278,14,0],[281,13,281,14,0],[282,17,282,56,0],[283,17,283,40,0],[284,17,287,36,0],[287,36,287,112,0],[287,112,288,20,0],[289,17,289,38,0],[290,13,290,14,0],[293,13,293,14,0],[294,17,294,103,0],[295,13,295,14,0],[298,39,298,43,0],[298,44,298,48,0]]);
+    </script>
+  </body>
+</html>

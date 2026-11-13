@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Input/RealmKeyBindingStore.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Localisation;
+using osu.Game.Database;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Rulesets;
+using Realms;
+
+namespace osu.Game.Input
+{
+    public class RealmKeyBindingStore
+    {
+        private readonly RealmAccess realm;
+        private readonly ReadableKeyCombinationProvider keyCombinationProvider;
+
+        public RealmKeyBindingStore(RealmAccess realm, ReadableKeyCombinationProvider keyCombinationProvider)
+        {
+            this.realm = realm;
+            this.keyCombinationProvider = keyCombinationProvider;
+        }
+
+        /// &lt;summary&gt;
+        /// For a given &lt;see cref=&quot;GlobalAction&quot;/&gt;, return a human-readable string representing the bindings bound to the action.
+        /// &lt;/summary&gt;
+        public LocalisableString GetBindingsStringFor(GlobalAction globalAction)
+        {
+            var combinations = GetReadableKeyCombinationsFor(globalAction);
+
+            if (combinations.Count == 0)
+                return ToastStrings.NoKeyBound;
+
+            return string.Join(&quot; / &quot;, combinations);
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieve all user-defined key combinations (in a format that can be displayed) for a specific action.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;globalAction&quot;&gt;The action to lookup.&lt;/param&gt;
+        /// &lt;returns&gt;A set of display strings for all the user&#39;s key configuration for the action.&lt;/returns&gt;
+        public IReadOnlyList&lt;string&gt; GetReadableKeyCombinationsFor(GlobalAction globalAction)
+        {
+            List&lt;string&gt; combinations = new List&lt;string&gt;();
+
+            realm.Run(context =&gt;
+            {
+                foreach (var action in context.All&lt;RealmKeyBinding&gt;().Where(b =&gt; string.IsNullOrEmpty(b.RulesetName) &amp;&amp; (GlobalAction)b.ActionInt == globalAction))
+                {
+                    string str = keyCombinationProvider.GetReadableString(action.KeyCombination);
+
+                    // even if found, the readable string may be empty for an unbound action.
+                    if (str.Length &gt; 0)
+                        combinations.Add(str);
+                }
+            });
+
+            return combinations;
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieve all user-defined key combinations (in a format that can be displayed) for a specific ruleset action.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The &lt;see cref=&quot;RulesetInfo.ShortName&quot;/&gt; of the ruleset.&lt;/param&gt;
+        /// &lt;param name=&quot;variant&quot;&gt;The ID of the key binding variant to look up.&lt;/param&gt;
+        /// &lt;param name=&quot;action&quot;&gt;The ID of the specific action to look up.&lt;/param&gt;
+        /// &lt;returns&gt;&lt;/returns&gt;
+        public IReadOnlyList&lt;string&gt; GetReadableKeyCombinationsFor(string ruleset, int variant, int action)
+        {
+            List&lt;string&gt; combinations = new List&lt;string&gt;();
+
+            realm.Run(context =&gt;
+            {
+                foreach (var binding in context.All&lt;RealmKeyBinding&gt;().Where(b =&gt; b.RulesetName == ruleset &amp;&amp; b.Variant == variant &amp;&amp; b.ActionInt == action))
+                {
+                    string str = keyCombinationProvider.GetReadableString(binding.KeyCombination);
+
+                    // even if found, the readable string may be empty for an unbound action.
+                    if (str.Length &gt; 0)
+                        combinations.Add(str);
+                }
+            });
+
+            return combinations;
+        }
+
+        /// &lt;summary&gt;
+        /// Register all defaults for this store.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;container&quot;&gt;The container to populate defaults from.&lt;/param&gt;
+        /// &lt;param name=&quot;rulesets&quot;&gt;The rulesets to populate defaults from.&lt;/param&gt;
+        public void Register(KeyBindingContainer container, IEnumerable&lt;RulesetInfo&gt; rulesets)
+        {
+            realm.Run(r =&gt;
+            {
+                using (var transaction = r.BeginWrite())
+                {
+                    // intentionally flattened to a list rather than querying against the IQueryable, as nullable fields being queried against aren&#39;t indexed.
+                    // this is much faster as a result.
+                    var existingBindings = r.All&lt;RealmKeyBinding&gt;().ToList();
+
+                    insertDefaults(r, existingBindings, container.DefaultKeyBindings);
+
+                    foreach (var ruleset in rulesets)
+                    {
+                        var instance = ruleset.CreateInstance();
+                        foreach (int variant in instance.AllVariants)
+                            insertDefaults(r, existingBindings, instance.GetDefaultKeyBindings(variant), ruleset.ShortName, variant);
+                    }
+
+                    transaction.Commit();
+                }
+            });
+        }
+
+        private void insertDefaults(Realm realm, List&lt;RealmKeyBinding&gt; existingBindings, IEnumerable&lt;IKeyBinding&gt; defaults, string? rulesetName = null, int? variant = null)
+        {
+            // compare counts in database vs defaults for each action type.
+            foreach (var defaultsForAction in defaults.GroupBy(k =&gt; k.Action))
+            {
+                IEnumerable&lt;RealmKeyBinding&gt; existing = existingBindings.Where(k =&gt;
+                    k.RulesetName == rulesetName
+                    &amp;&amp; k.Variant == variant
+                    &amp;&amp; k.ActionInt == (int)defaultsForAction.Key);
+
+                int defaultsCount = defaultsForAction.Count();
+                int existingCount = existing.Count();
+
+                if (defaultsCount &gt; existingCount)
+                {
+                    // insert any defaults which are missing.
+                    realm.Add(defaultsForAction.Skip(existingCount).Select(k =&gt; new RealmKeyBinding(k.Action, k.KeyCombination, rulesetName, variant)));
+                }
+                else if (defaultsCount &lt; existingCount)
+                {
+                    // generally this shouldn&#39;t happen, but if the user has more key bindings for an action than we expect,
+                    // remove the last entries until the count matches for sanity.
+                    foreach (var k in existing.TakeLast(existingCount - defaultsCount).ToArray())
+                    {
+                        realm.Remove(k);
+
+                        // Remove from the local flattened/cached list so future lookups don&#39;t query now deleted rows.
+                        existingBindings.Remove(k);
+                    }
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Keys which should not be allowed for gameplay input purposes.
+        /// &lt;/summary&gt;
+        private static readonly IEnumerable&lt;InputKey&gt; banned_keys = new[]
+        {
+            InputKey.MouseWheelDown,
+            InputKey.MouseWheelLeft,
+            InputKey.MouseWheelUp,
+            InputKey.MouseWheelRight
+        };
+
+        public static bool CheckValidForGameplay(KeyCombination combination)
+        {
+            foreach (var key in banned_keys)
+            {
+                if (combination.Keys.Contains(key))
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Clears all &lt;see cref=&quot;RealmKeyBinding.KeyCombination&quot;/&gt;s from the provided &lt;paramref name=&quot;keyBindings&quot;/&gt;
+        /// which are assigned to more than one binding.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;keyBindings&quot;&gt;The &lt;see cref=&quot;RealmKeyBinding&quot;/&gt;s to de-duplicate.&lt;/param&gt;
+        /// &lt;returns&gt;Number of bindings cleared.&lt;/returns&gt;
+        public static int ClearDuplicateBindings(IEnumerable&lt;IKeyBinding&gt; keyBindings)
+        {
+            int countRemoved = 0;
+
+            var lookup = keyBindings.ToLookup(kb =&gt; kb.KeyCombination);
+
+            foreach (var group in lookup)
+            {
+                if (group.Select(kb =&gt; kb.Action).Distinct().Count() &lt;= 1)
+                    continue;
+
+                foreach (var binding in group)
+                    binding.KeyCombination = new KeyCombination(InputKey.None);
+
+                countRemoved += group.Count();
+            }
+
+            return countRemoved;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,9,22,110,0],[23,9,23,10,0],[24,13,24,32,0],[25,13,25,66,0],[26,9,26,10,0],[32,9,32,10,0],[33,13,33,76,0],[35,13,35,41,0],[36,17,36,48,0],[38,13,38,53,0],[39,9,39,10,0],[47,9,47,10,0],[48,13,48,60,0],[50,13,51,13,0],[51,13,51,14,0],[51,14,52,17,0],[52,17,52,24,0],[52,24,52,26,0],[52,26,52,36,0],[52,36,52,37,0],[52,37,52,39,0],[52,39,52,40,0],[52,40,52,163,0],[52,163,53,17,0],[53,17,53,18,0],[53,18,54,21,0],[54,21,54,98,0],[54,98,57,21,0],[57,21,57,40,0],[57,40,58,25,0],[58,25,58,47,0],[58,47,59,17,0],[59,17,59,18,0],[59,18,60,13,0],[60,13,60,14,0],[60,14,60,16,0],[62,13,62,33,0],[63,9,63,10,0],[73,9,73,10,0],[74,13,74,60,0],[76,13,77,13,0],[77,13,77,14,0],[77,14,78,17,0],[78,17,78,24,0],[78,24,78,26,0],[78,26,78,37,0],[78,37,78,38,0],[78,38,78,40,0],[78,40,78,41,0],[78,41,78,157,0],[78,157,79,17,0],[79,17,79,18,0],[79,18,80,21,0],[80,21,80,99,0],[80,99,83,21,0],[83,21,83,40,0],[83,40,84,25,0],[84,25,84,47,0],[84,47,85,17,0],[85,17,85,18,0],[85,18,86,13,0],[86,13,86,14,0],[86,14,86,16,0],[88,13,88,33,0],[89,9,89,10,0],[97,9,97,10,0],[98,13,99,13,0],[99,13,99,14,0],[99,14,100,24,0],[100,24,100,56,0],[100,56,101,17,0],[101,17,101,18,0],[101,18,104,21,0],[104,21,104,78,0],[104,78,106,21,0],[106,21,106,87,0],[106,87,108,21,0],[108,21,108,28,0],[108,28,108,30,0],[108,30,108,41,0],[108,41,108,42,0],[108,42,108,44,0],[108,44,108,45,0],[108,45,108,53,0],[108,53,109,21,0],[109,21,109,22,0],[109,22,110,25,0],[110,25,110,65,0],[110,65,111,25,0],[111,25,111,32,0],[111,32,111,34,0],[111,34,111,45,0],[111,45,111,46,0],[111,46,111,48,0],[111,48,111,49,0],[111,49,111,69,0],[111,69,112,29,0],[112,29,112,134,0],[112,134,113,21,0],[113,21,113,22,0],[113,22,115,21,0],[115,21,115,42,0],[115,42,116,17,0],[116,17,116,18,0],[116,18,117,13,0],[117,13,117,14,0],[117,14,117,16,0],[118,9,118,10,0],[121,9,121,10,0],[123,13,123,20,0],[123,22,123,43,0],[123,44,123,46,0],[123,47,123,69,0],[123,69,123,77,0],[123,77,123,78,0],[124,13,124,14,0],[125,17,126,21,0],[126,21,128,65,0],[128,65,128,67,0],[130,17,130,63,0],[131,17,131,54,0],[133,17,133,51,0],[134,17,134,18,0],[136,21,136,81,0],[136,81,136,150,0],[136,150,136,153,0],[137,17,137,18,0],[138,22,138,56,0],[139,17,139,18,0],[142,21,142,28,0],[142,30,142,35,0],[142,36,142,38,0],[142,39,142,97,0],[143,21,143,22,0],[144,25,144,41,0],[147,25,147,52,0],[148,21,148,22,0],[149,17,149,18,0],[150,13,150,14,0],[151,9,151,10,0],[156,9,162,11,0],[165,9,165,10,0],[166,13,166,20,0],[166,22,166,29,0],[166,30,166,32,0],[166,33,166,44,0],[167,13,167,14,0],[168,17,168,52,0],[169,21,169,34,0],[170,13,170,14,0],[172,13,172,25,0],[173,9,173,10,0],[182,9,182,10,0],[183,13,183,34,0],[185,13,185,53,0],[185,53,185,70,0],[185,70,185,72,0],[187,13,187,20,0],[187,22,187,31,0],[187,32,187,34,0],[187,35,187,41,0],[188,13,188,14,0],[189,17,189,40,0],[189,40,189,49,0],[189,49,189,75,0],[190,21,190,30,0],[192,17,192,24,0],[192,26,192,37,0],[192,38,192,40,0],[192,41,192,46,0],[193,21,193,80,0],[195,17,195,47,0],[196,13,196,14,0],[198,13,198,33,0],[199,9,199,10,0]]);
+    </script>
+  </body>
+</html>

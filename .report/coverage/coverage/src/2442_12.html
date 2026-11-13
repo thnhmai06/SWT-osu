@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/DialogOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Overlays.Dialog;
+using osu.Game.Graphics.Containers;
+using osu.Game.Input.Bindings;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Logging;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays
+{
+    public partial class DialogOverlay : OsuFocusedOverlayContainer, IDialogOverlay
+    {
+        private readonly Box dimLayer;
+        private readonly Container dialogContainer;
+
+        protected override string PopInSampleName =&gt; &quot;UI/dialog-pop-in&quot;;
+        protected override string PopOutSampleName =&gt; &quot;UI/dialog-pop-out&quot;;
+
+        // Dialog overlay creates its own dim layer as it may be displayed over the top of other global overlays.
+        protected override bool DimMainContent =&gt; false;
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        public PopupDialog CurrentDialog { get; private set; }
+
+        public override bool IsPresent =&gt; (Scheduler.HasPendingTasks || dialogContainer.Children.Count &gt; 0)
+                                          // The following line ensures that dialogs are not presented while the dialog overlay
+                                          // cannot be displayed. This is due to the `Schedule` usage inside `Push()`.
+                                          //
+                                          // Without this, a dialog pushed during disabled overlay activation mode would be presented,
+                                          // but immediately dismissed without ever being seen by the user (see
+                                          // https://github.com/ppy/osu/blob/ce5e54c9d27b17d460d99e774de502f9480fb710/osu.Game/Graphics/Containers/OsuFocusedOverlayContainer.cs#L131-L136).
+                                          &amp;&amp; OverlayActivationMode.Value != OverlayActivation.Disabled;
+
+        [CanBeNull]
+        private IDisposable duckOperation;
+
+        public DialogOverlay()
+        {
+            RelativeSizeAxes = Axes.Both;
+
+            Child = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    dimLayer = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = Color4.Black,
+                        Alpha = 0.5f,
+                    },
+                    dialogContainer = new Container
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        AutoSizeAxes = Axes.Y,
+                        Width = 500,
+                    },
+                },
+            };
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            duckOperation?.Dispose();
+        }
+
+        public void Push(PopupDialog dialog)
+        {
+            if (dialog == CurrentDialog || dialog.State.Value == Visibility.Hidden) return;
+
+            // Immediately update the externally accessible property as this may be used for checks even before
+            // a DialogOverlay instance has finished loading.
+            var lastDialog = CurrentDialog;
+            CurrentDialog = dialog;
+
+            Schedule(() =&gt;
+            {
+                // if any existing dialog is being displayed, dismiss it before showing a new one.
+                lastDialog?.Hide();
+
+                // if the new dialog is hidden before added to the dialogContainer, bypass any further operations.
+                if (dialog.State.Value == Visibility.Hidden)
+                {
+                    dismiss();
+                    return;
+                }
+
+                Logger.Log($&quot;{nameof(DialogOverlay)}: Showing dialog {dialog}&quot;);
+                dialogContainer.Add(dialog);
+                Show();
+
+                dialog.State.BindValueChanged(state =&gt;
+                {
+                    if (state.NewValue != Visibility.Hidden) return;
+
+                    // Trigger the demise of the dialog as soon as it hides.
+                    dialog.Delay(PopupDialog.EXIT_DURATION).Expire();
+
+                    dismiss();
+                });
+            });
+
+            void dismiss()
+            {
+                if (dialog != CurrentDialog) return;
+
+                // Handle the case where the dialog is the currently displayed dialog.
+                // In this scenario, the overlay itself should also be hidden.
+                Hide();
+                Logger.Log($&quot;{nameof(DialogOverlay)}: Dismissing dialog {dialog}&quot;);
+                CurrentDialog = null;
+            }
+        }
+
+        protected override bool BlockNonPositionalInput =&gt; true;
+
+        // Matches `OsuFocusedOverlayContainer` implementation but redirects checks to the meaningful part of the dialog display.
+        // Required because of the custom dim layer logic used in this class.
+        private bool closeOnMouseUp;
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            closeOnMouseUp = !dialogContainer.ReceivePositionalInputAt(e.ScreenSpaceMousePosition);
+
+            return base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            if (closeOnMouseUp &amp;&amp; !dialogContainer.ReceivePositionalInputAt(e.ScreenSpaceMousePosition))
+                Hide();
+
+            base.OnMouseUp(e);
+        }
+
+        protected override void PopIn()
+        {
+            duckOperation = musicController?.Duck(new DuckParameters
+            {
+                DuckVolumeTo = 1,
+                DuckDuration = 100,
+                RestoreDuration = 100,
+            });
+
+            dimLayer.FadeTo(0.5f, PopupDialog.ENTER_DURATION, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+            duckOperation?.Dispose();
+
+            // PopOut gets called initially, but we only want to hide dialog when we have been loaded and are present.
+            if (IsLoaded &amp;&amp; CurrentDialog?.State.Value == Visibility.Visible)
+                CurrentDialog.Hide();
+
+            dimLayer.FadeOut(PopupDialog.EXIT_DURATION, Easing.OutQuint);
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.Select:
+                    var clickableButton =
+                        CurrentDialog?.Buttons.OfType&lt;PopupDialogOkButton&gt;().FirstOrDefault() ??
+                        CurrentDialog?.Buttons.First();
+
+                    clickableButton?.TriggerClick();
+                    return true;
+            }
+
+            return base.OnPressed(e);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,54,27,72,0],[28,55,28,74,0],[31,51,31,56,0],[34,51,34,55,0],[34,56,34,60,0],[36,44,36,48,0],[36,49,36,61,0],[38,43,45,103,0],[50,9,50,31,0],[51,9,51,10,0],[52,13,52,42,0],[54,13,73,15,0],[74,9,74,10,0],[77,9,77,10,0],[78,13,78,39,0],[79,13,79,38,0],[80,9,80,10,0],[83,9,83,10,0],[84,13,84,84,0],[84,85,84,92,0],[88,13,88,44,0],[89,13,89,36,0],[91,13,92,13,0],[92,13,92,14,0],[92,14,94,17,0],[94,17,94,36,0],[94,36,97,17,0],[97,17,97,61,0],[97,61,98,17,0],[98,17,98,18,0],[98,18,99,21,0],[99,21,99,31,0],[99,31,100,21,0],[100,21,100,28,0],[100,28,103,17,0],[103,17,103,81,0],[103,81,104,17,0],[104,17,104,45,0],[104,45,105,17,0],[105,17,105,24,0],[105,24,107,17,0],[107,17,108,17,0],[108,17,108,18,0],[108,18,109,21,0],[109,21,109,61,0],[109,61,109,62,0],[109,62,109,69,0],[109,69,112,21,0],[112,21,112,70,0],[112,70,114,21,0],[114,21,114,31,0],[114,31,115,17,0],[115,17,115,18,0],[115,18,115,20,0],[115,20,116,13,0],[116,13,116,14,0],[116,14,116,16,0],[119,13,119,14,0],[120,17,120,45,0],[120,46,120,53,0],[124,17,124,24,0],[125,17,125,84,0],[126,17,126,38,0],[127,13,127,14,0],[128,9,128,10,0],[130,60,130,64,0],[137,9,137,10,0],[138,13,138,100,0],[140,13,140,40,0],[141,9,141,10,0],[144,9,144,10,0],[145,13,145,105,0],[146,17,146,24,0],[148,13,148,31,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,158,16,0],[160,13,160,80,0],[161,9,161,10,0],[164,9,164,10,0],[165,13,165,27,0],[166,13,166,38,0],[169,13,169,78,0],[170,17,170,38,0],[172,13,172,74,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,177,26,0],[178,17,178,30,0],[180,13,180,30,0],[183,21,185,56,0],[187,21,187,53,0],[188,21,188,33,0],[191,13,191,38,0],[192,9,192,10,0]]);
+    </script>
+  </body>
+</html>

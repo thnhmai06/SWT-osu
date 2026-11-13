@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Mania/Edit/ManiaHitObjectComposer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Edit.Tools;
+using osu.Game.Rulesets.Mania.Objects;
+using osu.Game.Rulesets.Mania.UI;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.UI;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
+
+namespace osu.Game.Rulesets.Mania.Edit
+{
+    [Cached]
+    public partial class ManiaHitObjectComposer : ScrollingHitObjectComposer&lt;ManiaHitObject, ManiaAction&gt;
+    {
+        public override Bindable&lt;TernaryState&gt;? SelectionNewComboState =&gt; null;
+
+        private DrawableManiaEditorRuleset drawableRuleset = null!;
+
+        [Resolved]
+        private EditorScreenWithTimeline? screenWithTimeline { get; set; }
+
+        public ManiaHitObjectComposer(Ruleset ruleset)
+            : base(ruleset)
+        {
+        }
+
+        private Bindable&lt;bool&gt; limitPlacementToCurrentTime = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(OsuConfigManager config)
+        {
+            limitPlacementToCurrentTime = config.GetBindable&lt;bool&gt;(OsuSetting.EditorLimitedDistanceSnap);
+        }
+
+        public override SnapResult FindSnappedPositionAndTime(Vector2 screenSpacePosition)
+        {
+            if (limitPlacementToCurrentTime.Value
+                &amp;&amp; BlueprintContainer.CurrentHitObjectPlacement?.PlacementActive == PlacementBlueprint.PlacementState.Waiting)
+            {
+                if (PlayfieldAtScreenSpacePosition(screenSpacePosition) is ScrollingPlayfield playfield)
+                {
+                    double time = BeatSnapProvider.SnapTime(EditorClock.CurrentTime);
+                    return base.FindSnappedPositionAndTime(playfield.ScreenSpacePositionAtTime(time));
+                }
+            }
+
+            return base.FindSnappedPositionAndTime(screenSpacePosition);
+        }
+
+        public new ManiaPlayfield Playfield =&gt; drawableRuleset.Playfield;
+
+        public IScrollingInfo ScrollingInfo =&gt; drawableRuleset.ScrollingInfo;
+
+        protected override Playfield PlayfieldAtScreenSpacePosition(Vector2 screenSpacePosition) =&gt;
+            Playfield.GetColumnByPosition(screenSpacePosition);
+
+        protected override DrawableRuleset&lt;ManiaHitObject&gt; CreateDrawableRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods) =&gt;
+            drawableRuleset = new DrawableManiaEditorRuleset(ruleset, beatmap, mods);
+
+        protected override ComposeBlueprintContainer CreateBlueprintContainer()
+            =&gt; new ManiaBlueprintContainer(this);
+
+        protected override BeatSnapGrid CreateBeatSnapGrid() =&gt; new ManiaBeatSnapGrid();
+
+        protected override IReadOnlyList&lt;CompositionTool&lt;ManiaAction&gt;&gt; CompositionTools =&gt; new CompositionTool&lt;ManiaAction&gt;[]
+        {
+            new NoteCompositionTool(),
+            new HoldNoteCompositionTool()
+        };
+
+        public override string ConvertSelectionToString()
+            =&gt; string.Join(&#39;,&#39;, EditorBeatmap.SelectedHitObjects.Cast&lt;ManiaHitObject&gt;().OrderBy(h =&gt; h.StartTime)
+                                             .Select(h =&gt; FormattableString.Invariant($&quot;{Math.Round(h.StartTime)}|{h.Column}&quot;)));
+
+        // 123|0,456|1,789|2 ...
+        private static readonly Regex selection_regex = new Regex(@&quot;^\d+\|\d+(,\d+\|\d+)*$&quot;, RegexOptions.Compiled);
+
+        public override void SelectFromTimestamp(double timestamp, string objectDescription)
+        {
+            if (!selection_regex.IsMatch(objectDescription))
+                return;
+
+            List&lt;ManiaHitObject&gt; remainingHitObjects = EditorBeatmap.HitObjects.Cast&lt;ManiaHitObject&gt;().Where(h =&gt; h.StartTime &gt;= timestamp).ToList();
+            string[] objectDescriptions = objectDescription.Split(&#39;,&#39;);
+
+            for (int i = 0; i &lt; objectDescriptions.Length; i++)
+            {
+                string[] split = objectDescriptions[i].Split(&#39;|&#39;);
+                if (split.Length != 2)
+                    continue;
+
+                if (!int.TryParse(split[0], out int time) || !int.TryParse(split[1], out int column))
+                    continue;
+
+                ManiaHitObject? current = remainingHitObjects.FirstOrDefault(h =&gt; Precision.AlmostEquals(h.StartTime, time, 0.5) &amp;&amp; h.Column == column);
+
+                if (current == null)
+                    continue;
+
+                EditorBeatmap.SelectedHitObjects.Add(current);
+
+                if (i &lt; objectDescriptions.Length - 1)
+                    remainingHitObjects = remainingHitObjects.Where(h =&gt; h != current &amp;&amp; h.StartTime &gt;= current.StartTime).ToList();
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (screenWithTimeline?.TimelineArea.Timeline != null)
+                drawableRuleset.TimelineTimeRange = EditorClock.TrackLength / screenWithTimeline.TimelineArea.Timeline.CurrentZoom.Value / 2;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,75,30,79,0],[32,9,32,68,0],[35,64,35,68,0],[35,69,35,73,0],[38,15,38,28,0],[39,9,39,10,0],[40,9,40,10,0],[42,9,42,68,0],[46,9,46,10,0],[47,13,47,106,0],[48,9,48,10,0],[51,9,51,10,0],[52,13,53,127,0],[54,13,54,14,0],[55,17,55,105,0],[56,17,56,18,0],[57,21,57,86,0],[58,21,58,103,0],[60,13,60,14,0],[62,13,62,73,0],[63,9,63,10,0],[65,48,65,73,0],[67,48,67,77,0],[70,13,70,63,0],[73,13,73,85,0],[76,16,76,49,0],[78,65,78,88,0],[80,92,84,10,0],[87,16,87,102,0],[87,102,87,113,0],[87,113,88,59,0],[88,59,88,127,0],[88,127,88,129,0],[91,9,91,117,0],[94,9,94,10,0],[95,13,95,61,0],[96,17,96,24,0],[98,13,98,115,0],[98,115,98,139,0],[98,139,98,150,0],[99,13,99,72,0],[101,18,101,27,0],[101,29,101,58,0],[101,60,101,63,0],[102,13,102,14,0],[103,17,103,67,0],[104,17,104,39,0],[105,21,105,30,0],[107,17,107,102,0],[108,21,108,30,0],[110,17,110,83,0],[110,83,110,151,0],[110,151,110,153,0],[112,17,112,37,0],[113,21,113,30,0],[115,17,115,63,0],[117,17,117,55,0],[118,21,118,74,0],[118,74,118,122,0],[118,122,118,133,0],[119,13,119,14,0],[120,9,120,10,0],[123,9,123,10,0],[124,13,124,27,0],[126,13,126,67,0],[127,17,127,142,0],[128,9,128,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/Components/BeatmapAttributeText.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Localisation;
+using osu.Game.Localisation.SkinComponents;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Utils;
+
+namespace osu.Game.Skinning.Components
+{
+    [UsedImplicitly]
+    public partial class BeatmapAttributeText : FontAdjustableSkinComponent
+    {
+        [SettingSource(typeof(BeatmapAttributeTextStrings), nameof(BeatmapAttributeTextStrings.Attribute))]
+        public Bindable&lt;BeatmapAttribute&gt; Attribute { get; } = new Bindable&lt;BeatmapAttribute&gt;(BeatmapAttribute.StarRating);
+
+        [SettingSource(typeof(BeatmapAttributeTextStrings), nameof(BeatmapAttributeTextStrings.Template), nameof(BeatmapAttributeTextStrings.TemplateDescription))]
+        public Bindable&lt;string&gt; Template { get; } = new Bindable&lt;string&gt;(&quot;{Label}: {Value}&quot;);
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; mods { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapDifficultyCache difficultyCache { get; set; } = null!;
+
+        private readonly OsuSpriteText text;
+        private IBindable&lt;StarDifficulty&gt;? difficultyBindable;
+        private CancellationTokenSource? difficultyCancellationSource;
+        private ModSettingChangeTracker? modSettingTracker;
+        private StarDifficulty? starDifficulty;
+
+        public BeatmapAttributeText()
+        {
+            AutoSizeAxes = Axes.Both;
+
+            InternalChildren = new Drawable[]
+            {
+                text = new OsuSpriteText
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Attribute.BindValueChanged(_ =&gt; updateText());
+            Template.BindValueChanged(_ =&gt; updateText());
+
+            beatmap.BindValueChanged(b =&gt;
+            {
+                difficultyCancellationSource?.Cancel();
+                difficultyCancellationSource = new CancellationTokenSource();
+
+                difficultyBindable?.UnbindAll();
+                difficultyBindable = difficultyCache.GetBindableDifficulty(b.NewValue.BeatmapInfo, difficultyCancellationSource.Token);
+                difficultyBindable.BindValueChanged(d =&gt;
+                {
+                    starDifficulty = d.NewValue;
+                    updateText();
+                });
+
+                updateText();
+            }, true);
+
+            mods.BindValueChanged(m =&gt;
+            {
+                modSettingTracker?.Dispose();
+                modSettingTracker = new ModSettingChangeTracker(m.NewValue)
+                {
+                    SettingChanged = _ =&gt; updateText()
+                };
+
+                updateText();
+            }, true);
+
+            ruleset.BindValueChanged(_ =&gt; updateText());
+
+            updateText();
+        }
+
+        private void updateText()
+        {
+            string numberedTemplate = Template.Value
+                                              .Replace(&quot;{&quot;, &quot;{{&quot;)
+                                              .Replace(&quot;}&quot;, &quot;}}&quot;)
+                                              .Replace(@&quot;{{Label}}&quot;, &quot;{0}&quot;)
+                                              .Replace(@&quot;{{Value}}&quot;, &quot;{1}&quot;);
+
+            List&lt;object?&gt; values = new List&lt;object?&gt;
+            {
+                getLabelString(Attribute.Value),
+                getValueString(Attribute.Value)
+            };
+
+            foreach (var type in Enum.GetValues&lt;BeatmapAttribute&gt;())
+            {
+                string replaced = numberedTemplate.Replace($@&quot;{{{{{type}}}}}&quot;, $@&quot;{{{values.Count}}}&quot;);
+
+                if (numberedTemplate != replaced)
+                {
+                    numberedTemplate = replaced;
+                    values.Add(getValueString(type));
+                }
+            }
+
+            text.Text = LocalisableString.Format(numberedTemplate, values.ToArray());
+        }
+
+        private LocalisableString getLabelString(BeatmapAttribute attribute)
+        {
+            switch (attribute)
+            {
+                case BeatmapAttribute.CircleSize:
+                    return BeatmapsetsStrings.ShowStatsCs;
+
+                case BeatmapAttribute.Accuracy:
+                    return BeatmapsetsStrings.ShowStatsAccuracy;
+
+                case BeatmapAttribute.HPDrain:
+                    return BeatmapsetsStrings.ShowStatsDrain;
+
+                case BeatmapAttribute.ApproachRate:
+                    return BeatmapsetsStrings.ShowStatsAr;
+
+                case BeatmapAttribute.StarRating:
+                    return BeatmapsetsStrings.ShowStatsStars;
+
+                case BeatmapAttribute.Title:
+                    return EditorSetupStrings.Title;
+
+                case BeatmapAttribute.Artist:
+                    return EditorSetupStrings.Artist;
+
+                case BeatmapAttribute.DifficultyName:
+                    return EditorSetupStrings.DifficultyHeader;
+
+                case BeatmapAttribute.Creator:
+                    return EditorSetupStrings.Creator;
+
+                case BeatmapAttribute.Source:
+                    return EditorSetupStrings.Source;
+
+                case BeatmapAttribute.Length:
+                    return ArtistStrings.TracklistLength.ToTitle();
+
+                case BeatmapAttribute.RankedStatus:
+                    return BeatmapDiscussionsStrings.IndexFormBeatmapsetStatusDefault;
+
+                case BeatmapAttribute.BPM:
+                    return BeatmapsetsStrings.ShowStatsBpm;
+
+                case BeatmapAttribute.MaxPP:
+                    return BeatmapAttributeTextStrings.MaxPP;
+
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private LocalisableString getValueString(BeatmapAttribute attribute)
+        {
+            switch (attribute)
+            {
+                case BeatmapAttribute.Title:
+                    return new RomanisableString(beatmap.Value.BeatmapInfo.Metadata.TitleUnicode, beatmap.Value.BeatmapInfo.Metadata.Title);
+
+                case BeatmapAttribute.Artist:
+                    return new RomanisableString(beatmap.Value.BeatmapInfo.Metadata.ArtistUnicode, beatmap.Value.BeatmapInfo.Metadata.Artist);
+
+                case BeatmapAttribute.DifficultyName:
+                    return beatmap.Value.BeatmapInfo.DifficultyName;
+
+                case BeatmapAttribute.Creator:
+                    return beatmap.Value.BeatmapInfo.Metadata.Author.Username;
+
+                case BeatmapAttribute.Source:
+                    return beatmap.Value.BeatmapInfo.Metadata.Source;
+
+                case BeatmapAttribute.Length:
+                    return Math.Round(beatmap.Value.BeatmapInfo.Length / ModUtils.CalculateRateWithMods(mods.Value)).ToFormattedDuration();
+
+                case BeatmapAttribute.RankedStatus:
+                    return beatmap.Value.BeatmapInfo.Status.GetLocalisableDescription();
+
+                case BeatmapAttribute.BPM:
+                    return FormatUtils.RoundBPM(beatmap.Value.BeatmapInfo.BPM, ModUtils.CalculateRateWithMods(mods.Value)).ToLocalisableString(@&quot;0.##&quot;);
+
+                case BeatmapAttribute.CircleSize:
+                    return computeDifficulty().CircleSize.ToLocalisableString(@&quot;0.##&quot;);
+
+                case BeatmapAttribute.HPDrain:
+                    return computeDifficulty().DrainRate.ToLocalisableString(@&quot;0.##&quot;);
+
+                case BeatmapAttribute.Accuracy:
+                    return computeDifficulty().OverallDifficulty.ToLocalisableString(@&quot;0.##&quot;);
+
+                case BeatmapAttribute.ApproachRate:
+                    return computeDifficulty().ApproachRate.ToLocalisableString(@&quot;0.##&quot;);
+
+                case BeatmapAttribute.StarRating:
+                    return (starDifficulty?.Stars ?? 0).FormatStarRating();
+
+                case BeatmapAttribute.MaxPP:
+                    return Math.Round(starDifficulty?.PerformanceAttributes?.Total ?? 0, MidpointRounding.AwayFromZero).ToLocalisableString();
+
+                default:
+                    return string.Empty;
+            }
+
+            BeatmapDifficulty computeDifficulty()
+            {
+                return ruleset.Value is RulesetInfo rulesetInfo
+                    ? rulesetInfo.CreateInstance().GetAdjustedDisplayDifficulty(beatmap.Value.BeatmapInfo, mods.Value)
+                    : new BeatmapDifficulty(beatmap.Value.BeatmapInfo.Difficulty);
+            }
+        }
+
+        protected override void SetFont(FontUsage font) =&gt; text.Font = font.With(size: 40);
+
+        protected override void SetTextColour(Colour4 textColour) =&gt; text.Colour = textColour;
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            difficultyCancellationSource?.Cancel();
+            difficultyCancellationSource?.Dispose();
+            difficultyCancellationSource = null;
+
+            modSettingTracker?.Dispose();
+        }
+    }
+
+    // WARNING: DO NOT ADD ANY VALUES TO THIS ENUM ANYWHERE ELSE THAN AT THE END.
+    // Doing so will break existing user skins.
+    public enum BeatmapAttribute
+    {
+        CircleSize,
+        HPDrain,
+        Accuracy,
+        ApproachRate,
+        StarRating,
+        Title,
+        Artist,
+        DifficultyName,
+        Creator,
+        Length,
+        RankedStatus,
+        BPM,
+        Source,
+        MaxPP
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,55,32,59,0],[32,64,32,123,0],[35,44,35,48,0],[35,53,35,93,0],[38,53,38,57,0],[38,58,38,62,0],[38,67,38,72,0],[41,54,41,58,0],[41,59,41,63,0],[41,68,41,73,0],[44,50,44,54,0],[44,55,44,59,0],[44,64,44,69,0],[47,58,47,62,0],[47,63,47,67,0],[47,72,47,77,0],[55,9,55,38,0],[56,9,56,10,0],[57,13,57,38,0],[59,13,66,15,0],[67,9,67,10,0],[70,9,70,10,0],[71,13,71,33,0],[73,13,73,45,0],[73,45,73,57,0],[73,57,73,59,0],[74,13,74,44,0],[74,44,74,56,0],[74,56,74,58,0],[76,13,77,13,0],[77,13,77,14,0],[77,14,78,17,0],[78,17,78,56,0],[78,56,79,17,0],[79,17,79,78,0],[79,78,81,17,0],[81,17,81,49,0],[81,49,82,17,0],[82,17,82,136,0],[82,136,83,17,0],[83,17,84,17,0],[84,17,84,18,0],[84,18,85,21,0],[85,21,85,49,0],[85,49,86,21,0],[86,21,86,34,0],[86,34,87,17,0],[87,17,87,18,0],[87,18,87,20,0],[87,20,89,17,0],[89,17,89,30,0],[89,30,90,13,0],[90,13,90,14,0],[90,14,90,22,0],[92,13,93,13,0],[93,13,93,14,0],[93,14,94,17,0],[94,17,94,46,0],[94,46,95,17,0],[95,17,97,43,0],[97,43,97,55,0],[97,55,98,19,0],[98,19,100,17,0],[100,17,100,30,0],[100,30,101,13,0],[101,13,101,14,0],[101,14,101,22,0],[103,13,103,43,0],[103,43,103,55,0],[103,55,103,57,0],[105,13,105,26,0],[106,9,106,10,0],[109,9,109,10,0],[110,13,114,77,0],[116,13,120,15,0],[122,13,122,20,0],[122,22,122,30,0],[122,31,122,33,0],[122,34,122,68,0],[123,13,123,14,0],[124,17,124,104,0],[126,17,126,50,0],[127,17,127,18,0],[128,21,128,49,0],[129,21,129,54,0],[130,17,130,18,0],[131,13,131,14,0],[133,13,133,86,0],[134,9,134,10,0],[137,9,137,10,0],[138,13,138,31,0],[141,21,141,59,0],[144,21,144,65,0],[147,21,147,62,0],[150,21,150,59,0],[153,21,153,62,0],[156,21,156,53,0],[159,21,159,54,0],[162,21,162,64,0],[165,21,165,55,0],[168,21,168,54,0],[171,21,171,68,0],[174,21,174,87,0],[177,21,177,60,0],[180,21,180,62,0],[183,21,183,41,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,31,0],[192,21,192,141,0],[195,21,195,143,0],[198,21,198,69,0],[201,21,201,79,0],[204,21,204,70,0],[207,21,207,140,0],[210,21,210,89,0],[213,21,213,153,0],[216,21,216,88,0],[219,21,219,87,0],[222,21,222,95,0],[225,21,225,90,0],[228,21,228,76,0],[231,21,231,143,0],[234,21,234,41,0],[238,13,238,14,0],[239,17,241,83,0],[242,13,242,14,0],[243,9,243,10,0],[245,60,245,91,0],[247,70,247,94,0],[250,9,250,10,0],[251,13,251,39,0],[253,13,253,52,0],[254,13,254,53,0],[255,13,255,49,0],[257,13,257,42,0],[258,9,258,10,0]]);
+    </script>
+  </body>
+</html>

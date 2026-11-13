@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/MusicController.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Audio;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Audio.Effects;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Seasonal;
+
+namespace osu.Game.Overlays
+{
+    /// &lt;summary&gt;
+    /// Handles playback of the global music track.
+    /// &lt;/summary&gt;
+    public partial class MusicController : CompositeDrawable
+    {
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        /// &lt;summary&gt;
+        /// Point in time after which the current track will be restarted on triggering a &quot;previous track&quot; action.
+        /// &lt;/summary&gt;
+        private const double restart_cutoff_point = 5000;
+
+        public const double DELAY_BEFORE_FADE = 30;
+
+        /// &lt;summary&gt;
+        /// Whether the user has requested the track to be paused. Use &lt;see cref=&quot;IsPlaying&quot;/&gt; to determine whether the track is still playing.
+        /// &lt;/summary&gt;
+        public bool UserPauseRequested { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether user control of the global track should be allowed.
+        /// &lt;/summary&gt;
+        public readonly BindableBool AllowTrackControl = new BindableBool(true);
+
+        public readonly BindableBool Shuffle = new BindableBool(true);
+
+        /// &lt;summary&gt;
+        /// Fired when the global &lt;see cref=&quot;WorkingBeatmap&quot;/&gt; has changed.
+        /// Includes direction information for display purposes.
+        /// &lt;/summary&gt;
+        public event Action&lt;WorkingBeatmap, TrackChangeDirection&gt;? TrackChanged;
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; mods { get; set; } = null!;
+
+        public DrawableTrack CurrentTrack { get; private set; } = new DrawableTrack(new TrackVirtual(1000));
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        private BindableNumber&lt;double&gt; sampleVolume = null!;
+
+        private readonly BindableDouble audioDuckVolume = new BindableDouble(1);
+
+        private AudioFilter audioDuckFilter = null!;
+
+        private readonly Bindable&lt;RandomSelectAlgorithm&gt; randomSelectAlgorithm = new Bindable&lt;RandomSelectAlgorithm&gt;();
+
+        private readonly LinkedList&lt;Live&lt;BeatmapSetInfo&gt;&gt; randomHistory = new LinkedList&lt;Live&lt;BeatmapSetInfo&gt;&gt;();
+        private LinkedListNode&lt;Live&lt;BeatmapSetInfo&gt;&gt;? currentRandomHistoryPosition;
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio, OsuConfigManager configManager)
+        {
+            AddInternal(audioDuckFilter = new AudioFilter(audio.TrackMixer));
+            audio.Tracks.AddAdjustment(AdjustableProperty.Volume, audioDuckVolume);
+            sampleVolume = audio.VolumeSample.GetBoundCopy();
+
+            configManager.BindWith(OsuSetting.RandomSelectAlgorithm, randomSelectAlgorithm);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            beatmap.BindValueChanged(b =&gt;
+            {
+                if (b.NewValue != null)
+                    changeBeatmap(b.NewValue);
+            }, true);
+            mods.BindValueChanged(_ =&gt; ResetTrackAdjustments(), true);
+        }
+
+        /// &lt;summary&gt;
+        /// Forcefully reload the current &lt;see cref=&quot;WorkingBeatmap&quot;/&gt;&#39;s track from disk.
+        /// &lt;/summary&gt;
+        public void ReloadCurrentTrack()
+        {
+            if (current == null)
+                return;
+
+            changeTrack();
+            TrackChanged?.Invoke(current, TrackChangeDirection.None);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns whether the beatmap track is playing.
+        /// &lt;/summary&gt;
+        public bool IsPlaying =&gt; CurrentTrack.IsRunning;
+
+        /// &lt;summary&gt;
+        /// Returns whether the beatmap track is loaded.
+        /// &lt;/summary&gt;
+        public bool TrackLoaded =&gt; CurrentTrack.TrackLoaded;
+
+        private ScheduledDelegate? seekDelegate;
+
+        public void SeekTo(double position)
+        {
+            seekDelegate?.Cancel();
+            seekDelegate = Schedule(() =&gt;
+            {
+                if (!AllowTrackControl.Value)
+                    return;
+
+                CurrentTrack.Seek(position);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Ensures music is playing, no matter what, unless the user has explicitly paused.
+        /// This means that if the current beatmap has a virtual track (see &lt;see cref=&quot;TrackVirtual&quot;/&gt;) a new beatmap will be selected.
+        /// &lt;/summary&gt;
+        public void EnsurePlayingSomething()
+        {
+            if (UserPauseRequested) return;
+
+            if (CurrentTrack.IsDummyDevice || beatmap.Value.BeatmapSetInfo.DeletePending)
+            {
+                if (beatmap.Disabled || !AllowTrackControl.Value)
+                    return;
+
+                Logger.Log($&quot;{nameof(MusicController)} skipping next track to {nameof(EnsurePlayingSomething)}&quot;);
+                NextTrack(allowProtectedTracks: true);
+            }
+            else if (!IsPlaying)
+            {
+                Logger.Log($&quot;{nameof(MusicController)} starting playback to {nameof(EnsurePlayingSomething)}&quot;);
+                Play();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Start playing the current track (if not already playing).
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;restart&quot;&gt;Whether to restart the track from the beginning.&lt;/param&gt;
+        /// &lt;param name=&quot;requestedByUser&quot;&gt;
+        /// Whether the request to play was issued by the user rather than internally.
+        /// Specifying &lt;c&gt;true&lt;/c&gt; will ensure that other methods like &lt;see cref=&quot;EnsurePlayingSomething&quot;/&gt;
+        /// will resume music playback going forward.
+        /// &lt;/param&gt;
+        /// &lt;returns&gt;Whether the operation was successful.&lt;/returns&gt;
+        public bool Play(bool restart = false, bool requestedByUser = false)
+        {
+            if (requestedByUser &amp;&amp; !AllowTrackControl.Value)
+                return false;
+
+            if (requestedByUser)
+                UserPauseRequested = false;
+
+            if (restart)
+                CurrentTrack.RestartAsync();
+            else if (!IsPlaying)
+                CurrentTrack.StartAsync();
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Stop playing the current track and pause at the current position.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;requestedByUser&quot;&gt;
+        /// Whether the request to stop was issued by the user rather than internally.
+        /// Specifying &lt;c&gt;true&lt;/c&gt; will ensure that other methods like &lt;see cref=&quot;EnsurePlayingSomething&quot;/&gt;
+        /// will not resume music playback until the next explicit call to &lt;see cref=&quot;Play&quot;/&gt;.
+        /// &lt;/param&gt;
+        public void Stop(bool requestedByUser = false)
+        {
+            if (requestedByUser &amp;&amp; !AllowTrackControl.Value)
+                return;
+
+            UserPauseRequested |= requestedByUser;
+            if (CurrentTrack.IsRunning)
+                CurrentTrack.StopAsync();
+        }
+
+        /// &lt;summary&gt;
+        /// Toggle pause / play.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether the operation was successful.&lt;/returns&gt;
+        public bool TogglePause()
+        {
+            if (!AllowTrackControl.Value)
+                return false;
+
+            if (CurrentTrack.IsRunning)
+                Stop(true);
+            else
+                Play(requestedByUser: true);
+
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Play the previous track or restart the current track if it&#39;s current time below &lt;see cref=&quot;restart_cutoff_point&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;onSuccess&quot;&gt;Invoked when the operation has been performed successfully.&lt;/param&gt;
+        /// &lt;param name=&quot;allowProtectedTracks&quot;&gt;Whether to include &lt;see cref=&quot;BeatmapSetInfo.Protected&quot;/&gt; beatmap sets when navigating.&lt;/param&gt;
+        public void PreviousTrack(Action&lt;PreviousTrackResult&gt;? onSuccess = null, bool allowProtectedTracks = false) =&gt; Schedule(() =&gt;
+        {
+            PreviousTrackResult res = prev(allowProtectedTracks);
+            if (res != PreviousTrackResult.None)
+                onSuccess?.Invoke(res);
+        });
+
+        /// &lt;summary&gt;
+        /// Play the previous track or restart the current track if it&#39;s current time below &lt;see cref=&quot;restart_cutoff_point&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;allowProtectedTracks&quot;&gt;Whether to include &lt;see cref=&quot;BeatmapSetInfo.Protected&quot;/&gt; beatmap sets when navigating.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;PreviousTrackResult&quot;/&gt; that indicate the decided action.&lt;/returns&gt;
+        private PreviousTrackResult prev(bool allowProtectedTracks)
+        {
+            if (beatmap.Disabled || !AllowTrackControl.Value)
+                return PreviousTrackResult.None;
+
+            double currentTrackPosition = CurrentTrack.CurrentTime;
+
+            if (currentTrackPosition &gt;= restart_cutoff_point)
+            {
+                SeekTo(0);
+                return PreviousTrackResult.Restart;
+            }
+
+            queuedDirection = TrackChangeDirection.Prev;
+
+            Live&lt;BeatmapSetInfo&gt;? playableSet;
+
+            if (Shuffle.Value)
+                playableSet = getNextRandom(-1, allowProtectedTracks);
+            else
+            {
+                playableSet = getBeatmapSets(allowProtectedTracks).TakeWhile(i =&gt; !i.Value.Equals(current?.BeatmapSetInfo)).LastOrDefault()
+                              ?? getBeatmapSets(allowProtectedTracks).LastOrDefault();
+            }
+
+            if (playableSet != null)
+            {
+                changeBeatmap(beatmaps.GetWorkingBeatmap(playableSet.Value.Beatmaps.First()));
+                restartTrack();
+                return PreviousTrackResult.Previous;
+            }
+
+            return PreviousTrackResult.None;
+        }
+
+        /// &lt;summary&gt;
+        /// Play the next random or playlist track.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;onSuccess&quot;&gt;Invoked when the operation has been performed successfully.&lt;/param&gt;
+        /// &lt;param name=&quot;allowProtectedTracks&quot;&gt;Whether to include &lt;see cref=&quot;BeatmapSetInfo.Protected&quot;/&gt; beatmap sets when navigating.&lt;/param&gt;
+        /// &lt;returns&gt;A &lt;see cref=&quot;ScheduledDelegate&quot;/&gt; of the operation.&lt;/returns&gt;
+        public void NextTrack(Action? onSuccess = null, bool allowProtectedTracks = false) =&gt; Schedule(() =&gt;
+        {
+            bool res = next(allowProtectedTracks);
+            if (res)
+                onSuccess?.Invoke();
+        });
+
+        private readonly List&lt;DuckParameters&gt; duckOperations = new List&lt;DuckParameters&gt;();
+
+        /// &lt;summary&gt;
+        /// Applies ducking, attenuating the volume and/or low-pass cutoff of the currently playing track to make headroom for effects (or just to apply an effect).
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;A &lt;see cref=&quot;IDisposable&quot;/&gt; which will restore the duck operation when disposed.&lt;/returns&gt;
+        public IDisposable Duck(DuckParameters? parameters = null)
+        {
+            // Don&#39;t duck if samples have no volume, it sounds weird.
+            if (sampleVolume.Value == 0)
+                return new InvokeOnDisposal(() =&gt; { });
+
+            parameters ??= new DuckParameters();
+
+            duckOperations.Add(parameters);
+
+            DuckParameters volumeOperation = duckOperations.MinBy(p =&gt; p.DuckVolumeTo)!;
+            DuckParameters lowPassOperation = duckOperations.MinBy(p =&gt; p.DuckCutoffTo)!;
+
+            audioDuckFilter.CutoffTo(lowPassOperation.DuckCutoffTo, lowPassOperation.DuckDuration, lowPassOperation.DuckEasing);
+            this.TransformBindableTo(audioDuckVolume, volumeOperation.DuckVolumeTo, volumeOperation.DuckDuration, volumeOperation.DuckEasing);
+
+            return new InvokeOnDisposal(restoreDucking);
+
+            void restoreDucking() =&gt; Schedule(() =&gt;
+            {
+                if (!duckOperations.Remove(parameters))
+                    return;
+
+                DuckParameters? restoreVolumeOperation = duckOperations.MinBy(p =&gt; p.DuckVolumeTo);
+                DuckParameters? restoreLowPassOperation = duckOperations.MinBy(p =&gt; p.DuckCutoffTo);
+
+                // If another duck operation is in the list, restore ducking to its level, else reset back to defaults.
+                audioDuckFilter.CutoffTo(restoreLowPassOperation?.DuckCutoffTo ?? AudioFilter.MAX_LOWPASS_CUTOFF, parameters.RestoreDuration, parameters.RestoreEasing);
+                this.TransformBindableTo(audioDuckVolume, restoreVolumeOperation?.DuckVolumeTo ?? 1, parameters.RestoreDuration, parameters.RestoreEasing);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// A convenience method that ducks the currently playing track, then after a delay, restores automatically.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;delayUntilRestore&quot;&gt;A delay in milliseconds which defines how long to delay restoration after ducking completes.&lt;/param&gt;
+        /// &lt;param name=&quot;parameters&quot;&gt;Parameters defining the ducking operation.&lt;/param&gt;
+        public void DuckMomentarily(double delayUntilRestore, DuckParameters? parameters = null)
+        {
+            // Don&#39;t duck if samples have no volume, it sounds weird.
+            if (sampleVolume.Value == 0)
+                return;
+
+            parameters ??= new DuckParameters();
+
+            IDisposable duckOperation = Duck(parameters);
+
+            Scheduler.AddDelayed(duckOperation.Dispose, delayUntilRestore);
+        }
+
+        private bool next(bool allowProtectedTracks)
+        {
+            if (beatmap.Disabled || !AllowTrackControl.Value)
+                return false;
+
+            queuedDirection = TrackChangeDirection.Next;
+
+            Live&lt;BeatmapSetInfo&gt;? playableSet;
+
+            if (Shuffle.Value)
+                playableSet = getNextRandom(1, allowProtectedTracks);
+            else
+            {
+                playableSet = getBeatmapSets(allowProtectedTracks).SkipWhile(i =&gt; !i.Value.Equals(current?.BeatmapSetInfo)).ElementAtOrDefault(1)
+                              ?? getBeatmapSets(allowProtectedTracks).FirstOrDefault();
+            }
+
+            var playableBeatmap = playableSet?.Value.Beatmaps.FirstOrDefault();
+
+            if (playableBeatmap != null)
+            {
+                changeBeatmap(beatmaps.GetWorkingBeatmap(playableBeatmap));
+                restartTrack();
+                return true;
+            }
+
+            return false;
+        }
+
+        private Live&lt;BeatmapSetInfo&gt;? getNextRandom(int direction, bool allowProtectedTracks)
+        {
+            Live&lt;BeatmapSetInfo&gt; result;
+
+            var possibleSets = getBeatmapSets(allowProtectedTracks).ToList();
+
+            if (possibleSets.Count == 0)
+                return null;
+
+            // if there is only one possible set left, play it, even if it is the same as the current track.
+            // looping is preferable over playing nothing.
+            if (possibleSets.Count == 1)
+                return possibleSets.Single();
+
+            // now that we actually know there is a choice, do not allow the current track to be played again.
+            possibleSets.RemoveAll(s =&gt; s.Value.Equals(current?.BeatmapSetInfo));
+
+            if (currentRandomHistoryPosition != null)
+            {
+                if (direction &lt; 0 &amp;&amp; currentRandomHistoryPosition.Previous != null)
+                {
+                    currentRandomHistoryPosition = currentRandomHistoryPosition.Previous;
+                    return currentRandomHistoryPosition.Value;
+                }
+
+                if (direction &gt; 0 &amp;&amp; currentRandomHistoryPosition.Next != null)
+                {
+                    currentRandomHistoryPosition = currentRandomHistoryPosition.Next;
+                    return currentRandomHistoryPosition.Value;
+                }
+            }
+
+            // if the early-return above didn&#39;t cover it, it means that we have no history to fall back on
+            // and need to actually choose something random.
+
+            switch (randomSelectAlgorithm.Value)
+            {
+                case RandomSelectAlgorithm.Random:
+                    result = possibleSets[RNG.Next(possibleSets.Count)];
+                    break;
+
+                case RandomSelectAlgorithm.RandomPermutation:
+                    var notYetPlayedSets = possibleSets.Except(randomHistory).ToList();
+
+                    if (notYetPlayedSets.Count == 0)
+                    {
+                        possibleSets.RemoveAll(s =&gt; s.Value.Equals(current?.BeatmapSetInfo));
+                        notYetPlayedSets = possibleSets;
+                        randomHistory.Clear();
+                    }
+
+                    result = notYetPlayedSets[RNG.Next(notYetPlayedSets.Count)];
+
+                    Debug.Assert(randomHistory.Count == 0
+                                 || (currentRandomHistoryPosition == randomHistory.First &amp;&amp; direction &lt; 0)
+                                 || (currentRandomHistoryPosition == randomHistory.Last &amp;&amp; direction &gt; 0));
+
+                    // notably, this depends solely on `direction` specifically, because when there are less than 2 items in `randomHistory`,
+                    // we have `randomHistory.First == randomHistory.Last` (either `null` if no items, or the single item).
+                    // the assert above should make that safe to depend on.
+                    if (direction &gt; 0)
+                        currentRandomHistoryPosition = randomHistory.AddLast(result);
+                    else if (direction &lt; 0)
+                        currentRandomHistoryPosition = randomHistory.AddFirst(result);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(randomSelectAlgorithm), randomSelectAlgorithm.Value, &quot;Unsupported random select algorithm&quot;);
+            }
+
+            return result;
+        }
+
+        private void restartTrack()
+        {
+            // if not scheduled, the previously track will be stopped one frame later (see ScheduleAfterChildren logic in GameBase).
+            // we probably want to move this to a central method for switching to a new working beatmap in the future.
+            Schedule(() =&gt; CurrentTrack.RestartAsync());
+        }
+
+        private WorkingBeatmap? current;
+
+        private TrackChangeDirection? queuedDirection;
+
+        private IEnumerable&lt;Live&lt;BeatmapSetInfo&gt;&gt; getBeatmapSets(bool allowProtectedTracks) =&gt;
+            realm.Realm.All&lt;BeatmapSetInfo&gt;().Where(s =&gt; !s.DeletePending)
+                 .AsEnumerable()
+                 .Select(s =&gt; new RealmLive&lt;BeatmapSetInfo&gt;(s, realm))
+                 .Where(i =&gt; (allowProtectedTracks || !i.Value.Protected)
+                             &amp;&amp; (SeasonalUIConfig.ENABLED || i.Value.Hash != IntroChristmas.CHRISTMAS_BEATMAP_SET_HASH));
+
+        private void changeBeatmap(WorkingBeatmap newWorking)
+        {
+            // This method can potentially be triggered multiple times as it is eagerly fired in next() / prev() to ensure correct execution order
+            // (changeBeatmap must be called before consumers receive the bindable changed event, which is not the case when the local beatmap bindable is updated directly).
+            if (newWorking == current)
+                return;
+
+            var lastWorking = current;
+
+            TrackChangeDirection direction = TrackChangeDirection.None;
+
+            bool audioEquals = newWorking.BeatmapInfo?.AudioEquals(current?.BeatmapInfo) == true;
+
+            if (current != null)
+            {
+                if (audioEquals)
+                    direction = TrackChangeDirection.None;
+                else if (queuedDirection.HasValue)
+                {
+                    direction = queuedDirection.Value;
+                    queuedDirection = null;
+                }
+                else
+                {
+                    // figure out the best direction based on order in playlist.
+                    int last = getBeatmapSets(allowProtectedTracks: false).TakeWhile(b =&gt; !b.Value.Equals(current.BeatmapSetInfo)).Count();
+                    int next = getBeatmapSets(allowProtectedTracks: false).TakeWhile(b =&gt; !b.Value.Equals(newWorking.BeatmapSetInfo)).Count();
+
+                    direction = last &gt; next ? TrackChangeDirection.Prev : TrackChangeDirection.Next;
+                }
+            }
+
+            current = newWorking;
+
+            if (lastWorking == null || !lastWorking.TryTransferTrack(current))
+                changeTrack();
+
+            TrackChanged?.Invoke(current, direction);
+
+            ResetTrackAdjustments();
+
+            queuedDirection = null;
+
+            // this will be a noop if coming from the beatmapChanged event.
+            // the exception is local operations like next/prev, where we want to complete loading the track before sending out a change.
+            if (beatmap.Value != current &amp;&amp; beatmap is Bindable&lt;WorkingBeatmap&gt; working)
+                working.Value = current;
+        }
+
+        private void changeTrack()
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            const double track_fade_in_time = 220;
+            const double track_fade_out_time = 150;
+
+            var queuedTrack = getQueuedTrack();
+            var lastTrack = CurrentTrack;
+
+            lastTrack.Completed -= onTrackCompleted;
+            lastTrack.VolumeTo(0, track_fade_out_time, Easing.Out).Expire();
+
+            CurrentTrack = queuedTrack;
+
+            queuedTrack.Volume.Value = 0;
+            AddInternal(queuedTrack);
+            queuedTrack.Delay(DELAY_BEFORE_FADE).VolumeTo(1, track_fade_in_time);
+        }
+
+        private DrawableTrack getQueuedTrack()
+        {
+            // Important to keep this in its own method to avoid inadvertently capturing unnecessary variables in the callback.
+            // Can lead to leaks.
+            var queuedTrack = new DrawableTrack(current!.LoadTrack());
+            queuedTrack.Completed += onTrackCompleted;
+            return queuedTrack;
+        }
+
+        private void onTrackCompleted()
+        {
+            if (!CurrentTrack.Looping &amp;&amp; !beatmap.Disabled &amp;&amp; AllowTrackControl.Value)
+                NextTrack(allowProtectedTracks: true);
+        }
+
+        private bool applyModTrackAdjustments;
+
+        /// &lt;summary&gt;
+        /// Whether mod track adjustments are allowed to be applied.
+        /// &lt;/summary&gt;
+        public bool ApplyModTrackAdjustments
+        {
+            get =&gt; applyModTrackAdjustments;
+            set
+            {
+                if (applyModTrackAdjustments == value)
+                    return;
+
+                applyModTrackAdjustments = value;
+                ResetTrackAdjustments();
+            }
+        }
+
+        private AudioAdjustments? modTrackAdjustments;
+
+        /// &lt;summary&gt;
+        /// Resets the adjustments currently applied on &lt;see cref=&quot;CurrentTrack&quot;/&gt; and applies the mod adjustments if &lt;see cref=&quot;ApplyModTrackAdjustments&quot;/&gt; is &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Does not reset any adjustments applied directly to the beatmap track.
+        /// &lt;/remarks&gt;
+        public void ResetTrackAdjustments()
+        {
+            // todo: we probably want a helper method rather than this.
+            CurrentTrack.RemoveAllAdjustments(AdjustableProperty.Balance);
+            CurrentTrack.RemoveAllAdjustments(AdjustableProperty.Frequency);
+            CurrentTrack.RemoveAllAdjustments(AdjustableProperty.Tempo);
+            CurrentTrack.RemoveAllAdjustments(AdjustableProperty.Volume);
+
+            if (applyModTrackAdjustments)
+            {
+                CurrentTrack.BindAdjustments(modTrackAdjustments = new AudioAdjustments());
+
+                foreach (var mod in mods.Value.OfType&lt;IApplicableToTrack&gt;())
+                    mod.ApplyToTrack(modTrackAdjustments);
+            }
+        }
+    }
+
+    public class DuckParameters
+    {
+        /// &lt;summary&gt;
+        /// The duration of the ducking transition in milliseconds.
+        /// Defaults to 100 ms.
+        /// &lt;/summary&gt;
+        public double DuckDuration = 100;
+
+        /// &lt;summary&gt;
+        /// The final volume which should be reached during ducking, when 0 is silent and 1 is original volume.
+        /// Defaults to 25%.
+        /// &lt;/summary&gt;
+        public double DuckVolumeTo = 0.25;
+
+        /// &lt;summary&gt;
+        /// The low-pass cutoff frequency which should be reached during ducking. If not required, set to &lt;see cref=&quot;AudioFilter.MAX_LOWPASS_CUTOFF&quot;/&gt;.
+        /// Defaults to 300 Hz.
+        /// &lt;/summary&gt;
+        public int DuckCutoffTo = 300;
+
+        /// &lt;summary&gt;
+        /// The easing curve to be applied during ducking.
+        /// Defaults to &lt;see cref=&quot;Easing.Out&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public Easing DuckEasing = Easing.Out;
+
+        /// &lt;summary&gt;
+        /// The duration of the restoration transition in milliseconds.
+        /// Defaults to 500 ms.
+        /// &lt;/summary&gt;
+        public double RestoreDuration = 500;
+
+        /// &lt;summary&gt;
+        /// The easing curve to be applied during restoration.
+        /// Defaults to &lt;see cref=&quot;Easing.In&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public Easing RestoreEasing = Easing.In;
+    }
+
+    public enum TrackChangeDirection
+    {
+        None,
+        Next,
+        Prev
+    }
+
+    public enum PreviousTrackResult
+    {
+        None,
+        Restart,
+        Previous
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,43,34,47,0],[34,48,34,52,0],[34,57,34,62,0],[46,42,46,46,0],[46,47,46,59,0],[51,9,51,81,0],[53,9,53,71,0],[62,53,62,57,0],[62,58,62,62,0],[62,67,62,72,0],[65,54,65,58,0],[65,59,65,63,0],[65,68,65,73,0],[67,45,67,49,0],[67,50,67,62,0],[67,67,67,108,0],[70,37,70,41,0],[70,42,70,46,0],[70,51,70,56,0],[72,9,72,61,0],[74,9,74,81,0],[76,9,76,53,0],[78,9,78,120,0],[80,9,80,114,0],[85,9,85,10,0],[86,13,86,78,0],[87,13,87,84,0],[88,13,88,62,0],[90,13,90,93,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,33,0],[97,13,98,13,0],[98,13,98,14,0],[98,14,99,17,0],[99,17,99,40,0],[99,40,100,21,0],[100,21,100,47,0],[100,47,101,13,0],[101,13,101,14,0],[101,14,101,22,0],[102,13,102,40,0],[102,40,102,63,0],[102,63,102,71,0],[103,9,103,10,0],[109,9,109,10,0],[110,13,110,33,0],[111,17,111,24,0],[113,13,113,27,0],[114,13,114,70,0],[115,9,115,10,0],[120,34,120,56,0],[125,36,125,60,0],[130,9,130,10,0],[131,13,131,36,0],[132,13,133,13,0],[133,13,133,14,0],[133,14,134,17,0],[134,17,134,46,0],[134,46,135,21,0],[135,21,135,28,0],[135,28,137,17,0],[137,17,137,45,0],[137,45,138,13,0],[138,13,138,14,0],[138,14,138,16,0],[139,9,139,10,0],[146,9,146,10,0],[147,13,147,36,0],[147,37,147,44,0],[149,13,149,90,0],[150,13,150,14,0],[151,17,151,66,0],[152,21,152,28,0],[154,17,154,114,0],[155,17,155,55,0],[156,13,156,14,0],[157,18,157,33,0],[158,13,158,14,0],[159,17,159,112,0],[160,17,160,24,0],[161,13,161,14,0],[162,9,162,10,0],[175,9,175,10,0],[176,13,176,61,0],[177,17,177,30,0],[179,13,179,33,0],[180,17,180,44,0],[182,13,182,25,0],[183,17,183,45,0],[184,18,184,33,0],[185,17,185,43,0],[187,13,187,25,0],[188,9,188,10,0],[199,9,199,10,0],[200,13,200,61,0],[201,17,201,24,0],[203,13,203,51,0],[204,13,204,40,0],[205,17,205,42,0],[206,9,206,10,0],[213,9,213,10,0],[214,13,214,42,0],[215,17,215,30,0],[217,13,217,40,0],[218,17,218,28,0],[220,17,220,45,0],[222,13,222,25,0],[223,9,223,10,0],[230,120,231,9,0],[231,9,231,10,0],[231,10,232,13,0],[232,13,232,66,0],[232,66,233,13,0],[233,13,233,49,0],[233,49,234,17,0],[234,17,234,40,0],[234,40,235,9,0],[235,9,235,10,0],[235,10,235,11,0],[243,9,243,10,0],[244,13,244,62,0],[245,17,245,49,0],[247,13,247,68,0],[249,13,249,62,0],[250,13,250,14,0],[251,17,251,27,0],[252,17,252,52,0],[255,13,255,57,0],[259,13,259,31,0],[260,17,260,71,0],[262,13,262,14,0],[263,17,263,83,0],[263,83,263,123,0],[263,123,264,87,0],[265,13,265,14,0],[267,13,267,37,0],[268,13,268,14,0],[269,17,269,95,0],[270,17,270,32,0],[271,17,271,53,0],[274,13,274,45,0],[275,9,275,10,0],[283,95,284,9,0],[284,9,284,10,0],[284,10,285,13,0],[285,13,285,51,0],[285,51,286,13,0],[286,13,286,21,0],[286,21,287,17,0],[287,17,287,37,0],[287,37,288,9,0],[288,9,288,10,0],[288,10,288,11,0],[290,9,290,91,0],[297,9,297,10,0],[299,13,299,41,0],[300,17,300,51,0],[300,51,300,52,0],[300,52,300,53,0],[300,53,300,54,0],[300,54,300,56,0],[302,13,302,49,0],[304,13,304,44,0],[306,13,306,72,0],[306,72,306,86,0],[306,86,306,89,0],[307,13,307,73,0],[307,73,307,87,0],[307,87,307,90,0],[309,13,309,129,0],[310,13,310,143,0],[312,13,312,57,0],[314,38,315,13,0],[315,13,315,14,0],[315,14,316,17,0],[316,17,316,56,0],[316,56,317,21,0],[317,21,317,28,0],[317,28,319,17,0],[319,17,319,84,0],[319,84,319,98,0],[319,98,319,100,0],[319,100,320,17,0],[320,17,320,85,0],[320,85,320,99,0],[320,99,320,101,0],[320,101,323,17,0],[323,17,323,169,0],[323,169,324,17,0],[324,17,324,156,0],[324,156,325,13,0],[325,13,325,14,0],[325,14,325,15,0],[326,9,326,10,0],[334,9,334,10,0],[336,13,336,41,0],[337,17,337,24,0],[339,13,339,49,0],[341,13,341,58,0],[343,13,343,76,0],[344,9,344,10,0],[347,9,347,10,0],[348,13,348,62,0],[349,17,349,30,0],[351,13,351,57,0],[355,13,355,31,0],[356,17,356,70,0],[358,13,358,14,0],[359,17,359,83,0],[359,83,359,123,0],[359,123,360,88,0],[361,13,361,14,0],[363,13,363,80,0],[365,13,365,41,0],[366,13,366,14,0],[367,17,367,76,0],[368,17,368,32,0],[369,17,369,29,0],[372,13,372,26,0],[373,9,373,10,0],[376,9,376,10,0],[379,13,379,78,0],[381,13,381,41,0],[382,17,382,29,0],[386,13,386,41,0],[387,17,387,46,0],[390,13,390,41,0],[390,41,390,80,0],[390,80,390,82,0],[392,13,392,54,0],[393,13,393,14,0],[394,17,394,84,0],[395,17,395,18,0],[396,21,396,90,0],[397,21,397,63,0],[400,17,400,80,0],[401,17,401,18,0],[402,21,402,86,0],[403,21,403,63,0],[405,13,405,14,0],[410,13,410,49,0],[413,21,413,73,0],[414,21,414,27,0],[417,21,417,88,0],[419,21,419,53,0],[420,21,420,22,0],[421,25,421,53,0],[421,53,421,92,0],[421,92,421,94,0],[422,25,422,57,0],[423,25,423,47,0],[424,21,424,22,0],[426,21,426,81,0],[428,21,430,108,0],[435,21,435,39,0],[436,25,436,86,0],[437,26,437,44,0],[438,25,438,87,0],[439,21,439,27,0],[442,21,442,158,0],[445,13,445,27,0],[446,9,446,10,0],[449,9,449,10,0],[452,13,452,28,0],[452,28,452,55,0],[452,55,452,57,0],[453,9,453,10,0],[460,13,462,31,0],[462,31,462,70,0],[462,70,463,30,0],[463,30,464,120,0],[464,120,464,121,0],[467,9,467,10,0],[470,13,470,39,0],[471,17,471,24,0],[473,13,473,39,0],[475,13,475,72,0],[477,13,477,98,0],[479,13,479,33,0],[480,13,480,14,0],[481,17,481,33,0],[482,21,482,59,0],[483,22,483,51,0],[484,17,484,18,0],[485,21,485,55,0],[486,21,486,44,0],[487,17,487,18,0],[489,17,489,18,0],[491,21,491,91,0],[491,91,491,130,0],[491,130,491,140,0],[492,21,492,91,0],[492,91,492,133,0],[492,133,492,143,0],[494,21,494,101,0],[495,17,495,18,0],[496,13,496,14,0],[498,13,498,34,0],[500,13,500,79,0],[501,17,501,31,0],[503,13,503,54,0],[505,13,505,37,0],[507,13,507,36,0],[511,13,511,89,0],[512,17,512,41,0],[513,9,513,10,0],[516,9,516,10,0],[517,13,517,55,0],[522,13,522,48,0],[523,13,523,42,0],[525,13,525,53,0],[526,13,526,77,0],[528,13,528,40,0],[530,13,530,42,0],[531,13,531,38,0],[532,13,532,82,0],[533,9,533,10,0],[536,9,536,10,0],[539,13,539,71,0],[540,13,540,55,0],[541,13,541,32,0],[542,9,542,10,0],[545,9,545,10,0],[546,13,546,87,0],[547,17,547,55,0],[548,9,548,10,0],[557,20,557,44,0],[559,13,559,14,0],[560,17,560,55,0],[561,21,561,28,0],[563,17,563,50,0],[564,17,564,41,0],[565,13,565,14,0],[577,9,577,10,0],[579,13,579,75,0],[580,13,580,77,0],[581,13,581,73,0],[582,13,582,74,0],[584,13,584,42,0],[585,13,585,14,0],[586,17,586,92,0],[588,17,588,24,0],[588,26,588,33,0],[588,34,588,36,0],[588,37,588,76,0],[589,21,589,59,0],[590,13,590,14,0],[591,9,591,10,0],[600,9,600,42,0],[606,9,606,43,0],[612,9,612,39,0],[618,9,618,47,0],[624,9,624,45,0],[630,9,630,49,0]]);
+    </script>
+  </body>
+</html>

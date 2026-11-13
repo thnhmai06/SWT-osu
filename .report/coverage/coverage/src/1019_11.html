@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Mods/OsuModBlinds.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Osu.Objects;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Scoring;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Osu.Mods
+{
+    public partial class OsuModBlinds : ModBlinds, IApplicableToDrawableRuleset&lt;OsuHitObject&gt;, IApplicableToHealthProcessor
+    {
+        public override string Name =&gt; &quot;Blinds&quot;;
+        public override LocalisableString Description =&gt; &quot;Play with blinds on your screen.&quot;;
+        public override string Acronym =&gt; &quot;BL&quot;;
+
+        public override IconUsage? Icon =&gt; OsuIcon.ModBlinds;
+        public override ModType Type =&gt; ModType.DifficultyIncrease;
+
+        public override Type[] IncompatibleMods =&gt; new[] { typeof(OsuModFlashlight) };
+        public override bool Ranked =&gt; true;
+
+        private DrawableOsuBlinds blinds = null!;
+
+        public void ApplyToDrawableRuleset(DrawableRuleset&lt;OsuHitObject&gt; drawableRuleset)
+        {
+            drawableRuleset.Overlays.Add(blinds = new DrawableOsuBlinds(drawableRuleset.Playfield, drawableRuleset.Beatmap));
+        }
+
+        public void ApplyToHealthProcessor(HealthProcessor healthProcessor)
+        {
+            healthProcessor.Health.ValueChanged += health =&gt; { blinds.AnimateClosedness((float)health.NewValue); };
+        }
+
+        public ScoreRank AdjustRank(ScoreRank rank, double accuracy) =&gt; rank;
+
+        /// &lt;summary&gt;
+        /// Element for the Blinds mod drawing 2 black boxes covering the whole screen which resize inside a restricted area with some leniency.
+        /// &lt;/summary&gt;
+        public partial class DrawableOsuBlinds : Container
+        {
+            /// &lt;summary&gt;
+            /// Black background boxes behind blind panel textures.
+            /// &lt;/summary&gt;
+            private Box blackBoxLeft = null!, blackBoxRight = null!;
+
+            private Drawable panelLeft = null!;
+            private Drawable panelRight = null!;
+            private Drawable bgPanelLeft = null!;
+            private Drawable bgPanelRight = null!;
+
+            private readonly Beatmap&lt;OsuHitObject&gt; beatmap;
+
+            /// &lt;summary&gt;
+            /// Value between 0 and 1 setting a maximum &quot;closedness&quot; for the blinds.
+            /// Useful for animating how far the blinds can be opened while keeping them at the original position if they are wider open than this.
+            /// &lt;/summary&gt;
+            private const float target_clamp = 1;
+
+            private readonly float targetBreakMultiplier;
+            private readonly float easing;
+
+            private readonly CompositeDrawable restrictTo;
+
+            /// &lt;summary&gt;
+            /// &lt;para&gt;
+            /// Percentage of playfield to extend blinds over. Basically moves the origin points where the blinds start.
+            /// &lt;/para&gt;
+            /// &lt;para&gt;
+            /// -1 would mean the blinds always cover the whole screen no matter health.
+            /// 0 would mean the blinds will only ever be on the edge of the playfield on 0% health.
+            /// 1 would mean the blinds are fully outside the playfield on 50% health.
+            /// Infinity would mean the blinds are always outside the playfield except on 100% health.
+            /// &lt;/para&gt;
+            /// &lt;/summary&gt;
+            private const float leniency = 0.1f;
+
+            public DrawableOsuBlinds(CompositeDrawable restrictTo, Beatmap&lt;OsuHitObject&gt; beatmap)
+            {
+                this.restrictTo = restrictTo;
+                this.beatmap = beatmap;
+
+                targetBreakMultiplier = 0;
+                easing = 1;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                RelativeSizeAxes = Axes.Both;
+
+                Children = new[]
+                {
+                    blackBoxLeft = new Box
+                    {
+                        Anchor = Anchor.TopLeft,
+                        Origin = Anchor.TopLeft,
+                        Colour = Color4.Black,
+                        RelativeSizeAxes = Axes.Y,
+                    },
+                    blackBoxRight = new Box
+                    {
+                        Anchor = Anchor.TopRight,
+                        Origin = Anchor.TopRight,
+                        Colour = Color4.Black,
+                        RelativeSizeAxes = Axes.Y,
+                    },
+                    bgPanelLeft = new ModBlindsPanel
+                    {
+                        Origin = Anchor.TopRight,
+                        Colour = Color4.Gray,
+                    },
+                    panelLeft = new ModBlindsPanel { Origin = Anchor.TopRight, },
+                    bgPanelRight = new ModBlindsPanel { Colour = Color4.Gray },
+                    panelRight = new ModBlindsPanel()
+                };
+            }
+
+            private float calculateGap(float value) =&gt; Math.Clamp(value, 0, target_clamp) * targetBreakMultiplier;
+
+            // lagrange polinominal for (0,0) (0.6,0.4) (1,1) should make a good curve
+            private static float applyAdjustmentCurve(float value) =&gt; 0.6f * value * value + 0.4f * value;
+
+            protected override void Update()
+            {
+                float start, end;
+
+                if (Precision.AlmostEquals(restrictTo.Rotation, 0))
+                {
+                    start = Parent!.ToLocalSpace(restrictTo.ScreenSpaceDrawQuad.TopLeft).X;
+                    end = Parent!.ToLocalSpace(restrictTo.ScreenSpaceDrawQuad.TopRight).X;
+                }
+                else
+                {
+                    float center = restrictTo.ToSpaceOfOtherDrawable(restrictTo.OriginPosition, Parent!).X;
+                    float halfDiagonal = (restrictTo.DrawSize / 2).LengthFast;
+
+                    start = center - halfDiagonal;
+                    end = center + halfDiagonal;
+                }
+
+                float rawWidth = end - start;
+
+                start -= rawWidth * leniency * 0.5f;
+                end += rawWidth * leniency * 0.5f;
+
+                float width = (end - start) * 0.5f * applyAdjustmentCurve(calculateGap(easing));
+
+                // different values in case the playfield ever moves from center to somewhere else.
+                blackBoxLeft.Width = start + width;
+                blackBoxRight.Width = DrawWidth - end + width;
+
+                panelLeft.X = start + width;
+                panelRight.X = end - width;
+                bgPanelLeft.X = start;
+                bgPanelRight.X = end;
+            }
+
+            protected override void LoadComplete()
+            {
+                const float break_open_early = 500;
+                const float break_close_late = 250;
+
+                base.LoadComplete();
+
+                var firstObj = beatmap.HitObjects[0];
+                double startDelay = firstObj.StartTime - firstObj.TimePreempt;
+
+                using (BeginAbsoluteSequence(startDelay + break_close_late))
+                    leaveBreak();
+
+                foreach (var breakInfo in beatmap.Breaks)
+                {
+                    if (breakInfo.HasEffect)
+                    {
+                        using (BeginAbsoluteSequence(breakInfo.StartTime - break_open_early))
+                        {
+                            enterBreak();
+                            using (BeginDelayedSequence(breakInfo.Duration + break_open_early + break_close_late))
+                                leaveBreak();
+                        }
+                    }
+                }
+            }
+
+            private void enterBreak() =&gt; this.TransformTo(nameof(targetBreakMultiplier), 0f, 1000, Easing.OutSine);
+
+            private void leaveBreak() =&gt; this.TransformTo(nameof(targetBreakMultiplier), 1f, 2500, Easing.OutBounce);
+
+            /// &lt;summary&gt;
+            /// 0 is open, 1 is closed.
+            /// &lt;/summary&gt;
+            public void AnimateClosedness(float value) =&gt; this.TransformTo(nameof(easing), value, 200, Easing.OutQuint);
+
+            public partial class ModBlindsPanel : Sprite
+            {
+                [BackgroundDependencyLoader]
+                private void load(TextureStore textures)
+                {
+                    Texture = textures.Get(&quot;Gameplay/osu/blinds-panel&quot;);
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,40,26,48,0],[27,58,27,92,0],[28,43,28,47,1],[30,44,30,61,0],[31,41,31,67,1],[33,52,33,86,1],[34,40,34,44,0],[36,9,36,50,1],[39,9,39,10,0],[40,13,40,126,0],[41,9,41,10,0],[44,9,44,10,0],[45,13,45,62,0],[45,62,45,63,0],[45,63,45,64,0],[45,64,45,113,0],[45,113,45,114,0],[45,114,45,115,0],[45,115,45,116,0],[46,9,46,10,0],[48,73,48,77,0],[58,13,58,45,0],[58,47,58,68,0],[60,13,60,48,0],[61,13,61,49,0],[62,13,62,50,0],[63,13,63,51,0],[91,13,91,98,0],[92,13,92,14,0],[93,17,93,46,0],[94,17,94,40,0],[96,17,96,43,0],[97,17,97,28,0],[98,13,98,14,0],[102,13,102,14,0],[103,17,103,46,0],[105,17,129,19,0],[130,13,130,14,0],[132,56,132,114,0],[135,71,135,106,0],[138,13,138,14,0],[141,17,141,68,0],[142,17,142,18,0],[143,21,143,92,0],[144,21,144,91,0],[145,17,145,18,0],[147,17,147,18,0],[148,21,148,108,0],[149,21,149,79,0],[151,21,151,51,0],[152,21,152,49,0],[153,17,153,18,0],[155,17,155,46,0],[157,17,157,53,0],[158,17,158,51,0],[160,17,160,97,0],[163,17,163,52,0],[164,17,164,63,0],[166,17,166,45,0],[167,17,167,44,0],[168,17,168,39,0],[169,17,169,38,0],[170,13,170,14,0],[173,13,173,14,0],[177,17,177,37,0],[179,17,179,54,0],[180,17,180,79,0],[182,17,182,77,0],[183,21,183,34,0],[185,17,185,24,0],[185,26,185,39,0],[185,40,185,42,0],[185,43,185,57,0],[186,17,186,18,0],[187,21,187,45,0],[188,21,188,22,0],[189,25,189,94,0],[190,25,190,26,0],[191,29,191,42,0],[192,29,192,115,0],[193,33,193,46,0],[194,25,194,26,0],[195,21,195,22,0],[196,17,196,18,0],[197,13,197,14,0],[199,42,199,115,0],[201,42,201,117,0],[206,59,206,120,0],[212,17,212,18,0],[213,21,213,73,0],[214,17,214,18,0]]);
+    </script>
+  </body>
+</html>

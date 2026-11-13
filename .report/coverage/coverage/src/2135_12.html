@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/GameplayTest/EditorPlayer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Input.Bindings;
+using osu.Game.Overlays;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Play.Leaderboards;
+using osu.Game.Screens.Ranking;
+using osu.Game.Users;
+
+namespace osu.Game.Screens.Edit.GameplayTest
+{
+    public partial class EditorPlayer : Player, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        private readonly Editor editor;
+        private readonly EditorState editorState;
+
+        protected override UserActivity InitialActivity =&gt; new UserActivity.TestingBeatmap(Beatmap.Value.BeatmapInfo);
+
+        [Resolved]
+        private MusicController musicController { get; set; } = null!;
+
+        [Cached(typeof(IGameplayLeaderboardProvider))]
+        private EmptyGameplayLeaderboardProvider leaderboardProvider = new EmptyGameplayLeaderboardProvider();
+
+        public EditorPlayer(Editor editor)
+            : base(new PlayerConfiguration { ShowResults = false })
+        {
+            this.editor = editor;
+            editorState = editor.GetState();
+        }
+
+        protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart)
+        {
+            var masterGameplayClockContainer = new MasterGameplayClockContainer(beatmap, gameplayStart);
+
+            // Only reset the time to the current point if the editor is later than the normal start time (and the first object).
+            // This allows more sane test playing from the start of the beatmap (ie. correctly adding lead-in time).
+            if (editorState.Time &gt; gameplayStart &amp;&amp; editorState.Time &gt; DrawableRuleset.Objects.FirstOrDefault()?.StartTime)
+                masterGameplayClockContainer.Reset(editorState.Time);
+
+            return masterGameplayClockContainer;
+        }
+
+        protected override void LoadAsyncComplete()
+        {
+            base.LoadAsyncComplete();
+
+            if (!LoadedBeatmapSuccessfully)
+                return;
+
+            // This hack needs to be called to install its hooks before drawable hit objects get the chance to run update logic,
+            // because it will not work otherwise due to being too late (various effects of the objects getting missed will have already taken place).
+            preventMissOnPreviousHitObjects();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // this will notify components such as the skin&#39;s combo counter, which needs to happen on the update thread
+            // and therefore can&#39;t happen alongside `preventMissOnPreviousHitObjects()` in `LoadAsyncComplete()`
+            markPreviousObjectsHit();
+
+            ScoreProcessor.HasCompleted.BindValueChanged(completed =&gt;
+            {
+                if (completed.NewValue)
+                {
+                    Scheduler.AddDelayed(() =&gt;
+                    {
+                        if (this.IsCurrentScreen())
+                            this.Exit();
+                    }, RESULTS_DISPLAY_DELAY);
+                }
+            });
+        }
+
+        private void markPreviousObjectsHit()
+        {
+            foreach (var hitObject in enumerateHitObjects(DrawableRuleset.Objects, editorState.Time))
+            {
+                var judgement = hitObject.Judgement;
+                // this is very dodgy because there&#39;s no guarantee that `JudgementResult` is the correct result type for the object.
+                // however, instantiating the correct one is difficult here, because `JudgementResult`s are constructed by DHOs
+                // and because of pooling we don&#39;t *have* a DHO to use here.
+                // this basically mostly attempts to fill holes in `ScoreProcessor` tallies
+                // so that gameplay can actually complete at the end of the map when entering gameplay test midway through it, and not much else.
+                var result = new JudgementResult(hitObject, judgement)
+                {
+                    Type = judgement.MaxResult,
+                    GameplayRate = GameplayClockContainer.GetTrueGameplayRate(),
+                };
+
+                HealthProcessor.ApplyResult(result);
+                ScoreProcessor.ApplyResult(result);
+            }
+
+            static IEnumerable&lt;HitObject&gt; enumerateHitObjects(IEnumerable&lt;HitObject&gt; hitObjects, double cutoffTime)
+            {
+                foreach (var hitObject in hitObjects)
+                {
+                    foreach (var nested in enumerateHitObjects(hitObject.NestedHitObjects, cutoffTime))
+                    {
+                        if (nested.GetEndTime() &lt; cutoffTime)
+                            yield return nested;
+                    }
+
+                    if (hitObject.GetEndTime() &lt; cutoffTime)
+                        yield return hitObject;
+                }
+            }
+        }
+
+        private void preventMissOnPreviousHitObjects()
+        {
+            void preventMiss(HitObject hitObject)
+            {
+                var drawableObject = DrawableRuleset.Playfield.HitObjectContainer
+                                                    .AliveObjects
+                                                    .SingleOrDefault(it =&gt; it.HitObject == hitObject);
+
+                if (drawableObject != null)
+                    preventMissOnDrawable(drawableObject);
+            }
+
+            void preventMissOnDrawable(DrawableHitObject drawableObject)
+            {
+                foreach (var nested in drawableObject.NestedHitObjects)
+                    preventMissOnDrawable(nested);
+
+                if (drawableObject.Entry != null &amp;&amp; drawableObject.HitObject.GetEndTime() &lt; editorState.Time)
+                {
+                    var result = drawableObject.CreateResult(drawableObject.HitObject.Judgement);
+                    result.Type = result.Judgement.MaxResult;
+                    drawableObject.Entry.Result = result;
+                }
+            }
+
+            void removeListener()
+            {
+                if (!DrawableRuleset.Playfield.IsLoaded)
+                {
+                    Schedule(removeListener);
+                    return;
+                }
+
+                DrawableRuleset.Playfield.HitObjectUsageBegan -= preventMiss;
+            }
+
+            DrawableRuleset.Playfield.HitObjectUsageBegan += preventMiss;
+
+            Schedule(removeListener);
+        }
+
+        protected override void PrepareReplay()
+        {
+            // don&#39;t record replays.
+        }
+
+        protected override bool CheckModsAllowFailure() =&gt; false; // never fail.
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.EditorTestPlayToggleAutoplay:
+                    if (PauseOverlay?.State.Value == Visibility.Visible || DrawableRuleset.ResumeOverlay?.State.Value == Visibility.Visible)
+                        return true;
+
+                    toggleAutoplay();
+                    return true;
+
+                case GlobalAction.EditorTestPlayToggleQuickPause:
+                    if (PauseOverlay?.State.Value == Visibility.Visible || DrawableRuleset.ResumeOverlay?.State.Value == Visibility.Visible)
+                        return true;
+
+                    toggleQuickPause();
+                    return true;
+
+                case GlobalAction.EditorTestPlayQuickExitToInitialTime:
+                    quickExit(false);
+                    return true;
+
+                case GlobalAction.EditorTestPlayQuickExitToCurrentTime:
+                    quickExit(true);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        private void toggleAutoplay()
+        {
+            if (DrawableRuleset.ReplayScore == null)
+            {
+                var autoplay = Ruleset.Value.CreateInstance().GetAutoplayMod();
+                if (autoplay == null)
+                    return;
+
+                var score = autoplay.CreateScoreFromReplayData(GameplayState.Beatmap, [autoplay]);
+
+                // remove past frames to prevent replay frame handler from seeking back to start in an attempt to play back the entirety of the replay.
+                score.Replay.Frames.RemoveAll(f =&gt; f.Time &lt;= GameplayClockContainer.CurrentTime);
+
+                DrawableRuleset.SetReplayScore(score);
+                // Without this schedule, the `GlobalCursorDisplay.Update()` machinery will fade the gameplay cursor out, but we still want it to show.
+                Schedule(() =&gt; DrawableRuleset.Cursor?.Show());
+            }
+            else
+                DrawableRuleset.SetReplayScore(null);
+        }
+
+        private void toggleQuickPause()
+        {
+            if (GameplayClockContainer.IsPaused.Value)
+                GameplayClockContainer.Start();
+            else
+                GameplayClockContainer.Stop();
+        }
+
+        private void quickExit(bool useCurrentTime)
+        {
+            if (useCurrentTime)
+                editorState.Time = GameplayClockContainer.CurrentTime;
+
+            editor.RestoreState(editorState);
+            this.Exit();
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            // finish alpha transforms on entering to avoid gameplay starting in a half-hidden state.
+            // the finish calls are purposefully not propagated to children to avoid messing up their state.
+            FinishTransforms();
+            GameplayClockContainer.FinishTransforms(false, nameof(Alpha));
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            musicController.Stop();
+
+            editor.RestoreState(editorState);
+            return base.OnExiting(e);
+        }
+
+        protected override ResultsScreen CreateResults(ScoreInfo score) =&gt; throw new NotSupportedException();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,60,32,118,0],[35,51,35,55,0],[35,56,35,60,0],[35,65,35,70,0],[38,9,38,111,0],[41,15,41,68,0],[42,9,42,10,0],[43,13,43,34,0],[44,13,44,45,0],[45,9,45,10,0],[48,9,48,10,0],[49,13,49,105,0],[53,13,53,124,0],[54,17,54,70,0],[56,13,56,49,0],[57,9,57,10,0],[60,9,60,10,0],[61,13,61,38,0],[63,13,63,44,0],[64,17,64,24,0],[68,13,68,47,0],[69,9,69,10,0],[72,9,72,10,0],[73,13,73,33,0],[77,13,77,38,0],[79,13,80,13,0],[80,13,80,14,0],[80,14,81,17,0],[81,17,81,40,0],[81,40,82,17,0],[82,17,82,18,0],[82,18,83,21,0],[83,21,84,21,0],[84,21,84,22,0],[84,22,85,25,0],[85,25,85,52,0],[85,52,86,29,0],[86,29,86,41,0],[86,41,87,21,0],[87,21,87,22,0],[87,22,87,47,0],[87,47,88,17,0],[88,17,88,18,0],[88,18,89,13,0],[89,13,89,14,0],[89,14,89,16,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,20,0],[94,22,94,35,0],[94,36,94,38,0],[94,39,94,101,0],[95,13,95,14,0],[96,17,96,53,0],[102,17,106,19,0],[108,17,108,53,0],[109,17,109,52,0],[110,13,110,14,0],[113,13,113,14,0],[114,17,114,24,0],[114,26,114,39,0],[114,40,114,42,0],[114,43,114,53,0],[115,17,115,18,0],[116,21,116,28,0],[116,30,116,40,0],[116,41,116,43,0],[116,44,116,103,0],[117,21,117,22,0],[118,25,118,62,0],[119,29,119,49,0],[120,21,120,22,0],[122,21,122,61,0],[123,25,123,48,0],[124,17,124,18,0],[125,13,125,14,0],[126,9,126,10,0],[129,9,129,10,0],[131,13,131,14,0],[132,17,134,76,0],[134,76,134,101,0],[134,101,134,103,0],[136,17,136,44,0],[137,21,137,59,0],[138,13,138,14,0],[141,13,141,14,0],[142,17,142,24,0],[142,26,142,36,0],[142,37,142,39,0],[142,40,142,71,0],[143,21,143,51,0],[145,17,145,110,0],[146,17,146,18,0],[147,21,147,98,0],[148,21,148,62,0],[149,21,149,58,0],[150,17,150,18,0],[151,13,151,14,0],[154,13,154,14,0],[155,17,155,57,0],[156,17,156,18,0],[157,21,157,46,0],[158,21,158,28,0],[161,17,161,78,0],[162,13,162,14,0],[164,13,164,74,0],[166,13,166,38,0],[167,9,167,10,0],[170,9,170,10,0],[172,9,172,10,0],[174,60,174,65,0],[177,9,177,10,0],[178,13,178,26,0],[179,17,179,30,0],[181,13,181,30,0],[184,21,184,141,0],[185,25,185,37,0],[187,21,187,38,0],[188,21,188,33,0],[191,21,191,141,0],[192,25,192,37,0],[194,21,194,40,0],[195,21,195,33,0],[198,21,198,38,0],[199,21,199,33,0],[202,21,202,37,0],[203,21,203,33,0],[206,21,206,34,0],[208,9,208,10,0],[211,9,211,10,0],[212,9,212,10,0],[215,9,215,10,0],[216,13,216,53,0],[217,13,217,14,0],[218,17,218,80,0],[219,17,219,38,0],[220,21,220,28,0],[222,17,222,99,0],[225,17,225,52,0],[225,52,225,96,0],[225,96,225,98,0],[227,17,227,55,0],[229,17,229,32,0],[229,32,229,62,0],[229,62,229,64,0],[230,13,230,14,0],[232,17,232,54,0],[233,9,233,10,0],[236,9,236,10,0],[237,13,237,55,0],[238,17,238,48,0],[240,17,240,47,0],[241,9,241,10,0],[244,9,244,10,0],[245,13,245,32,0],[246,17,246,71,0],[248,13,248,46,0],[249,13,249,25,0],[250,9,250,10,0],[253,9,253,10,0],[254,13,254,32,0],[258,13,258,32,0],[259,13,259,75,0],[260,9,260,10,0],[263,9,263,10,0],[264,13,264,36,0],[266,13,266,46,0],[267,13,267,38,0],[268,9,268,10,0],[270,76,270,109,0]]);
+    </script>
+  </body>
+</html>

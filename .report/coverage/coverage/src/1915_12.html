@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCard.SongPreview.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Transforms;
+using osu.Framework.Threading;
+using osu.Framework.Timing;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.API.Requests.Responses;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card
+{
+    public partial class RankedPlayCard
+    {
+        public partial class SongPreviewContainer : Container, IBeatSyncProvider
+        {
+            private const double minimum_beat_length = 800;
+
+            public readonly Bindable&lt;bool&gt; Enabled = new BindableBool(true);
+
+            public readonly Bindable&lt;bool&gt; CardHovered = new BindableBool(true);
+
+            public bool TrackLoaded =&gt; previewTrack?.TrackLoaded ?? false;
+
+            public bool IsRunning =&gt; previewTrack?.IsRunning ?? false;
+
+            protected override Container&lt;Drawable&gt; Content { get; }
+
+            private readonly Bindable&lt;bool&gt; trackRunning = new BindableBool();
+
+            private readonly Container overlayLayer;
+
+            private bool shouldBePlaying =&gt; Enabled.Value &amp;&amp; CardHovered.Value;
+
+            [Resolved]
+            private PreviewTrackManager previewTrackManager { get; set; } = null!;
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            public SongPreviewContainer()
+            {
+                InternalChildren =
+                [
+                    new PulseContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Children =
+                        [
+                            Content = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            overlayLayer = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            }
+                        ]
+                    },
+                ];
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Enabled.BindValueChanged(enabled =&gt;
+                {
+                    if (!enabled.NewValue)
+                    {
+                        stopPreviewIfAvailable();
+                        return;
+                    }
+
+                    if (shouldBePlaying)
+                    {
+                        startPreviewIfAvailable();
+                    }
+                });
+
+                CardHovered.BindValueChanged(selected =&gt;
+                {
+                    if (selected.NewValue &amp;&amp; shouldBePlaying)
+                    {
+                        startPreviewIfAvailable();
+                    }
+                });
+            }
+
+            private PreviewTrack? previewTrack;
+
+            public void LoadPreview(APIBeatmap beatmap)
+            {
+                Debug.Assert(previewTrack == null);
+
+                LoadComponentAsync(previewTrack = previewTrackManager.Get(beatmap.BeatmapSet!), track =&gt;
+                {
+                    AddInternal(track);
+
+                    track.Looping = true;
+                    track.Started += () =&gt; Schedule(() =&gt; trackRunning.Value = true);
+                    track.Stopped += () =&gt; Schedule(() =&gt; trackRunning.Value = false);
+
+                    setupBeatSyncProvider(track, beatmap);
+
+                    var cardColours = new RankedPlayCardContent.CardColours(beatmap, colours);
+
+                    overlayLayer.Add(new RippleVisualization(cardColours.Border)
+                    {
+                        TrackRunning = { BindTarget = trackRunning }
+                    });
+
+                    if (shouldBePlaying)
+                        startPreviewIfAvailable();
+                });
+            }
+
+            // The following weirdness is a workaround for single-threaded crashes when
+            // attempting to start a track before it&#39;s fully loaded.
+            //
+            // See https://github.com/ppy/osu-framework/pull/6727
+            //     https://github.com/ppy/osu/pull/37473
+            private ScheduledDelegate? trackStartStopAction;
+
+            private void startPreviewIfAvailable()
+            {
+                if (previewTrack == null)
+                    return;
+
+                trackStartStopAction?.Cancel();
+
+                if (!previewTrack.TrackLoaded)
+                {
+                    trackStartStopAction = Schedule(startPreviewIfAvailable);
+                    return;
+                }
+
+                previewTrack?.Start();
+            }
+
+            private void stopPreviewIfAvailable()
+            {
+                if (previewTrack == null)
+                    return;
+
+                trackStartStopAction?.Cancel();
+
+                if (!previewTrack.TrackLoaded)
+                {
+                    trackStartStopAction = Schedule(stopPreviewIfAvailable);
+                    return;
+                }
+
+                previewTrack?.Stop();
+            }
+
+            #region IBeatSyncProvider implementation
+
+            private readonly PreviewTrackClock beatSyncClock = new PreviewTrackClock();
+            private readonly ControlPointInfo controlPoints = new ControlPointInfo();
+
+            ChannelAmplitudes IHasAmplitudes.CurrentAmplitudes =&gt; ChannelAmplitudes.Empty;
+            ControlPointInfo IBeatSyncProvider.ControlPoints =&gt; controlPoints;
+            IClock IBeatSyncProvider.Clock =&gt; beatSyncClock;
+
+            private void setupBeatSyncProvider(PreviewTrack track, APIBeatmap beatmap)
+            {
+                beatSyncClock.Track = track;
+
+                controlPoints.Add(0, new TimingControlPoint
+                {
+                    BeatLength = beatmap.BPM &gt; 0 ? 60_000 / beatmap.BPM : TimingControlPoint.DEFAULT_BEAT_LENGTH
+                });
+            }
+
+            private class PreviewTrackClock : IClock
+            {
+                public PreviewTrack? Track { get; set; }
+
+                public double CurrentTime =&gt; Track?.CurrentTime ?? 0;
+                public double Rate =&gt; 1;
+                public bool IsRunning =&gt; Track?.IsRunning ?? false;
+            }
+
+            #endregion
+
+            private partial class PulseContainer : BeatSyncedContainer
+            {
+                public const double EXPAND_DURATION = 200;
+
+                public PulseContainer()
+                {
+                    MinimumBeatLength = minimum_beat_length;
+                }
+
+                protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, ChannelAmplitudes amplitudes)
+                {
+                    if (!IsBeatSyncedWithTrack)
+                        return;
+
+                    double beatLength = TimeUntilNextBeat;
+
+                    this.ScaleTo(1.02f, EXPAND_DURATION, Easing.In)
+                        .Then()
+                        .ScaleTo(1f, Math.Max(0, beatLength - EXPAND_DURATION), new CubicBezierEasingFunction(easeIn: 0.1f, easeOut: 1f));
+                }
+            }
+
+            private partial class RippleVisualization : BeatSyncedContainer
+            {
+                [Resolved]
+                private SongPreviewParticleContainer? particleContainer { get; set; }
+
+                public readonly IBindable&lt;bool&gt; TrackRunning = new Bindable&lt;bool&gt;();
+
+                private readonly Color4 accentColour;
+                private readonly Container rippleContainer;
+
+                public RippleVisualization(Color4 accentColour)
+                {
+                    this.accentColour = accentColour;
+
+                    MinimumBeatLength = minimum_beat_length;
+
+                    RelativeSizeAxes = Axes.Both;
+
+                    InternalChildren =
+                    [
+                        new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Masking = true,
+                            CornerRadius = CORNER_RADIUS + 1.5f,
+                            Blending = BlendingParameters.Additive,
+                            BorderThickness = 2f,
+                            BorderColour = this.accentColour.Opacity(0.5f),
+                            EdgeEffect = new EdgeEffectParameters
+                            {
+                                Colour = this.accentColour.Opacity(0.1f),
+                                Type = EdgeEffectType.Glow,
+                                Radius = 25f,
+                                Hollow = true,
+                            },
+                            Child = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Alpha = 0,
+                                AlwaysPresent = true,
+                                EdgeSmoothness = new Vector2(3),
+                            },
+                        },
+                        rippleContainer = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                        }
+                    ];
+                }
+
+                protected override void LoadComplete()
+                {
+                    base.LoadComplete();
+
+                    TrackRunning.BindValueChanged(e =&gt;
+                    {
+                        if (e.NewValue)
+                        {
+                            rippleContainer.Clear();
+                            this.FadeIn(100);
+                        }
+                        else
+                        {
+                            this.FadeOut(200);
+                        }
+                    }, true);
+                    FinishTransforms();
+                }
+
+                protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, ChannelAmplitudes amplitudes)
+                {
+                    if (!IsBeatSyncedWithTrack)
+                        return;
+
+                    var ripple = new Container
+                    {
+                        Size = DrawSize,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Masking = true,
+                        CornerRadius = CORNER_RADIUS,
+                        BorderThickness = 2,
+                        BorderColour = accentColour,
+                        Blending = BlendingParameters.Additive,
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Alpha = 0,
+                            AlwaysPresent = true,
+                        },
+                        Alpha = 0,
+                    };
+
+                    rippleContainer.Add(ripple);
+
+                    const float expansion = 20;
+
+                    // The animation here is delayed to be in sync with the pulse-container&#39;s expansion animation.
+                    // Since the pulse container expands with ease-out, the animation starts a tiny bit
+                    // earlier, so it looks like it&#39;s maintaining the momentum of the pulse container&#39;s expansion
+                    using (BeginDelayedSequence(PulseContainer.EXPAND_DURATION - 50))
+                    {
+                        ripple.FadeIn(200)
+                              .Then()
+                              .FadeOut(1000);
+
+                        ripple.ResizeTo(DrawSize + new Vector2(expansion), 1000, Easing.OutQuart)
+                              .TransformTo(nameof(CornerRadius), CORNER_RADIUS + expansion / 2, 1000, Easing.OutQuart)
+                              .TransformTo(nameof(BorderThickness), 0.5f, 1000, Easing.In)
+                              .Expire();
+
+                        Schedule(() =&gt; particleContainer?.AddParticles(this, accentColour));
+                    }
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,13,35,77,0],[37,13,37,81,0],[39,40,39,74,0],[41,38,41,70,0],[43,62,43,66,0],[45,13,45,79,0],[49,45,49,79,0],[52,63,52,67,0],[52,68,52,72,0],[52,77,52,82,0],[55,41,55,45,0],[55,46,55,50,0],[55,55,55,60,0],[57,13,57,42,0],[58,13,58,14,0],[59,17,78,19,0],[79,13,79,14,0],[82,13,82,14,0],[83,17,83,37,0],[85,17,86,17,0],[86,17,86,18,0],[86,18,87,21,0],[87,21,87,43,0],[87,43,88,21,0],[88,21,88,22,0],[88,22,89,25,0],[89,25,89,50,0],[89,50,90,25,0],[90,25,90,32,0],[90,32,93,21,0],[93,21,93,41,0],[93,41,94,21,0],[94,21,94,22,0],[94,22,95,25,0],[95,25,95,51,0],[95,51,96,21,0],[96,21,96,22,0],[96,22,97,17,0],[97,17,97,18,0],[97,18,97,20,0],[99,17,100,17,0],[100,17,100,18,0],[100,18,101,21,0],[101,21,101,62,0],[101,62,102,21,0],[102,21,102,22,0],[102,22,103,25,0],[103,25,103,51,0],[103,51,104,21,0],[104,21,104,22,0],[104,22,105,17,0],[105,17,105,18,0],[105,18,105,20,0],[106,13,106,14,0],[111,13,111,14,0],[112,17,112,52,0],[114,17,115,17,0],[115,17,115,18,0],[115,18,116,21,0],[116,21,116,40,0],[116,40,118,21,0],[118,21,118,42,0],[118,42,119,21,0],[119,21,119,44,0],[119,44,119,59,0],[119,59,119,84,0],[119,84,119,85,0],[119,85,119,86,0],[119,86,120,21,0],[120,21,120,44,0],[120,44,120,59,0],[120,59,120,85,0],[120,85,120,86,0],[120,86,120,87,0],[120,87,122,21,0],[122,21,122,59,0],[122,59,124,21,0],[124,21,124,95,0],[124,95,126,21,0],[126,21,129,24,0],[129,24,131,21,0],[131,21,131,41,0],[131,41,132,25,0],[132,25,132,51,0],[132,51,133,17,0],[133,17,133,18,0],[133,18,133,20,0],[134,13,134,14,0],[144,13,144,14,0],[145,17,145,42,0],[146,21,146,28,0],[148,17,148,48,0],[150,17,150,47,0],[151,17,151,18,0],[152,21,152,78,0],[153,21,153,28,0],[156,17,156,39,0],[157,13,157,14,0],[160,13,160,14,0],[161,17,161,42,0],[162,21,162,28,0],[164,17,164,48,0],[166,17,166,47,0],[167,17,167,18,0],[168,21,168,77,0],[169,21,169,28,0],[172,17,172,38,0],[173,13,173,14,0],[177,13,177,88,0],[178,13,178,86,0],[180,67,180,90,0],[181,65,181,78,0],[182,47,182,60,0],[185,13,185,14,0],[186,17,186,45,0],[188,17,191,20,0],[192,13,192,14,0],[196,46,196,50,0],[196,51,196,55,0],[198,46,198,69,0],[199,39,199,40,0],[200,42,200,67,0],[209,17,209,40,0],[210,17,210,18,0],[211,21,211,61,0],[212,17,212,18,0],[215,17,215,18,0],[216,21,216,48,0],[217,25,217,32,0],[219,21,219,59,0],[221,21,223,139,0],[224,17,224,18,0],[230,75,230,79,0],[230,80,230,84,0],[232,17,232,85,0],[237,17,237,64,0],[238,17,238,18,0],[239,21,239,54,0],[241,21,241,61,0],[243,21,243,50,0],[245,21,274,23,0],[275,17,275,18,0],[278,17,278,18,0],[279,21,279,41,0],[281,21,282,21,0],[282,21,282,22,0],[282,22,283,25,0],[283,25,283,40,0],[283,40,284,25,0],[284,25,284,26,0],[284,26,285,29,0],[285,29,285,53,0],[285,53,286,29,0],[286,29,286,46,0],[286,46,287,25,0],[287,25,287,26,0],[287,26,289,25,0],[289,25,289,26,0],[289,26,290,29,0],[290,29,290,47,0],[290,47,291,25,0],[291,25,291,26,0],[291,26,292,21,0],[292,21,292,22,0],[292,22,292,30,0],[293,21,293,40,0],[294,17,294,18,0],[297,17,297,18,0],[298,21,298,48,0],[299,25,299,32,0],[301,21,318,23,0],[320,21,320,49,0],[327,21,327,86,0],[328,21,328,22,0],[329,25,331,46,0],[333,25,336,41,0],[338,25,338,40,0],[338,40,338,91,0],[338,91,338,93,0],[339,21,339,22,0],[340,17,340,18,0]]);
+    </script>
+  </body>
+</html>

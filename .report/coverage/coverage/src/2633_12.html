@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Settings/Sections/Audio/AudioOffsetAdjustControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Localisation;
+using osu.Game.Screens.Play.PlayerSettings;
+using osuTK;
+
+namespace osu.Game.Overlays.Settings.Sections.Audio
+{
+    public partial class AudioOffsetAdjustControl : CompositeDrawable
+    {
+        public Bindable&lt;double&gt; Current
+        {
+            get =&gt; current.Current;
+            set =&gt; current.Current = value;
+        }
+
+        private readonly BindableNumberWithCurrent&lt;double&gt; current = new BindableNumberWithCurrent&lt;double&gt;();
+
+        private readonly IBindableList&lt;SessionAverageHitErrorTracker.DataPoint&gt; averageHitErrorHistory = new BindableList&lt;SessionAverageHitErrorTracker.DataPoint&gt;();
+
+        public readonly Bindable&lt;double?&gt; SuggestedOffset = new Bindable&lt;double?&gt;();
+
+        private Container&lt;Circle&gt; notchContainer = null!;
+        private SettingsNote hintNote = null!;
+        private RoundedButton applySuggestion = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(SessionAverageHitErrorTracker hitErrorTracker)
+        {
+            averageHitErrorHistory.BindTo(hitErrorTracker.AverageHitErrorHistory);
+
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+            InternalChild = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(SettingsSection.ITEM_SPACING_V2),
+                Children = new Drawable[]
+                {
+                    new SettingsItemV2(new FormSliderBar&lt;double&gt;
+                    {
+                        Caption = AudioSettingsStrings.AudioOffset,
+                        RelativeSizeAxes = Axes.X,
+                        Current = { BindTarget = Current },
+                        KeyboardStep = 1,
+                        LabelFormat = v =&gt; $&quot;{v:N0} ms&quot;,
+                        TooltipFormat = BeatmapOffsetControl.GetOffsetExplanatoryText,
+                    }),
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Padding = SettingsPanel.CONTENT_PADDING,
+                        Children = new Drawable[]
+                        {
+                            notchContainer = new Container&lt;Circle&gt;
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                Width = 0.5f,
+                                Height = 10,
+                                Anchor = Anchor.TopRight,
+                                Origin = Anchor.TopRight,
+                                Padding = new MarginPadding
+                                {
+                                    Horizontal = FormSliderBar&lt;double&gt;.InnerSlider.NUB_WIDTH / 2
+                                },
+                            },
+                            hintNote = new SettingsNote { RelativeSizeAxes = Axes.X },
+                        }
+                    },
+                    applySuggestion = new RoundedButton
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Text = AudioSettingsStrings.ApplySuggestedOffset,
+                        Padding = SettingsPanel.CONTENT_PADDING,
+                        Action = () =&gt;
+                        {
+                            if (SuggestedOffset.Value.HasValue)
+                                current.Value = SuggestedOffset.Value.Value;
+                            hitErrorTracker.ClearHistory();
+                        }
+                    }
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            averageHitErrorHistory.BindCollectionChanged(updateDisplay, true);
+            current.BindValueChanged(_ =&gt; updateHintText());
+            SuggestedOffset.BindValueChanged(_ =&gt; updateHintText(), true);
+        }
+
+        private void updateDisplay(object? _, NotifyCollectionChangedEventArgs e)
+        {
+            switch (e.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                    foreach (SessionAverageHitErrorTracker.DataPoint dataPoint in e.NewItems!)
+                    {
+                        notchContainer.ForEach(n =&gt; n.Alpha *= 0.95f);
+                        notchContainer.Add(new Circle
+                        {
+                            RelativeSizeAxes = Axes.Y,
+                            Width = 2,
+                            RelativePositionAxes = Axes.X,
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Colour = colourProvider.Light1,
+                            X = getXPositionForOffset(dataPoint.SuggestedGlobalAudioOffset)
+                        });
+                    }
+
+                    break;
+
+                case NotifyCollectionChangedAction.Remove:
+                    foreach (SessionAverageHitErrorTracker.DataPoint dataPoint in e.OldItems!)
+                    {
+                        var notch = notchContainer.FirstOrDefault(n =&gt; n.X == getXPositionForOffset(dataPoint.SuggestedGlobalAudioOffset));
+                        Debug.Assert(notch != null);
+                        notchContainer.Remove(notch, true);
+                    }
+
+                    break;
+
+                case NotifyCollectionChangedAction.Reset:
+                    notchContainer.Clear();
+                    break;
+            }
+
+            SuggestedOffset.Value = averageHitErrorHistory.Any() ? Math.Round(averageHitErrorHistory.Average(dataPoint =&gt; dataPoint.SuggestedGlobalAudioOffset)) : null;
+        }
+
+        private float getXPositionForOffset(double offset) =&gt; (float)(Math.Clamp(offset, current.MinValue, current.MaxValue) / (2 * current.MaxValue));
+
+        private void updateHintText()
+        {
+            if (SuggestedOffset.Value == null)
+            {
+                applySuggestion.Enabled.Value = false;
+                notchContainer.Hide();
+                hintNote.Current.Value = new SettingsNote.Data(AudioSettingsStrings.SuggestedOffsetNote, SettingsNote.Type.Informational);
+                hintNote.MoveToY(0, 200, Easing.OutQuint);
+            }
+            else if (Math.Abs(SuggestedOffset.Value.Value - current.Value) &lt; 1)
+            {
+                applySuggestion.Enabled.Value = false;
+                notchContainer.Show();
+                hintNote.Current.Value = new SettingsNote.Data(AudioSettingsStrings.SuggestedOffsetCorrect(averageHitErrorHistory.Count), SettingsNote.Type.Informational);
+                hintNote.MoveToY(10, 200, Easing.OutQuint);
+            }
+            else
+            {
+                applySuggestion.Enabled.Value = true;
+                notchContainer.Show();
+                hintNote.Current.Value =
+                    new SettingsNote.Data(AudioSettingsStrings.SuggestedOffsetValueReceived(averageHitErrorHistory.Count, SuggestedOffset.Value.Value.ToStandardFormattedString(0)),
+                        SettingsNote.Type.Informational);
+                hintNote.MoveToY(10, 200, Easing.OutQuint);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,20,27,35,0],[28,20,28,43,0],[31,9,31,110,0],[33,9,33,166,0],[35,9,35,85,0],[37,9,37,58,0],[38,9,38,47,0],[39,9,39,55,0],[42,56,42,60,0],[42,61,42,65,0],[42,70,42,75,0],[46,9,46,10,0],[47,13,47,83,0],[49,13,49,39,0],[50,13,50,35,0],[51,13,65,44,0],[65,44,65,56,0],[65,56,96,25,0],[96,25,96,26,0],[96,26,97,29,0],[97,29,97,64,0],[97,64,98,33,0],[98,33,98,77,0],[98,77,99,29,0],[99,29,99,60,0],[99,60,100,25,0],[100,25,100,26,0],[100,26,103,15,0],[104,9,104,10,0],[107,9,107,10,0],[108,13,108,33,0],[110,13,110,79,0],[111,13,111,43,0],[111,43,111,59,0],[111,59,111,61,0],[112,13,112,51,0],[112,51,112,67,0],[112,67,112,75,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,30,0],[120,21,120,28,0],[120,30,120,79,0],[120,80,120,82,0],[120,83,120,94,0],[121,21,121,22,0],[122,25,122,53,0],[122,53,122,69,0],[122,69,122,71,0],[123,25,132,28,0],[133,21,133,22,0],[135,21,135,27,0],[138,21,138,28,0],[138,30,138,79,0],[138,80,138,82,0],[138,83,138,94,0],[139,21,139,22,0],[140,25,140,72,0],[140,72,140,138,0],[140,138,140,140,0],[141,25,141,53,0],[142,25,142,60,0],[143,21,143,22,0],[145,21,145,27,0],[148,21,148,44,0],[149,21,149,27,0],[152,13,152,123,0],[152,123,152,159,0],[152,159,152,169,0],[153,9,153,10,0],[155,63,155,151,0],[158,9,158,10,0],[159,13,159,47,0],[160,13,160,14,0],[161,17,161,55,0],[162,17,162,39,0],[163,17,163,139,0],[164,17,164,59,0],[165,13,165,14,0],[166,18,166,80,0],[167,13,167,14,0],[168,17,168,55,0],[169,17,169,39,0],[170,17,170,172,0],[171,17,171,60,0],[172,13,172,14,0],[174,13,174,14,0],[175,17,175,54,0],[176,17,176,39,0],[177,17,179,58,0],[180,17,180,60,0],[181,13,181,14,0],[182,9,182,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/Formats/LegacyBeatmapEncoder.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using osu.Game.Audio;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Beatmaps.Formats
+{
+    public class LegacyBeatmapEncoder
+    {
+        public const int FIRST_LAZER_VERSION = 128;
+
+        private readonly IBeatmap beatmap;
+        private readonly ISkin? skin;
+        private readonly LegacyStoryboardEncoder? storyboardEncoder;
+
+        private readonly int onlineRulesetID;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;LegacyBeatmapEncoder&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap to encode.&lt;/param&gt;
+        /// &lt;param name=&quot;skin&quot;&gt;The beatmap&#39;s skin, used for encoding combo colours.&lt;/param&gt;
+        /// &lt;param name=&quot;storyboard&quot;&gt;
+        /// The combined storyboard, loaded from both the &lt;c&gt;.osu&lt;/c&gt; and the &lt;c&gt;.osz&lt;/c&gt;.
+        /// Only elements from the &lt;c&gt;.osu&lt;/c&gt; (marked via &lt;see cref=&quot;StoryboardElementSource.Beatmap&quot;/&gt;) will be encoded to the beatmap.
+        /// &lt;/param&gt;
+        public LegacyBeatmapEncoder(IBeatmap beatmap, ISkin? skin, Storyboard? storyboard)
+        {
+            this.beatmap = beatmap;
+            this.skin = skin;
+
+            if (storyboard != null)
+                storyboardEncoder = new LegacyStoryboardEncoder(storyboard);
+
+            onlineRulesetID = beatmap.BeatmapInfo.Ruleset.OnlineID;
+
+            if (onlineRulesetID &lt; 0 || onlineRulesetID &gt; 3)
+                throw new ArgumentException(&quot;Only beatmaps in the osu, taiko, catch, or mania rulesets can be encoded to the legacy beatmap format.&quot;, nameof(beatmap));
+        }
+
+        public void Encode(TextWriter writer)
+        {
+            writer.WriteLine($&quot;osu file format v{FIRST_LAZER_VERSION}&quot;);
+
+            writer.WriteLine();
+            handleGeneral(writer);
+
+            writer.WriteLine();
+            handleEditor(writer);
+
+            writer.WriteLine();
+            handleMetadata(writer);
+
+            writer.WriteLine();
+            handleDifficulty(writer);
+
+            writer.WriteLine();
+            handleEvents(writer);
+
+            writer.WriteLine();
+            handleControlPoints(writer);
+
+            writer.WriteLine();
+            handleColours(writer);
+
+            writer.WriteLine();
+            handleHitObjects(writer);
+        }
+
+        private void handleGeneral(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[General]&quot;);
+
+            if (!string.IsNullOrEmpty(beatmap.Metadata.AudioFile)) writer.WriteLine(FormattableString.Invariant($&quot;AudioFilename: {Path.GetFileName(beatmap.Metadata.AudioFile)}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;AudioLeadIn: {beatmap.AudioLeadIn}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;PreviewTime: {beatmap.Metadata.PreviewTime}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;Countdown: {(int)beatmap.Countdown}&quot;));
+            writer.WriteLine(FormattableString.Invariant(
+                $&quot;SampleSet: {toLegacySampleBank(((beatmap.ControlPointInfo as LegacyControlPointInfo)?.SamplePoints.FirstOrDefault() ?? SampleControlPoint.DEFAULT).SampleBank)}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;StackLeniency: {beatmap.StackLeniency}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;Mode: {onlineRulesetID}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;LetterboxInBreaks: {(beatmap.LetterboxInBreaks ? &#39;1&#39; : &#39;0&#39;)}&quot;));
+            // if (beatmap.BeatmapInfo.UseSkinSprites)
+            //     writer.WriteLine(@&quot;UseSkinSprites: 1&quot;);
+            // if (b.AlwaysShowPlayfield)
+            //     writer.WriteLine(@&quot;AlwaysShowPlayfield: 1&quot;);
+            // if (b.OverlayPosition != OverlayPosition.NoChange)
+            //     writer.WriteLine(@&quot;OverlayPosition: &quot; + b.OverlayPosition);
+            // if (!string.IsNullOrEmpty(b.SkinPreference))
+            //     writer.WriteLine(@&quot;SkinPreference:&quot; + b.SkinPreference);
+            if (beatmap.EpilepsyWarning)
+                writer.WriteLine(@&quot;EpilepsyWarning: 1&quot;);
+            if (beatmap.CountdownOffset &gt; 0)
+                writer.WriteLine(FormattableString.Invariant($@&quot;CountdownOffset: {beatmap.CountdownOffset}&quot;));
+            if (onlineRulesetID == 3)
+                writer.WriteLine(FormattableString.Invariant($&quot;SpecialStyle: {(beatmap.SpecialStyle ? &#39;1&#39; : &#39;0&#39;)}&quot;));
+
+            if (storyboardEncoder != null)
+                storyboardEncoder.EncodeGeneralToBeatmap(writer);
+            else
+                writer.WriteLine(FormattableString.Invariant($&quot;WidescreenStoryboard: {(beatmap.WidescreenStoryboard ? &#39;1&#39; : &#39;0&#39;)}&quot;));
+
+            if (beatmap.SamplesMatchPlaybackRate)
+                writer.WriteLine(@&quot;SamplesMatchPlaybackRate: 1&quot;);
+        }
+
+        private void handleEditor(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[Editor]&quot;);
+
+            if (beatmap.Bookmarks.Length &gt; 0)
+                writer.WriteLine(FormattableString.Invariant($&quot;Bookmarks: {string.Join(&#39;,&#39;, beatmap.Bookmarks.Select(b =&gt; b.ToString(CultureInfo.InvariantCulture)))}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;DistanceSpacing: {beatmap.DistanceSpacing}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;BeatDivisor: {beatmap.BeatmapInfo.BeatDivisor}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;GridSize: {beatmap.GridSize}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;TimelineZoom: {beatmap.TimelineZoom}&quot;));
+            writer.WriteLine(FormattableString.Invariant($@&quot;VelocityPresets: {string.Join(&#39;,&#39;, beatmap.SliderVelocityPresets.Select(sv =&gt; sv.ToString(CultureInfo.InvariantCulture)))}&quot;));
+        }
+
+        private void handleMetadata(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[Metadata]&quot;);
+
+            writer.WriteLine(FormattableString.Invariant($&quot;Title: {beatmap.Metadata.Title}&quot;));
+            if (!string.IsNullOrEmpty(beatmap.Metadata.TitleUnicode)) writer.WriteLine(FormattableString.Invariant($&quot;TitleUnicode: {beatmap.Metadata.TitleUnicode}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;Artist: {beatmap.Metadata.Artist}&quot;));
+            if (!string.IsNullOrEmpty(beatmap.Metadata.ArtistUnicode)) writer.WriteLine(FormattableString.Invariant($&quot;ArtistUnicode: {beatmap.Metadata.ArtistUnicode}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;Creator: {beatmap.Metadata.Author.Username}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;Version: {beatmap.BeatmapInfo.DifficultyName}&quot;));
+            if (!string.IsNullOrEmpty(beatmap.Metadata.Source)) writer.WriteLine(FormattableString.Invariant($&quot;Source: {beatmap.Metadata.Source}&quot;));
+            if (!string.IsNullOrEmpty(beatmap.Metadata.Tags)) writer.WriteLine(FormattableString.Invariant($&quot;Tags: {beatmap.Metadata.Tags}&quot;));
+            if (beatmap.BeatmapInfo.OnlineID &gt; 0) writer.WriteLine(FormattableString.Invariant($&quot;BeatmapID: {beatmap.BeatmapInfo.OnlineID}&quot;));
+            if (beatmap.BeatmapInfo.BeatmapSet?.OnlineID &gt; 0) writer.WriteLine(FormattableString.Invariant($&quot;BeatmapSetID: {beatmap.BeatmapInfo.BeatmapSet.OnlineID}&quot;));
+        }
+
+        private void handleDifficulty(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[Difficulty]&quot;);
+
+            writer.WriteLine(FormattableString.Invariant($&quot;HPDrainRate: {beatmap.Difficulty.DrainRate}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;CircleSize: {beatmap.Difficulty.CircleSize}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;OverallDifficulty: {beatmap.Difficulty.OverallDifficulty}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;ApproachRate: {beatmap.Difficulty.ApproachRate}&quot;));
+
+            writer.WriteLine(FormattableString.Invariant($&quot;SliderMultiplier: {beatmap.Difficulty.SliderMultiplier}&quot;));
+            writer.WriteLine(FormattableString.Invariant($&quot;SliderTickRate: {beatmap.Difficulty.SliderTickRate}&quot;));
+        }
+
+        private void handleEvents(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[Events]&quot;);
+
+            if (storyboardEncoder != null)
+            {
+                storyboardEncoder.EncodeEventsToBeatmap(writer);
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(beatmap.BeatmapInfo.Metadata.BackgroundFile))
+                    writer.WriteLine(FormattableString.Invariant($&quot;{(int)LegacyEventType.Background},0,\&quot;{beatmap.BeatmapInfo.Metadata.BackgroundFile}\&quot;,0,0&quot;));
+            }
+
+            writer.WriteLine(&quot;// Break Periods&quot;);
+            foreach (var b in beatmap.Breaks)
+                writer.WriteLine(FormattableString.Invariant($&quot;{(int)LegacyEventType.Break},{b.StartTime},{b.EndTime}&quot;));
+        }
+
+        private void handleControlPoints(TextWriter writer)
+        {
+            var legacyControlPoints = new LegacyControlPointInfo();
+            foreach (var point in beatmap.ControlPointInfo.AllControlPoints)
+                legacyControlPoints.Add(point.Time, point.DeepClone());
+
+            writer.WriteLine(&quot;[TimingPoints]&quot;);
+
+            SampleControlPoint? lastRelevantSamplePoint = null;
+            DifficultyControlPoint? lastRelevantDifficultyPoint = null;
+
+            // In osu!taiko and osu!mania, a scroll speed is stored as &quot;slider velocity&quot; in legacy formats.
+            // In that case, a scrolling speed change is a global effect and per-hit object difficulty control points are ignored.
+            bool scrollSpeedEncodedAsSliderVelocity = onlineRulesetID == 1 || onlineRulesetID == 3;
+
+            // iterate over hitobjects and pull out all required sample and difficulty changes
+            extractDifficultyControlPoints(beatmap.HitObjects);
+            extractSampleControlPoints(beatmap.HitObjects);
+
+            if (scrollSpeedEncodedAsSliderVelocity)
+            {
+                foreach (var point in legacyControlPoints.EffectPoints)
+                {
+                    legacyControlPoints.Add(point.Time, new DifficultyControlPoint
+                    {
+                        SliderVelocityBindable =
+                        {
+                            MinValue = point.ScrollSpeedBindable.MinValue,
+                            MaxValue = point.ScrollSpeedBindable.MaxValue,
+                            Value = point.ScrollSpeedBindable.Value,
+                        }
+                    });
+                }
+            }
+
+            LegacyControlPointProperties lastControlPointProperties = new LegacyControlPointProperties();
+
+            foreach (var group in legacyControlPoints.Groups)
+            {
+                var groupTimingPoint = group.ControlPoints.OfType&lt;TimingControlPoint&gt;().FirstOrDefault();
+                var controlPointProperties = getLegacyControlPointProperties(group, groupTimingPoint != null);
+
+                // If the group contains a timing control point, it needs to be output separately.
+                if (groupTimingPoint != null)
+                {
+                    writer.Write(FormattableString.Invariant($&quot;{groupTimingPoint.Time},&quot;));
+                    writer.Write(FormattableString.Invariant($&quot;{groupTimingPoint.BeatLength},&quot;));
+
+                    // `LegacyControlPointProperties` is a struct, thus it has by-value semantics,
+                    // thus assigning `controlPointProperties` to a local creates a copy.
+                    var timingPointProperties = controlPointProperties;
+
+                    // Slider velocity cannot be encoded in a timing point,
+                    // as the legacy format writes it out as &quot;negative beat length&quot;.
+                    // Setting it to the default value of 1 ensures that any non-default slider velocity
+                    // will not be subject to the `IsRedundant()` guard lower down and thus still be output correctly.
+                    timingPointProperties.SliderVelocity = 1;
+
+                    // Kiai flag cannot be specified on the first timing point in the beatmap:
+                    // https://github.com/peppy/osu-stable-reference/blob/0b8b19af621dbb282773c22b36cc0453942b98d8/osu!/GameModes/Edit/Forms/TimingEntry.cs#L492-L495
+                    // That fact is also codified in the ranking criteria (https://osu.ppy.sh/wiki/en/Ranking_criteria#rules.2).
+                    // This is doing a thing slightly different from that in two major aspects:
+                    // - It applies to only groups with timing points, not to any control point groups.
+                    // - It applies to all groups with timing points that specify kiai time, not only the first one.
+                    // However, the two above conditions are acceptable, because:
+                    // - The ranking criteria also specifies that an inherited timing point cannot precede an uninherited timing point.
+                    //   Thus, the case of &quot;first timing point group of beatmap does not have timing point&quot; is fundamentally unsound,
+                    //   and guarded against via other measures such as preventing placement of objects before the first timing point.
+                    //   Therefore, checking only groups with timing points is sufficient.
+                    // - It&#39;s fine to enforce this for all uninherited timing points because an inherited point will be emitted below if necessary for kiai anyway.
+                    //   At worst doing so will result in some extra inherited points being output.
+                    timingPointProperties.EffectFlags &amp;= ~LegacyEffectFlags.Kiai;
+
+                    outputControlPointAt(timingPointProperties, true);
+                    lastControlPointProperties = timingPointProperties;
+                }
+
+                if (controlPointProperties.IsRedundant(lastControlPointProperties))
+                    continue;
+
+                // Output any remaining effects as secondary non-timing control point.
+                writer.Write(FormattableString.Invariant($&quot;{group.Time},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{-100 / controlPointProperties.SliderVelocity},&quot;));
+                outputControlPointAt(controlPointProperties, false);
+                lastControlPointProperties = controlPointProperties;
+            }
+
+            LegacyControlPointProperties getLegacyControlPointProperties(ControlPointGroup group, bool updateSampleBank)
+            {
+                var timingPoint = legacyControlPoints.TimingPointAt(group.Time);
+                var difficultyPoint = legacyControlPoints.DifficultyPointAt(group.Time);
+                var samplePoint = legacyControlPoints.SamplePointAt(group.Time);
+                var effectPoint = legacyControlPoints.EffectPointAt(group.Time);
+
+                // Apply the control point to a hit sample to uncover legacy properties (e.g. suffix)
+                HitSampleInfo tempHitSample = samplePoint.ApplyTo(new ConvertHitObjectParser.LegacyHitSampleInfo(string.Empty));
+                int customSampleBank = toLegacyCustomSampleBank(tempHitSample);
+
+                // Convert effect flags to the legacy format
+                LegacyEffectFlags effectFlags = LegacyEffectFlags.None;
+                if (effectPoint.KiaiMode)
+                    effectFlags |= LegacyEffectFlags.Kiai;
+                if (timingPoint.OmitFirstBarLine)
+                    effectFlags |= LegacyEffectFlags.OmitFirstBarLine;
+
+                return new LegacyControlPointProperties
+                {
+                    SliderVelocity = difficultyPoint.SliderVelocity,
+                    TimingSignature = timingPoint.TimeSignature.Numerator,
+                    SampleBank = updateSampleBank ? (int)toLegacySampleBank(tempHitSample.Bank) : lastControlPointProperties.SampleBank,
+                    // Inherit the previous custom sample bank if the current custom sample bank is not set
+                    CustomSampleBank = customSampleBank &gt;= 0 ? customSampleBank : lastControlPointProperties.CustomSampleBank,
+                    SampleVolume = tempHitSample.Volume,
+                    EffectFlags = effectFlags
+                };
+            }
+
+            void outputControlPointAt(LegacyControlPointProperties controlPoint, bool isTimingPoint)
+            {
+                writer.Write(FormattableString.Invariant($&quot;{controlPoint.TimingSignature.ToString(CultureInfo.InvariantCulture)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{controlPoint.SampleBank.ToString(CultureInfo.InvariantCulture)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{controlPoint.CustomSampleBank.ToString(CultureInfo.InvariantCulture)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{controlPoint.SampleVolume.ToString(CultureInfo.InvariantCulture)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{(isTimingPoint ? &quot;1&quot; : &quot;0&quot;)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{((int)controlPoint.EffectFlags).ToString(CultureInfo.InvariantCulture)}&quot;));
+                writer.WriteLine();
+            }
+
+            IEnumerable&lt;DifficultyControlPoint&gt; collectDifficultyControlPoints(IEnumerable&lt;HitObject&gt; hitObjects)
+            {
+                if (scrollSpeedEncodedAsSliderVelocity)
+                    yield break;
+
+                foreach (var hitObject in hitObjects)
+                {
+                    if (hitObject is IHasSliderVelocity hasSliderVelocity)
+                        yield return new DifficultyControlPoint { Time = hitObject.StartTime, SliderVelocity = hasSliderVelocity.SliderVelocityMultiplier };
+                }
+            }
+
+            void extractDifficultyControlPoints(IEnumerable&lt;HitObject&gt; hitObjects)
+            {
+                foreach (var hDifficultyPoint in collectDifficultyControlPoints(hitObjects).OrderBy(dp =&gt; dp.Time))
+                {
+                    if (!hDifficultyPoint.IsRedundant(lastRelevantDifficultyPoint))
+                    {
+                        legacyControlPoints.Add(hDifficultyPoint.Time, hDifficultyPoint);
+                        lastRelevantDifficultyPoint = hDifficultyPoint;
+                    }
+                }
+            }
+
+            IEnumerable&lt;SampleControlPoint&gt; collectSampleControlPoints(IEnumerable&lt;HitObject&gt; hitObjects)
+            {
+                foreach (var hitObject in hitObjects)
+                {
+                    if (hitObject is IHasRepeats hasNodeSamples)
+                    {
+                        double spanDuration = hasNodeSamples.Duration / hasNodeSamples.SpanCount();
+
+                        for (int i = 0; i &lt; hasNodeSamples.NodeSamples.Count; ++i)
+                        {
+                            double nodeTime = hitObject.StartTime + i * spanDuration;
+
+                            if (hasNodeSamples.NodeSamples[i].Count &gt; 0)
+                                yield return createSampleControlPointFor(nodeTime, hasNodeSamples.NodeSamples[i]);
+
+                            if (spanDuration &gt; LegacyBeatmapDecoder.CONTROL_POINT_LENIENCY + 1 &amp;&amp; hitObject.Samples.Count &gt; 0 &amp;&amp; i &lt; hasNodeSamples.NodeSamples.Count - 1)
+                                yield return createSampleControlPointFor(nodeTime + LegacyBeatmapDecoder.CONTROL_POINT_LENIENCY + 1, hitObject.Samples);
+                        }
+                    }
+                    else if (hitObject.Samples.Count &gt; 0)
+                    {
+                        yield return createSampleControlPointFor(hitObject.GetEndTime(), hitObject.Samples);
+                    }
+
+                    foreach (var nested in collectSampleControlPoints(hitObject.NestedHitObjects))
+                        yield return nested;
+                }
+
+                SampleControlPoint createSampleControlPointFor(double time, IList&lt;HitSampleInfo&gt; samples)
+                {
+                    int volume = samples.Max(o =&gt; o.Volume);
+                    string bank = samples.Where(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL).Select(s =&gt; s.Bank).FirstOrDefault()
+                                  ?? samples.Select(s =&gt; s.Bank).First();
+
+                    int customIndex = samples.Max(s =&gt;
+                    {
+                        switch (s)
+                        {
+                            case ConvertHitObjectParser.LegacyHitSampleInfo legacy:
+                                return legacy.CustomSampleBank;
+
+                            default:
+                                if (int.TryParse(s.Suffix, out int index))
+                                    return index;
+
+                                return s.UseBeatmapSamples ? 1 : -1;
+                        }
+                    });
+
+                    return new LegacyBeatmapDecoder.LegacySampleControlPoint { Time = time, SampleVolume = volume, SampleBank = bank, CustomSampleBank = customIndex };
+                }
+            }
+
+            void extractSampleControlPoints(IEnumerable&lt;HitObject&gt; hitObject)
+            {
+                foreach (var hSamplePoint in collectSampleControlPoints(hitObject).OrderBy(sp =&gt; sp.Time))
+                {
+                    if (!hSamplePoint.IsRedundant(lastRelevantSamplePoint))
+                    {
+                        legacyControlPoints.Add(hSamplePoint.Time, hSamplePoint);
+                        lastRelevantSamplePoint = hSamplePoint;
+                    }
+                }
+            }
+        }
+
+        private void handleColours(TextWriter writer)
+        {
+            var colours = skin?.GetConfig&lt;GlobalSkinColours, IReadOnlyList&lt;Color4&gt;&gt;(GlobalSkinColours.ComboColours)?.Value;
+
+            if (colours == null || colours.Count == 0)
+                return;
+
+            writer.WriteLine(&quot;[Colours]&quot;);
+
+            for (int i = 0; i &lt; Math.Min(colours.Count, LegacyBeatmapDecoder.MAX_COMBO_COLOUR_COUNT); i++)
+            {
+                var comboColour = colours[i];
+
+                writer.Write(FormattableString.Invariant($&quot;Combo{1 + i}: &quot;));
+                writer.Write(FormattableString.Invariant($&quot;{(byte)(comboColour.R * byte.MaxValue)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{(byte)(comboColour.G * byte.MaxValue)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{(byte)(comboColour.B * byte.MaxValue)},&quot;));
+                writer.Write(FormattableString.Invariant($&quot;{(byte)(comboColour.A * byte.MaxValue)}&quot;));
+                writer.WriteLine();
+            }
+        }
+
+        private void handleHitObjects(TextWriter writer)
+        {
+            writer.WriteLine(&quot;[HitObjects]&quot;);
+
+            if (beatmap.HitObjects.Count == 0)
+                return;
+
+            foreach (var h in beatmap.HitObjects)
+                handleHitObject(writer, h);
+        }
+
+        private void handleHitObject(TextWriter writer, HitObject hitObject)
+        {
+            Vector2 position = new Vector2(256, 192);
+
+            switch (onlineRulesetID)
+            {
+                case 0:
+                case 2:
+                    position = ((IHasPosition)hitObject).Position;
+                    break;
+
+                case 3:
+                    int totalColumns = (int)Math.Max(1, beatmap.Difficulty.CircleSize);
+                    // compare: https://github.com/peppy/osu-stable-reference/blob/c34a74fb61c17c5667486a12548485d1f03baa2e/osu!/GameModes/Play/Rulesets/Mania/Stage/StageMania_Calculations.cs#L159
+                    position.X = (int)Math.Floor((((IHasXPosition)hitObject).X + 0.5f) * (512f / totalColumns));
+                    break;
+            }
+
+            writer.Write(FormattableString.Invariant($&quot;{position.X},&quot;));
+            writer.Write(FormattableString.Invariant($&quot;{position.Y},&quot;));
+            writer.Write(FormattableString.Invariant($&quot;{hitObject.StartTime},&quot;));
+            writer.Write(FormattableString.Invariant($&quot;{(int)getObjectType(hitObject)},&quot;));
+            writer.Write(FormattableString.Invariant($&quot;{(int)toLegacyHitSoundType(hitObject.Samples)},&quot;));
+
+            if (hitObject is IHasPath path)
+            {
+                addPathData(writer, path, position);
+                writer.Write(getSampleBank(hitObject.Samples));
+            }
+            else
+            {
+                if (hitObject is IHasDuration)
+                    addEndTimeData(writer, hitObject);
+
+                writer.Write(getSampleBank(hitObject.Samples));
+            }
+
+            writer.WriteLine();
+        }
+
+        private LegacyHitObjectType getObjectType(HitObject hitObject)
+        {
+            LegacyHitObjectType type = 0;
+
+            if (hitObject is IHasCombo combo)
+            {
+                type = (LegacyHitObjectType)(combo.ComboOffset &lt;&lt; 4);
+
+                if (combo.NewCombo)
+                    type |= LegacyHitObjectType.NewCombo;
+            }
+
+            switch (hitObject)
+            {
+                case IHasPath:
+                    type |= LegacyHitObjectType.Slider;
+                    break;
+
+                case IHasDuration:
+                    if (onlineRulesetID == 3)
+                        type |= LegacyHitObjectType.Hold;
+                    else
+                        type |= LegacyHitObjectType.Spinner;
+                    break;
+
+                default:
+                    type |= LegacyHitObjectType.Circle;
+                    break;
+            }
+
+            return type;
+        }
+
+        private void addPathData(TextWriter writer, IHasPath pathData, Vector2 position)
+        {
+            for (int i = 0; i &lt; pathData.Path.ControlPoints.Count; i++)
+            {
+                PathControlPoint point = pathData.Path.ControlPoints[i];
+
+                // Note that lazer&#39;s encoding format supports specifying multiple curve types for a slider path, which is not supported by stable.
+                // Backwards compatibility with stable is handled by `LegacyBeatmapExporter` and `BezierConverter.ConvertToModernBezier()`.
+                if (point.Type != null)
+                {
+                    switch (point.Type?.Type)
+                    {
+                        case SplineType.BSpline:
+                            writer.Write(point.Type.Value.Degree &gt; 0 ? $&quot;B{point.Type.Value.Degree}|&quot; : &quot;B|&quot;);
+                            break;
+
+                        case SplineType.Catmull:
+                            writer.Write(&quot;C|&quot;);
+                            break;
+
+                        case SplineType.PerfectCurve:
+                            writer.Write(&quot;P|&quot;);
+                            break;
+
+                        case SplineType.Linear:
+                            writer.Write(&quot;L|&quot;);
+                            break;
+                    }
+                }
+
+                if (i != 0)
+                {
+                    writer.Write(FormattableString.Invariant($&quot;{position.X + point.Position.X}:{position.Y + point.Position.Y}&quot;));
+                    writer.Write(i != pathData.Path.ControlPoints.Count - 1 ? &quot;|&quot; : &quot;,&quot;);
+                }
+            }
+
+            var curveData = pathData as IHasPathWithRepeats;
+
+            writer.Write(FormattableString.Invariant($&quot;{(curveData?.RepeatCount ?? 0) + 1},&quot;));
+            writer.Write(FormattableString.Invariant($&quot;{pathData.Path.ExpectedDistance.Value ?? pathData.Path.Distance},&quot;));
+
+            if (curveData != null)
+            {
+                for (int i = 0; i &lt; curveData.SpanCount() + 1; i++)
+                {
+                    writer.Write(FormattableString.Invariant($&quot;{(i &lt; curveData.NodeSamples.Count ? (int)toLegacyHitSoundType(curveData.NodeSamples[i]) : 0)}&quot;));
+                    writer.Write(i != curveData.SpanCount() ? &quot;|&quot; : &quot;,&quot;);
+                }
+
+                for (int i = 0; i &lt; curveData.SpanCount() + 1; i++)
+                {
+                    writer.Write(i &lt; curveData.NodeSamples.Count ? getSampleBank(curveData.NodeSamples[i], true) : &quot;0:0&quot;);
+                    writer.Write(i != curveData.SpanCount() ? &quot;|&quot; : &quot;,&quot;);
+                }
+            }
+        }
+
+        private void addEndTimeData(TextWriter writer, HitObject hitObject)
+        {
+            var endTimeData = (IHasDuration)hitObject;
+            var type = getObjectType(hitObject);
+
+            char suffix = &#39;,&#39;;
+
+            // Holds write the end time as if it&#39;s part of sample data.
+            if (type == LegacyHitObjectType.Hold)
+                suffix = &#39;:&#39;;
+
+            writer.Write(FormattableString.Invariant($&quot;{endTimeData.EndTime}{suffix}&quot;));
+        }
+
+        private string getSampleBank(IList&lt;HitSampleInfo&gt; samples, bool banksOnly = false)
+        {
+            LegacySampleBank normalBank = toLegacySampleBank(samples.SingleOrDefault(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL)?.Bank);
+            LegacySampleBank addBank = toLegacySampleBank(samples.FirstOrDefault(s =&gt; !string.IsNullOrEmpty(s.Name) &amp;&amp; s.Name != HitSampleInfo.HIT_NORMAL &amp;&amp; !s.EditorAutoBank)?.Bank);
+
+            StringBuilder sb = new StringBuilder();
+
+            sb.Append(FormattableString.Invariant($&quot;{(int)normalBank}:&quot;));
+            sb.Append(FormattableString.Invariant($&quot;{(int)addBank}&quot;));
+
+            if (!banksOnly)
+            {
+                int customSampleBank = toLegacyCustomSampleBank(samples.FirstOrDefault(s =&gt; !string.IsNullOrEmpty(s.Name)));
+                string sampleFilename = samples.FirstOrDefault(s =&gt; s is ConvertHitObjectParser.FileHitSampleInfo)?.LookupNames.First() ?? string.Empty;
+                int volume = samples.FirstOrDefault()?.Volume ?? 100;
+
+                // We want to ignore custom sample banks and volume when not encoding to the mania game mode,
+                // because they cause unexpected results in the editor and are already satisfied by the control points.
+                if (onlineRulesetID != 3)
+                {
+                    customSampleBank = 0;
+                    volume = 0;
+                }
+
+                sb.Append(&#39;:&#39;);
+                sb.Append(FormattableString.Invariant($&quot;{customSampleBank}:&quot;));
+                sb.Append(FormattableString.Invariant($&quot;{volume}:&quot;));
+                sb.Append(FormattableString.Invariant($&quot;{sampleFilename}&quot;));
+            }
+
+            return sb.ToString();
+        }
+
+        private LegacyHitSoundType toLegacyHitSoundType(IList&lt;HitSampleInfo&gt; samples)
+        {
+            LegacyHitSoundType type = LegacyHitSoundType.None;
+
+            foreach (var sample in samples)
+            {
+                switch (sample.Name)
+                {
+                    case HitSampleInfo.HIT_WHISTLE:
+                        type |= LegacyHitSoundType.Whistle;
+                        break;
+
+                    case HitSampleInfo.HIT_FINISH:
+                        type |= LegacyHitSoundType.Finish;
+                        break;
+
+                    case HitSampleInfo.HIT_CLAP:
+                        type |= LegacyHitSoundType.Clap;
+                        break;
+                }
+            }
+
+            return type;
+        }
+
+        private LegacySampleBank toLegacySampleBank(string? sampleBank)
+        {
+            switch (sampleBank?.ToLowerInvariant())
+            {
+                case HitSampleInfo.BANK_NORMAL:
+                    return LegacySampleBank.Normal;
+
+                case HitSampleInfo.BANK_SOFT:
+                    return LegacySampleBank.Soft;
+
+                case HitSampleInfo.BANK_DRUM:
+                    return LegacySampleBank.Drum;
+
+                default:
+                    return LegacySampleBank.None;
+            }
+        }
+
+        private int toLegacyCustomSampleBank(HitSampleInfo? hitSampleInfo)
+        {
+            if (hitSampleInfo is ConvertHitObjectParser.LegacyHitSampleInfo legacy)
+                return legacy.CustomSampleBank;
+
+            return 0;
+        }
+
+        private struct LegacyControlPointProperties
+        {
+            internal double SliderVelocity { get; set; }
+            internal int TimingSignature { get; init; }
+            internal int SampleBank { get; init; }
+            internal int CustomSampleBank { get; init; }
+            internal int SampleVolume { get; init; }
+            internal LegacyEffectFlags EffectFlags { get; set; }
+
+            internal bool IsRedundant(LegacyControlPointProperties other) =&gt;
+                SliderVelocity == other.SliderVelocity &amp;&amp;
+                TimingSignature == other.TimingSignature &amp;&amp;
+                SampleBank == other.SampleBank &amp;&amp;
+                CustomSampleBank == other.CustomSampleBank &amp;&amp;
+                SampleVolume == other.SampleVolume &amp;&amp;
+                EffectFlags == other.EffectFlags;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,9,42,91,1],[43,9,43,10,1],[44,13,44,36,1],[45,13,45,30,1],[47,13,47,36,1],[48,17,48,77,0],[50,13,50,68,1],[52,13,52,60,1],[53,17,53,168,0],[54,9,54,10,1],[57,9,57,10,1],[58,13,58,73,1],[60,13,60,32,1],[61,13,61,35,1],[63,13,63,32,1],[64,13,64,34,1],[66,13,66,32,1],[67,13,67,36,1],[69,13,69,32,1],[70,13,70,38,1],[72,13,72,32,1],[73,13,73,34,1],[75,13,75,32,1],[76,13,76,41,1],[78,13,78,32,1],[79,13,79,35,1],[81,13,81,32,1],[82,13,82,38,1],[83,9,83,10,1],[86,9,86,10,1],[87,13,87,43,1],[89,13,89,67,1],[89,68,89,180,0],[90,13,90,98,1],[91,13,91,107,1],[92,13,92,99,1],[93,13,94,182,1],[95,13,95,102,1],[96,13,96,87,1],[97,13,97,124,1],[106,13,106,41,1],[107,17,107,57,0],[108,13,108,45,1],[109,17,109,111,0],[110,13,110,38,1],[111,17,111,118,0],[113,13,113,43,1],[114,17,114,66,0],[116,17,116,134,1],[118,13,118,50,1],[119,17,119,66,0],[120,9,120,10,1],[123,9,123,10,1],[124,13,124,42,1],[126,13,126,46,1],[127,17,127,123,1],[127,123,127,163,1],[127,163,127,170,1],[128,13,128,106,1],[129,13,129,110,1],[130,13,130,92,1],[131,13,131,100,1],[132,13,132,139,1],[132,139,132,180,1],[132,180,132,187,1],[133,9,133,10,1],[136,9,136,10,1],[137,13,137,44,1],[139,13,139,95,1],[140,13,140,70,1],[140,71,140,167,0],[141,13,141,97,1],[142,13,142,71,1],[142,72,142,170,0],[143,13,143,107,1],[144,13,144,109,1],[145,13,145,64,1],[145,65,145,149,0],[146,13,146,62,1],[146,63,146,143,0],[147,13,147,50,1],[147,51,147,143,0],[148,13,148,62,1],[148,63,148,169,0],[149,9,149,10,1],[152,9,152,10,1],[153,13,153,46,1],[155,13,155,107,1],[156,13,156,107,1],[157,13,157,121,1],[158,13,158,111,1],[160,13,160,119,1],[161,13,161,115,1],[162,9,162,10,1],[165,9,165,10,1],[166,13,166,42,1],[168,13,168,43,1],[169,13,169,14,0],[170,17,170,65,0],[171,13,171,14,0],[173,13,173,14,1],[174,17,174,88,1],[175,21,175,161,0],[176,13,176,14,1],[178,13,178,50,1],[179,13,179,20,1],[179,22,179,27,1],[179,28,179,30,1],[179,31,179,45,1],[180,17,180,122,1],[181,9,181,10,1],[184,9,184,10,1],[185,13,185,68,1],[186,13,186,20,1],[186,22,186,31,1],[186,32,186,34,1],[186,35,186,76,1],[187,17,187,72,1],[189,13,189,48,1],[191,13,191,64,1],[192,13,192,72,1],[196,13,196,100,1],[199,13,199,64,1],[200,13,200,60,1],[202,13,202,52,1],[203,13,203,14,0],[204,17,204,24,0],[204,26,204,35,0],[204,36,204,38,0],[204,39,204,71,0],[205,17,205,18,0],[206,21,214,24,0],[215,17,215,18,0],[216,13,216,14,0],[218,13,218,106,1],[220,13,220,20,1],[220,22,220,31,1],[220,32,220,34,1],[220,35,220,61,1],[221,13,221,14,1],[222,17,222,106,1],[223,17,223,111,1],[226,17,226,46,1],[227,17,227,18,1],[228,21,228,92,1],[229,21,229,98,1],[233,21,233,72,1],[239,21,239,62,1],[254,21,254,82,1],[256,21,256,71,1],[257,21,257,72,1],[258,17,258,18,1],[260,17,260,84,1],[261,21,261,30,1],[264,17,264,77,1],[265,17,265,111,1],[266,17,266,69,1],[267,17,267,69,1],[268,13,268,14,1],[271,13,271,14,1],[272,17,272,81,1],[273,17,273,89,1],[274,17,274,81,1],[275,17,275,81,1],[278,17,278,129,1],[279,17,279,80,1],[282,17,282,72,1],[283,17,283,42,1],[284,21,284,59,0],[285,17,285,50,1],[286,21,286,71,0],[288,17,297,19,1],[298,13,298,14,1],[301,13,301,14,1],[302,17,302,134,1],[303,17,303,129,1],[304,17,304,135,1],[305,17,305,131,1],[306,17,306,94,1],[307,17,307,136,1],[308,17,308,36,1],[309,13,309,14,1],[312,13,312,14,1],[313,17,313,56,1],[314,21,314,33,0],[316,17,316,24,1],[316,26,316,39,1],[316,40,316,42,1],[316,43,316,53,1],[317,17,317,18,1],[318,21,318,75,1],[319,25,319,157,1],[320,17,320,18,1],[321,13,321,14,1],[324,13,324,14,1],[325,17,325,24,1],[325,26,325,46,1],[325,47,325,49,1],[325,50,325,107,1],[325,107,325,114,1],[325,114,325,115,1],[326,17,326,18,1],[327,21,327,84,1],[328,21,328,22,1],[329,25,329,90,1],[330,25,330,72,1],[331,21,331,22,1],[332,17,332,18,1],[333,13,333,14,1],[336,13,336,14,1],[337,17,337,24,1],[337,26,337,39,1],[337,40,337,42,1],[337,43,337,53,1],[338,17,338,18,1],[339,21,339,65,1],[340,21,340,22,1],[341,25,341,100,1],[343,30,343,39,1],[343,41,343,77,1],[343,79,343,82,1],[344,25,344,26,1],[345,29,345,86,1],[347,29,347,73,1],[348,33,348,115,1],[350,29,350,171,1],[351,33,351,153,1],[352,25,352,26,1],[353,21,353,22,1],[354,26,354,58,1],[355,21,355,22,1],[356,25,356,109,1],[357,21,357,22,1],[359,21,359,28,1],[359,30,359,40,1],[359,41,359,43,1],[359,44,359,98,1],[360,25,360,45,1],[361,17,361,18,1],[364,17,364,18,1],[365,21,365,51,1],[365,51,365,59,1],[365,59,365,61,1],[366,21,366,54,1],[366,54,366,88,1],[366,88,366,102,1],[366,102,366,108,1],[366,108,367,58,1],[367,58,367,64,1],[367,64,367,74,1],[369,21,370,21,1],[370,21,370,22,1],[370,22,371,25,1],[371,25,371,35,1],[371,35,374,33,1],[374,33,374,64,1],[374,64,377,33,1],[377,33,377,75,1],[377,75,378,37,1],[378,37,378,50,0],[378,50,380,33,1],[380,33,380,69,1],[380,69,382,21,1],[382,21,382,22,1],[382,22,382,24,1],[384,21,384,168,1],[385,17,385,18,1],[386,13,386,14,1],[389,13,389,14,1],[390,17,390,24,1],[390,26,390,42,1],[390,43,390,45,1],[390,46,390,98,1],[390,98,390,105,1],[390,105,390,106,1],[391,17,391,18,1],[392,21,392,76,1],[393,21,393,22,1],[394,25,394,82,1],[395,25,395,64,1],[396,21,396,22,1],[397,17,397,18,1],[398,13,398,14,1],[399,9,399,10,1],[402,9,402,10,1],[403,13,403,124,1],[405,13,405,55,1],[406,17,406,24,1],[408,13,408,43,0],[410,18,410,27,0],[410,29,410,101,0],[410,103,410,106,0],[411,13,411,14,0],[412,17,412,46,0],[414,17,414,78,0],[415,17,415,104,0],[416,17,416,104,0],[417,17,417,104,0],[418,17,418,103,0],[419,17,419,36,0],[420,13,420,14,0],[421,9,421,10,1],[424,9,424,10,1],[425,13,425,46,1],[427,13,427,47,1],[428,17,428,24,1],[430,13,430,20,1],[430,22,430,27,1],[430,28,430,30,1],[430,31,430,49,1],[431,17,431,44,1],[432,9,432,10,1],[435,9,435,10,1],[436,13,436,54,1],[438,13,438,37,1],[442,21,442,67,1],[443,21,443,27,1],[446,21,446,88,0],[448,21,448,113,0],[449,21,449,27,0],[452,13,452,73,1],[453,13,453,73,1],[454,13,454,82,1],[455,13,455,92,1],[456,13,456,107,1],[458,13,458,44,1],[459,13,459,14,1],[460,17,460,53,1],[461,17,461,64,1],[462,13,462,14,1],[464,13,464,14,1],[465,17,465,47,1],[466,21,466,55,0],[468,17,468,64,1],[469,13,469,14,1],[471,13,471,32,1],[472,9,472,10,1],[475,9,475,10,1],[476,13,476,42,1],[478,13,478,46,1],[479,13,479,14,1],[480,17,480,70,1],[482,17,482,36,1],[483,21,483,58,1],[484,13,484,14,1],[486,13,486,31,1],[489,21,489,56,1],[490,21,490,27,1],[493,21,493,46,0],[494,25,494,58,0],[496,25,496,61,0],[497,21,497,27,0],[500,21,500,56,1],[501,21,501,27,1],[504,13,504,25,1],[505,9,505,10,1],[508,9,508,10,1],[509,18,509,27,1],[509,29,509,66,1],[509,68,509,71,1],[510,13,510,14,1],[511,17,511,73,1],[515,17,515,40,1],[516,17,516,18,1],[517,21,517,46,1],[520,29,520,111,0],[521,29,521,35,0],[524,29,524,48,0],[525,29,525,35,0],[528,29,528,48,0],[529,29,529,35,0],[532,29,532,48,1],[533,29,533,35,1],[535,17,535,18,1],[537,17,537,28,1],[538,17,538,18,1],[539,21,539,131,1],[540,21,540,90,1],[541,17,541,18,1],[542,13,542,14,1],[544,13,544,61,1],[546,13,546,96,1],[547,13,547,125,1],[549,13,549,35,1],[550,13,550,14,1],[551,22,551,31,1],[551,33,551,62,1],[551,64,551,67,1],[552,17,552,18,1],[553,21,553,161,1],[554,21,554,74,1],[555,17,555,18,1],[557,22,557,31,1],[557,33,557,62,1],[557,64,557,67,1],[558,17,558,18,1],[559,21,559,123,1],[560,21,560,74,1],[561,17,561,18,1],[562,13,562,14,1],[563,9,563,10,1],[566,9,566,10,0],[567,13,567,55,0],[568,13,568,49,0],[570,13,570,31,0],[573,13,573,50,0],[574,17,574,30,0],[576,13,576,89,0],[577,9,577,10,0],[580,9,580,10,1],[581,13,581,91,1],[581,91,581,125,1],[581,125,581,134,1],[582,13,582,87,1],[582,87,582,175,1],[582,175,582,184,1],[584,13,584,52,1],[586,13,586,75,1],[587,13,587,71,1],[589,13,589,28,1],[590,13,590,14,1],[591,17,591,93,1],[591,93,591,122,1],[591,122,591,125,1],[592,17,592,69,1],[592,69,592,114,1],[592,114,592,153,1],[593,17,593,70,1],[597,17,597,42,1],[598,17,598,18,1],[599,21,599,42,1],[600,21,600,32,1],[601,17,601,18,1],[603,17,603,32,1],[604,17,604,80,1],[605,17,605,70,1],[606,17,606,77,1],[607,13,607,14,1],[609,13,609,34,1],[610,9,610,10,1],[613,9,613,10,1],[614,13,614,63,1],[616,13,616,20,1],[616,22,616,32,1],[616,33,616,35,1],[616,36,616,43,1],[617,13,617,14,1],[618,17,618,37,1],[621,25,621,60,0],[622,25,622,31,0],[625,25,625,59,1],[626,25,626,31,1],[629,25,629,57,0],[630,25,630,31,0],[632,13,632,14,1],[634,13,634,25,1],[635,9,635,10,1],[638,9,638,10,1],[639,13,639,52,1],[642,21,642,52,1],[645,21,645,50,0],[648,21,648,50,0],[651,21,651,50,1],[653,9,653,10,1],[656,9,656,10,1],[657,13,657,84,1],[658,17,658,48,1],[660,13,660,22,1],[661,9,661,10,1],[665,46,665,50,1],[665,51,665,55,1],[666,44,666,48,1],[666,49,666,54,1],[667,39,667,43,1],[667,44,667,49,1],[668,45,668,49,1],[668,50,668,55,1],[669,41,669,45,1],[669,46,669,51,1],[670,54,670,58,1],[670,59,670,63,1],[673,17,678,49,1]]);
+    </script>
+  </body>
+</html>

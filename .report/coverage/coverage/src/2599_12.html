@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Settings/Sections/Input/KeyBindingConflictPopover.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osuTK;
+
+namespace osu.Game.Overlays.Settings.Sections.Input
+{
+    public partial class KeyBindingConflictPopover : OsuPopover
+    {
+        public Action? BindingConflictResolved { get; init; }
+
+        private ConflictingKeyBindingPreview newPreview = null!;
+        private ConflictingKeyBindingPreview existingPreview = null!;
+        private HoverableRoundedButton keepExistingButton = null!;
+        private HoverableRoundedButton applyNewButton = null!;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        private readonly KeyBindingRow.KeyBindingConflictInfo conflictInfo;
+
+        protected override string PopInSampleName =&gt; @&quot;UI/generic-error&quot;;
+
+        public KeyBindingConflictPopover(KeyBindingRow.KeyBindingConflictInfo conflictInfo)
+        {
+            this.conflictInfo = conflictInfo;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Child = new FillFlowContainer
+            {
+                Width = 250,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(10),
+                Children = new Drawable[]
+                {
+                    new OsuTextFlowContainer
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Text = InputSettingsStrings.KeyBindingConflictDetected,
+                        Margin = new MarginPadding { Bottom = 10 }
+                    },
+                    existingPreview = new ConflictingKeyBindingPreview(
+                        conflictInfo.Existing.Action,
+                        conflictInfo.Existing.CombinationWhenChosen,
+                        conflictInfo.Existing.CombinationWhenNotChosen),
+                    newPreview = new ConflictingKeyBindingPreview(
+                        conflictInfo.New.Action,
+                        conflictInfo.New.CombinationWhenChosen,
+                        conflictInfo.New.CombinationWhenNotChosen),
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Margin = new MarginPadding { Top = 10 },
+                        Children = new[]
+                        {
+                            keepExistingButton = new HoverableRoundedButton
+                            {
+                                Text = InputSettingsStrings.KeepExistingBinding,
+                                RelativeSizeAxes = Axes.X,
+                                Width = 0.48f,
+                                Anchor = Anchor.CentreLeft,
+                                Origin = Anchor.CentreLeft,
+                                Action = Hide
+                            },
+                            applyNewButton = new HoverableRoundedButton
+                            {
+                                Text = InputSettingsStrings.ApplyNewBinding,
+                                BackgroundColour = colours.DangerousButtonColour,
+                                RelativeSizeAxes = Axes.X,
+                                Width = 0.48f,
+                                Anchor = Anchor.CentreRight,
+                                Origin = Anchor.CentreRight,
+                                Action = applyNew
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        private void applyNew()
+        {
+            // only &quot;apply new&quot; needs to cause actual realm changes, since the flow in `KeyBindingsSubsection` does not actually make db changes
+            // if it detects a binding conflict.
+            // the temporary visual changes will be reverted by calling `Hide()` / `BindingConflictResolved`.
+            realm.Write(r =&gt;
+            {
+                var existingBinding = r.Find&lt;RealmKeyBinding&gt;(conflictInfo.Existing.ID);
+                existingBinding!.KeyCombinationString = conflictInfo.Existing.CombinationWhenNotChosen.ToString();
+
+                var newBinding = r.Find&lt;RealmKeyBinding&gt;(conflictInfo.New.ID);
+                newBinding!.KeyCombinationString = conflictInfo.Existing.CombinationWhenChosen.ToString();
+            });
+
+            Hide();
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            // workaround for `VisibilityContainer.PopOut()` being called in `LoadAsyncComplete()`
+            if (IsLoaded)
+                BindingConflictResolved?.Invoke();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            keepExistingButton.IsHoveredBindable.BindValueChanged(_ =&gt; updatePreviews());
+            applyNewButton.IsHoveredBindable.BindValueChanged(_ =&gt; updatePreviews());
+            updatePreviews();
+        }
+
+        private void updatePreviews()
+        {
+            if (!keepExistingButton.IsHovered &amp;&amp; !applyNewButton.IsHovered)
+            {
+                existingPreview.IsChosen.Value = newPreview.IsChosen.Value = null;
+                return;
+            }
+
+            existingPreview.IsChosen.Value = keepExistingButton.IsHovered;
+            newPreview.IsChosen.Value = applyNewButton.IsHovered;
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Action == GlobalAction.Select &amp;&amp; !e.Repeat)
+            {
+                applyNew();
+                return true;
+            }
+
+            return base.OnPressed(e);
+        }
+
+        private partial class ConflictingKeyBindingPreview : CompositeDrawable
+        {
+            private readonly object action;
+            private readonly KeyCombination combinationWhenChosen;
+            private readonly KeyCombination combinationWhenNotChosen;
+
+            private OsuSpriteText newBindingText = null!;
+
+            public Bindable&lt;bool?&gt; IsChosen { get; } = new Bindable&lt;bool?&gt;();
+
+            [Resolved]
+            private ReadableKeyCombinationProvider keyCombinationProvider { get; set; } = null!;
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            public ConflictingKeyBindingPreview(object action, KeyCombination combinationWhenChosen, KeyCombination combinationWhenNotChosen)
+            {
+                this.action = action;
+                this.combinationWhenChosen = combinationWhenChosen;
+                this.combinationWhenNotChosen = combinationWhenNotChosen;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OverlayColourProvider colourProvider)
+            {
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+
+                InternalChild = new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    CornerRadius = 5,
+                    Masking = true,
+                    Children = new Drawable[]
+                    {
+                        new FormControlBackground(),
+                        new GridContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            RowDimensions = new[] { new Dimension(GridSizeMode.AutoSize) },
+                            ColumnDimensions = new[]
+                            {
+                                new Dimension(),
+                                new Dimension(GridSizeMode.AutoSize),
+                            },
+                            Content = new[]
+                            {
+                                new Drawable[]
+                                {
+                                    new FormFieldCaption
+                                    {
+                                        Caption = action.GetLocalisableDescription(),
+                                        Margin = new MarginPadding(9),
+                                    },
+                                    new Container
+                                    {
+                                        AutoSizeAxes = Axes.Both,
+                                        CornerRadius = 5,
+                                        Masking = true,
+                                        Anchor = Anchor.CentreRight,
+                                        Origin = Anchor.CentreRight,
+                                        X = -5,
+                                        Children = new[]
+                                        {
+                                            new Box
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Colour = colourProvider.Background6
+                                            },
+                                            Empty().With(d =&gt; d.Width = 60), // poor man&#39;s min-width
+                                            newBindingText = new OsuSpriteText
+                                            {
+                                                Font = OsuFont.Default.With(size: 14, weight: FontWeight.Bold),
+                                                Margin = new MarginPadding(5),
+                                                Anchor = Anchor.Centre,
+                                                Origin = Anchor.Centre,
+                                            }
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                IsChosen.BindValueChanged(_ =&gt; updateState(), true);
+            }
+
+            private void updateState()
+            {
+                LocalisableString keyCombinationText;
+
+                switch (IsChosen.Value)
+                {
+                    case true:
+                        keyCombinationText = keyCombinationProvider.GetReadableString(combinationWhenChosen);
+                        newBindingText.Colour = colours.Green1;
+                        break;
+
+                    case false:
+                        keyCombinationText = keyCombinationProvider.GetReadableString(combinationWhenNotChosen);
+                        newBindingText.Colour = colours.Red1;
+                        break;
+
+                    case null:
+                        keyCombinationText = keyCombinationProvider.GetReadableString(combinationWhenChosen);
+                        newBindingText.Colour = Colour4.White;
+                        break;
+                }
+
+                if (LocalisableString.IsNullOrEmpty(keyCombinationText))
+                    keyCombinationText = InputSettingsStrings.ActionHasNoKeyBinding;
+
+                newBindingText.Text = keyCombinationText.ToUpper();
+            }
+        }
+
+        private partial class HoverableRoundedButton : RoundedButton
+        {
+            public BindableBool IsHoveredBindable { get; set; } = new BindableBool();
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                IsHoveredBindable.Value = IsHovered;
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                IsHoveredBindable.Value = IsHovered;
+                base.OnHoverLost(e);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,50,29,54,0],[29,55,29,60,0],[31,9,31,65,0],[32,9,32,70,0],[33,9,33,67,0],[34,9,34,63,0],[37,37,37,41,0],[37,42,37,46,0],[37,51,37,56,0],[40,37,40,41,0],[40,42,40,46,0],[40,51,40,56,0],[44,54,44,73,0],[46,9,46,92,0],[47,9,47,10,0],[48,13,48,46,0],[49,9,49,10,0],[53,9,53,10,0],[54,13,106,15,0],[107,9,107,10,0],[110,9,110,10,0],[114,13,115,13,0],[115,13,115,14,0],[115,14,116,17,0],[116,17,116,89,0],[116,89,117,17,0],[117,17,117,115,0],[117,115,119,17,0],[119,17,119,79,0],[119,79,120,17,0],[120,17,120,107,0],[120,107,121,13,0],[121,13,121,14,0],[121,14,121,16,0],[123,13,123,20,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,27,0],[131,13,131,26,0],[132,17,132,51,0],[133,9,133,10,0],[136,9,136,10,0],[137,13,137,33,0],[139,13,139,72,0],[139,72,139,88,0],[139,88,139,90,0],[140,13,140,68,0],[140,68,140,84,0],[140,84,140,86,0],[141,13,141,30,0],[142,9,142,10,0],[145,9,145,10,0],[146,13,146,76,0],[147,13,147,14,0],[148,17,148,83,0],[149,17,149,24,0],[152,13,152,75,0],[153,13,153,66,0],[154,9,154,10,0],[157,9,157,10,0],[158,13,158,62,0],[159,13,159,14,0],[160,17,160,28,0],[161,17,161,29,0],[164,13,164,38,0],[165,9,165,10,0],[173,13,173,58,0],[175,47,175,51,0],[175,56,175,77,0],[178,77,178,81,0],[178,82,178,86,0],[178,91,178,96,0],[181,41,181,45,0],[181,46,181,50,0],[181,55,181,60,0],[183,13,183,142,0],[184,13,184,14,0],[185,17,185,38,0],[186,17,186,68,0],[187,17,187,74,0],[188,13,188,14,0],[192,13,192,14,0],[193,17,193,43,0],[194,17,194,39,0],[196,17,239,63,0],[239,63,239,75,0],[239,75,253,19,0],[254,13,254,14,0],[257,13,257,14,0],[258,17,258,37,0],[260,17,260,48,0],[260,48,260,61,0],[260,61,260,69,0],[261,13,261,14,0],[264,13,264,14,0],[267,17,267,40,0],[270,25,270,110,0],[271,25,271,64,0],[272,25,272,31,0],[275,25,275,113,0],[276,25,276,62,0],[277,25,277,31,0],[280,25,280,110,0],[281,25,281,63,0],[282,25,282,31,0],[285,17,285,73,0],[286,21,286,85,0],[288,17,288,68,0],[289,13,289,14,0],[294,53,294,57,0],[294,58,294,62,0],[294,67,294,85,0],[297,13,297,14,0],[298,17,298,53,0],[299,17,299,40,0],[300,13,300,14,0],[303,13,303,14,0],[304,17,304,53,0],[305,17,305,37,0],[306,13,306,14,0]]);
+    </script>
+  </body>
+</html>

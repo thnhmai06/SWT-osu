@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/Scrolling/DrawableScrollingRuleset.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Lists;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Configuration;
+using osu.Game.Input.Bindings;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Timing;
+using osu.Game.Rulesets.UI.Scrolling.Algorithms;
+using osu.Game.Screens.Play;
+
+namespace osu.Game.Rulesets.UI.Scrolling
+{
+    /// &lt;summary&gt;
+    /// A type of &lt;see cref=&quot;DrawableRuleset{TObject}&quot;/&gt; that supports a &lt;see cref=&quot;ScrollingPlayfield&quot;/&gt;.
+    /// &lt;see cref=&quot;HitObject&quot;/&gt;s inside this &lt;see cref=&quot;DrawableRuleset{TObject}&quot;/&gt; will scroll within the playfield.
+    /// &lt;/summary&gt;
+    public abstract partial class DrawableScrollingRuleset&lt;TObject&gt; : DrawableRuleset&lt;TObject&gt;, IDrawableScrollingRuleset, IKeyBindingHandler&lt;GlobalAction&gt;
+        where TObject : HitObject
+    {
+        /// &lt;summary&gt;
+        /// The default span of time visible by the length of the scrolling axes.
+        /// This is clamped between &lt;see cref=&quot;time_span_min&quot;/&gt; and &lt;see cref=&quot;time_span_max&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private const double time_span_default = 1500;
+
+        /// &lt;summary&gt;
+        /// The minimum span of time that may be visible by the length of the scrolling axes.
+        /// &lt;/summary&gt;
+        private const double time_span_min = 50;
+
+        /// &lt;summary&gt;
+        /// The maximum span of time that may be visible by the length of the scrolling axes.
+        /// &lt;/summary&gt;
+        private const double time_span_max = 20000;
+
+        /// &lt;summary&gt;
+        /// The step increase/decrease of the span of time visible by the length of the scrolling axes.
+        /// &lt;/summary&gt;
+        private const double time_span_step = 200;
+
+        protected readonly Bindable&lt;ScrollingDirection&gt; Direction = new Bindable&lt;ScrollingDirection&gt;();
+
+        /// &lt;summary&gt;
+        /// The span of time that is visible by the length of the scrolling axes.
+        /// For example, only hit objects with start time less than or equal to 1000 will be visible with &lt;see cref=&quot;TimeRange&quot;/&gt; = 1000.
+        /// &lt;/summary&gt;
+        protected readonly BindableDouble TimeRange = new BindableDouble(time_span_default)
+        {
+            MinValue = time_span_min,
+            MaxValue = time_span_max
+        };
+
+        /// &lt;summary&gt;
+        /// Whether the player can change &lt;see cref=&quot;TimeRange&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected virtual bool UserScrollSpeedAdjustment =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Whether at the current point in time, whether scroll speed adjustments should be applied to gameplay.
+        /// This can potentially become false at some point during gameplay for game balance reasons.
+        /// &lt;/summary&gt;
+        protected bool AllowScrollSpeedAdjustment =&gt; UserScrollSpeedAdjustment &amp;&amp; player?.AllowCriticalSettingsAdjustment != false;
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;TimingControlPoint&quot;/&gt; beat lengths should scale relative to the most common beat length in the &lt;see cref=&quot;Beatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected virtual bool RelativeScaleBeatLengths =&gt; false;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;MultiplierControlPoint&quot;/&gt;s that adjust the scrolling rate of &lt;see cref=&quot;HitObject&quot;/&gt;s inside this &lt;see cref=&quot;DrawableRuleset{TObject}&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected readonly SortedList&lt;MultiplierControlPoint&gt; ControlPoints = new SortedList&lt;MultiplierControlPoint&gt;(Comparer&lt;MultiplierControlPoint&gt;.Default);
+
+        public IScrollingInfo ScrollingInfo =&gt; scrollingInfo;
+
+        [Cached(Type = typeof(IScrollingInfo))]
+        private readonly LocalScrollingInfo scrollingInfo;
+
+        [Resolved]
+        private Player? player { get; set; }
+
+        protected DrawableScrollingRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt;? mods = null)
+            : base(ruleset, beatmap, mods)
+        {
+            scrollingInfo = new LocalScrollingInfo();
+            scrollingInfo.Direction.BindTo(Direction);
+            scrollingInfo.TimeRange.BindTo(TimeRange);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            updateScrollAlgorithm();
+
+            double lastObjectTime = Beatmap.HitObjects.Any() ? Beatmap.GetLastObjectTime() : double.MaxValue;
+            double baseBeatLength = TimingControlPoint.DEFAULT_BEAT_LENGTH;
+
+            if (RelativeScaleBeatLengths)
+            {
+                baseBeatLength = Beatmap.GetMostCommonBeatLength();
+
+                // The slider multiplier is post-multiplied to determine the final velocity, but for relative scale beat lengths
+                // the multiplier should not affect the effective timing point (the longest in the beatmap), so it is factored out here
+                baseBeatLength /= Beatmap.Difficulty.SliderMultiplier;
+            }
+
+            // Merge sequences of timing and difficulty control points to create the aggregate &quot;multiplier&quot; control point
+            var lastTimingPoint = new TimingControlPoint();
+            var lastEffectPoint = new EffectControlPoint();
+            var allPoints = new SortedList&lt;ControlPoint&gt;(Comparer&lt;ControlPoint&gt;.Default);
+
+            allPoints.AddRange(Beatmap.ControlPointInfo.TimingPoints);
+            allPoints.AddRange(Beatmap.ControlPointInfo.EffectPoints);
+
+            // Generate the timing points, making non-timing changes use the previous timing change and vice-versa
+            var timingChanges = allPoints.Select(c =&gt;
+            {
+                switch (c)
+                {
+                    case TimingControlPoint timingPoint:
+                        lastTimingPoint = timingPoint;
+                        break;
+
+                    case EffectControlPoint difficultyPoint:
+                        lastEffectPoint = difficultyPoint;
+                        break;
+                }
+
+                return new MultiplierControlPoint(c.Time)
+                {
+                    Velocity = Beatmap.Difficulty.SliderMultiplier,
+                    BaseBeatLength = baseBeatLength,
+                    TimingPoint = lastTimingPoint,
+                    EffectPoint = lastEffectPoint
+                };
+            });
+
+            // Trim unwanted sequences of timing changes
+            timingChanges = timingChanges
+                            // Collapse sections after the last hit object
+                            .Where(s =&gt; s.Time &lt;= lastObjectTime)
+                            // Collapse sections with the same start time
+                            .GroupBy(s =&gt; s.Time).Select(g =&gt; g.Last()).OrderBy(s =&gt; s.Time);
+
+            ControlPoints.AddRange(timingChanges);
+
+            if (ControlPoints.Count == 0)
+                ControlPoints.Add(new MultiplierControlPoint { Velocity = Beatmap.Difficulty.SliderMultiplier });
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (!(Playfield is ScrollingPlayfield))
+                throw new ArgumentException($&quot;{nameof(Playfield)} must be a {nameof(ScrollingPlayfield)} when using {nameof(DrawableScrollingRuleset&lt;&gt;)}.&quot;);
+        }
+
+        private ScrollVisualisationMethod visualisationMethod = ScrollVisualisationMethod.Sequential;
+
+        public ScrollVisualisationMethod VisualisationMethod
+        {
+            get =&gt; visualisationMethod;
+            set
+            {
+                visualisationMethod = value;
+                updateScrollAlgorithm();
+            }
+        }
+
+        private void updateScrollAlgorithm()
+        {
+            switch (VisualisationMethod)
+            {
+                case ScrollVisualisationMethod.Sequential:
+                    scrollingInfo.Algorithm.Value = new SequentialScrollAlgorithm(ControlPoints);
+                    break;
+
+                case ScrollVisualisationMethod.Overlapping:
+                    scrollingInfo.Algorithm.Value = new OverlappingScrollAlgorithm(ControlPoints);
+                    break;
+
+                case ScrollVisualisationMethod.Constant:
+                    scrollingInfo.Algorithm.Value = new ConstantScrollAlgorithm();
+                    break;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Adjusts the scroll speed of &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;amount&quot;&gt;The amount to adjust by. Greater than 0 if the scroll speed should be increased, less than 0 if it should be decreased.&lt;/param&gt;
+        protected virtual void AdjustScrollSpeed(int amount)
+        {
+            this.TransformBindableTo(TimeRange, TimeRange.Value - amount * time_span_step, 200, Easing.OutQuint);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.IncreaseScrollSpeed:
+                    if (AllowScrollSpeedAdjustment)
+                        AdjustScrollSpeed(1);
+                    return true;
+
+                case GlobalAction.DecreaseScrollSpeed:
+                    if (AllowScrollSpeedAdjustment)
+                        AdjustScrollSpeed(-1);
+                    return true;
+            }
+
+            return false;
+        }
+
+        private ScheduledDelegate? scheduledScrollSpeedAdjustment;
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+            scheduledScrollSpeedAdjustment?.Cancel();
+            scheduledScrollSpeedAdjustment = null;
+        }
+
+        private class LocalScrollingInfo : IScrollingInfo
+        {
+            public IBindable&lt;ScrollingDirection&gt; Direction { get; } = new Bindable&lt;ScrollingDirection&gt;();
+
+            public IBindable&lt;double&gt; TimeRange { get; } = new BindableDouble();
+
+            public readonly Bindable&lt;IScrollAlgorithm&gt; Algorithm = new Bindable&lt;IScrollAlgorithm&gt;(new ConstantScrollAlgorithm());
+
+            IBindable&lt;IScrollAlgorithm&gt; IScrollingInfo.Algorithm =&gt; Algorithm;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[54,9,54,104,0],[60,9,64,11,0],[69,61,69,65,0],[75,54,75,131,0],[80,60,80,65,0],[85,9,85,160,0],[87,48,87,61,0],[93,34,93,38,0],[93,39,93,43,0],[96,15,96,43,0],[97,9,97,10,0],[98,13,98,54,0],[99,13,99,55,0],[100,13,100,55,0],[101,9,101,10,0],[105,9,105,10,0],[106,13,106,37,0],[108,13,108,110,0],[109,13,109,76,0],[111,13,111,42,0],[112,13,112,14,0],[113,17,113,68,0],[117,17,117,71,0],[118,13,118,14,0],[121,13,121,60,0],[122,13,122,60,0],[123,13,123,90,0],[125,13,125,71,0],[126,13,126,71,0],[129,13,130,13,0],[130,13,130,14,0],[130,14,131,17,0],[131,17,131,27,0],[131,27,134,25,0],[134,25,134,55,0],[134,55,135,25,0],[135,25,135,31,0],[135,31,138,25,0],[138,25,138,59,0],[138,59,139,25,0],[139,25,139,31,0],[139,31,142,17,0],[142,17,148,19,0],[148,19,149,13,0],[149,13,149,14,0],[149,14,149,16,0],[152,13,154,41,0],[154,41,154,65,0],[154,65,156,43,0],[156,43,156,49,0],[156,49,156,63,0],[156,63,156,71,0],[156,71,156,86,0],[156,86,156,92,0],[156,92,156,94,0],[158,13,158,51,0],[160,13,160,42,0],[161,17,161,114,0],[162,9,162,10,0],[165,9,165,10,0],[166,13,166,33,0],[168,13,168,52,0],[169,17,169,157,0],[170,9,170,10,0],[172,9,172,102,0],[176,20,176,39,0],[178,13,178,14,0],[179,17,179,45,0],[180,17,180,41,0],[181,13,181,14,0],[185,9,185,10,0],[186,13,186,41,0],[189,21,189,98,0],[190,21,190,27,0],[193,21,193,99,0],[194,21,194,27,0],[197,21,197,83,0],[198,21,198,27,0],[200,9,200,10,0],[207,9,207,10,0],[208,13,208,114,0],[209,9,209,10,0],[212,9,212,10,0],[213,13,213,30,0],[216,21,216,52,0],[217,25,217,46,0],[218,21,218,33,0],[221,21,221,52,0],[222,25,222,47,0],[223,21,223,33,0],[226,13,226,26,0],[227,9,227,10,0],[232,9,232,10,0],[233,13,233,54,0],[234,13,234,51,0],[235,9,235,10,0],[239,62,239,66,0],[239,71,239,105,0],[241,50,241,54,0],[241,59,241,79,0],[243,13,243,130,0],[245,69,245,78,0]]);
+    </script>
+  </body>
+</html>

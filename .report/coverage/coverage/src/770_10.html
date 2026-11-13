@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Catch/Edit/Blueprints/Components/EditablePath.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Screens.Edit;
+using osuTK;
+
+namespace osu.Game.Rulesets.Catch.Edit.Blueprints.Components
+{
+    public abstract partial class EditablePath : CompositeDrawable
+    {
+        public int PathId =&gt; path.InvalidationID;
+
+        public IReadOnlyList&lt;JuiceStreamPathVertex&gt; Vertices =&gt; path.Vertices;
+
+        public int VertexCount =&gt; path.Vertices.Count;
+
+        protected readonly Func&lt;float, double&gt; PositionToTime;
+
+        protected IReadOnlyList&lt;VertexState&gt; VertexStates =&gt; vertexStates;
+
+        private readonly JuiceStreamPath path = new JuiceStreamPath();
+
+        // Invariant: `path.Vertices.Count == vertexStates.Count`
+        private readonly List&lt;VertexState&gt; vertexStates = new List&lt;VertexState&gt;
+        {
+            new VertexState { IsFixed = true }
+        };
+
+        private readonly List&lt;VertexState&gt; previousVertexStates = new List&lt;VertexState&gt;();
+
+        [Resolved]
+        private IBeatSnapProvider? beatSnapProvider { get; set; }
+
+        [Resolved]
+        protected EditorBeatmap? EditorBeatmap { get; private set; }
+
+        protected EditablePath(Func&lt;float, double&gt; positionToTime)
+        {
+            PositionToTime = positionToTime;
+
+            Anchor = Anchor.BottomLeft;
+        }
+
+        public void UpdateFrom(ScrollingHitObjectContainer hitObjectContainer, JuiceStream hitObject)
+        {
+            while (path.Vertices.Count &lt; InternalChildren.Count)
+                RemoveInternal(InternalChildren[^1], true);
+
+            while (InternalChildren.Count &lt; path.Vertices.Count)
+                AddInternal(new VertexPiece());
+
+            double timeToYFactor = -hitObjectContainer.LengthAtTime(hitObject.StartTime, hitObject.StartTime + 1);
+
+            for (int i = 0; i &lt; VertexCount; i++)
+            {
+                var piece = (VertexPiece)InternalChildren[i];
+                var vertex = path.Vertices[i];
+                piece.Position = new Vector2(vertex.X, (float)(vertex.Time * timeToYFactor));
+                piece.UpdateFrom(vertexStates[i]);
+            }
+        }
+
+        public void InitializeFromHitObject(JuiceStream hitObject)
+        {
+            var sliderPath = hitObject.Path;
+            path.ConvertFromSliderPath(sliderPath, hitObject.Velocity);
+
+            // If the original slider path has non-linear type segments, resample the vertices at nested hit object times to reduce the number of vertices.
+            if (sliderPath.ControlPoints.Any(p =&gt; p.Type != null &amp;&amp; p.Type != PathType.LINEAR))
+            {
+                path.ResampleVertices(hitObject.NestedHitObjects
+                                               .Skip(1).TakeWhile(h =&gt; !(h is Fruit)) // Only droplets in the first span are used.
+                                               .Select(h =&gt; h.StartTime - hitObject.StartTime));
+            }
+
+            vertexStates.Clear();
+            vertexStates.AddRange(path.Vertices.Select((_, i) =&gt; new VertexState
+            {
+                IsFixed = i == 0
+            }));
+        }
+
+        public virtual void UpdateHitObjectFromPath(JuiceStream hitObject)
+        {
+            // The SV setting may need to be changed for the current path.
+            var svBindable = hitObject.SliderVelocityMultiplierBindable;
+            double svToVelocityFactor = hitObject.Velocity / svBindable.Value;
+            double requiredVelocity = path.ComputeRequiredVelocity();
+
+            // The value is pre-rounded here because setting it to the bindable will rounded to the nearest value
+            // but it should be always rounded up to satisfy the required minimum velocity condition.
+            //
+            // This is rounded to integers instead of using the precision of the bindable
+            // because it results in a smaller number of non-redundant control points.
+            //
+            // The value is clamped here by the bindable min and max values.
+            // In case the required velocity is too large, the path is not preserved.
+            double previousVelocity = svBindable.Value;
+            svBindable.Value = Math.Ceiling(requiredVelocity / svToVelocityFactor);
+
+            // adjust velocity locally, so that once the SV change is applied by applying defaults
+            // (triggered by `EditorBeatmap.Update()` call at end of method),
+            // it results in the outcome desired by the user.
+            double relativeChange = svBindable.Value / previousVelocity;
+            double localVelocity = hitObject.Velocity * relativeChange;
+            path.ConvertToSliderPath(hitObject.Path, hitObject.LegacyConvertedY, localVelocity);
+
+            if (beatSnapProvider == null) return;
+
+            double endTime = hitObject.StartTime + path.Duration;
+            double snappedEndTime = beatSnapProvider.SnapTime(endTime, hitObject.StartTime);
+            hitObject.Path.ExpectedDistance.Value = (snappedEndTime - hitObject.StartTime) * localVelocity;
+
+            EditorBeatmap?.Update(hitObject);
+        }
+
+        public Vector2 ToRelativePosition(Vector2 screenSpacePosition)
+        {
+            return ToLocalSpace(screenSpacePosition) - new Vector2(0, DrawHeight);
+        }
+
+        protected override bool ComputeIsMaskedAway(RectangleF maskingBounds) =&gt; false;
+
+        protected int AddVertex(double time, float x)
+        {
+            int index = path.InsertVertex(time);
+            path.SetVertexPosition(index, x);
+            vertexStates.Insert(index, new VertexState());
+
+            correctFixedVertexPositions();
+
+            Debug.Assert(vertexStates.Count == VertexCount);
+            return index;
+        }
+
+        protected bool RemoveVertex(int index)
+        {
+            if (index &lt; 0 || index &gt;= path.Vertices.Count)
+                return false;
+
+            if (vertexStates[index].IsFixed)
+                return false;
+
+            path.RemoveVertices((_, i) =&gt; i == index);
+
+            vertexStates.RemoveAt(index);
+            if (vertexStates.Count == 0)
+                vertexStates.Add(new VertexState());
+
+            Debug.Assert(vertexStates.Count == VertexCount);
+            return true;
+        }
+
+        protected void MoveSelectedVertices(double timeDelta, float xDelta)
+        {
+            // Because the vertex list may be reordered due to time change, the state list must be reordered as well.
+            previousVertexStates.Clear();
+            previousVertexStates.AddRange(vertexStates);
+
+            // We will recreate the path from scratch. Note that `Clear` leaves the first vertex.
+            int vertexCount = VertexCount;
+            path.Clear();
+            vertexStates.RemoveRange(1, vertexCount - 1);
+
+            for (int i = 1; i &lt; vertexCount; i++)
+            {
+                var state = previousVertexStates[i];
+                double time = state.VertexBeforeChange.Time;
+                if (state.IsSelected)
+                    time += timeDelta;
+
+                int newIndex = path.InsertVertex(Math.Max(0, time));
+                vertexStates.Insert(newIndex, state);
+            }
+
+            // First, restore positions of the non-selected vertices.
+            for (int i = 0; i &lt; vertexCount; i++)
+            {
+                if (!vertexStates[i].IsSelected &amp;&amp; !vertexStates[i].IsFixed)
+                    path.SetVertexPosition(i, vertexStates[i].VertexBeforeChange.X);
+            }
+
+            // Then, move the selected vertices.
+            for (int i = 0; i &lt; vertexCount; i++)
+            {
+                if (vertexStates[i].IsSelected &amp;&amp; !vertexStates[i].IsFixed)
+                    path.SetVertexPosition(i, vertexStates[i].VertexBeforeChange.X + xDelta);
+            }
+
+            // Finally, correct the position of fixed vertices.
+            correctFixedVertexPositions();
+        }
+
+        private void correctFixedVertexPositions()
+        {
+            for (int i = 0; i &lt; VertexCount; i++)
+            {
+                if (vertexStates[i].IsFixed)
+                    path.SetVertexPosition(i, vertexStates[i].VertexBeforeChange.X);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,30,23,49,0],[25,65,25,78,0],[27,35,27,54,0],[31,62,31,74,0],[33,9,33,71,0],[36,9,39,11,0],[41,9,41,91,0],[44,55,44,59,0],[44,60,44,64,0],[47,50,47,54,0],[47,55,47,67,0],[49,9,49,67,0],[50,9,50,10,0],[51,13,51,45,0],[53,13,53,40,0],[54,9,54,10,0],[57,9,57,10,0],[58,13,58,65,0],[59,17,59,60,0],[61,13,61,65,0],[62,17,62,48,0],[64,13,64,115,0],[66,18,66,27,0],[66,29,66,44,0],[66,46,66,49,0],[67,13,67,14,0],[68,17,68,62,0],[69,17,69,47,0],[70,17,70,94,0],[71,17,71,51,0],[72,13,72,14,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,45,0],[78,13,78,72,0],[81,13,81,51,0],[81,51,81,94,0],[81,94,81,96,0],[82,13,82,14,0],[83,17,84,72,0],[84,72,84,85,0],[84,85,85,61,0],[85,61,85,94,0],[85,94,85,97,0],[86,13,86,14,0],[88,13,88,34,0],[89,13,89,66,0],[89,66,92,14,0],[92,14,92,17,0],[93,9,93,10,0],[96,9,96,10,0],[98,13,98,73,0],[99,13,99,79,0],[100,13,100,70,0],[110,13,110,56,0],[111,13,111,84,0],[116,13,116,73,0],[117,13,117,72,0],[118,13,118,97,0],[120,13,120,42,0],[120,43,120,50,0],[122,13,122,66,0],[123,13,123,93,0],[124,13,124,108,0],[126,13,126,46,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,83,0],[132,9,132,10,0],[134,82,134,87,0],[137,9,137,10,0],[138,13,138,49,0],[139,13,139,46,0],[140,13,140,59,0],[142,13,142,43,0],[144,13,144,61,0],[145,13,145,26,0],[146,9,146,10,0],[149,9,149,10,0],[150,13,150,59,0],[151,17,151,30,0],[153,13,153,45,0],[154,17,154,30,0],[156,13,156,43,0],[156,43,156,53,0],[156,53,156,55,0],[158,13,158,42,0],[159,13,159,41,0],[160,17,160,53,0],[162,13,162,61,0],[163,13,163,25,0],[164,9,164,10,0],[167,9,167,10,0],[169,13,169,42,0],[170,13,170,57,0],[173,13,173,43,0],[174,13,174,26,0],[175,13,175,58,0],[177,18,177,27,0],[177,29,177,44,0],[177,46,177,49,0],[178,13,178,14,0],[179,17,179,53,0],[180,17,180,61,0],[181,17,181,38,0],[182,21,182,39,0],[184,17,184,69,0],[185,17,185,54,0],[186,13,186,14,0],[189,18,189,27,0],[189,29,189,44,0],[189,46,189,49,0],[190,13,190,14,0],[191,17,191,77,0],[192,21,192,85,0],[193,13,193,14,0],[196,18,196,27,0],[196,29,196,44,0],[196,46,196,49,0],[197,13,197,14,0],[198,17,198,76,0],[199,21,199,94,0],[200,13,200,14,0],[203,13,203,43,0],[204,9,204,10,0],[207,9,207,10,0],[208,18,208,27,0],[208,29,208,44,0],[208,46,208,49,0],[209,13,209,14,0],[210,17,210,45,0],[211,21,211,85,0],[212,13,212,14,0],[213,9,213,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Difficulty/Evaluators/Speed/RhythmEvaluator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using osu.Game.Rulesets.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Difficulty.Utils;
+using osu.Game.Rulesets.Osu.Difficulty.Preprocessing;
+using osu.Game.Rulesets.Osu.Objects;
+
+namespace osu.Game.Rulesets.Osu.Difficulty.Evaluators.Speed
+{
+    public static class RhythmEvaluator
+    {
+        /// &lt;summary&gt;
+        /// Calculates a rhythm multiplier for the difficulty of the tap associated with historic data of the current &lt;see cref=&quot;OsuDifficultyHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public static double EvaluateDifficultyOf(DifficultyHitObject current)
+        {
+            if (current.BaseObject is Spinner)
+                return 0;
+
+            const int history_time_max = 5 * 1000; // 5 seconds
+            const int history_objects_max = 32;
+            const double rhythm_overall_multiplier = 0.95;
+
+            double rhythmComplexitySum = 0;
+
+            double deltaDifferenceEpsilon = ((OsuDifficultyHitObject)current).HitWindowGreat * 0.3;
+
+            var island = new Island(int.MaxValue);
+            var previousIsland = new Island(int.MaxValue);
+
+            var islands = new List&lt;Island&gt;();
+
+            double startDifficulty = 0; // store the difficulty of the current start of an island to buff for tighter rhythms
+
+            bool firstDeltaSwitch = false;
+
+            int historicalNoteCount = Math.Min(current.Index, history_objects_max);
+
+            int rhythmStart = 0;
+
+            while (rhythmStart &lt; historicalNoteCount - 2 &amp;&amp; current.StartTime - current.Previous(rhythmStart).StartTime &lt; history_time_max)
+                rhythmStart++;
+
+            OsuDifficultyHitObject prevObj = (OsuDifficultyHitObject)current.Previous(rhythmStart);
+            OsuDifficultyHitObject prevPrevObj = (OsuDifficultyHitObject)current.Previous(rhythmStart + 1);
+
+            // we go from the furthest object back to the current one
+            for (int i = rhythmStart; i &gt; 0; i--)
+            {
+                OsuDifficultyHitObject currObj = (OsuDifficultyHitObject)current.Previous(i - 1);
+
+                if (currObj.BaseObject is Spinner)
+                    continue;
+
+                // scales note 0 to 1 from history to now
+                double timeDecay = (history_time_max - (current.StartTime - currObj.StartTime)) / history_time_max;
+                double noteDecay = (double)(historicalNoteCount - i) / historicalNoteCount;
+
+                double currHistoricalDecay = Math.Min(noteDecay, timeDecay); // either we&#39;re limited by time or limited by object count.
+
+                // Use custom cap value to ensure that at this point delta time is actually zero
+                const double delta_min_value = 1e-7;
+
+                double currDelta = Math.Max(currObj.DeltaTime, delta_min_value);
+                double prevDelta = Math.Max(prevObj.DeltaTime, delta_min_value);
+
+                double deltaDifference = Math.Abs(prevDelta - currDelta);
+
+                // Make sure to always have the current island initialised - if we don&#39;t do it here it will only initialise on the next rhythm change
+                if (island.Delta == int.MaxValue)
+                    island = new Island((int)currDelta);
+
+                // calculate how much current delta difference deserves a rhythm bonus
+                // this function is meant to reduce rhythm bonus for deltas that are multiples of each other (i.e 100 and 200)
+                double deltaDifferenceRatio = Math.Max(prevDelta, currDelta) / Math.Min(prevDelta, currDelta);
+
+                // reduce ratio bonus if delta difference is too big
+                double differenceMultiplier = Math.Clamp(2.0 - deltaDifferenceRatio / 8.0, 0.0, 1.0);
+
+                double windowPenalty = Math.Clamp((deltaDifference - deltaDifferenceEpsilon) / deltaDifferenceEpsilon, 0, 1);
+
+                double effectiveDifficulty = getEffectiveDifficulty(deltaDifferenceRatio) * windowPenalty * differenceMultiplier;
+
+                // if previous object is a slider it might be easier to tap since you don&#39;t have to do a whole tapping motion
+                // while a full deltatime might end up some weird ratio the &quot;unpress-&gt;tap&quot; motion might be simple
+                // for example a slider-circle-circle pattern should be evaluated as a regular triple and not as a single-&gt;double
+                if (prevObj.BaseObject is Slider)
+                {
+                    double sliderLazyEndDelta = currObj.MinimumJumpTime;
+                    double sliderLazyDeltaDifferenceRatio = Math.Max(sliderLazyEndDelta, currDelta) / Math.Min(sliderLazyEndDelta, currDelta);
+
+                    double sliderRealEndDelta = currObj.LastObjectEndDeltaTime;
+                    double sliderRealDeltaDifferenceRatio = Math.Max(sliderRealEndDelta, currDelta) / Math.Min(sliderRealEndDelta, currDelta);
+
+                    double sliderEffectiveDifficulty = Math.Min(getEffectiveDifficulty(sliderLazyDeltaDifferenceRatio), getEffectiveDifficulty(sliderRealDeltaDifferenceRatio));
+                    effectiveDifficulty = Math.Min(sliderEffectiveDifficulty, effectiveDifficulty);
+                }
+
+                if (deltaDifference &lt; deltaDifferenceEpsilon)
+                {
+                    // island is still progressing
+                    island.AddDelta((int)currDelta);
+                }
+
+                if (firstDeltaSwitch)
+                {
+                    if (deltaDifference &gt; deltaDifferenceEpsilon)
+                    {
+                        // bpm change is into slider, this is easy acc window
+                        if (currObj.BaseObject is Slider)
+                            effectiveDifficulty *= 0.5;
+
+                        // repeated island polarity (2 -&gt; 4, 3 -&gt; 5)
+                        if (island.IsSimilarPolarity(previousIsland, deltaDifferenceEpsilon))
+                            effectiveDifficulty *= 0.5;
+
+                        // previous increase happened a note ago, 1/1-&gt;1/2-1/4, dont want to buff this.
+                        if (Math.Max(prevPrevObj.DeltaTime, delta_min_value) &gt; prevDelta + deltaDifferenceEpsilon &amp;&amp; prevDelta &gt; currDelta + deltaDifferenceEpsilon)
+                            effectiveDifficulty *= 0.125;
+
+                        // repeated island size (ex: triplet -&gt; triplet)
+                        // TODO: remove this nerf since its staying here only for balancing purposes because of the flawed ratio calculation
+                        if (previousIsland.DeltaCount == island.DeltaCount)
+                            effectiveDifficulty *= 0.5;
+
+                        bool isSpeedingUp = prevDelta &gt; currDelta + deltaDifferenceEpsilon;
+
+                        if (isSpeedingUp)
+                            effectiveDifficulty *= 0.65;
+
+                        bool found = false;
+
+                        foreach (var existingIsland in islands)
+                        {
+                            if (existingIsland.AlmostEquals(island, deltaDifferenceEpsilon))
+                            {
+                                // only increase island occurrences if they&#39;re going one after another
+                                if (previousIsland.AlmostEquals(island, deltaDifferenceEpsilon))
+                                    existingIsland.Occurrences++;
+
+                                // repeated island (ex: triplet -&gt; triplet)
+                                double power = DiffUtils.Logistic(island.Delta, maxValue: 2.75, multiplier: 0.24, midpointOffset: 58.33);
+                                effectiveDifficulty *= Math.Min(3.0 / existingIsland.Occurrences, DiffUtils.Pow(1.0 / existingIsland.Occurrences, power));
+
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found &amp;&amp; island.DeltaCount &gt; 0)
+                            islands.Add(island);
+
+                        // scale down the difficulty if the object is double-tappable
+                        effectiveDifficulty *= 1 - prevObj.CalculateDoubleTapFeasibility(currObj) * 0.75;
+
+                        if (island.DeltaCount &gt; 1)
+                        {
+                            rhythmComplexitySum += Math.Sqrt(effectiveDifficulty * startDifficulty) * currHistoricalDecay;
+                        }
+                        else
+                        {
+                            // constant difficulty for single-note islands
+                            rhythmComplexitySum += 0.7 * currHistoricalDecay;
+                        }
+
+                        startDifficulty = effectiveDifficulty;
+
+                        if (prevDelta + deltaDifferenceEpsilon &lt; currDelta) // we&#39;re slowing down, stop counting
+                            firstDeltaSwitch = false; // if we&#39;re speeding up, this stays true and we keep counting island size.
+
+                        previousIsland = island;
+                        island = new Island((int)currDelta);
+                    }
+                }
+                else if (prevDelta &gt; currDelta + deltaDifferenceEpsilon) // we&#39;re speeding up
+                {
+                    // Begin counting island until we change speed again.
+                    firstDeltaSwitch = true;
+
+                    // bpm change is into slider, this is easy acc window
+                    if (currObj.BaseObject is Slider)
+                        effectiveDifficulty *= 0.6;
+
+                    // bpm change was from a slider, this is easier typically than circle -&gt; circle
+                    // unintentional side effect is that bursts with kicksliders at the ends might have lower difficulty than bursts without sliders
+                    if (prevObj.BaseObject is Slider)
+                        effectiveDifficulty *= 0.6;
+
+                    startDifficulty = effectiveDifficulty;
+
+                    island = new Island((int)currDelta);
+                }
+
+                prevPrevObj = prevObj;
+                prevObj = currObj;
+            }
+
+            // If the current island is long we don&#39;t want the sum to have as big of an effect
+            rhythmComplexitySum *= DiffUtils.ReverseLerp(island.DeltaCount, 22, 3);
+
+            return Math.Sqrt(4 + rhythmComplexitySum * rhythm_overall_multiplier) / 2.0; // produces multiplier that can be applied to strain. range [1, infinity) (not really though)
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static double getEffectiveDifficulty(double deltaDifferenceRatio)
+        {
+            const double rhythm_ratio_difficulty_multiplier = 26.0;
+
+            // Take only the fractional part of the value since we&#39;re only interested in punishing multiples
+            double deltaDifferenceFraction = deltaDifferenceRatio - Math.Truncate(deltaDifferenceRatio);
+
+            return 1.0 + rhythm_ratio_difficulty_multiplier * Math.Min(0.5, DiffUtils.SmoothstepBellCurve(deltaDifferenceFraction));
+        }
+
+        /// &lt;summary&gt;
+        /// An island is a group of consecutive objects with the same delta time.
+        /// &lt;/summary&gt;
+        private class Island
+        {
+            /// &lt;summary&gt;
+            /// Delta time of every object in this island
+            /// &lt;/summary&gt;
+            public int Delta { get; private set; }
+
+            /// &lt;summary&gt;
+            /// How long the island is
+            /// &lt;/summary&gt;
+            public int DeltaCount { get; private set; } = 1;
+
+            /// &lt;summary&gt;
+            /// How many times island already occured
+            /// &lt;/summary&gt;
+            public int Occurrences { get; set; } = 1;
+
+            public Island(int delta)
+            {
+                Delta = Math.Max(delta, OsuDifficultyHitObject.MIN_DELTA_TIME);
+            }
+
+            public void AddDelta(int delta)
+            {
+                if (Delta == int.MaxValue)
+                    Delta = Math.Max(delta, OsuDifficultyHitObject.MIN_DELTA_TIME);
+
+                DeltaCount++;
+            }
+
+            public bool IsSimilarPolarity(Island other, double epsilon)
+            {
+                // single delta islands shouldn&#39;t be compared
+                if (DeltaCount &lt;= 1 || other.DeltaCount &lt;= 1)
+                    return false;
+
+                return Math.Abs(Delta - other.Delta) &lt; epsilon &amp;&amp;
+                       DeltaCount % 2 == other.DeltaCount % 2;
+            }
+
+            public bool AlmostEquals(Island other, double epsilon)
+            {
+                return Math.Abs(Delta - other.Delta) &lt; epsilon &amp;&amp;
+                       DeltaCount == other.DeltaCount;
+            }
+
+            public override string ToString()
+            {
+                return $&quot;{Delta}x{DeltaCount}&quot;;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,10,1],[21,13,21,47,1],[22,17,22,26,1],[28,13,28,44,1],[30,13,30,100,1],[32,13,32,51,1],[33,13,33,59,1],[35,13,35,46,1],[37,13,37,40,1],[39,13,39,43,1],[41,13,41,84,1],[43,13,43,33,1],[45,13,45,140,1],[46,17,46,31,1],[48,13,48,100,1],[49,13,49,108,1],[52,18,52,37,1],[52,39,52,44,1],[52,46,52,49,1],[53,13,53,14,1],[54,17,54,98,1],[56,17,56,51,1],[57,21,57,30,1],[60,17,60,116,1],[61,17,61,92,1],[63,17,63,77,1],[68,17,68,81,1],[69,17,69,81,1],[71,17,71,74,1],[74,17,74,50,1],[75,21,75,57,1],[79,17,79,111,1],[82,17,82,102,1],[84,17,84,126,1],[86,17,86,130,1],[91,17,91,50,1],[92,17,92,18,1],[93,21,93,73,1],[94,21,94,143,1],[96,21,96,80,1],[97,21,97,143,1],[99,21,99,177,1],[100,21,100,100,1],[101,17,101,18,1],[103,17,103,62,1],[104,17,104,18,1],[106,21,106,53,1],[107,17,107,18,1],[109,17,109,38,1],[110,17,110,18,1],[111,21,111,66,1],[112,21,112,22,1],[114,25,114,58,1],[115,29,115,56,0],[118,25,118,94,1],[119,29,119,56,0],[122,25,122,165,1],[123,29,123,58,1],[127,25,127,76,1],[128,29,128,56,1],[130,25,130,92,1],[132,25,132,42,1],[133,29,133,57,1],[135,25,135,44,1],[137,25,137,32,1],[137,34,137,52,1],[137,53,137,55,1],[137,56,137,63,1],[138,25,138,26,1],[139,29,139,93,1],[140,29,140,30,0],[142,33,142,97,0],[143,37,143,66,0],[146,33,146,138,0],[147,33,147,155,0],[149,33,149,46,0],[150,33,150,39,0],[152,25,152,26,1],[154,25,154,61,1],[155,29,155,49,1],[158,25,158,106,1],[160,25,160,51,1],[161,25,161,26,0],[162,29,162,123,0],[163,25,163,26,0],[165,25,165,26,1],[167,29,167,78,1],[168,25,168,26,1],[170,25,170,63,1],[172,25,172,76,1],[173,29,173,54,1],[175,25,175,49,1],[176,25,176,61,1],[177,21,177,22,1],[178,17,178,18,1],[179,22,179,73,1],[180,17,180,18,1],[182,21,182,45,1],[185,21,185,54,1],[186,25,186,52,0],[190,21,190,54,1],[191,25,191,52,0],[193,21,193,59,1],[195,21,195,57,1],[196,17,196,18,1],[198,17,198,39,1],[199,17,199,35,1],[200,13,200,14,1],[203,13,203,84,1],[205,13,205,89,1],[206,9,206,10,1],[210,9,210,10,1],[214,13,214,105,1],[216,13,216,133,1],[217,9,217,10,1],[227,32,227,36,1],[227,37,227,49,1],[232,37,232,41,1],[232,42,232,54,1],[232,59,232,60,1],[237,38,237,42,0],[237,43,237,47,0],[237,52,237,53,1],[239,13,239,37,1],[240,13,240,14,1],[241,17,241,80,1],[242,13,242,14,1],[245,13,245,14,1],[246,17,246,43,1],[247,21,247,84,0],[249,17,249,30,1],[250,13,250,14,1],[253,13,253,14,1],[255,17,255,62,1],[256,21,256,34,1],[258,17,259,63,0],[260,13,260,14,1],[263,13,263,14,1],[264,17,265,55,1],[266,13,266,14,1],[269,13,269,14,0],[270,17,270,48,0],[271,13,271,14,0]]);
+    </script>
+  </body>
+</html>

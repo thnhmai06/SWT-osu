@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/Backgrounds/Triangles.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using osu.Framework.Graphics;
+using osu.Framework.Utils;
+using osuTK;
+using osuTK.Graphics;
+using System;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Allocation;
+using System.Collections.Generic;
+using Microsoft.Toolkit.HighPerformance;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Bindables;
+
+namespace osu.Game.Graphics.Backgrounds
+{
+    public partial class Triangles : Drawable
+    {
+        private const float triangle_size = 100;
+        private const float base_velocity = 50;
+
+        /// &lt;summary&gt;
+        /// sqrt(3) / 2
+        /// &lt;/summary&gt;
+        private const float equilateral_triangle_ratio = 0.866f;
+
+        private Color4 colourLight = Color4.White;
+
+        public Color4 ColourLight
+        {
+            get =&gt; colourLight;
+            set
+            {
+                if (colourLight == value) return;
+
+                colourLight = value;
+                updateColours();
+            }
+        }
+
+        private Color4 colourDark = Color4.Black;
+
+        public Color4 ColourDark
+        {
+            get =&gt; colourDark;
+            set
+            {
+                if (colourDark == value) return;
+
+                colourDark = value;
+                updateColours();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Whether we should create new triangles as others expire.
+        /// &lt;/summary&gt;
+        protected virtual bool CreateNewTriangles =&gt; true;
+
+        /// &lt;summary&gt;
+        /// The amount of triangles we want compared to the default distribution.
+        /// &lt;/summary&gt;
+        public float SpawnRatio { get; set; } = 1;
+
+        private readonly BindableFloat triangleScale = new BindableFloat(1f);
+
+        public float TriangleScale
+        {
+            get =&gt; triangleScale.Value;
+            set =&gt; triangleScale.Value = value;
+        }
+
+        /// &lt;summary&gt;
+        /// Controls on which &lt;see cref=&quot;Axes&quot;/&gt; the portion of triangles that falls within this &lt;see cref=&quot;Drawable&quot;/&gt;&#39;s
+        /// shape is drawn to the screen. Default is Axes.Both.
+        /// &lt;/summary&gt;
+        public Axes ClampAxes { get; set; } = Axes.Both;
+
+        /// &lt;summary&gt;
+        /// Whether we should drop-off alpha values of triangles more quickly to improve
+        /// the visual appearance of fading. This defaults to on as it is generally more
+        /// aesthetically pleasing, but should be turned off in buffered containers.
+        /// &lt;/summary&gt;
+        public bool HideAlphaDiscrepancies = true;
+
+        /// &lt;summary&gt;
+        /// The relative velocity of the triangles. Default is 1.
+        /// &lt;/summary&gt;
+        public float Velocity = 1;
+
+        private readonly List&lt;TriangleParticle&gt; parts = new List&lt;TriangleParticle&gt;();
+
+        private Random stableRandom;
+        private IShader shader;
+        private Texture texture;
+
+        /// &lt;summary&gt;
+        /// Construct a new triangle visualisation.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;seed&quot;&gt;An optional seed to stabilise random positions / attributes. Note that this does not guarantee stable playback when seeking in time.&lt;/param&gt;
+        public Triangles(int? seed = null)
+        {
+            if (seed != null)
+                stableRandom = new Random(seed.Value);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IRenderer renderer, ShaderManager shaders)
+        {
+            texture = renderer.WhitePixel;
+            shader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, &quot;TriangleBorder&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            triangleScale.BindValueChanged(_ =&gt; Reset(), true);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            float adjustedAlpha = HideAlphaDiscrepancies
+                // Cubically scale alpha to make it drop off more sharply.
+                ? MathF.Pow(DrawColourInfo.Colour.AverageColour.Linear.A, 3)
+                : 1;
+
+            float elapsedSeconds = (float)Time.Elapsed / 1000;
+
+            if (elapsedSeconds == 0)
+                return;
+
+            // Since position is relative, the velocity needs to scale inversely with DrawHeight.
+            // Since we will later multiply by the scale of individual triangles we normalize by
+            // dividing by triangleScale.
+            float movedDistance = -elapsedSeconds * Velocity * base_velocity / (DrawHeight * TriangleScale);
+
+            for (int i = parts.Count - 1; i &gt;= 0; i--)
+            {
+                TriangleParticle particle = parts[i];
+
+                // Scale moved distance by the size of the triangle. Smaller triangles should move more slowly.
+                float newY = particle.Position.Y + Math.Max(0.5f, particle.Scale) * movedDistance;
+                float bottomY = newY + triangle_size * particle.Scale * equilateral_triangle_ratio / DrawHeight;
+
+                if (bottomY &lt; 0)
+                {
+                    if (!CreateNewTriangles)
+                    {
+                        parts.RemoveAt(i);
+                        continue;
+                    }
+
+                    particle.Position = getRandomPosition(false, particle.Scale);
+                }
+                else
+                {
+                    particle.Position.Y = newY;
+                }
+
+                particle.Colour.A = adjustedAlpha;
+                parts[i] = particle;
+            }
+
+            Invalidate(Invalidation.DrawNode);
+        }
+
+        /// &lt;summary&gt;
+        /// Clears and re-initialises triangles according to a given seed.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;seed&quot;&gt;An optional seed to stabilise random positions / attributes. Note that this does not guarantee stable playback when seeking in time.&lt;/param&gt;
+        public void Reset(int? seed = null)
+        {
+            if (seed != null)
+                stableRandom = new Random(seed.Value);
+
+            // Limited by the maximum size of QuadVertexBuffer for safety.
+            const int max_triangles = ushort.MaxValue / (IRenderer.VERTICES_PER_QUAD + 2);
+
+            AimCount = (int)Math.Min(max_triangles, DrawWidth * DrawHeight * 0.002f / (TriangleScale * TriangleScale) * SpawnRatio);
+
+            if (parts.Count == AimCount)
+            {
+                var span = parts.AsSpan();
+
+                for (int i = 0; i &lt; span.Length; i++)
+                    span[i].Position = getRandomPosition(true, span[i].Scale);
+            }
+            else
+            {
+                parts.Clear();
+
+                for (int i = 0; i &lt; AimCount; i++)
+                    parts.Add(createTriangle(true));
+
+                parts.Sort(Comparer&lt;TriangleParticle&gt;.Default);
+            }
+
+            Invalidate(Invalidation.DrawNode);
+        }
+
+        protected int AimCount { get; private set; }
+
+        private TriangleParticle createTriangle(bool randomY)
+        {
+            TriangleParticle particle = CreateTriangle();
+
+            particle.Position = getRandomPosition(randomY, particle.Scale);
+            particle.ColourShade = nextRandom();
+            particle.Colour = CreateTriangleShade(particle.ColourShade);
+
+            return particle;
+        }
+
+        private Vector2 getRandomPosition(bool randomY, float scale)
+        {
+            float y = 1;
+
+            if (randomY)
+            {
+                // since triangles are drawn from the top - allow them to be positioned a bit above the screen
+                float maxOffset = triangle_size * scale * equilateral_triangle_ratio / DrawHeight;
+                y = Interpolation.ValueAt(nextRandom(), -maxOffset, 1f, 0f, 1f);
+            }
+
+            return new Vector2(nextRandom(), y);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a triangle particle with a random scale.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The triangle particle.&lt;/returns&gt;
+        protected virtual TriangleParticle CreateTriangle()
+        {
+            const float std_dev = 0.16f;
+            const float mean = 0.5f;
+
+            float u1 = 1 - nextRandom(); //uniform(0,1] random floats
+            float u2 = 1 - nextRandom();
+            float randStdNormal = (float)(Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2)); // random normal(0,1)
+            float scale = Math.Max(TriangleScale * (mean + std_dev * randStdNormal), 0.1f); // random normal(mean,stdDev^2)
+
+            return new TriangleParticle { Scale = scale };
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a shade of colour for the triangles.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The colour.&lt;/returns&gt;
+        protected virtual Color4 CreateTriangleShade(float shade) =&gt; Interpolation.ValueAt(shade, colourDark, colourLight, 0, 1);
+
+        private void updateColours()
+        {
+            for (int i = 0; i &lt; parts.Count; i++)
+            {
+                TriangleParticle newParticle = parts[i];
+                newParticle.Colour = CreateTriangleShade(newParticle.ColourShade);
+                parts[i] = newParticle;
+            }
+        }
+
+        private float nextRandom() =&gt; (float)(stableRandom?.NextDouble() ?? RNG.NextSingle());
+
+        protected override DrawNode CreateDrawNode() =&gt; new TrianglesDrawNode(this);
+
+        private class TrianglesDrawNode : DrawNode
+        {
+            private const float fill = 1f;
+
+            protected new Triangles Source =&gt; (Triangles)base.Source;
+
+            private IShader shader;
+            private Texture texture;
+            private Axes clampAxes;
+
+            private readonly List&lt;TriangleParticle&gt; parts = new List&lt;TriangleParticle&gt;();
+            private readonly Vector2 triangleSize = new Vector2(1f, equilateral_triangle_ratio) * triangle_size;
+
+            private Vector2 size;
+
+            public TrianglesDrawNode(Triangles source)
+                : base(source)
+            {
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                shader = Source.shader;
+                texture = Source.texture;
+                size = Source.DrawSize;
+                clampAxes = Source.ClampAxes;
+
+                parts.Clear();
+                parts.AddRange(Source.parts);
+            }
+
+            private IUniformBuffer&lt;TriangleBorderData&gt; borderDataBuffer;
+
+            protected override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                borderDataBuffer ??= renderer.CreateUniformBuffer&lt;TriangleBorderData&gt;();
+                borderDataBuffer.Data = borderDataBuffer.Data with
+                {
+                    Thickness = fill,
+                    // Due to triangles having various sizes we would need to set a different &quot;TexelSize&quot; value for each of them, which is insanely expensive, thus we should use one single value.
+                    // TexelSize computed for an average triangle (size 100) will result in big triangles becoming blurry, so we may just use 0 for all of them.
+                    TexelSize = 0
+                };
+
+                shader.Bind();
+                shader.BindUniformBlock(@&quot;m_BorderData&quot;, borderDataBuffer);
+
+                foreach (TriangleParticle particle in parts)
+                {
+                    Vector2 relativeSize = Vector2.Divide(triangleSize * particle.Scale, size);
+
+                    Vector2 topLeft = particle.Position - new Vector2(relativeSize.X * 0.5f, 0f);
+
+                    Quad triangleQuad = getClampedQuad(clampAxes, topLeft, relativeSize);
+
+                    var drawQuad = new Quad(
+                        Vector2Extensions.Transform(triangleQuad.TopLeft * size, DrawInfo.Matrix),
+                        Vector2Extensions.Transform(triangleQuad.TopRight * size, DrawInfo.Matrix),
+                        Vector2Extensions.Transform(triangleQuad.BottomLeft * size, DrawInfo.Matrix),
+                        Vector2Extensions.Transform(triangleQuad.BottomRight * size, DrawInfo.Matrix)
+                    );
+
+                    ColourInfo colourInfo = DrawColourInfo.Colour;
+                    colourInfo.ApplyChild(particle.Colour);
+
+                    RectangleF textureCoords = new RectangleF(
+                        triangleQuad.TopLeft.X - topLeft.X,
+                        triangleQuad.TopLeft.Y - topLeft.Y,
+                        triangleQuad.Width,
+                        triangleQuad.Height
+                    ) / relativeSize;
+
+                    renderer.DrawQuad(texture, drawQuad, colourInfo, new RectangleF(0, 0, 1, 1), textureCoords: textureCoords);
+                }
+
+                shader.Unbind();
+            }
+
+            private static Quad getClampedQuad(Axes clampAxes, Vector2 topLeft, Vector2 size)
+            {
+                Vector2 clampedTopLeft = topLeft;
+
+                if (clampAxes == Axes.X || clampAxes == Axes.Both)
+                {
+                    clampedTopLeft.X = Math.Clamp(topLeft.X, 0f, 1f);
+                    size.X = Math.Clamp(topLeft.X + size.X, 0f, 1f) - clampedTopLeft.X;
+                }
+
+                if (clampAxes == Axes.Y || clampAxes == Axes.Both)
+                {
+                    clampedTopLeft.Y = Math.Clamp(topLeft.Y, 0f, 1f);
+                    size.Y = Math.Clamp(topLeft.Y + size.Y, 0f, 1f) - clampedTopLeft.Y;
+                }
+
+                return new Quad(clampedTopLeft.X, clampedTopLeft.Y, size.X, size.Y);
+            }
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                borderDataBuffer?.Dispose();
+            }
+        }
+
+        protected struct TriangleParticle : IComparable&lt;TriangleParticle&gt;
+        {
+            /// &lt;summary&gt;
+            /// The position of the top vertex of the triangle.
+            /// &lt;/summary&gt;
+            public Vector2 Position;
+
+            /// &lt;summary&gt;
+            /// The colour shade of the triangle.
+            /// This is needed for colour recalculation of visible triangles when &lt;see cref=&quot;ColourDark&quot;/&gt; or &lt;see cref=&quot;ColourLight&quot;/&gt; is changed.
+            /// &lt;/summary&gt;
+            public float ColourShade;
+
+            /// &lt;summary&gt;
+            /// The colour of the triangle.
+            /// &lt;/summary&gt;
+            public Color4 Colour;
+
+            /// &lt;summary&gt;
+            /// The scale of the triangle.
+            /// &lt;/summary&gt;
+            public float Scale;
+
+            /// &lt;summary&gt;
+            /// Compares two &lt;see cref=&quot;TriangleParticle&quot;/&gt;s. This is a reverse comparer because when the
+            /// triangles are added to the particles list, they should be drawn from largest to smallest
+            /// such that the smaller triangles appear on top.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;other&quot;&gt;&lt;/param&gt;
+            public int CompareTo(TriangleParticle other) =&gt; other.Scale.CompareTo(Scale);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,51,0],[37,20,37,31,0],[39,13,39,14,0],[40,17,40,42,0],[40,43,40,50,0],[42,17,42,37,0],[43,17,43,33,0],[44,13,44,14,0],[47,9,47,50,0],[51,20,51,30,0],[53,13,53,14,0],[54,17,54,41,0],[54,42,54,49,0],[56,17,56,36,0],[57,17,57,33,0],[58,13,58,14,0],[64,54,64,58,0],[69,35,69,39,0],[69,40,69,44,0],[69,49,69,50,0],[71,9,71,78,0],[75,20,75,39,0],[76,20,76,47,0],[83,33,83,37,0],[83,38,83,42,0],[83,47,83,56,0],[90,9,90,51,0],[95,9,95,35,0],[97,9,97,86,0],[107,9,107,43,0],[108,9,108,10,0],[109,13,109,30,0],[110,17,110,55,0],[111,9,111,10,0],[115,9,115,10,0],[116,13,116,43,0],[117,13,117,87,0],[118,9,118,10,0],[121,9,121,10,0],[122,13,122,33,0],[123,13,123,49,0],[123,49,123,56,0],[123,56,123,64,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,27,0],[130,13,133,21,0],[135,13,135,63,0],[137,13,137,37,0],[138,17,138,24,0],[143,13,143,109,0],[145,18,145,41,0],[145,43,145,49,0],[145,51,145,54,0],[146,13,146,14,0],[147,17,147,54,0],[150,17,150,99,0],[151,17,151,113,0],[153,17,153,33,0],[154,17,154,18,0],[155,21,155,45,0],[156,21,156,22,0],[157,25,157,43,0],[158,25,158,34,0],[161,21,161,82,0],[162,17,162,18,0],[164,17,164,18,0],[165,21,165,48,0],[166,17,166,18,0],[168,17,168,51,0],[169,17,169,37,0],[170,13,170,14,0],[172,13,172,47,0],[173,9,173,10,0],[180,9,180,10,0],[181,13,181,30,0],[182,17,182,55,0],[187,13,187,133,0],[189,13,189,41,0],[190,13,190,14,0],[191,17,191,43,0],[193,22,193,31,0],[193,33,193,48,0],[193,50,193,53,0],[194,21,194,79,0],[195,13,195,14,0],[197,13,197,14,0],[198,17,198,31,0],[200,22,200,31,0],[200,33,200,45,0],[200,47,200,50,0],[201,21,201,53,0],[203,17,203,64,0],[204,13,204,14,0],[206,13,206,47,0],[207,9,207,10,0],[209,34,209,38,0],[209,39,209,51,0],[212,9,212,10,0],[213,13,213,58,0],[215,13,215,76,0],[216,13,216,49,0],[217,13,217,73,0],[219,13,219,29,0],[220,9,220,10,0],[223,9,223,10,0],[224,13,224,25,0],[226,13,226,25,0],[227,13,227,14,0],[229,17,229,99,0],[230,17,230,81,0],[231,13,231,14,0],[233,13,233,49,0],[234,9,234,10,0],[241,9,241,10,0],[245,13,245,41,0],[246,13,246,41,0],[247,13,247,106,0],[248,13,248,92,0],[250,13,250,59,0],[251,9,251,10,0],[257,70,257,129,0],[260,9,260,10,0],[261,18,261,27,0],[261,29,261,44,0],[261,46,261,49,0],[262,13,262,14,0],[263,17,263,57,0],[264,17,264,83,0],[265,17,265,40,0],[266,13,266,14,0],[267,9,267,10,0],[269,39,269,94,0],[271,57,271,84,0],[277,47,277,69,0],[283,13,283,90,0],[284,13,284,113,0],[289,19,289,31,0],[290,13,290,14,0],[291,13,291,14,0],[294,13,294,14,0],[295,17,295,35,0],[297,17,297,40,0],[298,17,298,42,0],[299,17,299,40,0],[300,17,300,46,0],[302,17,302,31,0],[303,17,303,46,0],[304,13,304,14,0],[309,13,309,14,0],[310,17,310,37,0],[312,17,312,89,0],[313,17,319,19,0],[321,17,321,31,0],[322,17,322,76,0],[324,17,324,24,0],[324,26,324,51,0],[324,52,324,54,0],[324,55,324,60,0],[325,17,325,18,0],[326,21,326,96,0],[328,21,328,98,0],[330,21,330,90,0],[332,21,337,23,0],[339,21,339,67,0],[340,21,340,60,0],[342,21,347,38,0],[349,21,349,128,0],[350,17,350,18,0],[352,17,352,33,0],[353,13,353,14,0],[356,13,356,14,0],[357,17,357,50,0],[359,17,359,67,0],[360,17,360,18,0],[361,21,361,70,0],[362,21,362,88,0],[363,17,363,18,0],[365,17,365,67,0],[366,17,366,18,0],[367,21,367,70,0],[368,21,368,88,0],[369,17,369,18,0],[371,17,371,85,0],[372,13,372,14,0],[375,13,375,14,0],[376,17,376,43,0],[378,17,378,45,0],[379,13,379,14,0],[411,61,411,89,0]]);
+    </script>
+  </body>
+</html>

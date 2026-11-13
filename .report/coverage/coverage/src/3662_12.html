@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/WorkingBeatmap.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Logging;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.UI;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+
+namespace osu.Game.Beatmaps
+{
+    public abstract class WorkingBeatmap : IWorkingBeatmap
+    {
+        public readonly BeatmapInfo BeatmapInfo;
+        public readonly BeatmapSetInfo BeatmapSetInfo;
+
+        // TODO: remove once the fallback lookup is not required (and access via `working.BeatmapInfo.Metadata` directly).
+        public BeatmapMetadata Metadata =&gt; BeatmapInfo.Metadata;
+
+        public Storyboard Storyboard =&gt; storyboard.Value;
+
+        public ISkin Skin =&gt; skin.Value;
+
+        private AudioManager audioManager { get; }
+
+        private CancellationTokenSource loadCancellationSource = new CancellationTokenSource();
+
+        private readonly Lock beatmapFetchLock = new Lock();
+
+        private readonly Lazy&lt;Storyboard&gt; storyboard;
+        private readonly Lazy&lt;ISkin&gt; skin;
+
+        private Track track; // track is not Lazy as we allow transferring and loading multiple times.
+        private Waveform waveform; // waveform is also not Lazy as the track may change.
+
+        protected WorkingBeatmap(BeatmapInfo beatmapInfo, AudioManager audioManager)
+        {
+            this.audioManager = audioManager;
+
+            BeatmapInfo = beatmapInfo;
+            BeatmapSetInfo = beatmapInfo.BeatmapSet ?? new BeatmapSetInfo();
+
+            storyboard = new Lazy&lt;Storyboard&gt;(GetStoryboard);
+            skin = new Lazy&lt;ISkin&gt;(GetSkin);
+        }
+
+        #region Resource getters
+
+        protected virtual Waveform GetWaveform() =&gt; new Waveform(null);
+
+        protected virtual Storyboard GetStoryboard() =&gt; new Storyboard
+        {
+            BeatmapInfo = BeatmapInfo,
+            Beatmap = Beatmap,
+        };
+
+        protected abstract IBeatmap GetBeatmap();
+        public abstract Texture GetBackground();
+        public virtual Texture GetPanelBackground() =&gt; GetBackground();
+        protected abstract Track GetBeatmapTrack();
+
+        /// &lt;summary&gt;
+        /// Creates a new skin instance for this beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This should only be called externally in scenarios where it is explicitly desired to get a new instance of a skin
+        /// (e.g. for editing purposes, to avoid state pollution).
+        /// For standard reading purposes, &lt;see cref=&quot;Skin&quot;/&gt; should always be used directly.
+        /// &lt;/remarks&gt;
+        protected internal abstract ISkin GetSkin();
+
+        #endregion
+
+        #region Async load control
+
+        public void BeginAsyncLoad() =&gt; loadBeatmapAsync();
+
+        public void CancelAsyncLoad()
+        {
+            lock (beatmapFetchLock)
+            {
+                loadCancellationSource?.Cancel();
+                loadCancellationSource = new CancellationTokenSource();
+
+                if (beatmapLoadTask?.IsCompleted != true)
+                    beatmapLoadTask = null;
+            }
+        }
+
+        #endregion
+
+        #region Track
+
+        public virtual bool TrackLoaded =&gt; track != null;
+
+        public Track LoadTrack()
+        {
+            track = GetBeatmapTrack() ?? GetVirtualTrack(1000);
+
+            // the track may have changed, recycle the current waveform.
+            waveform?.Dispose();
+            waveform = null;
+
+            return track;
+        }
+
+        public void PrepareTrackForPreview(bool looping, double? offsetFromPreviewPoint = null)
+        {
+            Track.Looping = looping;
+            Track.RestartPoint = Metadata.PreviewTime;
+
+            if (!Track.IsLoaded)
+            {
+                // force length to be populated (https://github.com/ppy/osu-framework/issues/4202)
+                Track.Seek(Track.CurrentTime);
+            }
+
+            if (Track.RestartPoint &lt; 0 || Track.RestartPoint &gt; Track.Length)
+                Track.RestartPoint = 0.4f * Track.Length;
+
+            offsetFromPreviewPoint ??= -MusicController.DELAY_BEFORE_FADE;
+
+            Track.RestartPoint = Math.Clamp(Track.RestartPoint + offsetFromPreviewPoint.Value, 0, Track.Length);
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to transfer the audio track to a target working beatmap, if valid for transferring.
+        /// Used as an optimisation to avoid reload / track swap across difficulties in the same beatmap set.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;target&quot;&gt;The target working beatmap to transfer this track to.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the track has been transferred to the &lt;paramref name=&quot;target&quot;/&gt;.&lt;/returns&gt;
+        public virtual bool TryTransferTrack([NotNull] WorkingBeatmap target)
+        {
+            if (BeatmapInfo?.AudioEquals(target.BeatmapInfo) != true || Track.IsDummyDevice)
+                return false;
+
+            target.track = Track;
+            return true;
+        }
+
+        /// &lt;summary&gt;
+        /// Get the loaded audio track instance. &lt;see cref=&quot;LoadTrack&quot;/&gt; must have first been called.
+        /// This generally happens via MusicController when changing the global beatmap.
+        /// &lt;/summary&gt;
+        [NotNull]
+        public Track Track
+        {
+            get
+            {
+                if (!TrackLoaded)
+                    throw new InvalidOperationException($&quot;Cannot access {nameof(Track)} without first calling {nameof(LoadTrack)}.&quot;);
+
+                return track;
+            }
+        }
+
+        protected Track GetVirtualTrack(double emptyLength = 0)
+        {
+            const double excess_length = 1000;
+
+            double length = (BeatmapInfo?.Length + excess_length) ?? emptyLength;
+
+            return audioManager.Tracks.GetVirtual(length);
+        }
+
+        #endregion
+
+        #region Waveform
+
+        public Waveform Waveform =&gt; waveform ??= GetWaveform();
+
+        #endregion
+
+        #region Beatmap
+
+        public virtual bool BeatmapLoaded
+        {
+            get
+            {
+                lock (beatmapFetchLock)
+                    return beatmapLoadTask?.IsCompleted ?? false;
+            }
+        }
+
+        public IBeatmap Beatmap
+        {
+            get
+            {
+                try
+                {
+                    // TODO: This is a touch expensive and can become an issue if being accessed every Update call.
+                    // Optimally we would not involve the async flow if things are already loaded.
+                    return loadBeatmapAsync().GetResultSafely();
+                }
+                catch (AggregateException ae)
+                {
+                    // This is the exception that is generally expected here, which occurs via natural cancellation of the asynchronous load
+                    if (ae.InnerExceptions.FirstOrDefault() is TaskCanceledException)
+                        return null;
+
+                    Logger.Error(ae, $&quot;Beatmap failed to load ({BeatmapInfo})&quot;);
+                    return null;
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, $&quot;Beatmap failed to load ({BeatmapInfo})&quot;);
+                    return null;
+                }
+            }
+        }
+
+        private Task&lt;IBeatmap&gt; beatmapLoadTask;
+
+        private Task&lt;IBeatmap&gt; loadBeatmapAsync()
+        {
+            lock (beatmapFetchLock)
+            {
+                return beatmapLoadTask ??= Task.Factory.StartNew(() =&gt;
+                {
+                    // Todo: Handle cancellation during beatmap parsing
+                    var b = GetBeatmap() ?? new Beatmap();
+
+                    // Copy across values of key properties for which the database-backed model has data that the decoded beatmap isn&#39;t going to.
+                    b.BeatmapInfo.ID = BeatmapInfo.ID;
+                    b.BeatmapInfo.UserSettings = BeatmapInfo.UserSettings;
+                    b.BeatmapInfo.BeatmapSet = BeatmapInfo.BeatmapSet;
+                    b.BeatmapInfo.Status = BeatmapInfo.Status;
+                    b.BeatmapInfo.OnlineID = BeatmapInfo.OnlineID;
+                    b.BeatmapInfo.OnlineMD5Hash = BeatmapInfo.OnlineMD5Hash;
+                    b.BeatmapInfo.LastLocalUpdate = BeatmapInfo.LastLocalUpdate;
+                    b.BeatmapInfo.LastOnlineUpdate = BeatmapInfo.LastOnlineUpdate;
+                    b.BeatmapInfo.LastPlayed = BeatmapInfo.LastPlayed;
+                    b.BeatmapInfo.EditorTimestamp = BeatmapInfo.EditorTimestamp;
+                    b.BeatmapInfo.StarRating = BeatmapInfo.StarRating; // this could be recomputed in the decoding process but it&#39;s a bit annoying to do.
+
+                    return b;
+                }, loadCancellationSource.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            }
+        }
+
+        #endregion
+
+        #region Playable beatmap
+
+        public IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList&lt;Mod&gt; mods = null)
+        {
+            try
+            {
+                using (var cancellationTokenSource = new CancellationTokenSource(10_000))
+                {
+                    // don&#39;t apply the default timeout when debugger is attached (may be breakpointing / debugging).
+                    return GetPlayableBeatmap(ruleset, mods ?? Array.Empty&lt;Mod&gt;(), Debugger.IsAttached ? CancellationToken.None : cancellationTokenSource.Token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw new BeatmapLoadTimeoutException(BeatmapInfo);
+            }
+        }
+
+        public virtual IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList&lt;Mod&gt; mods, CancellationToken token)
+        {
+            var rulesetInstance = ruleset.CreateInstance();
+
+            if (rulesetInstance == null)
+                throw new RulesetLoadException(&quot;Creating ruleset instance failed when attempting to create playable beatmap.&quot;);
+
+            IBeatmapConverter converter = CreateBeatmapConverter(Beatmap, rulesetInstance);
+
+            // Check if the beatmap can be converted
+            if (Beatmap.HitObjects.Count &gt; 0 &amp;&amp; !converter.CanConvert())
+                throw new BeatmapInvalidForRulesetException($&quot;{nameof(Beatmaps.Beatmap)} can not be converted for the ruleset (ruleset: {ruleset.InstantiationInfo}, converter: {converter}).&quot;);
+
+            // Apply conversion mods
+            foreach (var mod in mods.OfType&lt;IApplicableToBeatmapConverter&gt;())
+            {
+                token.ThrowIfCancellationRequested();
+                mod.ApplyToBeatmapConverter(converter);
+            }
+
+            // Convert
+            IBeatmap converted = converter.Convert(token);
+
+            // Apply conversion mods to the result
+            foreach (var mod in mods.OfType&lt;IApplicableAfterBeatmapConversion&gt;())
+            {
+                token.ThrowIfCancellationRequested();
+                mod.ApplyToBeatmap(converted);
+            }
+
+            // Apply difficulty mods
+            if (mods.Any(m =&gt; m is IApplicableToDifficulty))
+            {
+                foreach (var mod in mods.OfType&lt;IApplicableToDifficulty&gt;())
+                {
+                    token.ThrowIfCancellationRequested();
+                    mod.ApplyToDifficulty(converted.Difficulty);
+                }
+            }
+
+            var processor = rulesetInstance.CreateBeatmapProcessor(converted);
+
+            if (processor != null)
+            {
+                foreach (var mod in mods.OfType&lt;IApplicableToBeatmapProcessor&gt;())
+                    mod.ApplyToBeatmapProcessor(processor);
+
+                processor.PreProcess();
+            }
+
+            // Compute default values for hitobjects, including creating nested hitobjects in-case they&#39;re needed
+            foreach (var obj in converted.HitObjects)
+            {
+                token.ThrowIfCancellationRequested();
+                obj.ApplyDefaults(converted.ControlPointInfo, converted.Difficulty, token);
+            }
+
+            foreach (var mod in mods.OfType&lt;IApplicableToHitObject&gt;())
+            {
+                foreach (var obj in converted.HitObjects)
+                {
+                    token.ThrowIfCancellationRequested();
+                    mod.ApplyToHitObject(obj);
+                }
+            }
+
+            processor?.PostProcess();
+
+            foreach (var mod in mods.OfType&lt;IApplicableToBeatmap&gt;())
+            {
+                token.ThrowIfCancellationRequested();
+                mod.ApplyToBeatmap(converted);
+            }
+
+            return converted;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;IBeatmapConverter&quot;/&gt; to convert a &lt;see cref=&quot;IBeatmap&quot;/&gt; for a specified &lt;see cref=&quot;Ruleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; to be converted.&lt;/param&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The &lt;see cref=&quot;Ruleset&quot;/&gt; for which &lt;paramref name=&quot;beatmap&quot;/&gt; should be converted.&lt;/param&gt;
+        /// &lt;returns&gt;The applicable &lt;see cref=&quot;IBeatmapConverter&quot;/&gt;.&lt;/returns&gt;
+        protected virtual IBeatmapConverter CreateBeatmapConverter(IBeatmap beatmap, Ruleset ruleset) =&gt; ruleset.CreateBeatmapConverter(beatmap);
+
+        #endregion
+
+        public override string ToString() =&gt; BeatmapInfo.ToString();
+
+        public abstract Stream GetStream(string storagePath);
+
+        IBeatmapInfo IWorkingBeatmap.BeatmapInfo =&gt; BeatmapInfo;
+
+        private class BeatmapLoadTimeoutException : TimeoutException
+        {
+            public BeatmapLoadTimeoutException(BeatmapInfo beatmapInfo)
+                : base($&quot;Timed out while loading beatmap ({beatmapInfo}).&quot;)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,44,34,64,0],[36,41,36,57,0],[38,30,38,40,0],[40,45,40,49,0],[42,9,42,96,1],[44,9,44,61,1],[52,9,52,85,1],[53,9,53,10,1],[54,13,54,46,1],[56,13,56,39,1],[57,13,57,77,1],[59,13,59,62,1],[60,13,60,45,1],[61,9,61,10,1],[65,53,65,71,0],[67,57,71,10,0],[75,56,75,71,0],[92,41,92,59,0],[95,9,95,10,0],[97,13,97,14,0],[98,17,98,50,0],[99,17,99,72,0],[101,17,101,58,0],[102,21,102,44,0],[103,13,103,14,0],[104,9,104,10,0],[110,44,110,57,0],[113,9,113,10,0],[114,13,114,64,0],[117,13,117,33,0],[118,13,118,29,0],[120,13,120,26,0],[121,9,121,10,0],[124,9,124,10,0],[125,13,125,37,0],[126,13,126,55,0],[128,13,128,33,0],[129,13,129,14,0],[131,17,131,47,0],[132,13,132,14,0],[134,13,134,77,0],[135,17,135,58,0],[137,13,137,75,0],[139,13,139,113,0],[140,9,140,10,0],[149,9,149,10,0],[150,13,150,93,0],[151,17,151,30,0],[153,13,153,34,0],[154,13,154,25,0],[155,9,155,10,0],[165,13,165,14,0],[166,17,166,34,0],[167,21,167,134,0],[169,17,169,30,0],[170,13,170,14,0],[174,9,174,10,0],[177,13,177,82,0],[179,13,179,59,0],[180,9,180,10,0],[186,37,186,63,0],[195,13,195,14,0],[197,21,197,66,0],[198,13,198,14,0],[204,13,204,14,1],[206,17,206,18,1],[209,21,209,65,1],[211,17,211,46,0],[212,17,212,18,0],[214,21,214,86,0],[215,25,215,37,0],[217,21,217,81,0],[218,21,218,33,0],[220,17,220,36,0],[221,17,221,18,0],[222,21,222,80,0],[223,21,223,33,0],[225,13,225,14,1],[231,9,231,10,1],[233,13,233,14,1],[234,17,235,17,1],[235,17,235,18,1],[235,18,237,21,1],[237,21,237,59,1],[237,59,240,21,1],[240,21,240,55,1],[240,55,241,21,1],[241,21,241,75,1],[241,75,242,21,1],[242,21,242,71,1],[242,71,243,21,1],[243,21,243,63,1],[243,63,244,21,1],[244,21,244,67,1],[244,67,245,21,1],[245,21,245,77,1],[245,77,246,21,1],[246,21,246,81,1],[246,81,247,21,1],[247,21,247,83,1],[247,83,248,21,1],[248,21,248,71,1],[248,71,249,21,1],[249,21,249,81,1],[249,81,250,21,1],[250,21,250,71,1],[250,71,252,21,1],[252,21,252,30,1],[252,30,253,17,1],[253,17,253,18,1],[253,18,253,106,1],[255,9,255,10,1],[262,9,262,10,1],[264,13,264,14,1],[265,24,265,89,1],[266,17,266,18,1],[268,21,268,162,1],[271,13,271,47,0],[272,13,272,14,0],[273,17,273,68,0],[275,9,275,10,1],[278,9,278,10,1],[279,13,279,60,1],[281,13,281,41,1],[282,17,282,128,0],[284,13,284,92,1],[287,13,287,73,1],[288,17,288,193,0],[291,13,291,20,1],[291,22,291,29,0],[291,30,291,32,1],[291,33,291,77,1],[292,13,292,14,0],[293,17,293,54,0],[294,17,294,56,0],[295,13,295,14,0],[298,13,298,59,1],[301,13,301,20,1],[301,22,301,29,0],[301,30,301,32,1],[301,33,301,81,1],[302,13,302,14,0],[303,17,303,54,0],[304,17,304,47,0],[305,13,305,14,0],[308,13,308,31,1],[308,31,308,59,1],[308,59,308,61,1],[309,13,309,14,0],[310,17,310,24,0],[310,26,310,33,0],[310,34,310,36,0],[310,37,310,75,0],[311,17,311,18,0],[312,21,312,58,0],[313,21,313,65,0],[314,17,314,18,0],[315,13,315,14,0],[317,13,317,79,1],[319,13,319,35,1],[320,13,320,14,1],[321,17,321,24,1],[321,26,321,33,0],[321,34,321,36,1],[321,37,321,81,1],[322,21,322,60,0],[324,17,324,40,1],[325,13,325,14,1],[328,13,328,20,1],[328,22,328,29,1],[328,30,328,32,1],[328,33,328,53,1],[329,13,329,14,1],[330,17,330,54,1],[331,17,331,92,1],[332,13,332,14,1],[334,13,334,20,1],[334,22,334,29,1],[334,30,334,32,1],[334,33,334,70,1],[335,13,335,14,1],[336,17,336,24,1],[336,26,336,33,1],[336,34,336,36,1],[336,37,336,57,1],[337,17,337,18,1],[338,21,338,58,1],[339,21,339,47,1],[340,17,340,18,1],[341,13,341,14,1],[343,13,343,38,1],[345,13,345,20,1],[345,22,345,29,1],[345,30,345,32,1],[345,33,345,68,1],[346,13,346,14,1],[347,17,347,54,1],[348,17,348,47,1],[349,13,349,14,1],[351,13,351,30,1],[352,9,352,10,1],[360,106,360,145,1],[364,46,364,68,0],[368,53,368,64,1],[373,19,373,76,0],[374,13,374,14,0],[375,13,375,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/ChatOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Cursor;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online;
+using osu.Game.Online.Chat;
+using osu.Game.Overlays.Chat;
+using osu.Game.Overlays.Chat.ChannelList;
+using osu.Game.Overlays.Chat.Listing;
+
+namespace osu.Game.Overlays
+{
+    public partial class ChatOverlay : OsuFocusedOverlayContainer, INamedOverlayComponent, IKeyBindingHandler&lt;PlatformAction&gt;
+    {
+        public IconUsage Icon =&gt; OsuIcon.Chat;
+        public LocalisableString Title =&gt; ChatStrings.HeaderTitle;
+        public LocalisableString Description =&gt; ChatStrings.HeaderDescription;
+
+        private ChatOverlayTopBar topBar = null!;
+        private ChannelList channelList = null!;
+        private LoadingLayer loading = null!;
+        private ChannelListing channelListing = null!;
+        private ChatTextBar textBar = null!;
+        private Container&lt;DrawableChannel&gt; currentChannelContainer = null!;
+
+        private readonly Dictionary&lt;Channel, DrawableChannel&gt; loadedChannels = new Dictionary&lt;Channel, DrawableChannel&gt;();
+
+        protected IEnumerable&lt;DrawableChannel&gt; DrawableChannels =&gt; loadedChannels.Values;
+
+        private readonly BindableFloat chatHeight = new BindableFloat();
+        private bool isDraggingTopBar;
+        private float dragStartChatHeight;
+
+        public const float DEFAULT_HEIGHT = 0.4f;
+
+        private const int transition_length = 500;
+        private const float top_bar_height = 40;
+        private const float side_bar_width = 190;
+
+        protected override string PopInSampleName =&gt; @&quot;UI/overlay-big-pop-in&quot;;
+        protected override string PopOutSampleName =&gt; @&quot;UI/overlay-big-pop-out&quot;;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        [Resolved]
+        private ChannelManager channelManager { get; set; } = null!;
+
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Pink);
+
+        [Cached]
+        private readonly Bindable&lt;Channel?&gt; currentChannel = new Bindable&lt;Channel?&gt;();
+
+        private readonly IBindableList&lt;Channel&gt; availableChannels = new BindableList&lt;Channel&gt;();
+        private readonly IBindableList&lt;Channel&gt; joinedChannels = new BindableList&lt;Channel&gt;();
+
+        public ChatOverlay()
+        {
+            Height = DEFAULT_HEIGHT;
+
+            Masking = true;
+
+            const float corner_radius = 7f;
+
+            CornerRadius = corner_radius;
+
+            // Hack to hide the bottom edge corner radius off-screen.
+            Margin = new MarginPadding { Bottom = -corner_radius };
+            Padding = new MarginPadding { Bottom = corner_radius };
+
+            RelativeSizeAxes = Axes.Both;
+            Anchor = Anchor.BottomCentre;
+            Origin = Anchor.BottomCentre;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            // Required for the pop in/out animation
+            RelativePositionAxes = Axes.Both;
+
+            Children = new Drawable[]
+            {
+                topBar = new ChatOverlayTopBar
+                {
+                    RelativeSizeAxes = Axes.X,
+                    Height = top_bar_height,
+                },
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding { Top = top_bar_height },
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colourProvider.Background4,
+                        },
+                        new OnlineViewContainer(&quot;Sign in to chat&quot;)
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                channelList = new ChannelList
+                                {
+                                    RelativeSizeAxes = Axes.Y,
+                                    Width = side_bar_width,
+                                },
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    Padding = new MarginPadding
+                                    {
+                                        Left = side_bar_width,
+                                        Bottom = ChatTextBar.HEIGHT,
+                                    },
+                                    Children = new Drawable[]
+                                    {
+                                        new PopoverContainer
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Child = new OsuContextMenuContainer
+                                            {
+                                                RelativeSizeAxes = Axes.Both,
+                                                Child = currentChannelContainer = new Container&lt;DrawableChannel&gt;
+                                                {
+                                                    RelativeSizeAxes = Axes.Both,
+                                                }
+                                            }
+                                        },
+                                        loading = new LoadingLayer(true),
+                                        channelListing = new ChannelListing
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                        },
+                                    },
+                                },
+                                textBar = new ChatTextBar
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    Anchor = Anchor.BottomRight,
+                                    Origin = Anchor.BottomRight,
+                                    Padding = new MarginPadding { Left = side_bar_width },
+                                },
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            config.BindWith(OsuSetting.ChatDisplayHeight, chatHeight);
+
+            chatHeight.BindValueChanged(height =&gt; { Height = height.NewValue; }, true);
+
+            currentChannel.BindTo(channelManager.CurrentChannel);
+            joinedChannels.BindTo(channelManager.JoinedChannels);
+            availableChannels.BindTo(channelManager.AvailableChannels);
+
+            Schedule(() =&gt;
+            {
+                currentChannel.BindValueChanged(currentChannelChanged, true);
+                joinedChannels.BindCollectionChanged(joinedChannelsChanged, true);
+                availableChannels.BindCollectionChanged(availableChannelsChanged, true);
+            });
+
+            channelList.OnRequestSelect += channel =&gt; channelManager.CurrentChannel.Value = channel;
+            channelList.OnRequestLeave += channel =&gt; channelManager.LeaveChannel(channel);
+
+            channelListing.OnRequestJoin += channel =&gt; channelManager.JoinChannel(channel);
+            channelListing.OnRequestLeave += channel =&gt; channelManager.LeaveChannel(channel);
+
+            textBar.OnSearchTermsChanged += searchTerms =&gt; channelListing.SearchTerm = searchTerms;
+            textBar.OnChatMessageCommitted += handleChatMessage;
+        }
+
+        /// &lt;summary&gt;
+        /// Highlights a certain message in the specified channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;message&quot;&gt;The message to highlight.&lt;/param&gt;
+        /// &lt;param name=&quot;channel&quot;&gt;The channel containing the message.&lt;/param&gt;
+        public void HighlightMessage(Message message, Channel channel)
+        {
+            Debug.Assert(channel.Id == message.ChannelId);
+
+            if (currentChannel.Value?.Id != channel.Id)
+            {
+                if (!channel.Joined.Value)
+                    channel = channelManager.JoinChannel(channel);
+
+                channelManager.CurrentChannel.Value = channel;
+            }
+
+            channel.HighlightedMessage.Value = message;
+
+            Show();
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;PlatformAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case PlatformAction.TabNew:
+                    currentChannel.Value = channelList.ChannelListingChannel;
+                    return true;
+
+                case PlatformAction.DocumentClose:
+                    if (currentChannel.Value?.Type != ChannelType.Team)
+                        channelManager.LeaveChannel(currentChannel.Value);
+                    return true;
+
+                case PlatformAction.TabRestore:
+                    channelManager.JoinLastClosedChannel();
+                    return true;
+
+                case PlatformAction.DocumentPrevious:
+                    cycleChannel(-1);
+                    return true;
+
+                case PlatformAction.DocumentNext:
+                    cycleChannel(1);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;PlatformAction&gt; e)
+        {
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            isDraggingTopBar = topBar.DragBar.IsHovered;
+            return base.OnMouseDown(e);
+        }
+
+        protected override bool OnDragStart(DragStartEvent e)
+        {
+            if (!isDraggingTopBar)
+                return base.OnDragStart(e);
+
+            dragStartChatHeight = chatHeight.Value;
+            return true;
+        }
+
+        protected override void OnDrag(DragEvent e)
+        {
+            if (!isDraggingTopBar)
+                return;
+
+            float targetChatHeight = dragStartChatHeight - (e.MousePosition.Y - e.MouseDownPosition.Y) / Parent!.DrawSize.Y;
+            chatHeight.Value = targetChatHeight;
+        }
+
+        protected override void OnDragEnd(DragEndEvent e)
+        {
+            isDraggingTopBar = false;
+            base.OnDragEnd(e);
+        }
+
+        protected override void PopIn()
+        {
+            this.MoveToY(0, transition_length, Easing.OutQuint);
+            this.FadeIn(transition_length, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            base.PopOut();
+
+            this.MoveToY(Height, transition_length, Easing.InSine);
+            this.FadeOut(transition_length, Easing.InSine);
+
+            textBar.TextBoxKillFocus();
+        }
+
+        protected override void OnFocus(FocusEvent e)
+        {
+            textBar.TextBoxTakeFocus();
+            base.OnFocus(e);
+        }
+
+        private void currentChannelChanged(ValueChangedEvent&lt;Channel?&gt; channel)
+        {
+            Channel? newChannel = channel.NewValue;
+
+            // null channel denotes that we should be showing the listing.
+            if (newChannel == null)
+            {
+                currentChannel.Value = channelList.ChannelListingChannel;
+                return;
+            }
+
+            if (newChannel is ChannelListing.ChannelListingChannel)
+            {
+                currentChannelContainer.Clear(false);
+                channelListing.Show();
+                textBar.ShowSearch.Value = true;
+            }
+            else
+            {
+                channelListing.Hide();
+                textBar.ShowSearch.Value = false;
+
+                if (loadedChannels.TryGetValue(newChannel, out var loadedChannel))
+                {
+                    currentChannelContainer.Clear(false);
+                    currentChannelContainer.Add(loadedChannel);
+                }
+                else
+                {
+                    loading.Show();
+
+                    // Ensure the drawable channel is stored before async load to prevent double loading
+                    DrawableChannel drawableChannel = CreateDrawableChannel(newChannel);
+                    loadedChannels.Add(newChannel, drawableChannel);
+
+                    LoadComponentAsync(drawableChannel, loadedDrawable =&gt;
+                    {
+                        // Ensure the current channel hasn&#39;t changed by the time the load completes
+                        if (currentChannel.Value != loadedDrawable.Channel)
+                            return;
+
+                        // Ensure the cached reference hasn&#39;t been removed from leaving the channel
+                        if (!loadedChannels.ContainsKey(loadedDrawable.Channel))
+                            return;
+
+                        currentChannelContainer.Clear(false);
+                        currentChannelContainer.Add(loadedDrawable);
+                        loading.Hide();
+                    });
+                }
+            }
+
+            // Mark channel as read when channel switched
+            if (newChannel.Messages.Any())
+                channelManager.MarkChannelAsRead(newChannel);
+        }
+
+        protected virtual DrawableChannel CreateDrawableChannel(Channel newChannel) =&gt; new DrawableChannel(newChannel);
+
+        private void joinedChannelsChanged(object? sender, NotifyCollectionChangedEventArgs args)
+        {
+            switch (args.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                    Debug.Assert(args.NewItems != null);
+
+                    IEnumerable&lt;Channel&gt; newChannels = args.NewItems.OfType&lt;Channel&gt;().Where(isChatChannel);
+
+                    foreach (var channel in newChannels)
+                        channelList.AddChannel(channel);
+
+                    break;
+
+                case NotifyCollectionChangedAction.Remove:
+                    Debug.Assert(args.OldItems != null);
+
+                    IEnumerable&lt;Channel&gt; leftChannels = args.OldItems.OfType&lt;Channel&gt;().Where(isChatChannel);
+
+                    foreach (var channel in leftChannels)
+                    {
+                        channelList.RemoveChannel(channel);
+
+                        if (loadedChannels.Remove(channel, out var loaded))
+                        {
+                            // DrawableChannel removed from cache must be manually disposed
+                            loaded.Dispose();
+                        }
+                    }
+
+                    break;
+            }
+        }
+
+        private void availableChannelsChanged(object? sender, NotifyCollectionChangedEventArgs args)
+            =&gt; channelListing.UpdateAvailableChannels(channelManager.AvailableChannels);
+
+        private void handleChatMessage(string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+                return;
+
+            if (message[0] == &#39;/&#39;)
+                channelManager.PostCommand(message.Substring(1));
+            else
+                channelManager.PostMessage(message);
+        }
+
+        private void cycleChannel(int direction)
+        {
+            List&lt;Channel&gt; overlayChannels = channelList.Channels.ToList();
+
+            if (overlayChannels.Count &lt; 2 || currentChannel.Value == null)
+                return;
+
+            int currentIndex = overlayChannels.IndexOf(currentChannel.Value);
+
+            currentChannel.Value = overlayChannels[(currentIndex + direction + overlayChannels.Count) % overlayChannels.Count];
+
+            channelList.ScrollChannelIntoView(currentChannel.Value);
+        }
+
+        /// &lt;summary&gt;
+        /// Whether a channel should be displayed in this overlay, based on its type.
+        /// &lt;/summary&gt;
+        private static bool isChatChannel(Channel channel)
+        {
+            switch (channel.Type)
+            {
+                case ChannelType.Multiplayer:
+                case ChannelType.Spectator:
+                case ChannelType.Temporary:
+                    return false;
+
+                default:
+                    return true;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,34,35,46,0],[36,43,36,66,0],[37,49,37,78,0],[39,9,39,50,0],[40,9,40,49,0],[41,9,41,46,0],[42,9,42,55,0],[43,9,43,45,0],[44,9,44,76,0],[46,9,46,123,0],[48,68,48,89,0],[50,9,50,73,0],[60,54,60,78,0],[61,55,61,80,0],[64,43,64,47,0],[64,48,64,52,0],[64,57,64,62,0],[67,49,67,53,0],[67,54,67,58,0],[67,63,67,68,0],[70,9,70,117,0],[73,9,73,87,0],[75,9,75,97,0],[76,9,76,94,0],[78,9,78,29,0],[79,9,79,10,0],[80,13,80,37,0],[82,13,82,28,0],[86,13,86,42,0],[89,13,89,68,0],[90,13,90,68,0],[92,13,92,42,0],[93,13,93,42,0],[94,13,94,42,0],[95,9,95,10,0],[99,9,99,10,0],[101,13,101,46,0],[103,13,173,15,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,33,0],[180,13,180,71,0],[182,13,182,51,0],[182,51,182,52,0],[182,52,182,53,0],[182,53,182,78,0],[182,78,182,79,0],[182,79,182,80,0],[182,80,182,88,0],[184,13,184,66,0],[185,13,185,66,0],[186,13,186,72,0],[188,13,189,13,0],[189,13,189,14,0],[189,14,190,17,0],[190,17,190,78,0],[190,78,191,17,0],[191,17,191,83,0],[191,83,192,17,0],[192,17,192,89,0],[192,89,193,13,0],[193,13,193,14,0],[193,14,193,16,0],[195,13,195,55,0],[195,55,195,100,0],[195,100,195,101,0],[196,13,196,54,0],[196,54,196,90,0],[196,90,196,91,0],[198,13,198,56,0],[198,56,198,91,0],[198,91,198,92,0],[199,13,199,57,0],[199,57,199,93,0],[199,93,199,94,0],[201,13,201,60,0],[201,60,201,99,0],[201,99,201,100,0],[202,13,202,65,0],[203,9,203,10,0],[211,9,211,10,0],[212,13,212,59,0],[214,13,214,56,0],[215,13,215,14,0],[216,17,216,43,0],[217,21,217,67,0],[219,17,219,63,0],[220,13,220,14,0],[222,13,222,56,0],[224,13,224,20,0],[225,9,225,10,0],[228,9,228,10,0],[229,13,229,30,0],[232,21,232,78,0],[233,21,233,33,0],[236,21,236,72,0],[237,25,237,75,0],[238,21,238,33,0],[241,21,241,60,0],[242,21,242,33,0],[245,21,245,38,0],[246,21,246,33,0],[249,21,249,37,0],[250,21,250,33,0],[253,21,253,34,0],[255,9,255,10,0],[258,9,258,10,0],[259,9,259,10,0],[262,9,262,10,0],[263,13,263,57,0],[264,13,264,40,0],[265,9,265,10,0],[268,9,268,10,0],[269,13,269,35,0],[270,17,270,44,0],[272,13,272,52,0],[273,13,273,25,0],[274,9,274,10,0],[277,9,277,10,0],[278,13,278,35,0],[279,17,279,24,0],[281,13,281,125,0],[282,13,282,49,0],[283,9,283,10,0],[286,9,286,10,0],[287,13,287,38,0],[288,13,288,31,0],[289,9,289,10,0],[292,9,292,10,0],[293,13,293,65,0],[294,13,294,61,0],[295,9,295,10,0],[298,9,298,10,0],[299,13,299,27,0],[301,13,301,68,0],[302,13,302,60,0],[304,13,304,40,0],[305,9,305,10,0],[308,9,308,10,0],[309,13,309,40,0],[310,13,310,29,0],[311,9,311,10,0],[314,9,314,10,0],[315,13,315,52,0],[318,13,318,36,0],[319,13,319,14,0],[320,17,320,74,0],[321,17,321,24,0],[324,13,324,68,0],[325,13,325,14,0],[326,17,326,54,0],[327,17,327,39,0],[328,17,328,49,0],[329,13,329,14,0],[331,13,331,14,0],[332,17,332,39,0],[333,17,333,50,0],[335,17,335,83,0],[336,17,336,18,0],[337,21,337,58,0],[338,21,338,64,0],[339,17,339,18,0],[341,17,341,18,0],[342,21,342,36,0],[345,21,345,89,0],[346,21,346,69,0],[348,21,349,21,0],[349,21,349,22,0],[349,22,351,25,0],[351,25,351,76,0],[351,76,352,29,0],[352,29,352,36,0],[352,36,355,25,0],[355,25,355,81,0],[355,81,356,29,0],[356,29,356,36,0],[356,36,358,25,0],[358,25,358,62,0],[358,62,359,25,0],[359,25,359,69,0],[359,69,360,25,0],[360,25,360,40,0],[360,40,361,21,0],[361,21,361,22,0],[361,22,361,24,0],[362,17,362,18,0],[363,13,363,14,0],[366,13,366,43,0],[367,17,367,62,0],[368,9,368,10,0],[370,88,370,119,0],[373,9,373,10,0],[374,13,374,33,0],[377,21,377,57,0],[379,21,379,109,0],[381,21,381,28,0],[381,30,381,41,0],[381,42,381,44,0],[381,45,381,56,0],[382,25,382,57,0],[384,21,384,27,0],[387,21,387,57,0],[389,21,389,110,0],[391,21,391,28,0],[391,30,391,41,0],[391,42,391,44,0],[391,45,391,57,0],[392,21,392,22,0],[393,25,393,60,0],[395,25,395,76,0],[396,25,396,26,0],[398,29,398,46,0],[399,25,399,26,0],[400,21,400,22,0],[402,21,402,27,0],[404,9,404,10,0],[407,16,407,88,0],[410,9,410,10,0],[411,13,411,52,0],[412,17,412,24,0],[414,13,414,35,0],[415,17,415,66,0],[417,17,417,53,0],[418,9,418,10,0],[421,9,421,10,0],[422,13,422,75,0],[424,13,424,75,0],[425,17,425,24,0],[427,13,427,78,0],[429,13,429,128,0],[431,13,431,69,0],[432,9,432,10,0],[438,9,438,10,0],[439,13,439,34,0],[444,21,444,34,0],[447,21,447,33,0],[449,9,449,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/LegacyEditorBeatmapPatcher.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using DiffPlex;
+using DiffPlex.Model;
+using osu.Framework.Audio.Track;
+using osu.Framework.Graphics.Textures;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Skinning;
+using Decoder = osu.Game.Beatmaps.Formats.Decoder;
+
+namespace osu.Game.Screens.Edit
+{
+    /// &lt;summary&gt;
+    /// Patches an &lt;see cref=&quot;EditorBeatmap&quot;/&gt; based on the difference between two legacy (.osu) states.
+    /// &lt;/summary&gt;
+    public class LegacyEditorBeatmapPatcher
+    {
+        private readonly EditorBeatmap editorBeatmap;
+
+        public LegacyEditorBeatmapPatcher(EditorBeatmap editorBeatmap)
+        {
+            this.editorBeatmap = editorBeatmap;
+        }
+
+        public void Patch(byte[] currentState, byte[] newState)
+        {
+            // Diff the beatmaps
+            var result = new Differ().CreateLineDiffs(readString(currentState), readString(newState), true, false);
+            IBeatmap newBeatmap = null;
+
+            editorBeatmap.BeginChange();
+            processHitObjects(result, () =&gt; newBeatmap ??= readBeatmap(newState));
+            processTimingPoints(() =&gt; newBeatmap ??= readBeatmap(newState));
+            processBreaks(() =&gt; newBeatmap ??= readBeatmap(newState));
+            processBookmarks(() =&gt; newBeatmap ??= readBeatmap(newState));
+            processHitObjectLocalData(() =&gt; newBeatmap ??= readBeatmap(newState));
+            editorBeatmap.EndChange();
+        }
+
+        private void processTimingPoints(Func&lt;IBeatmap&gt; getNewBeatmap)
+        {
+            ControlPointInfo newControlPoints = EditorBeatmap.ConvertControlPoints(getNewBeatmap().ControlPointInfo);
+
+            // Remove all groups from the current beatmap which don&#39;t have a corresponding equal group in the new beatmap.
+            foreach (var oldGroup in editorBeatmap.ControlPointInfo.Groups.ToArray())
+            {
+                var newGroup = newControlPoints.GroupAt(oldGroup.Time);
+
+                if (!oldGroup.Equals(newGroup))
+                    editorBeatmap.ControlPointInfo.RemoveGroup(oldGroup);
+            }
+
+            // Add all groups from the new beatmap which don&#39;t have a corresponding equal group in the old beatmap.
+            foreach (var newGroup in newControlPoints.Groups)
+            {
+                var oldGroup = editorBeatmap.ControlPointInfo.GroupAt(newGroup.Time);
+
+                if (!newGroup.Equals(oldGroup))
+                {
+                    foreach (var point in newGroup.ControlPoints)
+                        editorBeatmap.ControlPointInfo.Add(newGroup.Time, point);
+                }
+            }
+        }
+
+        private void processBreaks(Func&lt;IBeatmap&gt; getNewBeatmap)
+        {
+            var newBreaks = getNewBeatmap().Breaks.ToArray();
+
+            foreach (var oldBreak in editorBeatmap.Breaks.ToArray())
+            {
+                if (newBreaks.Any(b =&gt; b.Equals(oldBreak)))
+                    continue;
+
+                editorBeatmap.Breaks.Remove(oldBreak);
+            }
+
+            foreach (var newBreak in newBreaks)
+            {
+                if (editorBeatmap.Breaks.Any(b =&gt; b.Equals(newBreak)))
+                    continue;
+
+                editorBeatmap.Breaks.Add(newBreak);
+            }
+        }
+
+        private void processBookmarks(Func&lt;IBeatmap&gt; getNewBeatmap)
+        {
+            var newBookmarks = getNewBeatmap().Bookmarks.ToHashSet();
+
+            foreach (int oldBookmark in editorBeatmap.Bookmarks.ToArray())
+            {
+                if (newBookmarks.Contains(oldBookmark))
+                    continue;
+
+                editorBeatmap.Bookmarks.Remove(oldBookmark);
+            }
+
+            foreach (int newBookmark in newBookmarks)
+            {
+                if (editorBeatmap.Bookmarks.Contains(newBookmark))
+                    continue;
+
+                int idx = editorBeatmap.Bookmarks.BinarySearch(newBookmark);
+                if (idx &lt; 0)
+                    editorBeatmap.Bookmarks.Insert(~idx, newBookmark);
+            }
+        }
+
+        private void processHitObjects(DiffResult result, Func&lt;IBeatmap&gt; getNewBeatmap)
+        {
+            findChangedIndices(result, LegacyDecoder&lt;Beatmap&gt;.Section.HitObjects, out var removedIndices, out var addedIndices);
+
+            for (int i = removedIndices.Count - 1; i &gt;= 0; i--)
+                editorBeatmap.RemoveAt(removedIndices[i]);
+
+            if (addedIndices.Count &gt; 0)
+            {
+                var newBeatmap = getNewBeatmap();
+
+                foreach (int i in addedIndices)
+                    editorBeatmap.Insert(i, newBeatmap.HitObjects[i]);
+            }
+        }
+
+        private void processHitObjectLocalData(Func&lt;IBeatmap&gt; getNewBeatmap)
+        {
+            // This method handles data that are stored in control points in the legacy format,
+            // but were moved to the hitobjects themselves in lazer.
+            // Specifically, the data being referred to here consists of: slider velocity and sample information.
+
+            // For simplicity, this implementation relies on the editor beatmap already having the same hitobjects in sequence as the new beatmap.
+            // To guarantee that, `processHitObjects()` must be ran prior to this method for correct operation.
+            // This is done to avoid the necessity of reimplementing/reusing parts of LegacyBeatmapDecoder that already treat this data correctly.
+
+            var oldObjects = editorBeatmap.HitObjects;
+            var newObjects = getNewBeatmap().HitObjects;
+
+            Debug.Assert(oldObjects.Count == newObjects.Count);
+
+            foreach (var (oldObject, newObject) in oldObjects.Zip(newObjects))
+            {
+                // if `oldObject` and `newObject` are the same, it means that `oldObject` was inserted into `editorBeatmap` by `processHitObjects()`.
+                // in that case, there is nothing to do (and some of the subsequent changes may even prove destructive).
+                if (ReferenceEquals(oldObject, newObject))
+                    continue;
+
+                if (oldObject is IHasSliderVelocity oldWithVelocity &amp;&amp; newObject is IHasSliderVelocity newWithVelocity)
+                    oldWithVelocity.SliderVelocityMultiplier = newWithVelocity.SliderVelocityMultiplier;
+
+                oldObject.Samples = newObject.Samples;
+
+                if (oldObject is IHasRepeats oldWithRepeats &amp;&amp; newObject is IHasRepeats newWithRepeats)
+                {
+                    oldWithRepeats.NodeSamples.Clear();
+                    oldWithRepeats.NodeSamples.AddRange(newWithRepeats.NodeSamples);
+                }
+
+                editorBeatmap.Update(oldObject);
+            }
+        }
+
+        private void findChangedIndices(DiffResult result, LegacyDecoder&lt;Beatmap&gt;.Section section, out List&lt;int&gt; removedIndices, out List&lt;int&gt; addedIndices)
+        {
+            removedIndices = new List&lt;int&gt;();
+            addedIndices = new List&lt;int&gt;();
+
+            string[] oldArr = result.PiecesOld.ToArray();
+            string[] newArr = result.PiecesNew.ToArray();
+
+            // Find the start and end indices of the relevant section headers in both the old and the new beatmap file. Lines changed outside of the modified ranges are ignored.
+            int oldSectionStartIndex = Array.IndexOf(oldArr, $&quot;[{section}]&quot;);
+            if (oldSectionStartIndex == -1)
+                return;
+
+            int oldSectionEndIndex = Array.FindIndex(oldArr, oldSectionStartIndex + 1, s =&gt; s.StartsWith(&#39;[&#39;));
+            if (oldSectionEndIndex == -1)
+                oldSectionEndIndex = oldArr.Length;
+
+            int newSectionStartIndex = Array.IndexOf(newArr, $&quot;[{section}]&quot;);
+            if (newSectionStartIndex == -1)
+                return;
+
+            int newSectionEndIndex = Array.FindIndex(newArr, newSectionStartIndex + 1, s =&gt; s.StartsWith(&#39;[&#39;));
+            if (newSectionEndIndex == -1)
+                newSectionEndIndex = newArr.Length;
+
+            foreach (var block in result.DiffBlocks)
+            {
+                // Removed indices
+                for (int i = 0; i &lt; block.DeleteCountA; i++)
+                {
+                    int objectIndex = block.DeleteStartA + i;
+
+                    if (objectIndex &lt;= oldSectionStartIndex || objectIndex &gt;= oldSectionEndIndex)
+                        continue;
+
+                    removedIndices.Add(objectIndex - oldSectionStartIndex - 1);
+                }
+
+                // Added indices
+                for (int i = 0; i &lt; block.InsertCountB; i++)
+                {
+                    int objectIndex = block.InsertStartB + i;
+
+                    if (objectIndex &lt;= newSectionStartIndex || objectIndex &gt;= newSectionEndIndex)
+                        continue;
+
+                    addedIndices.Add(objectIndex - newSectionStartIndex - 1);
+                }
+            }
+
+            // Sort the indices to ensure that removal + insertion indices don&#39;t get jumbled up post-removal or post-insertion.
+            // This isn&#39;t strictly required, but the differ makes no guarantees about order.
+            removedIndices.Sort();
+            addedIndices.Sort();
+        }
+
+        private string readString(byte[] state) =&gt; Encoding.UTF8.GetString(state);
+
+        private IBeatmap readBeatmap(byte[] state)
+        {
+            using (var stream = new MemoryStream(state))
+            using (var reader = new LineBufferedReader(stream, true))
+            {
+                var decoded = Decoder.GetDecoder&lt;Beatmap&gt;(reader).Decode(reader);
+                decoded.BeatmapInfo.Ruleset = editorBeatmap.BeatmapInfo.Ruleset;
+                return new PassThroughWorkingBeatmap(decoded).GetPlayableBeatmap(editorBeatmap.BeatmapInfo.Ruleset);
+            }
+        }
+
+        private class PassThroughWorkingBeatmap : WorkingBeatmap
+        {
+            private readonly IBeatmap beatmap;
+
+            public PassThroughWorkingBeatmap(IBeatmap beatmap)
+                : base(beatmap.BeatmapInfo, null)
+            {
+                this.beatmap = beatmap;
+            }
+
+            protected override IBeatmap GetBeatmap() =&gt; beatmap;
+
+            public override Texture GetBackground() =&gt; throw new NotImplementedException();
+
+            protected override Track GetBeatmapTrack() =&gt; throw new NotImplementedException();
+
+            protected internal override ISkin GetSkin() =&gt; throw new NotImplementedException();
+
+            public override Stream GetStream(string storagePath) =&gt; throw new NotImplementedException();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,9,34,71,1],[35,9,35,10,1],[36,13,36,48,1],[37,9,37,10,1],[40,9,40,10,1],[42,13,42,116,1],[43,13,43,40,1],[45,13,45,41,1],[46,13,46,45,1],[46,45,46,81,1],[46,81,46,83,1],[47,13,47,39,1],[47,39,47,75,1],[47,75,47,77,1],[48,13,48,33,1],[48,33,48,69,1],[48,69,48,71,1],[49,13,49,36,1],[49,36,49,72,1],[49,72,49,74,1],[50,13,50,45,1],[50,45,50,81,1],[50,81,50,83,1],[51,13,51,39,1],[52,9,52,10,1],[55,9,55,10,1],[56,13,56,118,1],[59,13,59,20,1],[59,22,59,34,1],[59,35,59,37,1],[59,38,59,85,1],[60,13,60,14,1],[61,17,61,72,1],[63,17,63,48,1],[64,21,64,74,1],[65,13,65,14,1],[68,13,68,20,1],[68,22,68,34,1],[68,35,68,37,1],[68,38,68,61,1],[69,13,69,14,1],[70,17,70,86,1],[72,17,72,48,1],[73,17,73,18,1],[74,21,74,28,1],[74,30,74,39,1],[74,40,74,42,1],[74,43,74,65,1],[75,25,75,82,1],[76,17,76,18,1],[77,13,77,14,1],[78,9,78,10,1],[81,9,81,10,1],[82,13,82,62,1],[84,13,84,20,1],[84,22,84,34,1],[84,35,84,37,1],[84,38,84,68,1],[85,13,85,14,1],[86,17,86,40,1],[86,40,86,58,1],[86,58,86,60,1],[87,21,87,30,1],[89,17,89,55,1],[90,13,90,14,1],[92,13,92,20,1],[92,22,92,34,1],[92,35,92,37,1],[92,38,92,47,1],[93,13,93,14,1],[94,17,94,51,1],[94,51,94,69,1],[94,69,94,71,1],[95,21,95,30,1],[97,17,97,52,1],[98,13,98,14,1],[99,9,99,10,1],[102,9,102,10,1],[103,13,103,70,1],[105,13,105,20,1],[105,22,105,37,1],[105,38,105,40,1],[105,41,105,74,1],[106,13,106,14,1],[107,17,107,56,1],[108,21,108,30,1],[110,17,110,61,1],[111,13,111,14,1],[113,13,113,20,1],[113,22,113,37,1],[113,38,113,40,1],[113,41,113,53,1],[114,13,114,14,1],[115,17,115,67,1],[116,21,116,30,1],[118,17,118,77,1],[119,17,119,29,1],[120,21,120,71,1],[121,13,121,14,1],[122,9,122,10,1],[125,9,125,10,1],[126,13,126,129,1],[128,18,128,50,1],[128,52,128,58,1],[128,60,128,63,1],[129,17,129,59,1],[131,13,131,40,1],[132,13,132,14,1],[133,17,133,50,1],[135,17,135,24,1],[135,26,135,31,1],[135,32,135,34,1],[135,35,135,47,1],[136,21,136,71,1],[137,13,137,14,1],[138,9,138,10,1],[141,9,141,10,1],[150,13,150,55,1],[151,13,151,57,1],[153,13,153,64,1],[155,13,155,20,1],[155,22,155,48,1],[155,49,155,51,1],[155,52,155,78,1],[156,13,156,14,1],[159,17,159,59,1],[160,21,160,30,1],[162,17,162,120,0],[163,21,163,105,0],[165,17,165,55,0],[167,17,167,104,0],[168,17,168,18,0],[169,21,169,56,0],[170,21,170,85,0],[171,17,171,18,0],[173,17,173,49,0],[174,13,174,14,0],[175,9,175,10,1],[178,9,178,10,1],[179,13,179,46,1],[180,13,180,44,1],[182,13,182,58,1],[183,13,183,58,1],[186,13,186,78,1],[187,13,187,44,1],[188,17,188,24,0],[190,13,190,93,1],[190,93,190,110,1],[190,110,190,112,1],[191,13,191,42,1],[192,17,192,52,1],[194,13,194,78,1],[195,13,195,44,1],[196,17,196,24,0],[198,13,198,93,1],[198,93,198,110,1],[198,110,198,112,1],[199,13,199,42,1],[200,17,200,52,1],[202,13,202,20,1],[202,22,202,31,1],[202,32,202,34,1],[202,35,202,52,1],[203,13,203,14,1],[205,22,205,31,1],[205,33,205,55,1],[205,57,205,60,1],[206,17,206,18,1],[207,21,207,62,1],[209,21,209,98,1],[210,25,210,34,1],[212,21,212,80,1],[213,17,213,18,1],[216,22,216,31,1],[216,33,216,55,1],[216,57,216,60,1],[217,17,217,18,1],[218,21,218,62,1],[220,21,220,98,1],[221,25,221,34,1],[223,21,223,78,1],[224,17,224,18,1],[225,13,225,14,1],[229,13,229,35,1],[230,13,230,33,1],[231,9,231,10,1],[233,52,233,82,1],[236,9,236,10,1],[237,20,237,56,1],[238,20,238,69,1],[239,13,239,14,1],[240,17,240,82,1],[241,17,241,81,1],[242,17,242,117,1],[244,9,244,10,1],[251,19,251,50,1],[252,13,252,14,1],[253,17,253,40,1],[254,13,254,14,1],[256,57,256,64,1],[258,56,258,91,0],[260,59,260,94,0],[262,60,262,95,0],[264,69,264,104,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapCarousel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.API;
+using osu.Game.Rulesets;
+using osu.Game.Scoring;
+using Realms;
+
+namespace osu.Game.Screens.Select
+{
+    [Cached]
+    public partial class BeatmapCarousel : Carousel&lt;BeatmapInfo&gt;
+    {
+        public Action&lt;BeatmapInfo&gt;? RequestPresentBeatmap { private get; init; }
+
+        /// &lt;summary&gt;
+        /// From the provided beatmaps, select the most appropriate one for the user&#39;s skill.
+        /// &lt;/summary&gt;
+        public required Action&lt;IEnumerable&lt;GroupedBeatmap&gt;&gt; RequestRecommendedSelection { private get; init; }
+
+        /// &lt;summary&gt;
+        /// Selection requested for the provided beatmap.
+        /// &lt;/summary&gt;
+        public required Action&lt;GroupedBeatmap&gt; RequestSelection { private get; init; }
+
+        public const float SPACING = 3f;
+
+        private IBindableList&lt;BeatmapSetInfo&gt; detachedBeatmaps = null!;
+
+        private readonly LoadingLayer loading;
+
+        private readonly BeatmapCarouselFilterGrouping grouping;
+
+        /// &lt;summary&gt;
+        /// Total number of beatmap difficulties displayed with the filter.
+        /// &lt;/summary&gt;
+        public int MatchedBeatmapsCount =&gt; Filters.Last().BeatmapItemsCount;
+
+        protected override float GetSpacingBetweenPanels(CarouselItem top, CarouselItem bottom)
+        {
+            // Group panels do not overlap with any other panel but should overlap with themselves.
+            if ((top.Model is GroupDefinition) ^ (bottom.Model is GroupDefinition))
+                return SPACING * 2;
+
+            if (grouping.BeatmapSetsGroupedTogether)
+            {
+                // Give some space around the expanded beatmap set, at the top..
+                if (bottom.Model is GroupedBeatmapSet &amp;&amp; bottom.IsExpanded)
+                    return SPACING * 2;
+
+                // ..and the bottom.
+                if (top.Model is GroupedBeatmap &amp;&amp; bottom.Model is GroupedBeatmapSet)
+                    return SPACING * 2;
+
+                // Beatmap difficulty panels do not overlap with themselves or any other panel.
+                if (top.Model is GroupedBeatmap || bottom.Model is GroupedBeatmap)
+                    return SPACING;
+            }
+            else
+            {
+                if (CurrentSelection != null &amp;&amp; (top == CurrentSelectionItem || bottom == CurrentSelectionItem))
+                    return SPACING * 2;
+            }
+
+            return -SPACING;
+        }
+
+        public BeatmapCarousel()
+        {
+            DebounceDelay = 100;
+            DistanceOffscreenToPreload = 100;
+
+            // Account for the osu! logo being in the way.
+            Scroll.ScrollbarPaddingBottom = 70;
+
+            Filters = new ICarouselFilter[]
+            {
+                new BeatmapCarouselFilterMatching(() =&gt; Criteria!),
+                new BeatmapCarouselFilterSorting(() =&gt; Criteria!),
+                grouping = new BeatmapCarouselFilterGrouping
+                {
+                    GetCriteria = () =&gt; Criteria!,
+                    GetCollections = GetAllCollections,
+                    GetLocalUserTopRanks = GetBeatmapInfoGuidToTopRankMapping,
+                    GetFavouriteBeatmapSets = GetFavouriteBeatmapSets,
+                }
+            };
+
+            AddInternal(loading = new LoadingLayer());
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(BeatmapStore beatmapStore, AudioManager audio, OsuConfigManager config, CancellationToken? cancellationToken)
+        {
+            setupPools();
+            detachedBeatmaps = beatmapStore.GetBeatmapSets(cancellationToken);
+            loadSamples(audio);
+
+            config.BindWith(OsuSetting.RandomSelectAlgorithm, randomAlgorithm);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            detachedBeatmaps.BindCollectionChanged(beatmapSetsChanged, true);
+        }
+
+        #region Beatmap source hookup
+
+        private void beatmapSetsChanged(object? beatmaps, NotifyCollectionChangedEventArgs changed) =&gt; Schedule(() =&gt;
+        {
+            // This callback is scheduled to ensure there&#39;s no added overhead during gameplay.
+            // If this ever becomes an issue, it&#39;s important to note that the actual carousel filtering is already
+            // implemented in a way it will only run when at song select.
+            //
+            // The overhead we are avoiding here is that of this method directly – things like Items.IndexOf calls
+            // that can be slow for very large beatmap libraries. There are definitely ways to optimise this further.
+
+            // TODO: moving management of BeatmapInfo tracking to BeatmapStore might be something we want to consider.
+            // right now we are managing this locally which is a bit of added overhead.
+            IEnumerable&lt;BeatmapSetInfo&gt;? newItems = changed.NewItems?.Cast&lt;BeatmapSetInfo&gt;();
+            IEnumerable&lt;BeatmapSetInfo&gt;? oldItems = changed.OldItems?.Cast&lt;BeatmapSetInfo&gt;();
+
+            switch (changed.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                    if (!newItems!.Any())
+                        return;
+
+                    Items.AddRange(newItems!.SelectMany(s =&gt; s.Beatmaps));
+                    break;
+
+                case NotifyCollectionChangedAction.Remove:
+                    bool selectedSetDeleted = false;
+
+                    foreach (var set in oldItems!)
+                    {
+                        foreach (var beatmap in set.Beatmaps)
+                        {
+                            Items.RemoveAll(i =&gt; i is BeatmapInfo bi &amp;&amp; beatmap.Equals(bi));
+                            selectedSetDeleted |= CheckModelEquality((CurrentSelection as GroupedBeatmap)?.Beatmap, beatmap);
+                        }
+                    }
+
+                    // After removing all items in this batch, we want to make an immediate reselection
+                    // based on adjacency to the previous selection if it was deleted.
+                    //
+                    // This needs to be done immediately to avoid song select making a random selection.
+                    // This needs to be done in this class because we need to know final display order.
+                    // This needs to be done with attention to detail of which beatmaps have not been deleted.
+                    if (selectedSetDeleted &amp;&amp; CurrentSelectionIndex != null)
+                    {
+                        var items = GetCarouselItems()!;
+                        if (items.Count == 0)
+                            break;
+
+                        bool success = false;
+
+                        // Try selecting forwards first
+                        for (int i = CurrentSelectionIndex.Value + 1; i &lt; items.Count; i++)
+                        {
+                            if (attemptSelection(items[i]))
+                            {
+                                success = true;
+                                break;
+                            }
+                        }
+
+                        if (success)
+                            break;
+
+                        // Then try backwards (we might be at the end of available items).
+                        for (int i = Math.Min(items.Count - 1, CurrentSelectionIndex.Value); i &gt;= 0; i--)
+                        {
+                            if (attemptSelection(items[i]))
+                                break;
+                        }
+
+                        bool attemptSelection(CarouselItem item)
+                        {
+                            if (CheckValidForSetSelection(item))
+                            {
+                                if (item.Model is GroupedBeatmap groupedBeatmap)
+                                {
+                                    // check the new selection wasn&#39;t deleted above
+                                    if (!Items.Contains(groupedBeatmap.Beatmap))
+                                        return false;
+
+                                    RequestSelection(groupedBeatmap);
+                                    return true;
+                                }
+
+                                if (item.Model is GroupedBeatmapSet groupedSet)
+                                {
+                                    if (oldItems.Contains(groupedSet.BeatmapSet))
+                                        return false;
+
+                                    selectRecommendedDifficultyForBeatmapSet(groupedSet);
+                                    return true;
+                                }
+                            }
+
+                            return false;
+                        }
+                    }
+
+                    break;
+
+                case NotifyCollectionChangedAction.Move:
+                    // We can ignore move operations as we are applying our own sort in all cases.
+                    break;
+
+                case NotifyCollectionChangedAction.Replace:
+                    var oldSetBeatmaps = oldItems!.Single().Beatmaps;
+                    var newSetBeatmaps = newItems!.Single().Beatmaps.ToList();
+
+                    // Handling replace operations is a touch manual, as we need to locally diff the beatmaps of each version of the beatmap set.
+                    // Matching is done based on online IDs, then difficulty names as these are the most stable thing between updates (which are usually triggered
+                    // by users editing the beatmap or by difficulty/metadata recomputation).
+                    //
+                    // In the case of difficulty reprocessing, this will trigger multiple times per beatmap as it&#39;s always triggering a set update.
+                    // We may want to look to improve this in the future either here or at the source (only trigger an update after all difficulties
+                    // have been processed) if it becomes an issue for animation or performance reasons.
+                    foreach (var beatmap in oldSetBeatmaps)
+                    {
+                        int previousIndex = Items.IndexOf(beatmap);
+                        Debug.Assert(previousIndex &gt;= 0);
+
+                        // we&#39;re intentionally being lenient with there being two difficulties with equal online ID or difficulty name.
+                        // this can be the case when the user modifies the beatmap using the editor&#39;s &quot;external edit&quot; feature.
+                        BeatmapInfo? matchingNewBeatmap =
+                            newSetBeatmaps.FirstOrDefault(b =&gt; b.OnlineID &gt; 0 &amp;&amp; b.OnlineID == beatmap.OnlineID) ??
+                            newSetBeatmaps.FirstOrDefault(b =&gt; b.DifficultyName == beatmap.DifficultyName &amp;&amp; b.Ruleset.Equals(beatmap.Ruleset));
+
+                        if (matchingNewBeatmap != null)
+                        {
+                            // TODO: should this exist in song select instead of here?
+                            // we need to ensure the global beatmap is also updated alongside changes.
+                            if (CurrentBeatmap != null &amp;&amp; beatmap.Equals(CurrentBeatmap))
+                            {
+                                var id = matchingNewBeatmap.ID;
+
+                                // The matching beatmap may have been deleted or invalidated in some way since this event was fired.
+                                // Let&#39;s make sure we have the most up-to-date realm state of the current beatmap.
+                                var refreshedNewBeatmap = realm.Run(r =&gt; r.FindWithRefresh&lt;BeatmapInfo&gt;(id)?.Detach());
+
+                                if (refreshedNewBeatmap != null)
+                                {
+                                    matchingNewBeatmap = refreshedNewBeatmap;
+
+                                    // we don&#39;t know in which group the matching new beatmap is, but that&#39;s fine - we can keep the previous one for now.
+                                    // we are about to modify `Items`, which - if required - will trigger a re-filter,
+                                    // which will pick a correct group - if one is present - via `HandleFilterCompleted()`.
+                                    RequestSelection(new GroupedBeatmap(CurrentGroupedBeatmap?.Group, matchingNewBeatmap));
+                                }
+                            }
+
+                            Items.ReplaceRange(previousIndex, 1, [matchingNewBeatmap]);
+                            newSetBeatmaps.Remove(matchingNewBeatmap);
+                        }
+                        else
+                        {
+                            Items.RemoveAt(previousIndex);
+                        }
+                    }
+
+                    // Add any items which weren&#39;t found in the previous pass (difficulty names didn&#39;t match).
+                    foreach (var beatmap in newSetBeatmaps)
+                        Items.Add(beatmap);
+
+                    break;
+
+                case NotifyCollectionChangedAction.Reset:
+                    Items.Clear();
+                    break;
+            }
+        });
+
+        #endregion
+
+        #region Selection handling
+
+        protected GroupDefinition? ExpandedGroup { get; private set; }
+
+        protected GroupedBeatmapSet? ExpandedBeatmapSet { get; private set; }
+
+        protected override bool ShouldActivateOnKeyboardSelection(CarouselItem item) =&gt;
+            grouping.BeatmapSetsGroupedTogether &amp;&amp; item.Model is GroupedBeatmap;
+
+        /// &lt;summary&gt;
+        /// The currently selected &lt;see cref=&quot;GroupedBeatmap&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The selection is never reset due to not existing. It can be set to anything.
+        /// If no matching carousel item exists, there will be no visually selected item while waiting for potential new item which matches.
+        /// &lt;/remarks&gt;
+        public GroupedBeatmap? CurrentGroupedBeatmap
+        {
+            get =&gt; CurrentSelection as GroupedBeatmap;
+            set =&gt; CurrentSelection = value;
+        }
+
+        /// &lt;summary&gt;
+        /// The currently selected &lt;see cref=&quot;BeatmapInfo&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is a property mostly dedicated to external consumers who only care about showing some particular copy of a beatmap
+        /// (there could be multiple panels for one beatmap due to grouping).
+        /// Through this property, the carousel basically figures out what group to use internally.
+        /// &lt;/remarks&gt;
+        public BeatmapInfo? CurrentBeatmap
+        {
+            get =&gt; CurrentGroupedBeatmap?.Beatmap;
+            set
+            {
+                if (value == null)
+                {
+                    CurrentGroupedBeatmap = null;
+                    return;
+                }
+
+                if (CurrentGroupedBeatmap != null &amp;&amp; value.Equals(CurrentGroupedBeatmap.Beatmap))
+                    return;
+
+                // it is not universally guaranteed that the carousel items will be materialised at the time this is set.
+                // therefore, in cases where it is known that they will not be, default to a null group.
+                // even if grouping is active, this will be rectified to a correct group on the next invocation of `HandleFilterCompleted()`.
+                CurrentGroupedBeatmap = IsLoaded &amp;&amp; !IsFiltering
+                    ? GetCarouselItems()?.Select(item =&gt; item.Model).OfType&lt;GroupedBeatmap&gt;().FirstOrDefault(gb =&gt; gb.Beatmap.Equals(value))
+                    : new GroupedBeatmap(null, value);
+            }
+        }
+
+        protected override void HandleItemActivated(CarouselItem item)
+        {
+            try
+            {
+                switch (item.Model)
+                {
+                    case GroupDefinition group:
+                        // Special case – collapsing an open group.
+                        if (ExpandedGroup == group)
+                        {
+                            setExpansionStateOfGroup(ExpandedGroup, false);
+                            ExpandedGroup = null;
+                            return;
+                        }
+
+                        setExpandedGroup(group);
+
+                        // If the active selection is within this group, it should get keyboard focus immediately.
+                        if (CurrentSelectionItem?.IsVisible == true &amp;&amp; CurrentSelection is GroupedBeatmap gb)
+                            RequestSelection(gb);
+
+                        return;
+
+                    case GroupedBeatmapSet groupedSet:
+                        selectRecommendedDifficultyForBeatmapSet(groupedSet);
+                        return;
+
+                    case GroupedBeatmap groupedBeatmap:
+                        if (CurrentSelection != null &amp;&amp; CheckModelEquality(CurrentSelection, groupedBeatmap))
+                        {
+                            RequestPresentBeatmap?.Invoke(groupedBeatmap.Beatmap);
+                            return;
+                        }
+
+                        RequestSelection(groupedBeatmap);
+                        return;
+                }
+            }
+            finally
+            {
+                playActivationSound(item);
+            }
+        }
+
+        protected override void HandleItemSelected(object? model)
+        {
+            base.HandleItemSelected(model);
+
+            switch (model)
+            {
+                case GroupedBeatmapSet:
+                case GroupDefinition:
+                    throw new InvalidOperationException(&quot;Groups should never become selected&quot;);
+
+                case GroupedBeatmap groupedBeatmap:
+                    setExpandedGroup(groupedBeatmap.Group);
+
+                    setExpandedSet(new GroupedBeatmapSet(groupedBeatmap.Group, groupedBeatmap.Beatmap.BeatmapSet!));
+                    break;
+            }
+        }
+
+        protected override bool HandleItemsChanged(NotifyCollectionChangedEventArgs args)
+        {
+            switch (args.Action)
+            {
+                case NotifyCollectionChangedAction.Add:
+                case NotifyCollectionChangedAction.Remove:
+                case NotifyCollectionChangedAction.Move:
+                case NotifyCollectionChangedAction.Reset:
+                    return true;
+
+                case NotifyCollectionChangedAction.Replace:
+                    var oldBeatmaps = args.OldItems!.OfType&lt;BeatmapInfo&gt;().ToList();
+                    var newBeatmaps = args.NewItems!.OfType&lt;BeatmapInfo&gt;().ToList();
+
+                    for (int i = 0; i &lt; oldBeatmaps.Count; i++)
+                    {
+                        var oldBeatmap = oldBeatmaps[i];
+                        var newBeatmap = newBeatmaps[i];
+
+                        // Ignore changes which don&#39;t concern us.
+                        //
+                        // Here are some examples of things that can go wrong:
+                        // - Background difficulty calculation runs and causes a realm update.
+                        //   We use `BeatmapDifficultyCache` and don&#39;t want to know about these.
+                        // - Background user tag population runs and causes a realm update.
+                        //   We don&#39;t display user tags so want to ignore this.
+                        bool equalForDisplayPurposes =
+                            // covers import-as-update flows, such as updating the beatmap with the latest online versions, or external editing inside editor
+                            oldBeatmap.ID == newBeatmap.ID &amp;&amp;
+                            // covers metadata changes
+                            oldBeatmap.Hash == newBeatmap.Hash &amp;&amp;
+                            // sanity check
+                            oldBeatmap.OnlineID == newBeatmap.OnlineID &amp;&amp;
+                            // displayed on panel
+                            oldBeatmap.Status == newBeatmap.Status &amp;&amp;
+                            // displayed on panel
+                            oldBeatmap.DifficultyName == newBeatmap.DifficultyName &amp;&amp;
+                            // hidden changed, needs re-filter
+                            oldBeatmap.Hidden == newBeatmap.Hidden &amp;&amp;
+                            // might be used for grouping, returning from gameplay
+                            oldBeatmap.LastPlayed == newBeatmap.LastPlayed;
+
+                        if (equalForDisplayPurposes)
+                            return false;
+                    }
+
+                    return true;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        protected override void FindCarouselItemsForSelection(ref Selection keyboardSelection, ref Selection selection, IList&lt;CarouselItem&gt; items)
+        {
+            if (keyboardSelection.Model != null &amp;&amp; grouping.ItemMap.TryGetValue(keyboardSelection.Model, out var keyboardSelectionItem))
+                keyboardSelection = keyboardSelection with { CarouselItem = keyboardSelectionItem.item, Index = keyboardSelectionItem.index };
+
+            if (selection.Model != null &amp;&amp; grouping.ItemMap.TryGetValue(selection.Model, out var selectionItem))
+                selection = selection with { CarouselItem = selectionItem.item, Index = selectionItem.index };
+        }
+
+        protected override void HandleFilterCompleted()
+        {
+            base.HandleFilterCompleted();
+
+            attemptSelectSingleFilteredResult();
+
+            if (CurrentSelection is GroupedBeatmap selection)
+            {
+                // Check whether the selection-group mapping is still valid post-filter.
+                if (!grouping.ItemMap.ContainsKey(selection))
+                {
+                    // If the group no longer exists (or the item no longer exists in the previous group), grab an arbitrary other instance of the beatmap under the first group encountered.
+                    var newSelection = GetCarouselItems()?
+                                       .Select(i =&gt; i.Model)
+                                       .OfType&lt;GroupedBeatmap&gt;()
+                                       .FirstOrDefault(gb =&gt; CheckModelEquality(gb.Beatmap, selection.Beatmap));
+
+                    // Only change the selection if we actually got a positive hit.
+                    // This is necessary so that selection isn&#39;t lost if the panel reappears later due to e.g. unapplying some filter criteria that made it disappear in the first place.
+                    if (newSelection != null)
+                        CurrentSelection = newSelection;
+                }
+            }
+
+            // Transfer the previous flag states across to the new models.
+            if (ExpandedBeatmapSet != null) setExpandedSet(ExpandedBeatmapSet);
+            if (ExpandedGroup != null) setExpandedGroup(ExpandedGroup);
+
+            foreach (var item in Scroll.Panels.OfType&lt;PanelBeatmapSet&gt;().Where(p =&gt; p.Item != null))
+                updateVisibleBeatmaps((GroupedBeatmapSet)item.Item!.Model, item);
+        }
+
+        private void selectRecommendedDifficultyForBeatmapSet(GroupedBeatmapSet set)
+        {
+            // Selecting a set isn&#39;t valid – let&#39;s re-select the first visible difficulty.
+            if (grouping.SetItems.TryGetValue(set, out var items))
+            {
+                var beatmaps = items.Select(i =&gt; i.Model).OfType&lt;GroupedBeatmap&gt;();
+                RequestRecommendedSelection(beatmaps);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// If we don&#39;t have a selection and there&#39;s a single beatmap set returned, select it for the user.
+        /// &lt;/summary&gt;
+        private void attemptSelectSingleFilteredResult()
+        {
+            var items = GetCarouselItems();
+
+            if (items == null || items.Count == 0) return;
+
+            BeatmapSetInfo? beatmapSetInfo = null;
+
+            foreach (var item in items)
+            {
+                if (item.Model is GroupedBeatmap groupedBeatmap)
+                {
+                    var beatmapInfo = groupedBeatmap.Beatmap;
+
+                    if (beatmapSetInfo == null)
+                    {
+                        beatmapSetInfo = beatmapInfo.BeatmapSet!;
+                        continue;
+                    }
+
+                    // Found a beatmap with a different beatmap set, abort.
+                    if (!beatmapSetInfo.Equals(beatmapInfo.BeatmapSet))
+                        return;
+                }
+            }
+
+            var beatmaps = items.Select(i =&gt; i.Model).OfType&lt;GroupedBeatmap&gt;();
+
+            // do not request recommended selection if the user already had selected a difficulty within the single filtered beatmap set,
+            // as it could change the difficulty that will be selected
+            var preexistingSelection = beatmaps.FirstOrDefault(b =&gt; b.Equals(CurrentSelection as GroupedBeatmap));
+
+            if (preexistingSelection != null)
+            {
+                // the selection might not have an item associated with it, if it was fully filtered away previously
+                // in this case, request to reselect it
+                if (CurrentSelectionItem == null)
+                    RequestSelection(preexistingSelection);
+
+                return;
+            }
+
+            RequestRecommendedSelection(beatmaps);
+        }
+
+        protected override bool CheckValidForGroupSelection(CarouselItem item) =&gt; item.Model is GroupDefinition;
+
+        protected override bool CheckValidForSetSelection(CarouselItem item)
+        {
+            switch (item.Model)
+            {
+                case GroupedBeatmapSet:
+                    return true;
+
+                case GroupedBeatmap:
+                    return !grouping.BeatmapSetsGroupedTogether;
+
+                case GroupDefinition:
+                    return false;
+
+                default:
+                    throw new ArgumentException($&quot;Unsupported model type {item.Model}&quot;);
+            }
+        }
+
+        private void setExpandedGroup(GroupDefinition? group)
+        {
+            if (ExpandedGroup != null)
+                setExpansionStateOfGroup(ExpandedGroup, false);
+
+            ExpandedGroup = group;
+
+            if (ExpandedGroup != null)
+                setExpansionStateOfGroup(ExpandedGroup, true);
+        }
+
+        private void setExpansionStateOfGroup(GroupDefinition group, bool expanded)
+        {
+            if (grouping.GroupItems.TryGetValue(group, out var items))
+            {
+                if (expanded)
+                {
+                    foreach (var i in items)
+                    {
+                        switch (i.Model)
+                        {
+                            case GroupDefinition:
+                                i.IsExpanded = true;
+                                break;
+
+                            case GroupedBeatmapSet groupedSet:
+                                // Case where there are set headers, header should be visible
+                                // and items should use the set&#39;s expanded state.
+                                i.IsVisible = true;
+                                setExpansionStateOfSetItems(groupedSet, i.IsExpanded);
+                                break;
+
+                            default:
+                                // Case where there are no set headers, all items should be visible.
+                                if (!grouping.BeatmapSetsGroupedTogether)
+                                    i.IsVisible = true;
+                                break;
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var i in items)
+                    {
+                        switch (i.Model)
+                        {
+                            case GroupDefinition:
+                                i.IsExpanded = false;
+                                break;
+
+                            default:
+                                i.IsVisible = false;
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+
+        private void setExpandedSet(GroupedBeatmapSet set)
+        {
+            GroupedBeatmapSet? lastExpandedSet = ExpandedBeatmapSet;
+
+            // It&#39;s important that we update the stored ExpandedBeatmapSet even when
+            // sets are not grouped together.
+            //
+            // This is stored when selection is changed and used later to ensure correct
+            // visual states are achieved (see call of this method in `HandleFilterCompleted`
+            // for an important case).
+            ExpandedBeatmapSet = set;
+
+            if (!grouping.BeatmapSetsGroupedTogether)
+                return;
+
+            setExpansionStateOfSetItems(lastExpandedSet, false);
+            setExpansionStateOfSetItems(ExpandedBeatmapSet, true);
+        }
+
+        private void setExpansionStateOfSetItems(GroupedBeatmapSet? set, bool expanded)
+        {
+            if (set == null)
+                return;
+
+            bool canMakeVisible = !grouping.GroupItems.Any() || ExpandedGroup == set.Group;
+
+            if (grouping.SetItems.TryGetValue(set, out var items))
+            {
+                foreach (var i in items)
+                {
+                    if (i.Model is GroupedBeatmapSet)
+                        i.IsExpanded = expanded;
+                    else
+                        i.IsVisible = canMakeVisible &amp;&amp; expanded;
+                }
+            }
+        }
+
+        protected override double? GetScrollTarget()
+        {
+            double? target = base.GetScrollTarget();
+
+            // if the base implementation returned null, it means that the keyboard selection has been filtered out and is no longer visible
+            // attempt a fallback to other possibly expanded panels (set first, then group)
+            if (target == null)
+            {
+                CarouselItem? targetItem = null;
+
+                if (ExpandedBeatmapSet != null &amp;&amp; grouping.ItemMap.TryGetValue(ExpandedBeatmapSet, out var setItem))
+                    targetItem = setItem.item;
+
+                if (targetItem == null &amp;&amp; ExpandedGroup != null &amp;&amp; grouping.ItemMap.TryGetValue(ExpandedGroup, out var groupItem))
+                    targetItem = groupItem.item;
+
+                target = targetItem?.CarouselYPosition;
+            }
+
+            return target;
+        }
+
+        #endregion
+
+        #region Audio
+
+        private Sample? sampleChangeDifficulty;
+        private Sample? sampleChangeSet;
+        private Sample? sampleToggleGroup;
+
+        private double audioFeedbackLastPlaybackTime;
+
+        private void loadSamples(AudioManager audio)
+        {
+            sampleChangeDifficulty = audio.Samples.Get(@&quot;SongSelect/select-difficulty&quot;);
+            sampleChangeSet = audio.Samples.Get(@&quot;SongSelect/select-expand&quot;);
+            sampleToggleGroup = audio.Samples.Get(@&quot;SongSelect/select-group&quot;);
+
+            spinSample = audio.Samples.Get(&quot;SongSelect/random-spin&quot;);
+            randomSelectSample = audio.Samples.Get(@&quot;SongSelect/select-random&quot;);
+        }
+
+        private void playActivationSound(CarouselItem item)
+        {
+            if (Time.Current - audioFeedbackLastPlaybackTime &gt;= OsuGameBase.SAMPLE_DEBOUNCE_TIME)
+            {
+                switch (item.Model)
+                {
+                    case GroupDefinition:
+                        sampleToggleGroup?.Play();
+                        return;
+
+                    case GroupedBeatmapSet:
+                        sampleChangeSet?.Play();
+                        return;
+
+                    case GroupedBeatmap:
+                        sampleChangeDifficulty?.Play();
+                        return;
+                }
+
+                audioFeedbackLastPlaybackTime = Time.Current;
+            }
+        }
+
+        #endregion
+
+        #region Animation
+
+        /// &lt;summary&gt;
+        /// Moves non-selected beatmaps to the right, hiding off-screen.
+        /// &lt;/summary&gt;
+        public bool VisuallyFocusSelected { get; set; }
+
+        private float selectionFocusOffset;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            selectionFocusOffset = (float)Interpolation.DampContinuously(selectionFocusOffset, VisuallyFocusSelected ? 300 : 0, 100, Time.Elapsed);
+        }
+
+        protected override float GetPanelXOffset(Drawable panel)
+        {
+            return base.GetPanelXOffset(panel) + (((ICarouselPanel)panel).Selected.Value ? 0 : selectionFocusOffset);
+        }
+
+        #endregion
+
+        #region Filtering
+
+        public FilterCriteria? Criteria { get; private set; }
+
+        private ScheduledDelegate? loadingDebounce;
+
+        public void Filter(FilterCriteria criteria, bool showLoadingImmediately = false)
+        {
+            bool resetDisplay = grouping.BeatmapSetsGroupedTogether != BeatmapCarouselFilterGrouping.ShouldGroupBeatmapsTogether(criteria);
+
+            Criteria = criteria;
+
+            loadingDebounce ??= Scheduler.AddDelayed(() =&gt;
+            {
+                if (loading.State.Value == Visibility.Visible)
+                    return;
+
+                Scroll.FadeColour(OsuColour.Gray(0.5f), 1000, Easing.OutQuint);
+                loading.Show();
+            }, showLoadingImmediately ? 0 : 250);
+
+            FilterAsync(resetDisplay).ContinueWith(_ =&gt; Schedule(() =&gt;
+            {
+                loadingDebounce?.Cancel();
+                loadingDebounce = null;
+
+                Scroll.FadeColour(OsuColour.Gray(1f), 500, Easing.OutQuint);
+                loading.Hide();
+            }));
+        }
+
+        protected override Task&lt;IEnumerable&lt;CarouselItem&gt;&gt; FilterAsync(bool clearExistingPanels = false)
+        {
+            if (Criteria == null)
+                return Task.FromResult(Enumerable.Empty&lt;CarouselItem&gt;());
+
+            return base.FilterAsync(clearExistingPanels);
+        }
+
+        #endregion
+
+        #region Fetches for grouping support
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        /// &lt;remarks&gt;
+        /// FOOTGUN WARNING: this being sorted on the realm side before detaching is IMPORTANT.
+        /// realm supports sorting as an internal operation, and realm&#39;s implementation of string sorting does NOT match dotnet&#39;s
+        /// with respect to treatment of punctuation characters like &lt;c&gt;-&lt;/c&gt; or &lt;c&gt;_&lt;/c&gt;, among others.
+        /// All other places that show lists of collections also use the realm-side sorting implementation,
+        /// because they use the sorting operation inside subscription queries for efficient drawable management,
+        /// so this usage kind of has to follow suit.
+        /// &lt;/remarks&gt;
+        protected virtual List&lt;BeatmapCollection&gt; GetAllCollections() =&gt; realm.Run(r =&gt; r.All&lt;BeatmapCollection&gt;().OrderBy(c =&gt; c.Name).AsEnumerable().Detach());
+
+        protected virtual Dictionary&lt;Guid, ScoreRank&gt; GetBeatmapInfoGuidToTopRankMapping(FilterCriteria criteria) =&gt; realm.Run(r =&gt;
+        {
+            var topRankMapping = new Dictionary&lt;Guid, ScoreRank&gt;();
+
+            var allLocalScores = r.GetAllLocalScoresForUser(criteria.LocalUserId)
+                                  .Filter($@&quot;{nameof(ScoreInfo.Ruleset)}.{nameof(RulesetInfo.ShortName)} == $0&quot;, criteria.Ruleset?.ShortName)
+                                  .OrderByDescending(s =&gt; s.TotalScore)
+                                  .ThenBy(s =&gt; s.Date);
+
+            foreach (var score in allLocalScores)
+            {
+                Debug.Assert(score.BeatmapInfo != null);
+
+                if (topRankMapping.ContainsKey(score.BeatmapInfo.ID))
+                    continue;
+
+                topRankMapping[score.BeatmapInfo.ID] = score.Rank;
+            }
+
+            return topRankMapping;
+        });
+
+        /// &lt;remarks&gt;
+        /// Note that calling &lt;c&gt;.ToHashSet()&lt;/c&gt; below has two purposes:
+        /// one being performance of contain checks in filtering code,
+        /// another being slightly better thread safety (as &lt;see cref=&quot;ILocalUserState.FavouriteBeatmapSets&quot;/&gt; could be mutated during async filtering).
+        /// &lt;/remarks&gt;
+        protected HashSet&lt;int&gt; GetFavouriteBeatmapSets() =&gt; api.LocalUserState.FavouriteBeatmapSets.ToHashSet();
+
+        #endregion
+
+        #region Drawable pooling
+
+        private readonly DrawablePool&lt;PanelBeatmap&gt; beatmapPanelPool = new DrawablePool&lt;PanelBeatmap&gt;(100);
+        private readonly DrawablePool&lt;PanelBeatmapStandalone&gt; standalonePanelPool = new DrawablePool&lt;PanelBeatmapStandalone&gt;(100);
+        private readonly DrawablePool&lt;PanelBeatmapSet&gt; setPanelPool = new DrawablePool&lt;PanelBeatmapSet&gt;(100);
+        private readonly DrawablePool&lt;PanelGroup&gt; groupPanelPool = new DrawablePool&lt;PanelGroup&gt;(100);
+        private readonly DrawablePool&lt;PanelGroupStarDifficulty&gt; starsGroupPanelPool = new DrawablePool&lt;PanelGroupStarDifficulty&gt;(11);
+        private readonly DrawablePool&lt;PanelGroupRankDisplay&gt; ranksGroupPanelPool = new DrawablePool&lt;PanelGroupRankDisplay&gt;(9);
+        private readonly DrawablePool&lt;PanelGroupRankedStatus&gt; statusGroupPanelPool = new DrawablePool&lt;PanelGroupRankedStatus&gt;(8);
+
+        private void setupPools()
+        {
+            AddInternal(statusGroupPanelPool);
+            AddInternal(ranksGroupPanelPool);
+            AddInternal(starsGroupPanelPool);
+            AddInternal(groupPanelPool);
+            AddInternal(beatmapPanelPool);
+            AddInternal(standalonePanelPool);
+            AddInternal(setPanelPool);
+        }
+
+        protected override bool CheckModelEquality(object? x, object? y)
+        {
+            // In the confines of the carousel logic, we assume that CurrentSelection (and all items) are using non-stale
+            // BeatmapInfo reference, and that we can match based on beatmap / beatmapset (GU)IDs.
+            //
+            // If there&#39;s a case where updates don&#39;t come in as expected, diagnosis should start from BeatmapStore, ensuring
+            // it is doing a Replace operation on the list. If it is, then check the local handling in beatmapSetsChanged
+            // before changing matching requirements here.
+
+            if (x is GroupedBeatmapSet groupedSetX &amp;&amp; y is GroupedBeatmapSet groupedSetY)
+                return groupedSetX.Equals(groupedSetY);
+
+            if (x is GroupedBeatmap groupedBeatmapX &amp;&amp; y is GroupedBeatmap groupedBeatmapY)
+                return groupedBeatmapX.Equals(groupedBeatmapY);
+
+            // `BeatmapInfo` is no longer used directly in carousel items, but in rare circumstances still is used for model equality comparisons
+            // (see `beatmapSetsChanged()` deletion handling logic, which aims to find a beatmap close to the just-deleted one, disregarding grouping concerns)
+            if (x is BeatmapInfo beatmapInfoX &amp;&amp; y is BeatmapInfo beatmapInfoY)
+                return beatmapInfoX.Equals(beatmapInfoY);
+
+            if (x is StarDifficultyGroupDefinition starX &amp;&amp; y is StarDifficultyGroupDefinition starY)
+                return starX.Equals(starY);
+
+            if (x is RankDisplayGroupDefinition rankX &amp;&amp; y is RankDisplayGroupDefinition rankY)
+                return rankX.Equals(rankY);
+
+            if (x is RankedStatusGroupDefinition statusX &amp;&amp; y is RankedStatusGroupDefinition statusY)
+                return statusX.Equals(statusY);
+
+            // NOTE: this branch must be AFTER all branches that compare `GroupDefinition` subtypes!
+            // this is an optimisation measure. any subclass of `GroupDefinition` will pass the `is GroupDefinition` check,
+            // and testing a subclass of `GroupDefinition` against any other `GroupDefinition` (or subclass thereof)
+            // will result in a casting cascade of `Equals(GroupDefinition) -&gt; Equals(object) -&gt; Equals(GroupDefinitionSubClass)`
+            // (that last one only if the type check passes)
+            if (x is GroupDefinition groupX &amp;&amp; y is GroupDefinition groupY)
+                return groupX.Equals(groupY);
+
+            return base.CheckModelEquality(x, y);
+        }
+
+        protected override Drawable GetDrawableForDisplay(CarouselItem item)
+        {
+            switch (item.Model)
+            {
+                case RankedStatusGroupDefinition:
+                    return statusGroupPanelPool.Get();
+
+                case StarDifficultyGroupDefinition:
+                    return starsGroupPanelPool.Get();
+
+                case RankDisplayGroupDefinition:
+                    return ranksGroupPanelPool.Get();
+
+                case GroupDefinition:
+                    return groupPanelPool.Get();
+
+                case GroupedBeatmap:
+                    if (!grouping.BeatmapSetsGroupedTogether)
+                        return standalonePanelPool.Get();
+
+                    return beatmapPanelPool.Get();
+
+                case GroupedBeatmapSet groupedBeatmapSet:
+                    var setPanel = setPanelPool.Get();
+                    updateVisibleBeatmaps(groupedBeatmapSet, setPanel);
+                    return setPanel;
+            }
+
+            throw new InvalidOperationException();
+        }
+
+        private void updateVisibleBeatmaps(GroupedBeatmapSet groupedBeatmapSet, PanelBeatmapSet setPanel)
+        {
+            HashSet&lt;BeatmapInfo&gt; visibleBeatmaps = [];
+            if (grouping.SetItems.TryGetValue(groupedBeatmapSet, out var visibleItems))
+                visibleBeatmaps = visibleItems.Where(i =&gt; i.Model is GroupedBeatmap).Select(i =&gt; ((GroupedBeatmap)i.Model).Beatmap).ToHashSet();
+
+            setPanel.VisibleBeatmaps.Value = visibleBeatmaps;
+        }
+
+        #endregion
+
+        #region Random selection handling
+
+        private readonly Bindable&lt;RandomSelectAlgorithm&gt; randomAlgorithm = new Bindable&lt;RandomSelectAlgorithm&gt;();
+        private readonly HashSet&lt;BeatmapInfo&gt; previouslyVisitedRandomBeatmaps = new HashSet&lt;BeatmapInfo&gt;();
+        private readonly List&lt;GroupedBeatmap&gt; randomHistory = new List&lt;GroupedBeatmap&gt;();
+
+        private Sample? spinSample;
+        private Sample? randomSelectSample;
+
+        public bool NextRandom()
+        {
+            var carouselItems = GetCarouselItems();
+
+            if (carouselItems?.Any() != true)
+                return false;
+
+            var selectionBefore = CurrentSelectionItem;
+            var beatmapBefore = selectionBefore?.Model as GroupedBeatmap;
+
+            bool success;
+
+            if (beatmapBefore != null)
+            {
+                // keep track of visited beatmaps and sets for rewind
+                randomHistory.Add(beatmapBefore);
+                // keep track of visited beatmaps for &quot;RandomPermutation&quot; random tracking.
+                // note that this is reset when we run out of beatmaps, while `randomHistory` is not.
+                previouslyVisitedRandomBeatmaps.Add(beatmapBefore.Beatmap);
+            }
+
+            if (grouping.BeatmapSetsGroupedTogether)
+                success = nextRandomSet();
+            else
+                success = nextRandomBeatmap();
+
+            if (!success)
+            {
+                if (beatmapBefore != null)
+                    randomHistory.RemoveAt(randomHistory.Count - 1);
+                return false;
+            }
+
+            // CurrentSelectionItem won&#39;t be valid until UpdateAfterChildren.
+            // We probably want to fix this at some point since a few places are working-around this quirk.
+            ScheduleAfterChildren(() =&gt;
+            {
+                if (selectionBefore != null &amp;&amp; CurrentSelectionItem != null)
+                    playSpinSample(visiblePanelCountBetweenItems(selectionBefore, CurrentSelectionItem));
+            });
+
+            return true;
+        }
+
+        private bool nextRandomBeatmap()
+        {
+            ICollection&lt;GroupedBeatmap&gt; visibleBeatmaps = ExpandedGroup != null &amp;&amp; grouping.GroupItems.TryGetValue(ExpandedGroup, out var groupItems)
+                // In the case of grouping, users expect random to only operate on the expanded group.
+                // This is going to incur some overhead as we don&#39;t have a group-beatmapset mapping currently.
+                //
+                // If this becomes an issue, we could either store a mapping, or run the random algorithm many times
+                // using the `SetItems` method until we get a group HIT.
+                ? groupItems.Select(i =&gt; i.Model).OfType&lt;GroupedBeatmap&gt;().ToArray()
+                : GetCarouselItems()!.Select(i =&gt; i.Model).OfType&lt;GroupedBeatmap&gt;().ToArray();
+
+            GroupedBeatmap beatmap;
+
+            switch (randomAlgorithm.Value)
+            {
+                case RandomSelectAlgorithm.RandomPermutation:
+                {
+                    ICollection&lt;GroupedBeatmap&gt; notYetVisitedBeatmaps = visibleBeatmaps.ExceptBy(previouslyVisitedRandomBeatmaps, gb =&gt; gb.Beatmap).ToList();
+
+                    if (!notYetVisitedBeatmaps.Any())
+                    {
+                        previouslyVisitedRandomBeatmaps.ExceptWith(visibleBeatmaps.Select(b =&gt; b.Beatmap));
+                        notYetVisitedBeatmaps = visibleBeatmaps;
+                        if (CurrentSelection is GroupedBeatmap groupedBeatmap)
+                            notYetVisitedBeatmaps = notYetVisitedBeatmaps.Except([groupedBeatmap]).ToList();
+                    }
+
+                    if (notYetVisitedBeatmaps.Count == 0)
+                        return false;
+
+                    beatmap = notYetVisitedBeatmaps.ElementAt(RNG.Next(notYetVisitedBeatmaps.Count));
+                    break;
+                }
+
+                case RandomSelectAlgorithm.Random:
+                    beatmap = visibleBeatmaps.ElementAt(RNG.Next(visibleBeatmaps.Count));
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            RequestSelection(beatmap);
+            return true;
+        }
+
+        private bool nextRandomSet()
+        {
+            ICollection&lt;GroupedBeatmapSet&gt; visibleGroupedSets = ExpandedGroup != null &amp;&amp; grouping.GroupItems.TryGetValue(ExpandedGroup, out var groupItems)
+                // In the case of grouping, users expect random to only operate on the expanded group.
+                // This is going to incur some overhead as we don&#39;t have a group-beatmapset mapping currently.
+                //
+                // If this becomes an issue, we could either store a mapping, or run the random algorithm many times
+                // using the `SetItems` method until we get a group HIT.
+                ? groupItems.Select(i =&gt; i.Model).OfType&lt;GroupedBeatmapSet&gt;().ToArray()
+                // This is the fastest way to retrieve sets for randomisation.
+                : grouping.SetItems.Keys;
+
+            GroupedBeatmapSet set;
+
+            switch (randomAlgorithm.Value)
+            {
+                case RandomSelectAlgorithm.RandomPermutation:
+                {
+                    ICollection&lt;GroupedBeatmapSet&gt; notYetVisitedSets =
+                        visibleGroupedSets.ExceptBy(previouslyVisitedRandomBeatmaps.Select(b =&gt; b.BeatmapSet!), groupedSet =&gt; groupedSet.BeatmapSet).ToList();
+
+                    if (!notYetVisitedSets.Any())
+                    {
+                        previouslyVisitedRandomBeatmaps.ExceptWith(visibleGroupedSets.SelectMany(setUnderGrouping =&gt; setUnderGrouping.BeatmapSet.Beatmaps));
+                        notYetVisitedSets = visibleGroupedSets;
+                        if (CurrentSelection is GroupedBeatmap groupedBeatmap)
+                            notYetVisitedSets = notYetVisitedSets.ExceptBy([groupedBeatmap.Beatmap.BeatmapSet!], groupedSet =&gt; groupedSet.BeatmapSet).ToList();
+                    }
+
+                    if (notYetVisitedSets.Count == 0)
+                        return false;
+
+                    set = notYetVisitedSets.ElementAt(RNG.Next(notYetVisitedSets.Count));
+                    break;
+                }
+
+                case RandomSelectAlgorithm.Random:
+                    set = visibleGroupedSets.ElementAt(RNG.Next(visibleGroupedSets.Count));
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            selectRecommendedDifficultyForBeatmapSet(set);
+            return true;
+        }
+
+        public bool PreviousRandom()
+        {
+            var carouselItems = GetCarouselItems();
+
+            if (carouselItems?.Any() != true)
+                return false;
+
+            while (randomHistory.Any())
+            {
+                var previousBeatmap = randomHistory[^1];
+                randomHistory.RemoveAt(randomHistory.Count - 1);
+
+                // when going back through rewind history, we may no longer be in the same grouping mode.
+                // the user wants to go back to the beatmap first and foremost, so the most important thing is to find a panel that corresponds to the beatmap.
+                // going back to the same group is a nice-to-have, but a secondary concern.
+                var previousBeatmapItem = carouselItems.Where(i =&gt; i.Model is GroupedBeatmap gb &amp;&amp; gb.Beatmap.Equals(previousBeatmap.Beatmap))
+                                                       .MaxBy(i =&gt; ((GroupedBeatmap)i.Model).Group == previousBeatmap.Group);
+
+                if (previousBeatmapItem == null)
+                    return false;
+
+                if (CurrentSelection is GroupedBeatmap groupedBeatmap)
+                {
+                    if (randomAlgorithm.Value == RandomSelectAlgorithm.RandomPermutation)
+                        previouslyVisitedRandomBeatmaps.Remove(groupedBeatmap.Beatmap);
+
+                    if (CurrentSelectionItem == null)
+                        playSpinSample(0);
+                    else
+                        playSpinSample(visiblePanelCountBetweenItems(previousBeatmapItem, CurrentSelectionItem));
+                }
+
+                RequestSelection((GroupedBeatmap)previousBeatmapItem.Model);
+                return true;
+            }
+
+            return false;
+        }
+
+        private double visiblePanelCountBetweenItems(CarouselItem item1, CarouselItem item2) =&gt; Math.Ceiling(Math.Abs(item1.CarouselYPosition - item2.CarouselYPosition) / PanelBeatmapSet.HEIGHT);
+
+        private void playSpinSample(double distance)
+        {
+            var chan = spinSample?.GetChannel();
+
+            if (chan != null)
+            {
+                chan.Frequency.Value = 1f + Math.Clamp(distance / 200, 0, 1);
+                chan.Play();
+            }
+
+            randomSelectSample?.Play();
+        }
+
+        #endregion
+    }
+
+    /// &lt;summary&gt;
+    /// Defines a grouping header for a set of carousel items.
+    /// &lt;/summary&gt;
+    public record GroupDefinition
+    {
+        /// &lt;summary&gt;
+        /// The order of this group in the carousel, sorted using ascending order.
+        /// &lt;/summary&gt;
+        public int Order { get; }
+
+        /// &lt;summary&gt;
+        /// The title of this group.
+        /// &lt;/summary&gt;
+        public LocalisableString Title { get; }
+
+        private readonly string uncasedTitle;
+
+        public GroupDefinition(int order, LocalisableString title)
+        {
+            Order = order;
+            Title = title;
+            uncasedTitle = title.ToLower().GetLocalised(LocalisationParameters.DEFAULT);
+        }
+
+        public virtual bool Equals(GroupDefinition? other) =&gt; uncasedTitle == other?.uncasedTitle;
+
+        public override int GetHashCode() =&gt; HashCode.Combine(uncasedTitle);
+    }
+
+    /// &lt;summary&gt;
+    /// Defines a grouping header for a set of carousel items grouped by star difficulty.
+    /// &lt;/summary&gt;
+    public record StarDifficultyGroupDefinition(int Order, LocalisableString Title, StarDifficulty Difficulty) : GroupDefinition(Order, Title);
+
+    /// &lt;summary&gt;
+    /// Defines a grouping header for a set of carousel items grouped by achieved rank.
+    /// &lt;/summary&gt;
+    public record RankDisplayGroupDefinition(ScoreRank Rank) : GroupDefinition(-(int)Rank, Rank.GetLocalisableDescription());
+
+    /// &lt;summary&gt;
+    /// Defines a grouping header for a set of carousel items grouped by ranked status.
+    /// &lt;/summary&gt;
+    public record RankedStatusGroupDefinition(int Order, BeatmapOnlineStatus Status) : GroupDefinition(Order, Status.GetLocalisableDescription());
+
+    /// &lt;summary&gt;
+    /// Used to represent a portion of a &lt;see cref=&quot;BeatmapSetInfo&quot;/&gt; under a &lt;see cref=&quot;GroupDefinition&quot;/&gt;.
+    /// The purpose of this model is to support splitting beatmap sets apart when the active grouping mode demands it.
+    /// &lt;/summary&gt;
+    public record GroupedBeatmapSet([UsedImplicitly] GroupDefinition? Group, BeatmapSetInfo BeatmapSet);
+
+    /// &lt;summary&gt;
+    /// Used to represent a &lt;see cref=&quot;Beatmap&quot;/&gt; under a &lt;see cref=&quot;GroupDefinition&quot;/&gt;.
+    /// The purpose of this model is to support showing multiple copies of a beatmap, which can occur if a beatmap appears in multiple groups
+    /// (most prominently, collections group mode).
+    /// &lt;/summary&gt;
+    public record GroupedBeatmap(GroupDefinition? Group, BeatmapInfo Beatmap);
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[41,61,41,73,0],[41,74,41,79,0],[46,91,46,103,0],[46,104,46,109,0],[51,67,51,79,0],[51,80,51,85,0],[55,9,55,72,0],[64,44,64,76,0],[67,9,67,10,0],[69,13,69,84,0],[70,17,70,36,0],[72,13,72,53,0],[73,13,73,14,0],[75,17,75,76,0],[76,21,76,40,0],[79,17,79,86,0],[80,21,80,40,0],[83,17,83,83,0],[84,21,84,36,0],[85,13,85,14,0],[87,13,87,14,0],[88,17,88,113,0],[89,21,89,40,0],[90,13,90,14,0],[92,13,92,29,0],[93,9,93,10,0],[95,9,95,33,0],[96,9,96,10,0],[97,13,97,33,0],[98,13,98,46,0],[101,13,101,48,0],[103,13,105,57,0],[105,57,105,66,0],[105,66,106,56,0],[106,56,106,65,0],[106,65,109,41,0],[109,41,109,50,0],[109,50,114,15,0],[116,13,116,55,0],[117,9,117,10,0],[121,9,121,10,0],[122,13,122,26,0],[123,13,123,79,0],[124,13,124,32,0],[126,13,126,80,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,33,0],[132,13,132,78,0],[133,9,133,10,0],[137,104,138,9,0],[138,9,138,10,0],[138,10,148,13,0],[148,13,148,94,0],[148,94,149,13,0],[149,13,149,94,0],[149,94,151,13,0],[151,13,151,36,0],[151,36,154,21,0],[154,21,154,42,0],[154,42,155,25,0],[155,25,155,32,0],[155,32,157,21,0],[157,21,157,62,0],[157,62,157,72,0],[157,72,157,75,0],[157,75,158,21,0],[158,21,158,27,0],[158,27,161,21,0],[161,21,161,53,0],[161,53,163,21,0],[163,21,163,28,0],[163,28,163,30,0],[163,30,163,37,0],[163,37,163,38,0],[163,38,163,40,0],[163,40,163,41,0],[163,41,163,50,0],[163,50,164,21,0],[164,21,164,22,0],[164,22,165,25,0],[165,25,165,32,0],[165,32,165,34,0],[165,34,165,45,0],[165,45,165,46,0],[165,46,165,48,0],[165,48,165,49,0],[165,49,165,61,0],[165,61,166,25,0],[166,25,166,26,0],[166,26,167,29,0],[167,29,167,50,0],[167,50,167,91,0],[167,91,167,93,0],[167,93,168,29,0],[168,29,168,126,0],[168,126,169,25,0],[169,25,169,26,0],[169,26,170,21,0],[170,21,170,22,0],[170,22,178,21,0],[178,21,178,77,0],[178,77,179,21,0],[179,21,179,22,0],[179,22,180,25,0],[180,25,180,57,0],[180,57,181,25,0],[181,25,181,46,0],[181,46,182,29,0],[182,29,182,35,0],[182,35,184,25,0],[184,25,184,46,0],[184,46,187,30,0],[187,30,187,69,0],[187,69,187,71,0],[187,71,187,86,0],[187,86,187,88,0],[187,88,187,91,0],[187,91,188,25,0],[188,25,188,26,0],[188,26,189,29,0],[189,29,189,60,0],[189,60,190,29,0],[190,29,190,30,0],[190,30,191,33,0],[191,33,191,48,0],[191,48,192,33,0],[192,33,192,39,0],[192,39,194,25,0],[194,25,194,26,0],[194,26,196,25,0],[196,25,196,37,0],[196,37,197,29,0],[197,29,197,35,0],[197,35,200,30,0],[200,30,200,92,0],[200,92,200,94,0],[200,94,200,100,0],[200,100,200,102,0],[200,102,200,105,0],[200,105,201,25,0],[201,25,201,26,0],[201,26,202,29,0],[202,29,202,60,0],[202,60,203,33,0],[203,33,203,39,0],[203,39,204,25,0],[204,25,204,26,0],[204,26,207,25,0],[207,25,207,26,0],[207,26,208,29,0],[208,29,208,65,0],[208,65,209,29,0],[209,29,209,30,0],[209,30,210,33,0],[210,33,210,81,0],[210,81,211,33,0],[211,33,211,34,0],[211,34,213,37,0],[213,37,213,81,0],[213,81,214,41,0],[214,41,214,54,0],[214,54,216,37,0],[216,37,216,70,0],[216,70,217,37,0],[217,37,217,49,0],[217,49,220,33,0],[220,33,220,80,0],[220,80,221,33,0],[221,33,221,34,0],[221,34,222,37,0],[222,37,222,82,0],[222,82,223,41,0],[223,41,223,54,0],[223,54,225,37,0],[225,37,225,90,0],[225,90,226,37,0],[226,37,226,49,0],[226,49,228,29,0],[228,29,228,30,0],[228,30,230,29,0],[230,29,230,42,0],[230,42,231,25,0],[231,25,231,26,0],[231,26,232,21,0],[232,21,232,22,0],[232,22,234,21,0],[234,21,234,27,0],[234,27,238,21,0],[238,21,238,27,0],[238,27,241,21,0],[241,21,241,70,0],[241,70,242,21,0],[242,21,242,79,0],[242,79,251,21,0],[251,21,251,28,0],[251,28,251,30,0],[251,30,251,41,0],[251,41,251,42,0],[251,42,251,44,0],[251,44,251,45,0],[251,45,251,59,0],[251,59,252,21,0],[252,21,252,22,0],[252,22,253,25,0],[253,25,253,68,0],[253,68,254,25,0],[254,25,254,58,0],[254,58,258,25,0],[258,25,259,64,0],[259,64,259,112,0],[259,112,260,64,0],[260,64,260,143,0],[260,143,260,145,0],[260,145,262,25,0],[262,25,262,56,0],[262,56,263,25,0],[263,25,263,26,0],[263,26,266,29,0],[266,29,266,90,0],[266,90,267,29,0],[267,29,267,30,0],[267,30,268,33,0],[268,33,268,64,0],[268,64,272,33,0],[272,33,272,74,0],[272,74,272,118,0],[272,118,272,120,0],[272,120,274,33,0],[274,33,274,65,0],[274,65,275,33,0],[275,33,275,34,0],[275,34,276,37,0],[276,37,276,78,0],[276,78,281,37,0],[281,37,281,124,0],[281,124,282,33,0],[282,33,282,34,0],[282,34,283,29,0],[283,29,283,30,0],[283,30,285,29,0],[285,29,285,88,0],[285,88,286,29,0],[286,29,286,71,0],[286,71,287,25,0],[287,25,287,26,0],[287,26,289,25,0],[289,25,289,26,0],[289,26,290,29,0],[290,29,290,59,0],[290,59,291,25,0],[291,25,291,26,0],[291,26,292,21,0],[292,21,292,22,0],[292,22,295,21,0],[295,21,295,28,0],[295,28,295,30,0],[295,30,295,41,0],[295,41,295,42,0],[295,42,295,44,0],[295,44,295,45,0],[295,45,295,59,0],[295,59,296,25,0],[296,25,296,44,0],[296,44,298,21,0],[298,21,298,27,0],[298,27,301,21,0],[301,21,301,35,0],[301,35,302,21,0],[302,21,302,27,0],[302,27,304,9,0],[304,9,304,10,0],[304,10,304,11,0],[310,52,310,56,0],[310,57,310,69,0],[312,59,312,63,0],[312,64,312,76,0],[315,13,315,80,0],[326,20,326,54,0],[327,20,327,44,0],[340,20,340,50,0],[342,13,342,14,0],[343,17,343,35,0],[344,17,344,18,0],[345,21,345,50,0],[346,21,346,28,0],[349,17,349,98,0],[350,21,350,28,0],[355,17,356,58,0],[356,58,356,68,0],[356,68,356,116,0],[356,116,356,140,0],[356,140,357,55,0],[358,13,358,14,0],[362,9,362,10,0],[364,13,364,14,0],[365,17,365,36,0],[369,25,369,52,0],[370,25,370,26,0],[371,29,371,76,0],[372,29,372,50,0],[373,29,373,36,0],[376,25,376,49,0],[379,25,379,110,0],[380,29,380,50,0],[382,25,382,32,0],[385,25,385,78,0],[386,25,386,32,0],[389,25,389,110,0],[390,25,390,26,0],[391,29,391,83,0],[392,29,392,36,0],[395,25,395,58,0],[396,25,396,32,0],[398,13,398,14,0],[400,13,400,14,0],[401,17,401,43,0],[402,13,402,14,0],[403,9,403,10,0],[406,9,406,10,0],[407,13,407,44,0],[409,13,409,27,0],[413,21,413,96,0],[416,21,416,60,0],[418,21,418,117,0],[419,21,419,27,0],[421,9,421,10,0],[424,9,424,10,0],[425,13,425,33,0],[431,21,431,33,0],[434,21,434,85,0],[435,21,435,85,0],[437,26,437,35,0],[437,37,437,58,0],[437,60,437,63,0],[438,21,438,22,0],[439,25,439,57,0],[440,25,440,57,0],[449,25,463,76,0],[465,25,465,53,0],[466,29,466,42,0],[467,21,467,22,0],[469,21,469,33,0],[472,21,472,61,0],[474,9,474,10,0],[477,9,477,10,0],[478,13,478,137,0],[479,17,479,143,0],[481,13,481,113,0],[482,17,482,111,0],[483,9,483,10,0],[486,9,486,10,0],[487,13,487,42,0],[489,13,489,49,0],[491,13,491,62,0],[492,13,492,14,0],[494,17,494,62,0],[495,17,495,18,0],[497,21,498,53,0],[498,53,498,60,0],[498,60,500,62,0],[500,62,500,111,0],[500,111,500,113,0],[504,21,504,46,0],[505,25,505,57,0],[506,17,506,18,0],[507,13,507,14,0],[510,13,510,44,0],[510,45,510,80,0],[511,13,511,39,0],[511,40,511,72,0],[513,13,513,20,0],[513,22,513,30,0],[513,31,513,33,0],[513,34,513,85,0],[513,85,513,99,0],[513,99,513,100,0],[514,17,514,82,0],[515,9,515,10,0],[518,9,518,10,0],[520,13,520,67,0],[521,13,521,14,0],[522,17,522,50,0],[522,50,522,57,0],[522,57,522,84,0],[523,17,523,55,0],[524,13,524,14,0],[525,9,525,10,0],[531,9,531,10,0],[532,13,532,44,0],[534,13,534,51,0],[534,52,534,59,0],[536,13,536,51,0],[538,13,538,20,0],[538,22,538,30,0],[538,31,538,33,0],[538,34,538,39,0],[539,13,539,14,0],[540,17,540,65,0],[541,17,541,18,0],[542,21,542,62,0],[544,21,544,48,0],[545,21,545,22,0],[546,25,546,66,0],[547,25,547,34,0],[551,21,551,72,0],[552,25,552,32,0],[553,17,553,18,0],[554,13,554,14,0],[556,13,556,46,0],[556,46,556,53,0],[556,53,556,80,0],[560,13,560,69,0],[560,69,560,113,0],[560,113,560,115,0],[562,13,562,46,0],[563,13,563,14,0],[566,17,566,50,0],[567,21,567,60,0],[569,17,569,24,0],[572,13,572,51,0],[573,9,573,10,0],[575,83,575,112,0],[578,9,578,10,0],[579,13,579,32,0],[582,21,582,33,0],[585,21,585,65,0],[588,21,588,34,0],[591,21,591,89,0],[593,9,593,10,0],[596,9,596,10,0],[597,13,597,39,0],[598,17,598,64,0],[600,13,600,35,0],[602,13,602,39,0],[603,17,603,63,0],[604,9,604,10,0],[607,9,607,10,0],[608,13,608,71,0],[609,13,609,14,0],[610,17,610,30,0],[611,17,611,18,0],[612,21,612,28,0],[612,30,612,35,0],[612,36,612,38,0],[612,39,612,44,0],[613,21,613,22,0],[614,25,614,41,0],[617,33,617,53,0],[618,33,618,39,0],[623,33,623,52,0],[624,33,624,87,0],[625,33,625,39,0],[629,33,629,74,0],[630,37,630,56,0],[631,33,631,39,0],[633,21,633,22,0],[634,17,634,18,0],[636,17,636,18,0],[637,21,637,28,0],[637,30,637,35,0],[637,36,637,38,0],[637,39,637,44,0],[638,21,638,22,0],[639,25,639,41,0],[642,33,642,54,0],[643,33,643,39,0],[646,33,646,53,0],[647,33,647,39,0],[649,21,649,22,0],[650,17,650,18,0],[651,13,651,14,0],[652,9,652,10,0],[655,9,655,10,0],[656,13,656,69,0],[664,13,664,38,0],[666,13,666,54,0],[667,17,667,24,0],[669,13,669,65,0],[670,13,670,67,0],[671,9,671,10,0],[674,9,674,10,0],[675,13,675,29,0],[676,17,676,24,0],[678,13,678,92,0],[680,13,680,67,0],[681,13,681,14,0],[682,17,682,24,0],[682,26,682,31,0],[682,32,682,34,0],[682,35,682,40,0],[683,17,683,18,0],[684,21,684,54,0],[685,25,685,49,0],[687,25,687,66,0],[688,17,688,18,0],[689,13,689,14,0],[690,9,690,10,0],[693,9,693,10,0],[694,13,694,53,0],[698,13,698,32,0],[699,13,699,14,0],[700,17,700,49,0],[702,17,702,117,0],[703,21,703,47,0],[705,17,705,131,0],[706,21,706,49,0],[708,17,708,56,0],[709,13,709,14,0],[711,13,711,27,0],[712,9,712,10,0],[725,9,725,10,0],[726,13,726,89,0],[727,13,727,78,0],[728,13,728,79,0],[730,13,730,70,0],[731,13,731,81,0],[732,9,732,10,0],[735,9,735,10,0],[736,13,736,98,0],[737,13,737,14,0],[738,17,738,36,0],[741,25,741,51,0],[742,25,742,32,0],[745,25,745,49,0],[746,25,746,32,0],[749,25,749,56,0],[750,25,750,32,0],[753,17,753,62,0],[754,13,754,14,0],[755,9,755,10,0],[764,45,764,49,0],[764,50,764,54,0],[769,9,769,10,0],[770,13,770,27,0],[772,13,772,148,0],[773,9,773,10,0],[776,9,776,10,0],[777,13,777,118,0],[778,9,778,10,0],[784,43,784,47,0],[784,48,784,60,0],[789,9,789,10,0],[790,13,790,140,0],[792,13,792,33,0],[794,13,795,13,0],[795,13,795,14,0],[795,14,796,17,0],[796,17,796,63,0],[796,63,797,21,0],[797,21,797,28,0],[797,28,799,17,0],[799,17,799,80,0],[799,80,800,17,0],[800,17,800,32,0],[800,32,801,13,0],[801,13,801,14,0],[801,14,801,50,0],[803,13,803,57,0],[803,57,804,13,0],[804,13,804,14,0],[804,14,805,17,0],[805,17,805,43,0],[805,43,806,17,0],[806,17,806,40,0],[806,40,808,17,0],[808,17,808,77,0],[808,77,809,17,0],[809,17,809,32,0],[809,32,810,13,0],[810,13,810,14,0],[810,14,810,15,0],[810,15,810,17,0],[811,9,811,10,0],[814,9,814,10,0],[815,13,815,34,0],[816,17,816,74,0],[818,13,818,58,0],[819,9,819,10,0],[826,37,826,41,0],[826,42,826,46,0],[826,51,826,56,0],[829,36,829,40,0],[829,41,829,45,0],[829,50,829,55,0],[839,74,839,89,0],[839,89,839,160,0],[839,160,839,161,0],[841,118,842,9,0],[842,9,842,10,0],[842,10,843,13,0],[843,13,843,68,0],[843,68,845,13,0],[845,13,848,56,0],[848,56,850,13,0],[850,13,850,20,0],[850,20,850,22,0],[850,22,850,31,0],[850,31,850,32,0],[850,32,850,34,0],[850,34,850,35,0],[850,35,850,49,0],[850,49,851,13,0],[851,13,851,14,0],[851,14,852,17,0],[852,17,852,57,0],[852,57,854,17,0],[854,17,854,70,0],[854,70,855,21,0],[855,21,855,30,0],[855,30,857,17,0],[857,17,857,67,0],[857,67,858,13,0],[858,13,858,14,0],[858,14,860,13,0],[860,13,860,35,0],[860,35,861,9,0],[861,9,861,10,0],[861,10,861,11,0],[868,61,868,112,0],[874,9,874,108,0],[875,9,875,131,0],[876,9,876,110,0],[877,9,877,102,0],[878,9,878,134,0],[879,9,879,127,0],[880,9,880,130,0],[883,9,883,10,0],[884,13,884,47,0],[885,13,885,46,0],[886,13,886,46,0],[887,13,887,41,0],[888,13,888,43,0],[889,13,889,46,0],[890,13,890,39,0],[891,9,891,10,0],[894,9,894,10,0],[902,13,902,90,0],[903,17,903,56,0],[905,13,905,92,0],[906,17,906,64,0],[910,13,910,80,0],[911,17,911,58,0],[913,13,913,102,0],[914,17,914,44,0],[916,13,916,96,0],[917,17,917,44,0],[919,13,919,102,0],[920,17,920,48,0],[927,13,927,76,0],[928,17,928,46,0],[930,13,930,50,0],[931,9,931,10,0],[934,9,934,10,0],[935,13,935,32,0],[938,21,938,55,0],[941,21,941,54,0],[944,21,944,54,0],[947,21,947,49,0],[950,21,950,62,0],[951,25,951,58,0],[953,21,953,51,0],[956,21,956,55,0],[957,21,957,72,0],[958,21,958,37,0],[961,13,961,51,0],[962,9,962,10,0],[965,9,965,10,0],[966,13,966,55,0],[967,13,967,88,0],[968,17,968,59,0],[968,59,968,84,0],[968,84,968,98,0],[968,98,968,131,0],[968,131,968,145,0],[970,13,970,62,0],[971,9,971,10,0],[977,9,977,114,0],[978,9,978,108,0],[979,9,979,90,0],[985,9,985,10,0],[986,13,986,52,0],[988,13,988,46,0],[989,17,989,30,0],[991,13,991,56,0],[992,13,992,74,0],[996,13,996,39,0],[997,13,997,14,0],[999,17,999,50,0],[1002,17,1002,76,0],[1003,13,1003,14,0],[1005,13,1005,53,0],[1006,17,1006,43,0],[1008,17,1008,47,0],[1010,13,1010,26,0],[1011,13,1011,14,0],[1012,17,1012,43,0],[1013,21,1013,69,0],[1014,17,1014,30,0],[1019,13,1020,13,0],[1020,13,1020,14,0],[1020,14,1021,17,0],[1021,17,1021,77,0],[1021,77,1022,21,0],[1022,21,1022,106,0],[1022,106,1023,13,0],[1023,13,1023,14,0],[1023,14,1023,16,0],[1025,13,1025,25,0],[1026,9,1026,10,0],[1029,9,1029,10,0],[1030,13,1036,42,0],[1036,42,1036,49,0],[1036,49,1037,51,0],[1037,51,1037,58,0],[1037,58,1037,95,0],[1041,13,1041,43,0],[1044,17,1044,18,0],[1045,21,1045,137,0],[1045,137,1045,147,0],[1045,147,1045,158,0],[1047,21,1047,54,0],[1048,21,1048,22,0],[1049,25,1049,96,0],[1049,96,1049,105,0],[1049,105,1049,108,0],[1050,25,1050,65,0],[1051,25,1051,79,0],[1052,29,1052,109,0],[1053,21,1053,22,0],[1055,21,1055,58,0],[1056,25,1056,38,0],[1058,21,1058,102,0],[1059,21,1059,27,0],[1063,21,1063,90,0],[1064,21,1064,27,0],[1067,21,1067,61,0],[1070,13,1070,39,0],[1071,13,1071,25,0],[1072,9,1072,10,0],[1075,9,1075,10,0],[1076,13,1082,42,0],[1082,42,1082,49,0],[1082,49,1084,42,0],[1088,13,1088,43,0],[1091,17,1091,18,0],[1092,21,1093,97,0],[1093,97,1093,110,0],[1093,110,1093,127,0],[1093,127,1093,148,0],[1093,148,1093,159,0],[1095,21,1095,50,0],[1096,21,1096,22,0],[1097,25,1097,118,0],[1097,118,1097,154,0],[1097,154,1097,157,0],[1098,25,1098,64,0],[1099,25,1099,79,0],[1100,29,1100,128,0],[1100,128,1100,149,0],[1100,149,1100,160,0],[1101,21,1101,22,0],[1103,21,1103,54,0],[1104,25,1104,38,0],[1106,21,1106,90,0],[1107,21,1107,27,0],[1111,21,1111,92,0],[1112,21,1112,27,0],[1115,21,1115,61,0],[1118,13,1118,59,0],[1119,13,1119,25,0],[1120,9,1120,10,0],[1123,9,1123,10,0],[1124,13,1124,52,0],[1126,13,1126,46,0],[1127,17,1127,30,0],[1129,13,1129,40,0],[1130,13,1130,14,0],[1131,17,1131,57,0],[1132,17,1132,65,0],[1137,17,1137,68,0],[1137,68,1137,142,0],[1137,142,1138,68,0],[1138,68,1138,124,0],[1138,124,1138,126,0],[1140,17,1140,49,0],[1141,21,1141,34,0],[1143,17,1143,71,0],[1144,17,1144,18,0],[1145,21,1145,90,0],[1146,25,1146,88,0],[1148,21,1148,54,0],[1149,25,1149,43,0],[1151,25,1151,114,0],[1152,17,1152,18,0],[1154,17,1154,77,0],[1155,17,1155,29,0],[1158,13,1158,26,0],[1159,9,1159,10,0],[1161,97,1161,195,0],[1164,9,1164,10,0],[1165,13,1165,49,0],[1167,13,1167,30,0],[1168,13,1168,14,0],[1169,17,1169,78,0],[1170,17,1170,29,0],[1171,13,1171,14,0],[1173,13,1173,40,0],[1174,9,1174,10,0],[1187,28,1187,32,1],[1192,42,1192,46,1],[1196,9,1196,67,1],[1197,9,1197,10,1],[1198,13,1198,27,1],[1199,13,1199,27,1],[1200,13,1200,89,1],[1201,9,1201,10,1],[1203,63,1203,98,1],[1205,46,1205,76,1],[1211,114,1211,143,1],[1216,64,1216,125,1],[1221,88,1221,146,1]]);
+    </script>
+  </body>
+</html>

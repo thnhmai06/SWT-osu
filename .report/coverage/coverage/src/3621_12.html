@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/Beatmap.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Rulesets.Objects;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Beatmaps.ControlPoints;
+using Newtonsoft.Json;
+using osu.Framework.Lists;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.IO.Serialization.Converters;
+
+namespace osu.Game.Beatmaps
+{
+    public class Beatmap&lt;T&gt; : IBeatmap&lt;T&gt;
+        where T : HitObject
+    {
+        private BeatmapDifficulty difficulty = new BeatmapDifficulty();
+
+        public BeatmapDifficulty Difficulty
+        {
+            get =&gt; difficulty;
+            set
+            {
+                difficulty = value;
+
+                beatmapInfo.Difficulty = difficulty.Clone();
+            }
+        }
+
+        private BeatmapInfo beatmapInfo;
+
+        public BeatmapInfo BeatmapInfo
+        {
+            get =&gt; beatmapInfo;
+            set
+            {
+                beatmapInfo = value;
+
+                Difficulty = beatmapInfo.Difficulty.Clone();
+            }
+        }
+
+        public Beatmap()
+        {
+            beatmapInfo = new BeatmapInfo
+            {
+                Metadata = new BeatmapMetadata
+                {
+                    Artist = @&quot;Unknown&quot;,
+                    Title = @&quot;Unknown&quot;,
+                    Author = { Username = @&quot;Unknown Creator&quot; },
+                },
+                DifficultyName = @&quot;Normal&quot;,
+                Difficulty = Difficulty,
+            };
+        }
+
+        [JsonIgnore]
+        public BeatmapMetadata Metadata =&gt; BeatmapInfo.Metadata;
+
+        public ControlPointInfo ControlPointInfo { get; set; } = new ControlPointInfo();
+
+        public SortedList&lt;BreakPeriod&gt; Breaks { get; set; } = new SortedList&lt;BreakPeriod&gt;(Comparer&lt;BreakPeriod&gt;.Default);
+
+        [JsonIgnore]
+        public double TotalBreakTime =&gt; Breaks.Sum(b =&gt; b.Duration);
+
+        [JsonConverter(typeof(TypedListConverter&lt;HitObject&gt;))]
+        public List&lt;T&gt; HitObjects { get; set; } = new List&lt;T&gt;();
+
+        IReadOnlyList&lt;T&gt; IBeatmap&lt;T&gt;.HitObjects =&gt; HitObjects;
+
+        IReadOnlyList&lt;HitObject&gt; IBeatmap.HitObjects =&gt; HitObjects;
+
+        public virtual IEnumerable&lt;BeatmapStatistic&gt; GetStatistics() =&gt; Enumerable.Empty&lt;BeatmapStatistic&gt;();
+
+        public double GetMostCommonBeatLength()
+        {
+            double lastTime;
+
+            // The last playable time in the beatmap - the last timing point extends to this time.
+            // Note: This is more accurate and may present different results because osu-stable didn&#39;t have the ability to calculate slider durations in this context.
+            if (!HitObjects.Any())
+                lastTime = ControlPointInfo.TimingPoints.LastOrDefault()?.Time ?? 0;
+            else
+                lastTime = this.GetLastObjectTime();
+
+            var mostCommon =
+                // Construct a set of (beatLength, duration) tuples for each individual timing point.
+                ControlPointInfo.TimingPoints.Select((t, i) =&gt;
+                                {
+                                    if (t.Time &gt; lastTime)
+                                        return (beatLength: t.BeatLength, 0);
+
+                                    // osu-stable forced the first control point to start at 0.
+                                    // This is reproduced here to maintain compatibility around osu!mania scroll speed and song select display.
+                                    double currentTime = i == 0 ? 0 : t.Time;
+                                    double nextTime = i == ControlPointInfo.TimingPoints.Count - 1 ? lastTime : ControlPointInfo.TimingPoints[i + 1].Time;
+
+                                    return (beatLength: t.BeatLength, duration: nextTime - currentTime);
+                                })
+                                // Aggregate durations into a set of (beatLength, duration) tuples for each beat length
+                                // Rounding is applied here (to 1e-3 milliseconds) to neutralise potential effects of floating point inaccuracies
+                                .GroupBy(t =&gt; Math.Round(t.beatLength * 1000) / 1000)
+                                .Select(g =&gt; (beatLength: g.Key, duration: g.Sum(t =&gt; t.duration)))
+                                // Get the most common one, or 0 as a suitable default (see handling below)
+                                .OrderByDescending(i =&gt; i.duration).FirstOrDefault();
+
+            if (mostCommon.beatLength == 0)
+                return TimingControlPoint.DEFAULT_BEAT_LENGTH;
+
+            // Because of the rounding applied to the beat length above, it is possible for the &quot;most common&quot; beat length as determined by the linq query above
+            // to actually be less or more than the raw range of unrounded beat lengths present in the map
+            // To ensure this does not become a problem anywhere else further, clamp the result to the known raw range
+            double minBeatLength = ControlPointInfo.TimingPoints.Min(t =&gt; t.BeatLength);
+            double maxBeatLength = ControlPointInfo.TimingPoints.Max(t =&gt; t.BeatLength);
+            return Math.Clamp(mostCommon.beatLength, minBeatLength, maxBeatLength);
+        }
+
+        public double AudioLeadIn { get; set; }
+
+        public float StackLeniency { get; set; } = 0.7f;
+
+        public bool SpecialStyle { get; set; }
+
+        public bool LetterboxInBreaks { get; set; }
+
+        public bool WidescreenStoryboard { get; set; } = true;
+
+        public bool EpilepsyWarning { get; set; }
+
+        public bool SamplesMatchPlaybackRate { get; set; }
+
+        public double DistanceSpacing { get; set; } = 1.0;
+
+        public int GridSize { get; set; }
+
+        public double TimelineZoom { get; set; } = 1.0;
+
+        public CountdownType Countdown { get; set; } = CountdownType.None;
+
+        public int CountdownOffset { get; set; }
+
+        public int[] Bookmarks { get; set; } = Array.Empty&lt;int&gt;();
+
+        public double[] SliderVelocityPresets { get; set; } = [0.75, 1, 1.5];
+
+        public int BeatmapVersion { get; set; } = LegacyBeatmapEncoder.FIRST_LAZER_VERSION;
+
+        IBeatmap IBeatmap.Clone() =&gt; Clone();
+
+        public Beatmap&lt;T&gt; Clone() =&gt; (Beatmap&lt;T&gt;)MemberwiseClone();
+
+        public override string ToString() =&gt; BeatmapInfo.ToString();
+    }
+
+    public class Beatmap : Beatmap&lt;HitObject&gt;
+    {
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,72,1],[24,20,24,30,1],[26,13,26,14,1],[27,17,27,36,1],[29,17,29,61,1],[30,13,30,14,1],[37,20,37,31,1],[39,13,39,14,1],[40,17,40,37,1],[42,17,42,61,1],[43,13,43,14,1],[46,9,46,25,1],[47,9,47,10,1],[48,13,58,15,1],[59,9,59,10,1],[62,44,62,64,1],[64,52,64,56,1],[64,57,64,61,1],[64,66,64,88,1],[66,49,66,53,1],[66,54,66,58,1],[66,63,66,121,1],[69,41,69,57,1],[69,57,69,67,1],[69,67,69,68,1],[72,37,72,41,1],[72,42,72,46,1],[72,51,72,64,1],[74,52,74,62,0],[76,57,76,67,1],[78,73,78,109,0],[81,9,81,10,1],[86,13,86,35,1],[87,17,87,85,0],[89,17,89,53,1],[91,13,94,33,1],[94,33,94,34,1],[94,34,95,37,1],[95,37,95,59,1],[95,59,96,41,1],[96,41,96,78,1],[96,78,100,37,1],[100,37,100,78,1],[100,78,101,37,1],[101,37,101,155,1],[101,155,103,37,1],[103,37,103,105,1],[103,105,104,33,1],[104,33,104,34,1],[104,34,107,47,1],[107,47,107,85,1],[107,85,108,46,1],[108,46,108,87,1],[108,87,108,97,1],[108,97,108,99,1],[108,99,110,57,1],[110,57,110,67,1],[110,67,110,86,1],[112,13,112,44,1],[113,17,113,63,0],[118,13,118,75,1],[118,75,118,87,1],[118,87,118,89,1],[119,13,119,75,1],[119,75,119,87,1],[119,87,119,89,1],[120,13,120,84,1],[121,9,121,10,1],[123,37,123,41,1],[123,42,123,46,1],[125,38,125,42,1],[125,43,125,47,1],[125,52,125,56,1],[127,36,127,40,1],[127,41,127,45,1],[129,41,129,45,1],[129,46,129,50,1],[131,44,131,48,1],[131,49,131,53,1],[131,58,131,62,1],[133,39,133,43,1],[133,44,133,48,1],[135,48,135,52,1],[135,53,135,57,1],[137,41,137,45,1],[137,46,137,50,1],[137,55,137,58,1],[139,31,139,35,1],[139,36,139,40,1],[141,38,141,42,1],[141,43,141,47,1],[141,52,141,55,1],[143,42,143,46,1],[143,47,143,51,1],[143,56,143,74,1],[145,38,145,42,1],[145,43,145,47,1],[147,34,147,38,1],[147,39,147,43,1],[147,48,147,66,1],[149,49,149,53,1],[149,54,149,58,1],[149,63,149,77,1],[151,37,151,41,1],[151,42,151,46,1],[151,51,151,91,1],[153,38,153,45,1],[155,38,155,67,1],[157,46,157,68,0]]);
+    </script>
+  </body>
+</html>

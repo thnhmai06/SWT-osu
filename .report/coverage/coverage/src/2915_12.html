@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/BeatmapListing/BeatmapListingFilterControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps.Drawables.Cards;
+using osu.Game.Configuration;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Resources.Localisation.Web;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.BeatmapListing
+{
+    public partial class BeatmapListingFilterControl : CompositeDrawable
+    {
+        /// &lt;summary&gt;
+        /// Fired when a search finishes.
+        /// &lt;/summary&gt;
+        public Action&lt;SearchResult&gt; SearchFinished;
+
+        /// &lt;summary&gt;
+        /// Fired when search criteria change.
+        /// &lt;/summary&gt;
+        public Action SearchStarted;
+
+        /// &lt;summary&gt;
+        /// Any time the search text box receives key events (even while masked).
+        /// &lt;/summary&gt;
+        public Action TypingStarted;
+
+        /// &lt;summary&gt;
+        /// True when pagination has reached the end of available results.
+        /// &lt;/summary&gt;
+        private bool noMoreResults;
+
+        /// &lt;summary&gt;
+        /// The current page fetched of results (zero index).
+        /// &lt;/summary&gt;
+        public int CurrentPage { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The currently selected &lt;see cref=&quot;BeatmapCardSize&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IBindable&lt;BeatmapCardSize&gt; CardSize =&gt; cardSize;
+
+        private readonly Bindable&lt;BeatmapCardSize&gt; cardSize = new Bindable&lt;BeatmapCardSize&gt;();
+
+        private readonly BeatmapListingSearchControl searchControl;
+        private readonly BeatmapListingSortTabControl sortControl;
+        private readonly Box sortControlBackground;
+
+        private ScheduledDelegate queryChangedDebounce;
+
+        private SearchBeatmapSetsRequest getSetsRequest;
+        private SearchBeatmapSetsResponse lastResponse;
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        private IBindable&lt;APIUser&gt; apiUser;
+
+        public BeatmapListingFilterControl()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChild = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(0, 10),
+                Children = new Drawable[]
+                {
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Masking = true,
+                        EdgeEffect = new EdgeEffectParameters
+                        {
+                            Colour = Color4.Black.Opacity(0.25f),
+                            Type = EdgeEffectType.Shadow,
+                            Radius = 3,
+                            Offset = new Vector2(0f, 1f),
+                        },
+                        Child = searchControl = new BeatmapListingSearchControl
+                        {
+                            TypingStarted = () =&gt; TypingStarted?.Invoke()
+                        }
+                    },
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Height = 40,
+                        Children = new Drawable[]
+                        {
+                            sortControlBackground = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both
+                            },
+                            sortControl = new BeatmapListingSortTabControl
+                            {
+                                Anchor = Anchor.CentreLeft,
+                                Origin = Anchor.CentreLeft,
+                                Margin = new MarginPadding { Left = 20 }
+                            },
+                            new BeatmapListingCardSizeTabControl
+                            {
+                                Anchor = Anchor.CentreRight,
+                                Origin = Anchor.CentreRight,
+                                Margin = new MarginPadding { Right = 20 },
+                                Current = { BindTarget = CardSize }
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        [Resolved]
+        private OsuConfigManager config { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider, IAPIProvider api)
+        {
+            sortControlBackground.Colour = colourProvider.Background4;
+        }
+
+        public void Search(string query)
+            =&gt; Schedule(() =&gt; searchControl.Query.Value = query);
+
+        public void FilterGenre(SearchGenre genre)
+            =&gt; Schedule(() =&gt; searchControl.Genre.Value = genre);
+
+        public void FilterLanguage(SearchLanguage language)
+            =&gt; Schedule(() =&gt; searchControl.Language.Value = language);
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            config.BindWith(OsuSetting.BeatmapListingCardSize, cardSize);
+
+            searchControl.Query.BindValueChanged(_ =&gt;
+            {
+                resetSortControl();
+                queueUpdateSearch(true);
+            });
+
+            searchControl.Category.BindValueChanged(_ =&gt;
+            {
+                resetSortControl();
+                queueUpdateSearch();
+            });
+
+            searchControl.General.CollectionChanged += (_, _) =&gt; queueUpdateSearch();
+            searchControl.Ruleset.BindValueChanged(_ =&gt; queueUpdateSearch());
+            searchControl.Genre.BindValueChanged(_ =&gt; queueUpdateSearch());
+            searchControl.Language.BindValueChanged(_ =&gt; queueUpdateSearch());
+            searchControl.Extra.CollectionChanged += (_, _) =&gt; queueUpdateSearch();
+            searchControl.Ranks.CollectionChanged += (_, _) =&gt; queueUpdateSearch();
+            searchControl.Played.BindValueChanged(_ =&gt; queueUpdateSearch());
+            searchControl.ExplicitContent.BindValueChanged(_ =&gt; queueUpdateSearch());
+
+            sortControl.Current.BindValueChanged(_ =&gt; queueUpdateSearch());
+            sortControl.SortDirection.BindValueChanged(_ =&gt; queueUpdateSearch());
+
+            apiUser = api.LocalUser.GetBoundCopy();
+            apiUser.BindValueChanged(_ =&gt; queueUpdateSearch());
+        }
+
+        public void TakeFocus() =&gt; searchControl.TakeFocus();
+
+        /// &lt;summary&gt;
+        /// Fetch the next page of results. May result in a no-op if a fetch is already in progress, or if there are no results left.
+        /// &lt;/summary&gt;
+        public void FetchNextPage()
+        {
+            // there may be no results left.
+            if (noMoreResults)
+                return;
+
+            // there may already be an active request.
+            if (getSetsRequest != null)
+                return;
+
+            if (lastResponse != null)
+                CurrentPage++;
+
+            performRequest();
+        }
+
+        private void resetSortControl() =&gt; sortControl.Reset(searchControl.Category.Value, !string.IsNullOrEmpty(searchControl.Query.Value));
+
+        private void queueUpdateSearch(bool queryTextChanged = false)
+        {
+            SearchStarted?.Invoke();
+
+            resetSearch();
+
+            if (!api.IsLoggedIn)
+                return;
+
+            queryChangedDebounce = Scheduler.AddDelayed(() =&gt;
+            {
+                resetSearch();
+                FetchNextPage();
+            }, queryTextChanged ? 500 : 100);
+        }
+
+        private void performRequest()
+        {
+            getSetsRequest = new SearchBeatmapSetsRequest(
+                searchControl.Query.Value,
+                searchControl.Ruleset.Value,
+                lastResponse?.Cursor,
+                searchControl.General,
+                searchControl.Category.Value,
+                sortControl.Current.Value,
+                sortControl.SortDirection.Value,
+                searchControl.Genre.Value,
+                searchControl.Language.Value,
+                searchControl.Extra,
+                searchControl.Ranks,
+                searchControl.Played.Value,
+                searchControl.ExplicitContent.Value);
+
+            getSetsRequest.Success += response =&gt;
+            {
+                var sets = response.BeatmapSets.ToList();
+
+                // If the previous request returned a null cursor, the API is indicating we can&#39;t paginate further (maybe there are no more beatmaps left).
+                if (sets.Count == 0 || response.Cursor == null)
+                    noMoreResults = true;
+
+                if (CurrentPage == 0)
+                    searchControl.BeatmapSet = sets.FirstOrDefault();
+
+                lastResponse = response;
+                getSetsRequest = null;
+
+                // check if a non-supporter used supporter-only filters
+                if (!api.LocalUser.Value.IsSupporter)
+                {
+                    List&lt;LocalisableString&gt; filters = new List&lt;LocalisableString&gt;();
+
+                    if (searchControl.Played.Value != SearchPlayed.Any)
+                        filters.Add(BeatmapsStrings.ListingSearchFiltersPlayed);
+
+                    if (searchControl.Ranks.Any())
+                        filters.Add(BeatmapsStrings.ListingSearchFiltersRank);
+
+                    if (filters.Any())
+                    {
+                        var supporterOnlyFilters = SearchResult.SupporterOnlyFilters(filters);
+                        SearchFinished?.Invoke(supporterOnlyFilters);
+                        return;
+                    }
+                }
+
+                var resultsReturned = SearchResult.ResultsReturned(sets);
+                SearchFinished?.Invoke(resultsReturned);
+            };
+
+            api.Queue(getSetsRequest);
+        }
+
+        private void resetSearch()
+        {
+            noMoreResults = false;
+            CurrentPage = 0;
+
+            lastResponse = null;
+
+            getSetsRequest?.Cancel();
+            getSetsRequest = null;
+
+            queryChangedDebounce?.Cancel();
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            resetSearch();
+
+            base.Dispose(isDisposing);
+        }
+
+        /// &lt;summary&gt;
+        /// Indicates the type of result of a user-requested beatmap search.
+        /// &lt;/summary&gt;
+        public enum SearchResultType
+        {
+            /// &lt;summary&gt;
+            /// Actual results have been returned from API.
+            /// &lt;/summary&gt;
+            ResultsReturned,
+
+            /// &lt;summary&gt;
+            /// The user is not a supporter, but used supporter-only search filters.
+            /// &lt;/summary&gt;
+            SupporterOnlyFilters
+        }
+
+        /// &lt;summary&gt;
+        /// Describes the result of a user-requested beatmap search.
+        /// &lt;/summary&gt;
+        public struct SearchResult
+        {
+            public SearchResultType Type { get; private set; }
+
+            /// &lt;summary&gt;
+            /// Contains the beatmap sets returned from API.
+            /// Valid for read if and only if &lt;see cref=&quot;Type&quot;/&gt; is &lt;see cref=&quot;SearchResultType.ResultsReturned&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public List&lt;APIBeatmapSet&gt; Results { get; private set; }
+
+            /// &lt;summary&gt;
+            /// Contains the names of supporter-only filters requested by the user.
+            /// Valid for read if and only if &lt;see cref=&quot;Type&quot;/&gt; is &lt;see cref=&quot;SearchResultType.SupporterOnlyFilters&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public List&lt;LocalisableString&gt; SupporterOnlyFiltersUsed { get; private set; }
+
+            public static SearchResult ResultsReturned(List&lt;APIBeatmapSet&gt; results) =&gt; new SearchResult
+            {
+                Type = SearchResultType.ResultsReturned,
+                Results = results,
+            };
+
+            public static SearchResult SupporterOnlyFilters(List&lt;LocalisableString&gt; filters) =&gt; new SearchResult
+            {
+                Type = SearchResultType.SupporterOnlyFilters,
+                SupporterOnlyFiltersUsed = filters
+            };
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[54,34,54,38,0],[54,39,54,51,0],[59,55,59,63,0],[61,9,61,95,0],[73,36,73,40,0],[73,41,73,45,0],[77,9,77,45,0],[78,9,78,10,0],[79,13,79,39,0],[80,13,80,35,0],[82,13,104,51,0],[104,51,104,74,0],[104,74,133,15,0],[134,9,134,10,0],[137,43,137,47,0],[137,48,137,52,0],[141,9,141,10,0],[142,13,142,71,0],[143,9,143,10,0],[146,16,146,31,0],[146,31,146,64,0],[146,64,146,65,0],[149,16,149,31,0],[149,31,149,64,0],[149,64,149,65,0],[152,16,152,31,0],[152,31,152,70,0],[152,70,152,71,0],[155,9,155,10,0],[156,13,156,33,0],[158,13,158,74,0],[160,13,161,13,0],[161,13,161,14,0],[161,14,162,17,0],[162,17,162,36,0],[162,36,163,17,0],[163,17,163,41,0],[163,41,164,13,0],[164,13,164,14,0],[164,14,164,16,0],[166,13,167,13,0],[167,13,167,14,0],[167,14,168,17,0],[168,17,168,36,0],[168,36,169,17,0],[169,17,169,37,0],[169,37,170,13,0],[170,13,170,14,0],[170,14,170,16,0],[172,13,172,66,0],[172,66,172,85,0],[172,85,172,86,0],[173,13,173,57,0],[173,57,173,76,0],[173,76,173,78,0],[174,13,174,55,0],[174,55,174,74,0],[174,74,174,76,0],[175,13,175,58,0],[175,58,175,77,0],[175,77,175,79,0],[176,13,176,64,0],[176,64,176,83,0],[176,83,176,84,0],[177,13,177,64,0],[177,64,177,83,0],[177,83,177,84,0],[178,13,178,56,0],[178,56,178,75,0],[178,75,178,77,0],[179,13,179,65,0],[179,65,179,84,0],[179,84,179,86,0],[181,13,181,55,0],[181,55,181,74,0],[181,74,181,76,0],[182,13,182,61,0],[182,61,182,80,0],[182,80,182,82,0],[184,13,184,52,0],[185,13,185,43,0],[185,43,185,62,0],[185,62,185,64,0],[186,9,186,10,0],[188,36,188,61,0],[194,9,194,10,0],[196,13,196,31,0],[197,17,197,24,0],[200,13,200,40,0],[201,17,201,24,0],[203,13,203,38,0],[204,17,204,31,0],[206,13,206,30,0],[207,9,207,10,0],[209,44,209,141,0],[212,9,212,10,0],[213,13,213,37,0],[215,13,215,27,0],[217,13,217,33,0],[218,17,218,24,0],[220,13,221,13,0],[221,13,221,14,0],[221,14,222,17,0],[222,17,222,31,0],[222,31,223,17,0],[223,17,223,33,0],[223,33,224,13,0],[224,13,224,14,0],[224,14,224,46,0],[225,9,225,10,0],[228,9,228,10,0],[229,13,242,54,0],[244,13,245,13,0],[245,13,245,14,0],[245,14,246,17,0],[246,17,246,58,0],[246,58,249,17,0],[249,17,249,64,0],[249,64,250,21,0],[250,21,250,42,0],[250,42,252,17,0],[252,17,252,38,0],[252,38,253,21,0],[253,21,253,70,0],[253,70,255,17,0],[255,17,255,41,0],[255,41,256,17,0],[256,17,256,39,0],[256,39,259,17,0],[259,17,259,54,0],[259,54,260,17,0],[260,17,260,18,0],[260,18,261,21,0],[261,21,261,85,0],[261,85,263,21,0],[263,21,263,72,0],[263,72,264,25,0],[264,25,264,81,0],[264,81,266,21,0],[266,21,266,51,0],[266,51,267,25,0],[267,25,267,79,0],[267,79,269,21,0],[269,21,269,39,0],[269,39,270,21,0],[270,21,270,22,0],[270,22,271,25,0],[271,25,271,95,0],[271,95,272,25,0],[272,25,272,70,0],[272,70,273,25,0],[273,25,273,32,0],[273,32,275,17,0],[275,17,275,18,0],[275,18,277,17,0],[277,17,277,74,0],[277,74,278,17,0],[278,17,278,57,0],[278,57,279,13,0],[279,13,279,14,0],[279,14,279,15,0],[281,13,281,39,0],[282,9,282,10,0],[285,9,285,10,0],[286,13,286,35,0],[287,13,287,29,0],[289,13,289,33,0],[291,13,291,38,0],[292,13,292,35,0],[294,13,294,44,0],[295,9,295,10,0],[298,9,298,10,0],[299,13,299,27,0],[301,13,301,39,0],[302,9,302,10,0],[325,44,325,48,0],[325,49,325,61,0],[331,50,331,54,0],[331,55,331,67,0],[337,71,337,75,0],[337,76,337,88,0],[339,88,343,14,0],[345,97,349,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/PerformFromMenuRunner.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Dialog;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Screens;
+using osu.Game.Screens.Menu;
+
+namespace osu.Game
+{
+    internal partial class PerformFromMenuRunner : Component
+    {
+        private readonly Action&lt;IScreen&gt; finalAction;
+        private readonly Type[] validScreens;
+        private readonly Func&lt;IScreen&gt; getCurrentScreen;
+
+        [Resolved]
+        private INotificationOverlay notifications { get; set; }
+
+        [Resolved]
+        private IDialogOverlay dialogOverlay { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private OsuGame game { get; set; }
+
+        private readonly ScheduledDelegate task;
+
+        private PopupDialog lastEncounteredDialog;
+        private IScreen lastEncounteredDialogScreen;
+
+        /// &lt;summary&gt;
+        /// Perform an action only after returning to a specific screen as indicated by &lt;paramref name=&quot;validScreens&quot;/&gt;.
+        /// Eagerly tries to exit the current screen until it succeeds.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;finalAction&quot;&gt;The action to perform once we are in the correct state.&lt;/param&gt;
+        /// &lt;param name=&quot;validScreens&quot;&gt;An optional collection of valid screen types. If any of these screens are already current we can perform the action immediately, else the first valid parent will be made current before performing the action. &lt;see cref=&quot;MainMenu&quot;/&gt; is used if not specified.&lt;/param&gt;
+        /// &lt;param name=&quot;getCurrentScreen&quot;&gt;A function to retrieve the currently displayed game screen.&lt;/param&gt;
+        public PerformFromMenuRunner(Action&lt;IScreen&gt; finalAction, IEnumerable&lt;Type&gt; validScreens, Func&lt;IScreen&gt; getCurrentScreen)
+        {
+            validScreens ??= Enumerable.Empty&lt;Type&gt;();
+            validScreens = validScreens.Append(typeof(MainMenu));
+
+            this.finalAction = finalAction;
+            this.validScreens = validScreens.ToArray();
+            this.getCurrentScreen = getCurrentScreen;
+
+            Scheduler.Add(task = new ScheduledDelegate(checkCanComplete, 0, 200));
+        }
+
+        /// &lt;summary&gt;
+        /// Cancel this runner from running.
+        /// &lt;/summary&gt;
+        public void Cancel()
+        {
+            task.Cancel();
+            Expire();
+        }
+
+        private void checkCanComplete()
+        {
+            // find closest valid target
+            IScreen current = getCurrentScreen();
+
+            if (current == null)
+                return;
+
+            // a dialog may be blocking the execution for now.
+            if (checkForDialog(current)) return;
+
+            game?.CloseAllOverlays(false);
+
+            findValidTarget(current);
+        }
+
+        private bool findValidTarget(IScreen current)
+        {
+            var type = current.GetType();
+
+            // check if we are already at a valid target screen.
+            if (validScreens.Any(t =&gt; t.IsAssignableFrom(type)))
+            {
+                if (!((Drawable)current).IsLoaded)
+                    // wait until screen is loaded before invoking action.
+                    return true;
+
+                finalAction(current);
+                Cancel();
+                return true;
+            }
+
+            while (current != null)
+            {
+                // if this has a sub stack, recursively check the screens within it.
+                if (current is IHasSubScreenStack currentSubScreen)
+                {
+                    var nestedCurrent = currentSubScreen.SubScreenStack.CurrentScreen;
+
+                    if (nestedCurrent != null)
+                    {
+                        // should be correct in theory, but currently untested/unused in existing implementations.
+                        // note that calling findValidTarget actually performs the final operation.
+                        if (findValidTarget(nestedCurrent))
+                            return true;
+                    }
+                }
+
+                if (validScreens.Any(t =&gt; t.IsAssignableFrom(type)))
+                {
+                    current.MakeCurrent();
+                    return true;
+                }
+
+                current = current.GetParentScreen();
+                type = current?.GetType();
+            }
+
+            return false;
+        }
+
+        /// &lt;summary&gt;
+        /// Check whether there is currently a dialog requiring user interaction.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;current&quot;&gt;&lt;/param&gt;
+        /// &lt;returns&gt;Whether a dialog blocked interaction.&lt;/returns&gt;
+        private bool checkForDialog(IScreen current)
+        {
+            // An exit process may traverse multiple levels.
+            // When checking for dismissing dialogs, let&#39;s also consider sub screens.
+            while (current is IHasSubScreenStack currentWithSubScreenStack)
+            {
+                var nestedCurrent = currentWithSubScreenStack.SubScreenStack.CurrentScreen;
+
+                if (nestedCurrent == null)
+                    break;
+
+                current = nestedCurrent;
+            }
+
+            var currentDialog = dialogOverlay.CurrentDialog;
+
+            if (lastEncounteredDialog != null)
+            {
+                if (lastEncounteredDialog == currentDialog)
+                    // still waiting on user interaction
+                    return true;
+
+                if (lastEncounteredDialogScreen != current)
+                {
+                    // a dialog was previously encountered but has since been dismissed.
+                    // if the screen changed, the user likely confirmed an exit dialog and we should continue attempting the action.
+                    lastEncounteredDialog = null;
+                    lastEncounteredDialogScreen = null;
+                    return false;
+                }
+
+                // the last dialog encountered has been dismissed but the screen has not changed, abort.
+                Cancel();
+                notifications.Post(new SimpleNotification
+                {
+                    Text = NotificationsStrings.ActionInterruptedByDialog
+                });
+
+                return true;
+            }
+
+            if (currentDialog == null)
+                return false;
+
+            // a new dialog was encountered.
+            lastEncounteredDialog = currentDialog;
+            lastEncounteredDialogScreen = current;
+            return true;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,54,29,58,0],[29,59,29,63,0],[32,48,32,52,0],[32,53,32,57,0],[35,32,35,36,0],[35,37,35,41,0],[49,9,49,130,0],[50,9,50,10,0],[51,13,51,55,0],[52,13,52,66,0],[54,13,54,44,0],[55,13,55,56,0],[56,13,56,54,0],[58,13,58,83,0],[59,9,59,10,0],[65,9,65,10,0],[66,13,66,27,0],[67,13,67,22,0],[68,9,68,10,0],[71,9,71,10,0],[73,13,73,50,0],[75,13,75,33,0],[76,17,76,24,0],[79,13,79,41,0],[79,42,79,49,0],[81,13,81,43,0],[83,13,83,38,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,42,0],[91,13,91,39,0],[91,39,91,63,0],[91,63,91,65,0],[92,13,92,14,0],[93,17,93,51,0],[95,21,95,33,0],[97,17,97,38,0],[98,17,98,26,0],[99,17,99,29,0],[102,13,102,36,0],[103,13,103,14,0],[105,17,105,68,0],[106,17,106,18,0],[107,21,107,87,0],[109,21,109,47,0],[110,21,110,22,0],[113,25,113,60,0],[114,29,114,41,0],[115,21,115,22,0],[116,17,116,18,0],[118,17,118,43,0],[118,43,118,67,0],[118,67,118,69,0],[119,17,119,18,0],[120,21,120,43,0],[121,21,121,33,0],[124,17,124,53,0],[125,17,125,43,0],[126,13,126,14,0],[128,13,128,26,0],[129,9,129,10,0],[137,9,137,10,0],[140,13,140,76,0],[141,13,141,14,0],[142,17,142,92,0],[144,17,144,43,0],[145,21,145,27,0],[147,17,147,41,0],[148,13,148,14,0],[150,13,150,61,0],[152,13,152,47,0],[153,13,153,14,0],[154,17,154,60,0],[156,21,156,33,0],[158,17,158,60,0],[159,17,159,18,0],[162,21,162,50,0],[163,21,163,56,0],[164,21,164,34,0],[168,17,168,26,0],[169,17,172,20,0],[174,17,174,29,0],[177,13,177,39,0],[178,17,178,30,0],[181,13,181,51,0],[182,13,182,51,0],[183,13,183,25,0],[184,9,184,10,0]]);
+    </script>
+  </body>
+</html>

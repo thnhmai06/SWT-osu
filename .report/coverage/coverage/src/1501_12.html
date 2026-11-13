@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/SkinnableSound.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Audio;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Audio;
+
+namespace osu.Game.Skinning
+{
+    /// &lt;summary&gt;
+    /// A sound consisting of one or more samples to be played.
+    /// &lt;/summary&gt;
+    public partial class SkinnableSound : SkinReloadableDrawable, IAdjustableAudioComponent
+    {
+        /// &lt;summary&gt;
+        /// The minimum allowable volume for &lt;see cref=&quot;Samples&quot;/&gt;.
+        /// &lt;see cref=&quot;Samples&quot;/&gt; that specify a lower &lt;see cref=&quot;ISampleInfo.Volume&quot;/&gt; will be forcibly pulled up to this volume.
+        /// &lt;/summary&gt;
+        public int MinimumSampleVolume { get; set; }
+
+        public override bool RemoveWhenNotAlive =&gt; false;
+        public override bool RemoveCompletedTransforms =&gt; false;
+
+        /// &lt;summary&gt;
+        /// Whether to play the underlying sample when aggregate volume is zero.
+        /// Note that this is checked at the point of calling &lt;see cref=&quot;Play&quot;/&gt;; changing the volume post-play will not begin playback.
+        /// Defaults to false unless &lt;see cref=&quot;Looping&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Can serve as an optimisation if it is known ahead-of-time that this behaviour is allowed in a given use case.
+        /// &lt;/remarks&gt;
+        protected bool PlayWhenZeroVolume =&gt; Looping;
+
+        /// &lt;summary&gt;
+        /// All raw &lt;see cref=&quot;DrawableSamples&quot;/&gt;s contained in this &lt;see cref=&quot;SkinnableSound&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected IEnumerable&lt;DrawableSample&gt; DrawableSamples =&gt; samplesContainer.Select(c =&gt; c.Sample).Where(s =&gt; s != null);
+
+        private readonly AudioContainer&lt;PoolableSkinnableSample&gt; samplesContainer;
+
+        [Resolved]
+        private IPooledSampleProvider? samplePool { get; set; }
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;SkinnableSound&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public SkinnableSound()
+        {
+            InternalChild = samplesContainer = new AudioContainer&lt;PoolableSkinnableSample&gt;();
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;SkinnableSound&quot;/&gt; with some initial samples.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;samples&quot;&gt;The initial samples.&lt;/param&gt;
+        public SkinnableSound(IEnumerable&lt;ISampleInfo&gt; samples)
+            : this()
+        {
+            this.samples = samples.ToArray();
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;SkinnableSound&quot;/&gt; with an initial sample.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sample&quot;&gt;The initial sample.&lt;/param&gt;
+        public SkinnableSound(ISampleInfo sample)
+            : this(new[] { sample })
+        {
+        }
+
+        private ISampleInfo[] samples = Array.Empty&lt;ISampleInfo&gt;();
+
+        /// &lt;summary&gt;
+        /// The samples that should be played.
+        /// &lt;/summary&gt;
+        public ISampleInfo[] Samples
+        {
+            get =&gt; samples;
+            set
+            {
+                if (samples == value)
+                    return;
+
+                samples = value;
+
+                if (LoadState &gt;= LoadState.Ready)
+                    updateSamples();
+            }
+        }
+
+        public void ClearSamples() =&gt; Samples = Array.Empty&lt;ISampleInfo&gt;();
+
+        private bool looping;
+
+        /// &lt;summary&gt;
+        /// Whether the samples should loop on completion.
+        /// &lt;/summary&gt;
+        public bool Looping
+        {
+            get =&gt; looping;
+            set
+            {
+                if (value == looping) return;
+
+                looping = value;
+
+                samplesContainer.ForEach(c =&gt; c.Looping = looping);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Plays the samples.
+        /// &lt;/summary&gt;
+        public virtual void Play()
+        {
+            FlushPendingSkinChanges();
+
+            samplesContainer.ForEach(c =&gt;
+            {
+                if (PlayWhenZeroVolume || c.AggregateVolume.Value &gt; 0)
+                {
+                    c.Stop();
+                    c.Play();
+                }
+            });
+        }
+
+        protected override void LoadAsyncComplete()
+        {
+            // ensure samples are constructed before SkinChanged() is called via base.LoadAsyncComplete().
+            if (!samplesContainer.Any())
+                updateSamples();
+
+            base.LoadAsyncComplete();
+        }
+
+        /// &lt;summary&gt;
+        /// Stops the samples.
+        /// &lt;/summary&gt;
+        public virtual void Stop()
+        {
+            samplesContainer.ForEach(c =&gt; c.Stop());
+        }
+
+        private void updateSamples()
+        {
+            bool wasPlaying = IsPlaying;
+
+            if (wasPlaying &amp;&amp; Looping)
+                Stop();
+
+            // Remove all pooled samples (return them to the pool), and dispose the rest.
+            samplesContainer.RemoveAll(s =&gt; s.IsInPool, false);
+            samplesContainer.Clear();
+
+            foreach (var s in samples)
+            {
+                var sample = samplePool?.GetPooledSample(s) ?? new PoolableSkinnableSample(s);
+                sample.Looping = Looping;
+                sample.Volume.Value = Math.Max(s.Volume, MinimumSampleVolume) / 100.0;
+
+                samplesContainer.Add(sample);
+            }
+
+            if (wasPlaying &amp;&amp; Looping)
+                Play();
+        }
+
+        #region Re-expose AudioContainer
+
+        public BindableNumber&lt;double&gt; Volume =&gt; samplesContainer.Volume;
+
+        public BindableNumber&lt;double&gt; Balance =&gt; samplesContainer.Balance;
+
+        public BindableNumber&lt;double&gt; Frequency =&gt; samplesContainer.Frequency;
+
+        public BindableNumber&lt;double&gt; Tempo =&gt; samplesContainer.Tempo;
+
+        public void BindAdjustments(IAggregateAudioAdjustment component) =&gt; samplesContainer.BindAdjustments(component);
+
+        public void UnbindAdjustments(IAggregateAudioAdjustment component) =&gt; samplesContainer.UnbindAdjustments(component);
+
+        public void AddAdjustment(AdjustableProperty type, IBindable&lt;double&gt; adjustBindable) =&gt; samplesContainer.AddAdjustment(type, adjustBindable);
+
+        public void RemoveAdjustment(AdjustableProperty type, IBindable&lt;double&gt; adjustBindable) =&gt; samplesContainer.RemoveAdjustment(type, adjustBindable);
+
+        public void RemoveAllAdjustments(AdjustableProperty type) =&gt; samplesContainer.RemoveAllAdjustments(type);
+
+        /// &lt;summary&gt;
+        /// Whether any samples are currently playing.
+        /// &lt;/summary&gt;
+        public bool IsPlaying
+        {
+            get
+            {
+                foreach (PoolableSkinnableSample s in samplesContainer)
+                {
+                    if (s.Playing)
+                        return true;
+                }
+
+                return false;
+            }
+        }
+
+        public bool IsPlayed
+        {
+            get
+            {
+                foreach (PoolableSkinnableSample s in samplesContainer)
+                {
+                    if (s.Played)
+                        return true;
+                }
+
+                return false;
+            }
+        }
+
+        public IBindable&lt;double&gt; AggregateVolume =&gt; samplesContainer.AggregateVolume;
+
+        public IBindable&lt;double&gt; AggregateBalance =&gt; samplesContainer.AggregateBalance;
+
+        public IBindable&lt;double&gt; AggregateFrequency =&gt; samplesContainer.AggregateFrequency;
+
+        public IBindable&lt;double&gt; AggregateTempo =&gt; samplesContainer.AggregateTempo;
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,42,27,46,0],[27,47,27,51,0],[29,52,29,57,0],[30,59,30,64,0],[40,46,40,53,0],[45,66,45,95,0],[45,95,45,103,0],[45,103,45,116,0],[45,116,45,125,0],[45,125,45,126,0],[50,53,50,57,0],[50,58,50,62,0],[55,9,55,32,0],[56,9,56,10,0],[57,13,57,94,0],[58,9,58,10,0],[65,15,65,21,0],[66,9,66,10,0],[67,13,67,46,0],[68,9,68,10,0],[75,15,75,37,0],[76,9,76,10,0],[77,9,77,10,0],[79,9,79,68,0],[86,20,86,27,0],[88,13,88,14,0],[89,17,89,38,0],[90,21,90,28,0],[92,17,92,33,0],[94,17,94,50,0],[95,21,95,37,0],[96,13,96,14,0],[99,39,99,75,0],[108,20,108,27,0],[110,13,110,14,0],[111,17,111,38,0],[111,39,111,46,0],[113,17,113,33,0],[115,17,115,47,0],[115,47,115,66,0],[115,66,115,68,0],[116,13,116,14,0],[123,9,123,10,0],[124,13,124,39,0],[126,13,127,13,0],[127,13,127,14,0],[127,14,128,17,0],[128,17,128,71,0],[128,71,129,17,0],[129,17,129,18,0],[129,18,130,21,0],[130,21,130,30,0],[130,30,131,21,0],[131,21,131,30,0],[131,30,132,17,0],[132,17,132,18,0],[132,18,133,13,0],[133,13,133,14,0],[133,14,133,16,0],[134,9,134,10,0],[137,9,137,10,0],[139,13,139,41,0],[140,17,140,33,0],[142,13,142,38,0],[143,9,143,10,0],[149,9,149,10,0],[150,13,150,43,0],[150,43,150,51,0],[150,51,150,53,0],[151,9,151,10,0],[154,9,154,10,0],[155,13,155,41,0],[157,13,157,39,0],[158,17,158,24,0],[161,13,161,45,0],[161,45,161,55,0],[161,55,161,64,0],[162,13,162,38,0],[164,13,164,20,0],[164,22,164,27,0],[164,28,164,30,0],[164,31,164,38,0],[165,13,165,14,0],[166,17,166,95,0],[167,17,167,42,0],[168,17,168,87,0],[170,17,170,46,0],[171,13,171,14,0],[173,13,173,39,0],[174,17,174,24,0],[175,9,175,10,0],[179,49,179,72,0],[181,50,181,74,0],[183,52,183,78,0],[185,48,185,70,0],[187,77,187,120,0],[189,79,189,124,0],[191,97,191,149,0],[193,100,193,155,0],[195,70,195,113,0],[203,13,203,14,0],[204,17,204,24,0],[204,26,204,51,0],[204,52,204,54,0],[204,55,204,71,0],[205,17,205,18,0],[206,21,206,35,0],[207,25,207,37,0],[208,17,208,18,0],[210,17,210,30,0],[211,13,211,14,0],[217,13,217,14,0],[218,17,218,24,0],[218,26,218,51,0],[218,52,218,54,0],[218,55,218,71,0],[219,17,219,18,0],[220,21,220,34,0],[221,25,221,37,0],[222,17,222,18,0],[224,17,224,30,0],[225,13,225,14,0],[228,53,228,85,0],[230,54,230,87,0],[232,56,232,91,0],[234,52,234,83,0]]);
+    </script>
+  </body>
+</html>

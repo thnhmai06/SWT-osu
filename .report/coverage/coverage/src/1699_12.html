@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/SubmittingPlayer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Online;
+using osu.Game.Online.API;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Rooms;
+using osu.Game.Online.Spectator;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Screens.Ranking;
+
+namespace osu.Game.Screens.Play
+{
+    /// &lt;summary&gt;
+    /// A player instance which supports submitting scores to an online store.
+    /// &lt;/summary&gt;
+    public abstract partial class SubmittingPlayer : Player
+    {
+        /// &lt;summary&gt;
+        /// The token to be used for the current submission. This is fetched via a request created by &lt;see cref=&quot;CreateTokenRequest&quot;/&gt;.
+        /// &lt;/summary&gt;
+        private long? token;
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Resolved]
+        private SpectatorClient spectatorClient { get; set; }
+
+        [Resolved]
+        private SessionStatics statics { get; set; }
+
+        [Resolved(canBeNull: true)]
+        [CanBeNull]
+        private UserStatisticsWatcher userStatisticsWatcher { get; set; }
+
+        [Resolved(canBeNull: true)]
+        [CanBeNull]
+        private INotificationOverlay notifications { get; set; }
+
+        private readonly Lock scoreSubmissionLock = new Lock();
+        private TaskCompletionSource&lt;bool&gt; scoreSubmissionSource;
+
+        protected SubmittingPlayer(PlayerConfiguration configuration = null)
+            : base(configuration)
+        {
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            if (DrawableRuleset == null)
+            {
+                // base load must have failed (e.g. due to an unknown mod); bail.
+                return;
+            }
+
+            AddInternal(new PlayerTouchInputDetector());
+
+            // We probably want to move this display to something more global.
+            // Probably using the OSD somehow.
+            AddInternal(new GameplayOffsetControl
+            {
+                Margin = new MarginPadding(20),
+                Anchor = Anchor.CentreRight,
+                Origin = Anchor.CentreRight,
+            });
+        }
+
+        protected override GameplayClockContainer CreateGameplayClockContainer(WorkingBeatmap beatmap, double gameplayStart) =&gt; new MasterGameplayClockContainer(beatmap, gameplayStart)
+        {
+            ShouldValidatePlaybackRate = true,
+        };
+
+        protected override void LoadAsyncComplete()
+        {
+            base.LoadAsyncComplete();
+            handleTokenRetrieval();
+        }
+
+        private bool handleTokenRetrieval()
+        {
+            // Token request construction should happen post-load to allow derived classes to potentially prepare DI backings that are used to create the request.
+            var tcs = new TaskCompletionSource&lt;bool&gt;();
+
+            if (Mods.Value.Any(m =&gt; !m.UserPlayable))
+            {
+                handleTokenFailure(new InvalidOperationException(&quot;Non-user playable mod selected.&quot;));
+                return false;
+            }
+
+            if (!api.IsLoggedIn || api.State.Value == APIState.Failing)
+            {
+                handleTokenFailure(new InvalidOperationException(&quot;Online functionality is not available.&quot;), displayNotification: api.State.Value == APIState.Failing);
+                return false;
+            }
+
+            var req = CreateTokenRequest();
+
+            if (req == null)
+            {
+                handleTokenFailure(new InvalidOperationException(&quot;Request could not be constructed.&quot;));
+                return false;
+            }
+
+            req.Success += r =&gt;
+            {
+                Logger.Log($&quot;Score submission token retrieved ({r.ID})&quot;);
+                token = r.ID;
+                tcs.SetResult(true);
+            };
+            req.Failure += ex =&gt; handleTokenFailure(ex, displayNotification: true);
+
+            api.Queue(req);
+
+            // Generally a timeout would not happen here as APIAccess will timeout first.
+            if (!tcs.Task.Wait(30000))
+                req.TriggerFailure(new InvalidOperationException(&quot;Token retrieval timed out (request never run)&quot;));
+
+            return true;
+
+            void handleTokenFailure(Exception exception, bool displayNotification = false)
+            {
+                tcs.SetResult(false);
+
+                bool shouldExit = ShouldExitOnTokenRetrievalFailure(exception);
+
+                if (displayNotification || shouldExit)
+                {
+                    string whatWillHappen = shouldExit
+                        ? &quot;Cannot start play&quot;
+                        : &quot;Score will not be submitted&quot;;
+
+                    if (string.IsNullOrEmpty(exception.Message))
+                        notifications?.Post(new ScoreSubmissionFailureNotification(whatWillHappen, &quot;Failed to retrieve a score submission token.&quot;));
+                    else
+                        notifications?.Post(new ScoreSubmissionFailureNotification(whatWillHappen, getUserFacingAPIError(exception)));
+                }
+
+                if (shouldExit)
+                {
+                    Schedule(() =&gt;
+                    {
+                        ValidForResume = false;
+                        this.Exit();
+                    });
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Called when a token could not be retrieved for submission.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;exception&quot;&gt;The error causing the failure.&lt;/param&gt;
+        /// &lt;returns&gt;Whether gameplay should be immediately exited as a result. Returning false allows the gameplay session to continue. Defaults to true.&lt;/returns&gt;
+        protected virtual bool ShouldExitOnTokenRetrievalFailure(Exception exception) =&gt; true;
+
+        public override bool AllowCriticalSettingsAdjustment
+        {
+            get
+            {
+                // General limitations to ensure players don&#39;t do anything too weird.
+                // These match stable for now.
+
+                // TODO: the blocking conditions should probably display a message.
+                if (!IsBreakTime.Value &amp;&amp; GameplayClockContainer.CurrentTime - GameplayClockContainer.GameplayStartTime &gt; 10000)
+                    return false;
+
+                if (GameplayClockContainer.IsPaused.Value)
+                    return false;
+
+                return base.AllowCriticalSettingsAdjustment;
+            }
+        }
+
+        protected override async Task PrepareScoreForResultsAsync(Score score)
+        {
+            await base.PrepareScoreForResultsAsync(score).ConfigureAwait(false);
+
+            score.ScoreInfo.Date = DateTimeOffset.Now;
+
+            await submitScore(score).ConfigureAwait(false);
+            spectatorClient.EndPlaying(token, GameplayState);
+            userStatisticsWatcher?.RegisterForStatisticsUpdateAfter(score.ScoreInfo);
+        }
+
+        [Resolved]
+        private RealmAccess realm { get; set; }
+
+        protected override void StartGameplay()
+        {
+            base.StartGameplay();
+
+            // User expectation is that last played should be updated when entering the gameplay loop
+            // from multiplayer / playlists / solo.
+            realm.WriteAsync(r =&gt;
+            {
+                var realmBeatmap = r.Find&lt;BeatmapInfo&gt;(Beatmap.Value.BeatmapInfo.ID);
+                realmBeatmap?.LastPlayed = DateTimeOffset.Now;
+            });
+
+            spectatorClient.BeginPlaying(token, GameplayState, Score);
+        }
+
+        public override bool Pause()
+        {
+            bool wasPaused = GameplayClockContainer.IsPaused.Value;
+
+            bool paused = base.Pause();
+
+            if (!wasPaused &amp;&amp; paused)
+                Score.ScoreInfo.Pauses.Add((int)Math.Round(GameplayClockContainer.CurrentTime));
+
+            return paused;
+        }
+
+        protected override void ConcludeFailedScore(Score score)
+        {
+            base.ConcludeFailedScore(score);
+            submitFromFailOrQuit(score);
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            bool exiting = base.OnExiting(e);
+            submitFromFailOrQuit(Score);
+            statics.SetValue(Static.LastLocalUserScore, Score?.ScoreInfo.DeepClone());
+            return exiting;
+        }
+
+        private void submitFromFailOrQuit(Score score)
+        {
+            if (LoadedBeatmapSuccessfully)
+            {
+                // compare: https://github.com/ppy/osu/blob/ccf1acce56798497edfaf92d3ece933469edcf0a/osu.Game/Screens/Play/Player.cs#L848-L851
+                var scoreCopy = score.DeepClone();
+
+                Task.Run(async () =&gt;
+                {
+                    await submitScore(scoreCopy).ConfigureAwait(false);
+                    spectatorClient.EndPlaying(token, GameplayState);
+                }).FireAndForget();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Construct a request to be used for retrieval of the score token.
+        /// Can return null, at which point &lt;see cref=&quot;ShouldExitOnTokenRetrievalFailure&quot;/&gt; will be fired.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        protected abstract APIRequest&lt;APIScoreToken&gt; CreateTokenRequest();
+
+        /// &lt;summary&gt;
+        /// Construct a request to submit the score.
+        /// Will only be invoked if the request constructed via &lt;see cref=&quot;CreateTokenRequest&quot;/&gt; was successful.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The score to be submitted.&lt;/param&gt;
+        /// &lt;param name=&quot;token&quot;&gt;The submission token.&lt;/param&gt;
+        protected abstract APIRequest&lt;MultiplayerScore&gt; CreateSubmissionRequest(Score score, long token);
+
+        private Task submitScore(Score score)
+        {
+            var masterClock = GameplayClockContainer as MasterGameplayClockContainer;
+
+            if (masterClock?.PlaybackRateValid.Value != true)
+            {
+                Logger.Log(&quot;Score submission cancelled due to audio playback rate discrepancy.&quot;);
+                return Task.CompletedTask;
+            }
+
+            // token may be null if the request failed but gameplay was still allowed (see HandleTokenRetrievalFailure).
+            if (token == null)
+            {
+                Logger.Log(&quot;No token, skipping score submission&quot;);
+                return Task.CompletedTask;
+            }
+
+            // if the user never hit anything, this score should not be counted in any way.
+            if (!score.ScoreInfo.Statistics.Any(s =&gt; s.Key.IsHit() &amp;&amp; s.Value &gt; 0))
+            {
+                Logger.Log(&quot;No hits registered, skipping score submission&quot;);
+                return Task.CompletedTask;
+            }
+
+            // zero scores should also never be submitted.
+            if (score.ScoreInfo.TotalScore == 0)
+            {
+                Logger.Log(&quot;Zero score, skipping score submission&quot;);
+                return Task.CompletedTask;
+            }
+
+            // mind the timing of this.
+            // once `scoreSubmissionSource` is created, it is presumed that submission is taking place in the background,
+            // so all exceptional circumstances that would disallow submission must be handled above.
+            lock (scoreSubmissionLock)
+            {
+                if (scoreSubmissionSource != null)
+                    return scoreSubmissionSource.Task;
+
+                scoreSubmissionSource = new TaskCompletionSource&lt;bool&gt;();
+            }
+
+            Logger.Log($&quot;Beginning score submission (token:{token.Value})...&quot;);
+            var request = CreateSubmissionRequest(score, token.Value);
+
+            request.Success += s =&gt;
+            {
+                score.ScoreInfo.OnlineID = s.ID;
+                score.ScoreInfo.Position = s.Position;
+
+                scoreSubmissionSource.SetResult(true);
+                Logger.Log($&quot;Score submission completed! (token:{token.Value} id:{s.ID})&quot;);
+            };
+
+            request.Failure += e =&gt;
+            {
+                Logger.Error(e, $&quot;{getUserFacingAPIError(e)}\n\nScore was not submitted (id: {token.Value})&quot;);
+                scoreSubmissionSource.SetResult(false);
+            };
+
+            api.Queue(request);
+            return scoreSubmissionSource.Task;
+        }
+
+        private static string getUserFacingAPIError(Exception exception)
+        {
+            switch (exception.Message)
+            {
+                case @&quot;missing token header&quot;:
+                case @&quot;invalid client hash&quot;:
+                case @&quot;invalid verification hash&quot;:
+                case @&quot;invalid token&quot;:
+                case @&quot;outdated client&quot;:
+                    return &quot;Please ensure that you are using the latest version of the official game releases.&quot;;
+
+                case @&quot;invalid or missing beatmap_hash&quot;:
+                    return &quot;This beatmap does not match the online version. Please update or redownload it.&quot;;
+
+                case @&quot;expired token&quot;:
+                    return &quot;Your system clock is set incorrectly. Please check your system time, date and timezone.&quot;;
+
+                default:
+                    return exception.Message;
+            }
+        }
+
+        protected override ResultsScreen CreateResults(ScoreInfo score) =&gt; new SoloResultsScreen(score)
+        {
+            AllowRetry = true,
+            IsLocalPlay = true,
+        };
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,36,42,40,0],[42,41,42,45,0],[45,51,45,55,0],[45,56,45,60,0],[48,42,48,46,0],[48,47,48,51,0],[52,63,52,67,0],[52,68,52,72,0],[56,54,56,58,0],[56,59,56,63,0],[58,9,58,64,0],[62,15,62,34,0],[63,9,63,10,0],[64,9,64,10,0],[68,9,68,10,0],[69,13,69,41,0],[70,13,70,14,0],[72,17,72,24,0],[75,13,75,57,0],[79,13,84,16,0],[85,9,85,10,0],[87,129,90,10,0],[93,9,93,10,0],[94,13,94,38,0],[95,13,95,36,0],[96,9,96,10,0],[99,9,99,10,0],[101,13,101,56,0],[103,13,103,37,0],[103,37,103,52,0],[103,52,103,54,0],[104,13,104,14,0],[105,17,105,102,0],[106,17,106,30,0],[109,13,109,72,0],[110,13,110,14,0],[111,17,111,167,0],[112,17,112,30,0],[115,13,115,44,0],[117,13,117,29,0],[118,13,118,14,0],[119,17,119,104,0],[120,17,120,30,0],[123,13,124,13,0],[124,13,124,14,0],[124,14,125,17,0],[125,17,125,74,0],[125,74,126,17,0],[126,17,126,30,0],[126,30,127,17,0],[127,17,127,37,0],[127,37,128,13,0],[128,13,128,14,0],[128,14,128,15,0],[129,13,129,34,0],[129,34,129,83,0],[129,83,129,84,0],[131,13,131,28,0],[134,13,134,39,0],[135,17,135,116,0],[137,13,137,25,0],[140,13,140,14,0],[141,17,141,38,0],[143,17,143,80,0],[145,17,145,55,0],[146,17,146,18,0],[147,21,149,57,0],[151,21,151,65,0],[152,25,152,149,0],[154,25,154,135,0],[155,17,155,18,0],[157,17,157,32,0],[158,17,158,18,0],[159,21,160,21,0],[160,21,160,22,0],[160,22,161,25,0],[161,25,161,48,0],[161,48,162,25,0],[162,25,162,37,0],[162,37,163,21,0],[163,21,163,22,0],[163,22,163,24,0],[164,17,164,18,0],[165,13,165,14,0],[166,9,166,10,0],[173,90,173,94,0],[178,13,178,14,0],[183,17,183,129,0],[184,21,184,34,0],[186,17,186,59,0],[187,21,187,34,0],[189,17,189,61,0],[190,13,190,14,0],[194,9,194,10,0],[195,13,195,81,0],[197,13,197,55,0],[199,13,199,60,0],[200,13,200,62,0],[201,13,201,86,0],[202,9,202,10,0],[205,37,205,41,0],[205,42,205,46,0],[208,9,208,10,0],[209,13,209,34,0],[213,13,214,13,0],[214,13,214,14,0],[214,14,215,17,0],[215,17,215,86,0],[215,86,216,17,0],[216,17,216,63,0],[216,63,217,13,0],[217,13,217,14,0],[217,14,217,16,0],[219,13,219,71,0],[220,9,220,10,0],[223,9,223,10,0],[224,13,224,68,0],[226,13,226,40,0],[228,13,228,38,0],[229,17,229,97,0],[231,13,231,27,0],[232,9,232,10,0],[235,9,235,10,0],[236,13,236,45,0],[237,13,237,41,0],[238,9,238,10,0],[241,9,241,10,0],[242,13,242,46,0],[243,13,243,41,0],[244,13,244,87,0],[245,13,245,28,0],[246,9,246,10,0],[249,9,249,10,0],[250,13,250,43,0],[251,13,251,14,0],[253,17,253,51,0],[255,17,256,17,0],[256,17,256,18,0],[256,18,257,21,0],[257,21,257,72,0],[257,72,258,21,0],[258,21,258,70,0],[258,70,259,17,0],[259,17,259,18,0],[259,18,259,36,0],[260,13,260,14,0],[261,9,261,10,0],[279,9,279,10,0],[280,13,280,86,0],[282,13,282,62,0],[283,13,283,14,0],[284,17,284,98,0],[285,17,285,43,0],[289,13,289,31,0],[290,13,290,14,0],[291,17,291,67,0],[292,17,292,43,0],[296,13,296,54,0],[296,54,296,82,0],[296,82,296,84,0],[297,13,297,14,0],[298,17,298,77,0],[299,17,299,43,0],[303,13,303,49,0],[304,13,304,14,0],[305,17,305,69,0],[306,17,306,43,0],[313,13,313,14,0],[314,17,314,51,0],[315,21,315,55,0],[317,17,317,74,0],[318,13,318,14,0],[320,13,320,80,0],[321,13,321,71,0],[323,13,324,13,0],[324,13,324,14,0],[324,14,325,17,0],[325,17,325,49,0],[325,49,326,17,0],[326,17,326,55,0],[326,55,328,17,0],[328,17,328,55,0],[328,55,329,17,0],[329,17,329,92,0],[329,92,330,13,0],[330,13,330,14,0],[330,14,330,15,0],[332,13,333,13,0],[333,13,333,14,0],[333,14,334,17,0],[334,17,334,111,0],[334,111,335,17,0],[335,17,335,56,0],[335,56,336,13,0],[336,13,336,14,0],[336,14,336,15,0],[338,13,338,32,0],[339,13,339,47,0],[340,9,340,10,0],[343,9,343,10,0],[344,13,344,39,0],[351,21,351,113,0],[354,21,354,110,0],[357,21,357,118,0],[360,21,360,46,0],[362,9,362,10,0],[364,76,368,10,0]]);
+    </script>
+  </body>
+</html>

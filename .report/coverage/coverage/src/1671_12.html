@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUDOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Game.Configuration;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Play.HUD;
+using osu.Game.Screens.Play.HUD.ClicksPerSecond;
+using osu.Game.Screens.Play.HUD.JudgementCounter;
+using osu.Game.Skinning;
+using osuTK;
+
+namespace osu.Game.Screens.Play
+{
+    [Cached]
+    public partial class HUDOverlay : Container, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        public const float FADE_DURATION = 300;
+
+        public const Easing FADE_EASING = Easing.OutQuint;
+
+        protected override bool ShouldBeConsideredForInput(Drawable child)
+        {
+            // HUD uses AlwaysVisible on child components so they can be in an updated state for next display.
+            // Without blocking input, this would also allow them to be interacted with in such a state.
+            if (ShowHud.Value)
+                return base.ShouldBeConsideredForInput(child);
+
+            // hold to quit button should always be interactive.
+            return child == BottomRightElements;
+        }
+
+        public readonly ModDisplay ModDisplay;
+        public readonly HoldForMenuButton HoldToQuit;
+
+        [Cached]
+        private readonly ClicksPerSecondController clicksPerSecondController;
+
+        [Cached]
+        public readonly InputCountController InputCountController;
+
+        [Cached]
+        private readonly JudgementCountController judgementCountController;
+
+        public Bindable&lt;bool&gt; ShowHealthBar = new Bindable&lt;bool&gt;(true);
+
+        [CanBeNull]
+        private readonly DrawableRuleset drawableRuleset;
+
+        private readonly IReadOnlyList&lt;Mod&gt; mods;
+        private readonly PlayerConfiguration configuration;
+
+        /// &lt;summary&gt;
+        /// Whether the elements that can optionally be hidden should be visible.
+        /// &lt;/summary&gt;
+        public Bindable&lt;bool&gt; ShowHud { get; } = new BindableBool();
+
+        private Bindable&lt;HUDVisibilityMode&gt; configVisibilityMode;
+        private Bindable&lt;bool&gt; configLeaderboardVisibility;
+
+        private readonly BindableBool replayLoaded = new BindableBool();
+
+        private static bool hasShownNotificationOnce;
+
+        // The following flows are used to attach fixed non-skinnable elements in particular implementations of the player
+        // (e.g. replay or multiplayer-specific controls).
+        // They will make a best-effort attempt to get out of the way of any other skinnable components.
+
+        public readonly FillFlowContainer TopLeftElements;
+        public readonly FillFlowContainer TopRightElements;
+        public readonly FillFlowContainer BottomRightElements;
+
+        internal readonly IBindable&lt;bool&gt; IsPlaying = new Bindable&lt;bool&gt;();
+
+        public IBindable&lt;bool&gt; HoldingForHUD =&gt; holdingForHUD;
+
+        private readonly BindableBool holdingForHUD = new BindableBool();
+
+        private readonly SkinnableContainer mainComponents;
+
+        [CanBeNull]
+        private readonly SkinnableContainer rulesetComponents;
+
+        private readonly List&lt;Drawable&gt; hideTargets;
+
+        /// &lt;summary&gt;
+        /// The container for skin components attached to &lt;see cref=&quot;GlobalSkinnableContainers.Playfield&quot;/&gt;
+        /// &lt;/summary&gt;
+        internal readonly Drawable PlayfieldSkinLayer;
+
+        public HUDOverlay([CanBeNull] DrawableRuleset drawableRuleset, IReadOnlyList&lt;Mod&gt; mods, PlayerConfiguration configuration)
+        {
+            this.drawableRuleset = drawableRuleset;
+            this.mods = mods;
+            this.configuration = configuration;
+
+            RelativeSizeAxes = Axes.Both;
+
+            Children = new[]
+            {
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Alpha = configuration.ShowFailingOverlay ? 1 : 0,
+                    Child = CreateFailingLayer()
+                },
+                //Needs to be initialized before skinnable drawables.
+                judgementCountController = new JudgementCountController(),
+                clicksPerSecondController = new ClicksPerSecondController(),
+                InputCountController = new InputCountController(),
+                mainComponents = new HUDComponentsContainer { AlwaysPresent = true, },
+                drawableRuleset != null
+                    ? (rulesetComponents = new HUDComponentsContainer(drawableRuleset.Ruleset.RulesetInfo) { AlwaysPresent = true, })
+                    : Empty(),
+                PlayfieldSkinLayer = drawableRuleset != null
+                    ? new SkinnableContainer(new GlobalSkinnableContainerLookup(GlobalSkinnableContainers.Playfield, drawableRuleset.Ruleset.RulesetInfo)) { AlwaysPresent = true, }
+                    : Empty(),
+                TopRightElements = new FillFlowContainer
+                {
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    AlwaysPresent = true,
+                    Margin = new MarginPadding(10),
+                    Spacing = new Vector2(10),
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        // This display is potentially a duplicate of users with a local ModDisplay in their skins.
+                        // It would be very nice to remove this, but the version here has special logic with regards to replays
+                        // and initial states, so needs a bit of thought before doing so.
+                        ModDisplay = CreateModsContainer(),
+                    }
+                },
+                BottomRightElements = new FillFlowContainer
+                {
+                    Anchor = Anchor.BottomRight,
+                    Origin = Anchor.BottomRight,
+                    Margin = new MarginPadding(10),
+                    Spacing = new Vector2(10),
+                    AutoSizeAxes = Axes.Both,
+                    LayoutDuration = FADE_DURATION / 2,
+                    LayoutEasing = FADE_EASING,
+                    Direction = FillDirection.Vertical,
+                    Children = new Drawable[]
+                    {
+                        HoldToQuit = CreateHoldForMenuButton(),
+                    }
+                },
+                TopLeftElements = new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Padding = new MarginPadding(44), // enough margin to avoid the hit error display
+                    Spacing = new Vector2(5)
+                },
+            };
+
+            hideTargets = new List&lt;Drawable&gt; { mainComponents, TopRightElements };
+
+            if (rulesetComponents != null)
+                hideTargets.Add(rulesetComponents);
+
+            hideTargets.Add(TopLeftElements);
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuConfigManager config, RealmKeyBindingStore keyBindingStore, INotificationOverlay notificationOverlay)
+        {
+            if (drawableRuleset != null)
+            {
+                BindDrawableRuleset(drawableRuleset);
+            }
+
+            ModDisplay.Current.Value = mods;
+
+            configVisibilityMode = config.GetBindable&lt;HUDVisibilityMode&gt;(OsuSetting.HUDVisibilityMode);
+            configLeaderboardVisibility = config.GetBindable&lt;bool&gt;(OsuSetting.GameplayLeaderboard);
+
+            if (configVisibilityMode.Value == HUDVisibilityMode.Never &amp;&amp; !hasShownNotificationOnce)
+            {
+                hasShownNotificationOnce = true;
+
+                notificationOverlay?.Post(new SimpleNotification
+                {
+                    Text = NotificationsStrings.ScoreOverlayDisabled(keyBindingStore.GetBindingsStringFor(GlobalAction.ToggleInGameInterface))
+                });
+            }
+
+            // start all elements hidden
+            hideTargets.ForEach(d =&gt; d.Hide());
+        }
+
+        public override void Hide() =&gt;
+            throw new InvalidOperationException($&quot;{nameof(HUDOverlay)} should not be hidden as it will remove the ability of a user to quit. Use {nameof(ShowHud)} instead.&quot;);
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            ShowHud.BindValueChanged(visible =&gt; hideTargets.ForEach(d =&gt; d.FadeTo(visible.NewValue ? 1 : 0, FADE_DURATION, FADE_EASING)));
+
+            holdingForHUD.BindValueChanged(_ =&gt; updateVisibility());
+            IsPlaying.BindValueChanged(_ =&gt; updateVisibility());
+            configVisibilityMode.BindValueChanged(_ =&gt; updateVisibility());
+
+            replayLoaded.BindValueChanged(e =&gt;
+            {
+                if (e.NewValue)
+                {
+                    ModDisplay.FadeIn(1000, FADE_EASING);
+                    InputCountController.Margin = new MarginPadding(10) { Bottom = 30 };
+                }
+                else
+                {
+                    ModDisplay.Delay(2000).FadeOut(200);
+                    InputCountController.Margin = new MarginPadding(10);
+                }
+
+                updateVisibility();
+            }, true);
+
+            ModDisplay.ExpansionMode = ExpansionMode.AlwaysExpanded;
+            Scheduler.AddDelayed(() =&gt; ModDisplay.ExpansionMode = ExpansionMode.ExpandOnHover, 1200);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (drawableRuleset != null)
+            {
+                Quad playfieldScreenSpaceDrawQuad = drawableRuleset.Playfield.SkinnableComponentScreenSpaceDrawQuad;
+
+                PlayfieldSkinLayer.Position = ToLocalSpace(playfieldScreenSpaceDrawQuad.TopLeft);
+                PlayfieldSkinLayer.Width = (ToLocalSpace(playfieldScreenSpaceDrawQuad.TopRight) - ToLocalSpace(playfieldScreenSpaceDrawQuad.TopLeft)).Length;
+                PlayfieldSkinLayer.Height = (ToLocalSpace(playfieldScreenSpaceDrawQuad.BottomLeft) - ToLocalSpace(playfieldScreenSpaceDrawQuad.TopLeft)).Length;
+                PlayfieldSkinLayer.Rotation = drawableRuleset.PlayfieldAdjustmentContainer.Rotation;
+            }
+
+            float? lowestTopScreenSpaceLeft = null;
+            float? lowestTopScreenSpaceRight = null;
+
+            Vector2? highestBottomScreenSpace = null;
+
+            processDrawables(mainComponents);
+
+            if (rulesetComponents != null)
+                processDrawables(rulesetComponents);
+
+            if (lowestTopScreenSpaceRight.HasValue &amp;&amp; DrawHeight - TopRightElements.DrawHeight &gt; 0)
+                TopRightElements.Y = Math.Clamp(ToLocalSpace(new Vector2(0, lowestTopScreenSpaceRight.Value)).Y, 0, DrawHeight - TopRightElements.DrawHeight);
+            else
+                TopRightElements.Y = 0;
+
+            if (lowestTopScreenSpaceLeft.HasValue &amp;&amp; DrawHeight - TopLeftElements.DrawHeight &gt; 0)
+                TopLeftElements.Y = Math.Clamp(ToLocalSpace(new Vector2(0, lowestTopScreenSpaceLeft.Value)).Y, 0, DrawHeight - TopLeftElements.DrawHeight);
+            else
+                TopLeftElements.Y = 0;
+
+            if (highestBottomScreenSpace.HasValue &amp;&amp; DrawHeight - BottomRightElements.DrawHeight &gt; 0)
+                BottomRightElements.Y = -Math.Clamp(DrawHeight - ToLocalSpace(highestBottomScreenSpace.Value).Y, 0, DrawHeight - BottomRightElements.DrawHeight);
+            else
+                BottomRightElements.Y = 0;
+
+            void processDrawables(SkinnableContainer components)
+            {
+                // Avoid using foreach due to missing GetEnumerator implementation.
+                // See https://github.com/ppy/osu-framework/blob/e10051e6643731e393b09de40a3a3d209a545031/osu.Framework/Bindables/IBindableList.cs#L41-L44.
+                for (int i = 0; i &lt; components.Components.Count; i++)
+                    processDrawable(components.Components[i]);
+            }
+
+            void processDrawable(ISerialisableDrawable element)
+            {
+                // Cast can be removed when IDrawable interface includes Anchor / RelativeSizeAxes.
+                Drawable drawable = (Drawable)element;
+
+                // for now align some top components with the bottom-edge of the lowest top-anchored hud element.
+                if (drawable.Anchor.HasFlag(Anchor.y0))
+                {
+                    // health bars are excluded for the sake of hacky legacy skins which extend the health bar to take up the full screen area.
+                    if (element is LegacyHealthDisplay)
+                        return;
+
+                    // AABB is used here because the drawable can be flipped/rotated arbitrarily,
+                    // so the &quot;bottom right&quot; corner of the raw SSDQ might not necessarily be where one expects it to be.
+                    float bottom = drawable.ScreenSpaceDrawQuad.AABBFloat.BottomRight.Y;
+
+                    bool isRelativeX = drawable.RelativeSizeAxes == Axes.X;
+
+                    if (drawable.Anchor.HasFlag(Anchor.TopRight) || isRelativeX)
+                    {
+                        if (lowestTopScreenSpaceRight == null || bottom &gt; lowestTopScreenSpaceRight.Value)
+                            lowestTopScreenSpaceRight = bottom;
+                    }
+
+                    if (drawable.Anchor.HasFlag(Anchor.TopLeft) || isRelativeX)
+                    {
+                        if (lowestTopScreenSpaceLeft == null || bottom &gt; lowestTopScreenSpaceLeft.Value)
+                            lowestTopScreenSpaceLeft = bottom;
+                    }
+                }
+                // and align bottom-right components with the top-edge of the highest bottom-anchored hud element.
+                else if (drawable.Anchor.HasFlag(Anchor.BottomRight) || (drawable.Anchor.HasFlag(Anchor.y2) &amp;&amp; drawable.RelativeSizeAxes == Axes.X))
+                {
+                    var topLeft = element.ScreenSpaceDrawQuad.AABBFloat.TopLeft;
+                    if (highestBottomScreenSpace == null || topLeft.Y &lt; highestBottomScreenSpace.Value.Y)
+                        highestBottomScreenSpace = topLeft;
+                }
+            }
+        }
+
+        private void updateVisibility()
+        {
+            if (ShowHud.Disabled)
+                return;
+
+            if (holdingForHUD.Value)
+            {
+                ShowHud.Value = true;
+                return;
+            }
+
+            switch (configVisibilityMode.Value)
+            {
+                case HUDVisibilityMode.Never:
+                    ShowHud.Value = false;
+                    break;
+
+                case HUDVisibilityMode.HideDuringGameplay:
+                    // always show during replay as we want the seek bar to be visible.
+                    ShowHud.Value = replayLoaded.Value || !IsPlaying.Value;
+                    break;
+
+                case HUDVisibilityMode.Always:
+                    ShowHud.Value = true;
+                    break;
+            }
+        }
+
+        protected virtual void BindDrawableRuleset(DrawableRuleset drawableRuleset)
+        {
+            if (drawableRuleset is ICanAttachHUDPieces attachTarget)
+            {
+                attachTarget.Attach(InputCountController);
+                attachTarget.Attach(clicksPerSecondController);
+            }
+
+            replayLoaded.BindTo(drawableRuleset.HasReplayLoaded);
+        }
+
+        protected FailingLayer CreateFailingLayer() =&gt; new FailingLayer
+        {
+            ShowHealth = { BindTarget = ShowHealthBar }
+        };
+
+        protected HoldForMenuButton CreateHoldForMenuButton() =&gt; new HoldForMenuButton(!configuration.AllowRestart)
+        {
+            Anchor = Anchor.BottomRight,
+            Origin = Anchor.BottomRight,
+        };
+
+        protected ModDisplay CreateModsContainer() =&gt; new ModDisplay
+        {
+            Anchor = Anchor.TopRight,
+            Origin = Anchor.TopRight,
+        };
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.HoldForHUD:
+                    holdingForHUD.Value = true;
+                    return false;
+
+                case GlobalAction.ToggleInGameInterface:
+                    switch (configVisibilityMode.Value)
+                    {
+                        case HUDVisibilityMode.Never:
+                            configVisibilityMode.Value = HUDVisibilityMode.HideDuringGameplay;
+                            break;
+
+                        case HUDVisibilityMode.HideDuringGameplay:
+                            configVisibilityMode.Value = HUDVisibilityMode.Always;
+                            break;
+
+                        case HUDVisibilityMode.Always:
+                            configVisibilityMode.Value = HUDVisibilityMode.Never;
+                            break;
+                    }
+
+                    return true;
+
+                case GlobalAction.ToggleInGameLeaderboard:
+                    configLeaderboardVisibility.Value = !configLeaderboardVisibility.Value;
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.HoldForHUD:
+                    holdingForHUD.Value = false;
+                    break;
+            }
+        }
+
+        private partial class HUDComponentsContainer : SkinnableContainer
+        {
+            private Bindable&lt;ScoringMode&gt; scoringMode;
+
+            [Resolved]
+            private OsuConfigManager config { get; set; }
+
+            public HUDComponentsContainer([CanBeNull] RulesetInfo ruleset = null)
+                : base(new GlobalSkinnableContainerLookup(GlobalSkinnableContainers.MainHUDComponents, ruleset))
+            {
+                RelativeSizeAxes = Axes.Both;
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                // When the scoring mode changes, relative positions of elements may change (see DefaultSkin.GetDrawableComponent).
+                // This is a best effort implementation for cases where users haven&#39;t customised layouts.
+                scoringMode = config.GetBindable&lt;ScoringMode&gt;(OsuSetting.ScoreDisplayMode);
+                scoringMode.BindValueChanged(_ =&gt; Reload());
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,9,42,10,0],[45,13,45,31,0],[46,17,46,63,0],[49,13,49,49,0],[50,9,50,10,0],[64,9,64,72,0],[75,41,75,45,0],[75,50,75,68,0],[80,9,80,73,0],[92,9,92,76,0],[94,49,94,62,0],[96,9,96,74,0],[110,9,110,131,0],[111,9,111,10,0],[112,13,112,52,0],[113,13,113,30,0],[114,13,114,48,0],[116,13,116,42,0],[118,13,176,15,0],[178,13,178,83,0],[180,13,180,43,0],[181,17,181,52,0],[183,13,183,46,0],[184,9,184,10,0],[188,9,188,10,0],[189,13,189,41,0],[190,13,190,14,0],[191,17,191,54,0],[192,13,192,14,0],[194,13,194,45,0],[196,13,196,104,0],[197,13,197,100,0],[199,13,199,100,0],[200,13,200,14,0],[201,17,201,49,0],[203,17,206,20,0],[207,13,207,14,0],[210,13,210,38,0],[210,38,210,46,0],[210,46,210,48,0],[211,9,211,10,0],[214,13,214,174,0],[217,9,217,10,0],[218,13,218,33,0],[220,13,220,49,0],[220,49,220,74,0],[220,74,220,136,0],[220,136,220,137,0],[220,137,220,139,0],[222,13,222,49,0],[222,49,222,67,0],[222,67,222,69,0],[223,13,223,45,0],[223,45,223,63,0],[223,63,223,65,0],[224,13,224,56,0],[224,56,224,74,0],[224,74,224,76,0],[226,13,227,13,0],[227,13,227,14,0],[227,14,228,17,0],[228,17,228,32,0],[228,32,229,17,0],[229,17,229,18,0],[229,18,230,21,0],[230,21,230,58,0],[230,58,231,21,0],[231,21,231,89,0],[231,89,232,17,0],[232,17,232,18,0],[232,18,234,17,0],[234,17,234,18,0],[234,18,235,21,0],[235,21,235,57,0],[235,57,236,21,0],[236,21,236,73,0],[236,73,237,17,0],[237,17,237,18,0],[237,18,239,17,0],[239,17,239,36,0],[239,36,240,13,0],[240,13,240,14,0],[240,14,240,22,0],[242,13,242,69,0],[243,13,243,40,0],[243,40,243,94,0],[243,94,243,102,0],[244,9,244,10,0],[247,9,247,10,0],[248,13,248,27,0],[250,13,250,41,0],[251,13,251,14,0],[252,17,252,117,0],[254,17,254,98,0],[255,17,255,158,0],[256,17,256,161,0],[257,17,257,101,0],[258,13,258,14,0],[260,13,260,52,0],[261,13,261,53,0],[263,13,263,54,0],[265,13,265,46,0],[267,13,267,43,0],[268,17,268,53,0],[270,13,270,100,0],[271,17,271,159,0],[273,17,273,40,0],[275,13,275,98,0],[276,17,276,156,0],[278,17,278,39,0],[280,13,280,102,0],[281,17,281,162,0],[283,17,283,43,0],[286,13,286,14,0],[289,22,289,31,0],[289,33,289,64,0],[289,66,289,69,0],[290,21,290,63,0],[291,13,291,14,0],[294,13,294,14,0],[296,17,296,55,0],[299,17,299,56,0],[300,17,300,18,0],[302,21,302,56,0],[303,25,303,32,0],[307,21,307,89,0],[309,21,309,76,0],[311,21,311,81,0],[312,21,312,22,0],[313,25,313,107,0],[314,29,314,64,0],[315,21,315,22,0],[317,21,317,80,0],[318,21,318,22,0],[319,25,319,105,0],[320,29,320,63,0],[321,21,321,22,0],[322,17,322,18,0],[324,22,324,149,0],[325,17,325,18,0],[326,21,326,81,0],[327,21,327,106,0],[328,25,328,60,0],[329,17,329,18,0],[330,13,330,14,0],[331,9,331,10,0],[334,9,334,10,0],[335,13,335,34,0],[336,17,336,24,0],[338,13,338,37,0],[339,13,339,14,0],[340,17,340,38,0],[341,17,341,24,0],[344,13,344,48,0],[347,21,347,43,0],[348,21,348,27,0],[352,21,352,76,0],[353,21,353,27,0],[356,21,356,42,0],[357,21,357,27,0],[359,9,359,10,0],[362,9,362,10,0],[363,13,363,69,0],[364,13,364,14,0],[365,17,365,59,0],[366,17,366,64,0],[367,13,367,14,0],[369,13,369,66,0],[370,9,370,10,0],[372,56,375,10,0],[377,66,381,10,0],[383,55,387,10,0],[390,9,390,10,0],[391,13,391,26,0],[392,17,392,30,0],[394,13,394,30,0],[397,21,397,48,0],[398,21,398,34,0],[401,21,401,56,0],[404,29,404,95,0],[405,29,405,35,0],[408,29,408,83,0],[409,29,409,35,0],[412,29,412,82,0],[413,29,413,35,0],[416,21,416,33,0],[419,21,419,92,0],[420,21,420,33,0],[423,13,423,26,0],[424,9,424,10,0],[427,9,427,10,0],[428,13,428,30,0],[431,21,431,49,0],[432,21,432,27,0],[434,9,434,10,0],[441,47,441,51,0],[441,52,441,56,0],[444,19,444,113,0],[445,13,445,14,0],[446,17,446,46,0],[447,13,447,14,0],[450,13,450,14,0],[451,17,451,37,0],[455,17,455,92,0],[456,17,456,51,0],[456,51,456,59,0],[456,59,456,61,0],[457,13,457,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/Checks/CheckFewHitsounds.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Audio;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Rulesets.Edit.Checks.Components;
+using osu.Game.Rulesets.Objects;
+
+namespace osu.Game.Rulesets.Edit.Checks
+{
+    public abstract class CheckFewHitsounds : ICheck
+    {
+        /// &lt;summary&gt;
+        /// 2 measures (4/4) of 120 BPM, typically makes up a few patterns in the map.
+        /// This is almost always ok, but can still be useful for the mapper to make sure hitsounding coverage is good.
+        /// &lt;/summary&gt;
+        private const int negligible_threshold_time = 4000;
+
+        /// &lt;summary&gt;
+        /// 4 measures (4/4) of 120 BPM, typically makes up a large portion of a section in the song.
+        /// This is ok if the section is a quiet intro, for example.
+        /// &lt;/summary&gt;
+        private const int warning_threshold_time = 8000;
+
+        /// &lt;summary&gt;
+        /// 12 measures (4/4) of 120 BPM, typically makes up multiple sections in the song.
+        /// &lt;/summary&gt;
+        private const int problem_threshold_time = 24000;
+
+        // Should pass at least this many objects without hitsounds to be considered an issue (should work for Easy diffs too).
+        private const int warning_threshold_objects = 4;
+        private const int problem_threshold_objects = 16;
+
+        public CheckMetadata Metadata { get; } = new CheckMetadata(CheckCategory.Audio, &quot;Few or no hitsounds&quot;);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
+        {
+            new IssueTemplateLongPeriodProblem(this),
+            new IssueTemplateLongPeriodWarning(this),
+            new IssueTemplateLongPeriodNegligible(this),
+            new IssueTemplateNoHitsounds(this)
+        };
+
+        private bool mapHasHitsounds;
+        private int objectsWithoutHitsounds;
+        private double lastHitsoundTime;
+        private IReadOnlyList&lt;(double StartTime, double EndTime)&gt; excludedTimeRanges = Array.Empty&lt;(double StartTime, double EndTime)&gt;();
+
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            if (!context.CurrentDifficulty.Playable.HitObjects.Any())
+                yield break;
+
+            excludedTimeRanges = context.CurrentDifficulty.Playable.Breaks
+                                        .Select(b =&gt; (b.StartTime, b.EndTime))
+                                        .Concat(context.CurrentDifficulty.Playable.HitObjects
+                                                       .Where(IsExcludedFromHitsounding)
+                                                       .Select(h =&gt; (h.StartTime, EndTime: h.GetEndTime())))
+                                        .Where(period =&gt; period.EndTime &gt; period.StartTime)
+                                        .ToList();
+
+            mapHasHitsounds = false;
+            objectsWithoutHitsounds = 0;
+            lastHitsoundTime = context.CurrentDifficulty.Playable.HitObjects.First().StartTime;
+
+            var hitObjectsIncludingNested = new List&lt;HitObject&gt;();
+
+            foreach (var hitObject in context.CurrentDifficulty.Playable.HitObjects)
+            {
+                // Samples play on the end of objects. Some objects have nested objects to accomplish playing them elsewhere (e.g. slider head/repeat).
+                foreach (var nestedHitObject in hitObject.NestedHitObjects)
+                {
+                    if (!IsExcludedFromHitsounding(nestedHitObject))
+                        hitObjectsIncludingNested.Add(nestedHitObject);
+                }
+
+                if (!IsExcludedFromHitsounding(hitObject))
+                    hitObjectsIncludingNested.Add(hitObject);
+            }
+
+            var hitObjectsByEndTime = hitObjectsIncludingNested.OrderBy(o =&gt; o.GetEndTime()).ToList();
+            int hitObjectCount = hitObjectsByEndTime.Count;
+
+            for (int i = 0; i &lt; hitObjectCount; ++i)
+            {
+                var hitObject = hitObjectsByEndTime[i];
+
+                // This is used to perform an update at the end so that the period after the last hitsounded object can be an issue.
+                bool isLastObject = i == hitObjectCount - 1;
+
+                foreach (var issue in applyHitsoundUpdate(hitObject, isLastObject))
+                    yield return issue;
+            }
+
+            if (!mapHasHitsounds)
+                yield return new IssueTemplateNoHitsounds(this).Create();
+        }
+
+        private IEnumerable&lt;Issue&gt; applyHitsoundUpdate(HitObject hitObject, bool isLastObject = false)
+        {
+            double time = hitObject.GetEndTime();
+            bool hasHitsound = hitObject.Samples.Any(isHitsound);
+            bool couldHaveHitsound = hitObject.Samples.Any(isHitnormal);
+
+            // Only generating issues on hitsounded or last objects ensures we get one issue per long period.
+            // If there are no hitsounds we let the &quot;No hitsounds&quot; template take precedence.
+            if (hasHitsound || (isLastObject &amp;&amp; mapHasHitsounds))
+            {
+                double timeWithoutHitsounds = getTimeWithoutHitsounds(lastHitsoundTime, time);
+
+                if (timeWithoutHitsounds &gt; problem_threshold_time &amp;&amp; objectsWithoutHitsounds &gt; problem_threshold_objects)
+                    yield return new IssueTemplateLongPeriodProblem(this).Create(lastHitsoundTime, timeWithoutHitsounds);
+                else if (timeWithoutHitsounds &gt; warning_threshold_time &amp;&amp; objectsWithoutHitsounds &gt; warning_threshold_objects)
+                    yield return new IssueTemplateLongPeriodWarning(this).Create(lastHitsoundTime, timeWithoutHitsounds);
+                else if (timeWithoutHitsounds &gt; negligible_threshold_time &amp;&amp; objectsWithoutHitsounds &gt; warning_threshold_objects)
+                    yield return new IssueTemplateLongPeriodNegligible(this).Create(lastHitsoundTime, timeWithoutHitsounds);
+            }
+
+            if (hasHitsound)
+            {
+                mapHasHitsounds = true;
+                objectsWithoutHitsounds = 0;
+                lastHitsoundTime = time;
+            }
+            else if (couldHaveHitsound)
+                ++objectsWithoutHitsounds;
+        }
+
+        /// &lt;summary&gt;
+        /// Milliseconds between &lt;paramref name=&quot;start&quot;/&gt; and &lt;paramref name=&quot;end&quot;/&gt; that are not covered by a &lt;see cref=&quot;BreakPeriod&quot;/&gt; or excluded object duration.
+        /// &lt;/summary&gt;
+        private double getTimeWithoutHitsounds(double start, double end)
+        {
+            if (end &lt;= start)
+                return 0;
+
+            double duration = end - start;
+
+            foreach (var period in excludedTimeRanges)
+            {
+                double overlapStart = Math.Max(start, period.StartTime);
+                double overlapEnd = Math.Min(end, period.EndTime);
+
+                if (overlapEnd &gt; overlapStart)
+                    duration -= overlapEnd - overlapStart;
+            }
+
+            return Math.Max(0, duration);
+        }
+
+        // Intended to be overridden by ruleset-specific objects e.g. spinners, banana showers.
+        protected virtual bool IsExcludedFromHitsounding(HitObject hitObject) =&gt; false;
+
+        private bool isHitsound(HitSampleInfo sample) =&gt; HitSampleInfo.ALL_ADDITIONS.Any(sample.Name.Contains);
+        private bool isHitnormal(HitSampleInfo sample) =&gt; sample.Name.Contains(HitSampleInfo.HIT_NORMAL);
+
+        public abstract class IssueTemplateLongPeriod : IssueTemplate
+        {
+            protected IssueTemplateLongPeriod(ICheck check, IssueType type)
+                : base(check, type, &quot;Long period without hitsounds ({0:F1} seconds).&quot;)
+            {
+            }
+
+            public Issue Create(double time, double duration) =&gt; new Issue(this, duration / 1000f) { Time = time };
+        }
+
+        public class IssueTemplateLongPeriodProblem : IssueTemplateLongPeriod
+        {
+            public IssueTemplateLongPeriodProblem(ICheck check)
+                : base(check, IssueType.Problem)
+            {
+            }
+        }
+
+        public class IssueTemplateLongPeriodWarning : IssueTemplateLongPeriod
+        {
+            public IssueTemplateLongPeriodWarning(ICheck check)
+                : base(check, IssueType.Warning)
+            {
+            }
+        }
+
+        public class IssueTemplateLongPeriodNegligible : IssueTemplateLongPeriod
+        {
+            public IssueTemplateLongPeriodNegligible(ICheck check)
+                : base(check, IssueType.Negligible)
+            {
+            }
+        }
+
+        public class IssueTemplateNoHitsounds : IssueTemplate
+        {
+            public IssueTemplateNoHitsounds(ICheck check)
+                : base(check, IssueType.Problem, &quot;There are no hitsounds.&quot;)
+            {
+            }
+
+            public Issue Create() =&gt; new Issue(this);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,41,37,45,0],[37,50,37,111,0],[39,64,45,10,0],[50,9,50,138,0],[53,9,53,10,0],[54,13,54,70,0],[55,17,55,29,0],[57,13,58,54,0],[58,54,58,78,0],[58,78,61,69,0],[61,69,61,107,0],[61,107,62,58,0],[62,58,62,91,0],[62,91,63,51,0],[65,13,65,37,0],[66,13,66,41,0],[67,13,67,96,0],[69,13,69,67,0],[71,13,71,20,0],[71,22,71,35,0],[71,36,71,38,0],[71,39,71,84,0],[72,13,72,14,0],[74,17,74,24,0],[74,26,74,45,0],[74,46,74,48,0],[74,49,74,75,0],[75,17,75,18,0],[76,21,76,69,0],[77,25,77,72,0],[78,17,78,18,0],[80,17,80,59,0],[81,21,81,62,0],[82,13,82,14,0],[84,13,84,78,0],[84,78,84,92,0],[84,92,84,103,0],[85,13,85,60,0],[87,18,87,27,0],[87,29,87,47,0],[87,49,87,52,0],[88,13,88,14,0],[89,17,89,56,0],[92,17,92,61,0],[94,17,94,24,0],[94,26,94,35,0],[94,36,94,38,0],[94,39,94,83,0],[95,21,95,40,0],[96,13,96,14,0],[98,13,98,34,0],[99,17,99,74,0],[100,9,100,10,0],[103,9,103,10,0],[104,13,104,50,0],[105,13,105,66,0],[106,13,106,73,0],[110,13,110,66,0],[111,13,111,14,0],[112,17,112,95,0],[114,17,114,122,0],[115,21,115,122,0],[116,22,116,127,0],[117,21,117,122,0],[118,22,118,130,0],[119,21,119,125,0],[120,13,120,14,0],[122,13,122,29,0],[123,13,123,14,0],[124,17,124,40,0],[125,17,125,45,0],[126,17,126,41,0],[127,13,127,14,0],[128,18,128,40,0],[129,17,129,43,0],[130,9,130,10,0],[136,9,136,10,0],[137,13,137,30,0],[138,17,138,26,0],[140,13,140,43,0],[142,13,142,20,0],[142,22,142,32,0],[142,33,142,35,0],[142,36,142,54,0],[143,13,143,14,0],[144,17,144,73,0],[145,17,145,67,0],[147,17,147,47,0],[148,21,148,59,0],[149,13,149,14,0],[151,13,151,42,0],[152,9,152,10,0],[155,82,155,87,0],[157,58,157,111,0],[158,59,158,105,0],[163,19,163,87,0],[164,13,164,14,0],[165,13,165,14,0],[167,66,167,115,0],[173,19,173,49,0],[174,13,174,14,0],[175,13,175,14,0],[181,19,181,49,0],[182,13,182,14,0],[183,13,183,14,0],[189,19,189,52,0],[190,13,190,14,0],[191,13,191,14,0],[197,19,197,76,0],[198,13,198,14,0],[199,13,199,14,0],[201,38,201,53,0]]);
+    </script>
+  </body>
+</html>

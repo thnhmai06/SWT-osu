@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Replays/OsuAutoGenerator.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using osuTK;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Osu.Objects;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Graphics;
+using osu.Game.Replays;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Osu.Beatmaps;
+using osu.Game.Rulesets.Osu.Scoring;
+using osu.Game.Rulesets.Scoring;
+
+namespace osu.Game.Rulesets.Osu.Replays
+{
+    public class OsuAutoGenerator : OsuAutoGeneratorBase
+    {
+        public const double MIN_FRAME_SEPARATION_FOR_ALTERNATING = 266;
+
+        public new OsuBeatmap Beatmap =&gt; (OsuBeatmap)base.Beatmap;
+
+        #region Parameters
+
+        /// &lt;summary&gt;
+        /// If delayed movements should be used, causing the cursor to stay on each hitobject for as long as possible.
+        /// Mainly for Autopilot.
+        /// &lt;/summary&gt;
+        public bool DelayedMovements; // ModManager.CheckActive(Mods.Relax2);
+
+        #endregion
+
+        #region Constants
+
+        private readonly HitWindows defaultHitWindows;
+
+        /// &lt;summary&gt;
+        /// What easing to use when moving between hitobjects
+        /// &lt;/summary&gt;
+        private Easing preferredEasing =&gt; DelayedMovements ? Easing.InOutCubic : Easing.Out;
+
+        #endregion
+
+        #region Construction / Initialisation
+
+        public OsuAutoGenerator(IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods)
+            : base(beatmap, mods)
+        {
+            defaultHitWindows = new OsuHitWindows();
+            defaultHitWindows.SetDifficulty(Beatmap.Difficulty.OverallDifficulty);
+        }
+
+        #endregion
+
+        #region Generator
+
+        /// &lt;summary&gt;
+        /// Which button (left or right) to use for the current hitobject.
+        /// Even means LMB will be used to click, odd means RMB will be used.
+        /// This keeps track of the button previously used for alt/singletap logic.
+        /// &lt;/summary&gt;
+        private int buttonIndex;
+
+        public override Replay Generate()
+        {
+            if (Beatmap.HitObjects.Count == 0)
+                return Replay;
+
+            buttonIndex = 0;
+
+            AddFrameToReplay(new OsuReplayFrame(Beatmap.HitObjects[0].StartTime - 1500, new Vector2(256, 500)));
+
+            for (int i = 0; i &lt; Beatmap.HitObjects.Count; i++)
+            {
+                OsuHitObject h = Beatmap.HitObjects[i];
+
+                if (DelayedMovements &amp;&amp; i &gt; 0)
+                {
+                    OsuHitObject prev = Beatmap.HitObjects[i - 1];
+                    addDelayedMovements(h, prev);
+                }
+
+                addHitObjectReplay(h);
+            }
+
+            return Replay;
+        }
+
+        private void addDelayedMovements(OsuHitObject h, OsuHitObject prev)
+        {
+            double endTime = prev.GetEndTime();
+
+            HitWindows? hitWindows = null;
+
+            switch (h)
+            {
+                case HitCircle hitCircle:
+                    hitWindows = hitCircle.HitWindows;
+                    break;
+
+                case Slider slider:
+                    hitWindows = slider.TailCircle.HitWindows;
+                    break;
+
+                case Spinner:
+                    hitWindows = defaultHitWindows;
+                    break;
+            }
+
+            Debug.Assert(hitWindows != null);
+
+            // Make the cursor stay at a hitObject as long as possible (mainly for autopilot).
+            if (h.StartTime - hitWindows.WindowFor(HitResult.Miss) &gt; endTime + hitWindows.WindowFor(HitResult.Meh) + 50)
+            {
+                if (!(prev is Spinner) &amp;&amp; h.StartTime - endTime &lt; 1000)
+                    AddFrameToReplay(new OsuReplayFrame(endTime + hitWindows.WindowFor(HitResult.Meh), new Vector2(prev.StackedEndPosition.X, prev.StackedEndPosition.Y)));
+
+                if (!(h is Spinner))
+                    AddFrameToReplay(new OsuReplayFrame(h.StartTime - hitWindows.WindowFor(HitResult.Miss), new Vector2(h.StackedPosition.X, h.StackedPosition.Y)));
+            }
+            else if (h.StartTime - hitWindows.WindowFor(HitResult.Meh) &gt; endTime + hitWindows.WindowFor(HitResult.Meh) + 50)
+            {
+                if (!(prev is Spinner) &amp;&amp; h.StartTime - endTime &lt; 1000)
+                    AddFrameToReplay(new OsuReplayFrame(endTime + hitWindows.WindowFor(HitResult.Meh), new Vector2(prev.StackedEndPosition.X, prev.StackedEndPosition.Y)));
+
+                if (!(h is Spinner))
+                    AddFrameToReplay(new OsuReplayFrame(h.StartTime - hitWindows.WindowFor(HitResult.Meh), new Vector2(h.StackedPosition.X, h.StackedPosition.Y)));
+            }
+            else if (h.StartTime - hitWindows.WindowFor(HitResult.Ok) &gt; endTime + hitWindows.WindowFor(HitResult.Ok) + 50)
+            {
+                if (!(prev is Spinner) &amp;&amp; h.StartTime - endTime &lt; 1000)
+                    AddFrameToReplay(new OsuReplayFrame(endTime + hitWindows.WindowFor(HitResult.Ok), new Vector2(prev.StackedEndPosition.X, prev.StackedEndPosition.Y)));
+
+                if (!(h is Spinner))
+                    AddFrameToReplay(new OsuReplayFrame(h.StartTime - hitWindows.WindowFor(HitResult.Ok), new Vector2(h.StackedPosition.X, h.StackedPosition.Y)));
+            }
+        }
+
+        private void addHitObjectReplay(OsuHitObject h)
+        {
+            // Default values for circles/sliders
+            Vector2 startPosition = h.StackedPosition;
+            Easing easing = preferredEasing;
+            float spinnerDirection = -1;
+
+            // The startPosition for the slider should not be its .Position, but the point on the circle whose tangent crosses the current cursor position
+            // We also modify spinnerDirection so it spins in the direction it enters the spin circle, to make a smooth transition.
+            // TODO: Shouldn&#39;t the spinner always spin in the same direction?
+            if (h is Spinner spinner)
+            {
+                // spinners with 0 spins required will auto-complete - don&#39;t bother
+                if (spinner.SpinsRequired == 0)
+                    return;
+
+                calcSpinnerStartPosAndDirection(((OsuReplayFrame)Frames[^1]).Position, out startPosition, out spinnerDirection);
+
+                Vector2 spinCentreOffset = SPINNER_CENTRE - ((OsuReplayFrame)Frames[^1]).Position;
+
+                if (spinCentreOffset.Length &gt; SPIN_RADIUS)
+                {
+                    // If moving in from the outside, don&#39;t ease out (default eases out). This means auto will &quot;start&quot; spinning immediately after moving into position.
+                    easing = Easing.In;
+                }
+            }
+
+            // Do some nice easing for cursor movements
+            if (Frames.Count &gt; 0)
+            {
+                moveToHitObject(h, startPosition, easing);
+            }
+
+            // Add frames to click the hitobject
+            addHitObjectClickFrames(h, startPosition, spinnerDirection);
+        }
+
+        #endregion
+
+        #region Helper subroutines
+
+        private static void calcSpinnerStartPosAndDirection(Vector2 prevPos, out Vector2 startPosition, out float spinnerDirection)
+        {
+            Vector2 spinCentreOffset = SPINNER_CENTRE - prevPos;
+            float distFromCentre = spinCentreOffset.Length;
+            float distToTangentPoint = MathF.Sqrt(distFromCentre * distFromCentre - SPIN_RADIUS * SPIN_RADIUS);
+
+            if (distFromCentre &gt; SPIN_RADIUS)
+            {
+                // Previous cursor position was outside spin circle, set startPosition to the tangent point.
+
+                // Angle between centre offset and tangent point offset.
+                float angle = MathF.Asin(SPIN_RADIUS / distFromCentre);
+
+                if (angle &gt; 0)
+                {
+                    spinnerDirection = -1;
+                }
+                else
+                {
+                    spinnerDirection = 1;
+                }
+
+                // Rotate by angle so it&#39;s parallel to tangent line
+                spinCentreOffset.X = spinCentreOffset.X * MathF.Cos(angle) - spinCentreOffset.Y * MathF.Sin(angle);
+                spinCentreOffset.Y = spinCentreOffset.X * MathF.Sin(angle) + spinCentreOffset.Y * MathF.Cos(angle);
+
+                // Set length to distToTangentPoint
+                spinCentreOffset.Normalize();
+                spinCentreOffset *= distToTangentPoint;
+
+                // Move along the tangent line, now startPosition is at the tangent point.
+                startPosition = prevPos + spinCentreOffset;
+            }
+            else if (spinCentreOffset.Length &gt; 0)
+            {
+                // Previous cursor position was inside spin circle, set startPosition to the nearest point on spin circle.
+                startPosition = SPINNER_CENTRE - spinCentreOffset * (SPIN_RADIUS / spinCentreOffset.Length);
+                spinnerDirection = 1;
+            }
+            else
+            {
+                // Degenerate case where cursor position is exactly at the centre of the spin circle.
+                startPosition = SPINNER_CENTRE + new Vector2(0, -SPIN_RADIUS);
+                spinnerDirection = 1;
+            }
+        }
+
+        private void moveToHitObject(OsuHitObject h, Vector2 targetPos, Easing easing)
+        {
+            OsuReplayFrame lastFrame = (OsuReplayFrame)Frames[^1];
+
+            // Wait until Auto could &quot;see and react&quot; to the next note.
+            double waitTime = h.StartTime - Math.Max(0.0, h.TimePreempt - getReactionTime(h.StartTime - h.TimePreempt));
+            bool hasWaited = false;
+
+            if (waitTime &gt; lastFrame.Time)
+            {
+                lastFrame = new OsuReplayFrame(waitTime, lastFrame.Position) { Actions = lastFrame.Actions };
+                hasWaited = true;
+                AddFrameToReplay(lastFrame);
+            }
+
+            double timeDifference = ApplyModsToTimeDelta(lastFrame.Time, h.StartTime);
+            OsuReplayFrame? lastLastFrame = Frames.Count &gt;= 2 ? (OsuReplayFrame)Frames[^2] : null;
+
+            if (timeDifference &gt;= 0)
+            {
+                // If the last frame is a key-up frame and there has been no wait period, adjust the last frame&#39;s position such that it begins eased movement instantaneously.
+                if (lastLastFrame != null &amp;&amp; lastFrame is OsuKeyUpReplayFrame &amp;&amp; !hasWaited)
+                {
+                    // [lastLastFrame] ... [lastFrame] ... [current frame]
+                    // We want to find the cursor position at lastFrame, so interpolate between lastLastFrame and the new target position.
+                    lastFrame.Position = Interpolation.ValueAt(lastFrame.Time, lastFrame.Position, targetPos, lastLastFrame.Time, h.StartTime, easing);
+                }
+
+                Vector2 lastPosition = lastFrame.Position;
+
+                // Perform the rest of the eased movement until the target position is reached.
+                for (double time = lastFrame.Time + GetFrameDelay(lastFrame.Time); time &lt; h.StartTime; time += GetFrameDelay(time))
+                {
+                    Vector2 currentPosition = Interpolation.ValueAt(time, lastPosition, targetPos, lastFrame.Time, h.StartTime, easing);
+                    AddFrameToReplay(new OsuReplayFrame((int)time, new Vector2(currentPosition.X, currentPosition.Y)) { Actions = lastFrame.Actions });
+                }
+            }
+
+            // Start alternating once the time separation is too small (faster than ~225BPM).
+            if (timeDifference &gt;= 0 &amp;&amp; timeDifference &lt; MIN_FRAME_SEPARATION_FOR_ALTERNATING)
+                buttonIndex++;
+            else
+                buttonIndex = 0;
+        }
+
+        /// &lt;summary&gt;
+        /// Calculates the &quot;reaction time&quot; in ms between &quot;seeing&quot; a new hit object and moving to &quot;react&quot; to it.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Already superhuman, but still somewhat realistic.
+        /// &lt;/remarks&gt;
+        private double getReactionTime(double timeInstant) =&gt; ApplyModsToRate(timeInstant, 100);
+
+        // Add frames to click the hitobject
+        private void addHitObjectClickFrames(OsuHitObject h, Vector2 startPosition, float spinnerDirection)
+        {
+            // Time to insert the first frame which clicks the object
+            // Here we mainly need to determine which button to use
+            var action = buttonIndex % 2 == 0 ? OsuAction.LeftButton : OsuAction.RightButton;
+
+            var startFrame = new OsuReplayFrame(h.StartTime, new Vector2(startPosition.X, startPosition.Y), action);
+
+            // TODO: Why do we delay 1 ms if the object is a spinner? There already is KEY_UP_DELAY from hEndTime.
+            double hEndTime = h.GetEndTime() + KEY_UP_DELAY;
+            int endDelay = h is Spinner ? 1 : 0;
+            var endFrame = new OsuKeyUpReplayFrame(hEndTime + endDelay, new Vector2(h.StackedEndPosition.X, h.StackedEndPosition.Y));
+
+            // Decrement because we want the previous frame, not the next one
+            int index = FindInsertionIndex(startFrame) - 1;
+
+            // If the previous frame has a button pressed, force alternation.
+            // If there are frames ahead, modify those to use the new button press.
+            // Do we have a previous frame? No need to check for &lt; replay.Count since we decremented!
+            if (index &gt;= 0)
+            {
+                var previousFrame = (OsuReplayFrame)Frames[index];
+                var previousActions = previousFrame.Actions;
+
+                // If a button is already held, then we simply alternate
+                if (previousActions.Any())
+                {
+                    // Force alternation if we have the same button. Otherwise we can just keep the naturally to us assigned button.
+                    if (previousActions.Contains(action))
+                    {
+                        action = action == OsuAction.LeftButton ? OsuAction.RightButton : OsuAction.LeftButton;
+                        startFrame.Actions.Clear();
+                        startFrame.Actions.Add(action);
+                    }
+
+                    // We always follow the most recent slider / spinner, so remove any other frames that occur while it exists.
+                    int endIndex = FindInsertionIndex(endFrame);
+
+                    if (index &lt; Frames.Count - 1)
+                        Frames.RemoveRange(index + 1, Math.Max(0, endIndex - (index + 1)));
+
+                    // After alternating we need to keep holding the other button in the future rather than the previous one.
+                    for (int j = index + 1; j &lt; Frames.Count; ++j)
+                    {
+                        var frame = (OsuReplayFrame)Frames[j];
+
+                        // Don&#39;t affect frames which stop pressing a button!
+                        if (j &lt; Frames.Count - 1 || frame.Actions.SequenceEqual(previousActions))
+                        {
+                            frame.Actions.Clear();
+                            frame.Actions.Add(action);
+                        }
+                    }
+                }
+            }
+
+            AddFrameToReplay(startFrame);
+
+            // 0.05 rad/ms, or ~477 RPM, as per stable.
+            // the redundant conversion from RPM to rad/ms is here for ease of testing custom SPM specs.
+            const float spin_rpm = 0.05f / (2 * MathF.PI) * 60000;
+            float radsPerMillisecond = float.DegreesToRadians(spin_rpm * 360) / 60000;
+
+            switch (h)
+            {
+                // We add intermediate frames for spinning / following a slider here.
+                case Spinner spinner:
+                    Vector2 difference = startPosition - SPINNER_CENTRE;
+
+                    float radius = difference.Length;
+                    float angle = radius == 0 ? 0 : MathF.Atan2(difference.Y, difference.X);
+
+                    double t;
+                    double previousFrame = h.StartTime;
+
+                    for (double nextFrame = h.StartTime + GetFrameDelay(h.StartTime); nextFrame &lt; spinner.EndTime; nextFrame += GetFrameDelay(nextFrame))
+                    {
+                        t = ApplyModsToTimeDelta(previousFrame, nextFrame) * spinnerDirection;
+                        angle += (float)t * radsPerMillisecond;
+
+                        Vector2 pos = SPINNER_CENTRE + CirclePosition(angle, SPIN_RADIUS);
+                        AddFrameToReplay(new OsuReplayFrame((int)nextFrame, new Vector2(pos.X, pos.Y), action));
+
+                        previousFrame = nextFrame;
+                    }
+
+                    t = ApplyModsToTimeDelta(previousFrame, spinner.EndTime) * spinnerDirection;
+                    angle += (float)t * radsPerMillisecond;
+
+                    Vector2 endPosition = SPINNER_CENTRE + CirclePosition(angle, SPIN_RADIUS);
+
+                    AddFrameToReplay(new OsuReplayFrame(spinner.EndTime, new Vector2(endPosition.X, endPosition.Y), action));
+
+                    endFrame.Position = endPosition;
+                    break;
+
+                case Slider slider:
+                    for (double j = GetFrameDelay(slider.StartTime); j &lt; slider.Duration; j += GetFrameDelay(slider.StartTime + j))
+                    {
+                        Vector2 pos = slider.StackedPositionAt(j / slider.Duration);
+                        AddFrameToReplay(new OsuReplayFrame(h.StartTime + j, new Vector2(pos.X, pos.Y), action));
+                    }
+
+                    AddFrameToReplay(new OsuReplayFrame(slider.EndTime, new Vector2(slider.StackedEndPosition.X, slider.StackedEndPosition.Y), action));
+                    break;
+            }
+
+            // We only want to let go of our button if we are at the end of the current replay. Otherwise something is still going on after us so we need to keep the button pressed!
+            if (Frames[^1].Time &lt;= endFrame.Time)
+                AddFrameToReplay(endFrame);
+        }
+
+        #endregion
+
+        private class OsuKeyUpReplayFrame : OsuReplayFrame
+        {
+            public OsuKeyUpReplayFrame(double time, Vector2 position)
+                : base(time, position)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,42,26,66,0],[45,43,45,92,0],[52,15,52,34,0],[53,9,53,10,0],[54,13,54,53,0],[55,13,55,83,0],[56,9,56,10,0],[70,9,70,10,0],[71,13,71,47,0],[72,17,72,31,0],[74,13,74,29,0],[76,13,76,113,0],[78,18,78,27,0],[78,29,78,57,0],[78,59,78,62,0],[79,13,79,14,0],[80,17,80,56,0],[82,17,82,47,0],[83,17,83,18,0],[84,21,84,67,0],[85,21,85,50,0],[86,17,86,18,0],[88,17,88,39,0],[89,13,89,14,0],[91,13,91,27,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,48,0],[98,13,98,43,0],[100,13,100,23,0],[103,21,103,55,0],[104,21,104,27,0],[107,21,107,63,0],[108,21,108,27,0],[111,21,111,52,0],[112,21,112,27,0],[115,13,115,46,0],[118,13,118,121,0],[119,13,119,14,0],[120,17,120,72,0],[121,21,121,172,0],[123,17,123,37,0],[124,21,124,165,0],[125,13,125,14,0],[126,18,126,125,0],[127,13,127,14,0],[128,17,128,72,0],[129,21,129,172,0],[131,17,131,37,0],[132,21,132,164,0],[133,13,133,14,0],[134,18,134,123,0],[135,13,135,14,0],[136,17,136,72,0],[137,21,137,171,0],[139,17,139,37,0],[140,21,140,163,0],[141,13,141,14,0],[142,9,142,10,0],[145,9,145,10,0],[147,13,147,55,0],[148,13,148,45,0],[149,13,149,41,0],[154,13,154,38,0],[155,13,155,14,0],[157,17,157,48,0],[158,21,158,28,0],[160,17,160,129,0],[162,17,162,99,0],[164,17,164,59,0],[165,17,165,18,0],[167,21,167,40,0],[168,17,168,18,0],[169,13,169,14,0],[172,13,172,34,0],[173,13,173,14,0],[174,17,174,59,0],[175,13,175,14,0],[178,13,178,73,0],[179,9,179,10,0],[186,9,186,10,0],[187,13,187,65,0],[188,13,188,60,0],[189,13,189,112,0],[191,13,191,46,0],[192,13,192,14,0],[196,17,196,72,0],[198,17,198,31,0],[199,17,199,18,0],[200,21,200,43,0],[201,17,201,18,0],[203,17,203,18,0],[204,21,204,42,0],[205,17,205,18,0],[208,17,208,116,0],[209,17,209,116,0],[212,17,212,46,0],[213,17,213,56,0],[216,17,216,60,0],[217,13,217,14,0],[218,18,218,50,0],[219,13,219,14,0],[221,17,221,109,0],[222,17,222,38,0],[223,13,223,14,0],[225,13,225,14,0],[227,17,227,79,0],[228,17,228,38,0],[229,13,229,14,0],[230,9,230,10,0],[233,9,233,10,0],[234,13,234,67,0],[237,13,237,121,0],[238,13,238,36,0],[240,13,240,43,0],[241,13,241,14,0],[242,17,242,110,0],[243,17,243,34,0],[244,17,244,45,0],[245,13,245,14,0],[247,13,247,87,0],[248,13,248,99,0],[250,13,250,37,0],[251,13,251,14,0],[253,17,253,93,0],[254,17,254,18,0],[257,21,257,152,0],[258,17,258,18,0],[260,17,260,59,0],[263,22,263,82,0],[263,84,263,102,0],[263,104,263,131,0],[264,17,264,18,0],[265,21,265,137,0],[266,21,266,152,0],[267,17,267,18,0],[268,13,268,14,0],[271,13,271,94,0],[272,17,272,31,0],[274,17,274,33,0],[275,9,275,10,0],[283,63,283,96,0],[287,9,287,10,0],[290,13,290,94,0],[292,13,292,117,0],[295,13,295,61,0],[296,13,296,49,0],[297,13,297,134,0],[300,13,300,60,0],[305,13,305,28,0],[306,13,306,14,0],[307,17,307,67,0],[308,17,308,61,0],[311,17,311,43,0],[312,17,312,18,0],[314,21,314,58,0],[315,21,315,22,0],[316,25,316,112,0],[317,25,317,52,0],[318,25,318,56,0],[319,21,319,22,0],[322,21,322,65,0],[324,21,324,50,0],[325,25,325,92,0],[328,26,328,43,0],[328,45,328,61,0],[328,63,328,66,0],[329,21,329,22,0],[330,25,330,63,0],[333,25,333,98,0],[334,25,334,26,0],[335,29,335,51,0],[336,29,336,55,0],[337,25,337,26,0],[338,21,338,22,0],[339,17,339,18,0],[340,13,340,14,0],[342,13,342,42,0],[347,13,347,87,0],[349,13,349,23,0],[353,21,353,73,0],[355,21,355,54,0],[356,21,356,93,0],[359,21,359,56,0],[361,26,361,85,0],[361,87,361,114,0],[361,116,361,153,0],[362,21,362,22,0],[363,25,363,95,0],[364,25,364,64,0],[366,25,366,91,0],[367,25,367,113,0],[369,25,369,51,0],[370,21,370,22,0],[372,21,372,97,0],[373,21,373,60,0],[375,21,375,95,0],[377,21,377,126,0],[379,21,379,53,0],[380,21,380,27,0],[383,26,383,68,0],[383,70,383,89,0],[383,91,383,131,0],[384,21,384,22,0],[385,25,385,85,0],[386,25,386,114,0],[387,21,387,22,0],[389,21,389,153,0],[390,21,390,27,0],[394,13,394,50,0],[395,17,395,44,0],[396,9,396,10,0],[403,19,403,39,0],[404,13,404,14,0],[405,13,405,14,0]]);
+    </script>
+  </body>
+</html>

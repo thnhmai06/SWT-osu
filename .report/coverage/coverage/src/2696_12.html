@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Profile/Header/Components/FollowersButton.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Graphics;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Resources.Localisation.Web;
+
+namespace osu.Game.Overlays.Profile.Header.Components
+{
+    public partial class FollowersButton : ProfileHeaderStatisticsButton
+    {
+        public readonly Bindable&lt;UserProfileData?&gt; User = new Bindable&lt;UserProfileData?&gt;();
+
+        // Because it is impossible to update the number of friends after the operation,
+        // the number of friends obtained is stored and modified locally.
+        private int followerCount;
+
+        public override LocalisableString TooltipText
+        {
+            get
+            {
+                switch (status.Value)
+                {
+                    case FriendStatus.Self:
+                        return FriendsStrings.ButtonsDisabled;
+
+                    case FriendStatus.None:
+                        return FriendsStrings.ButtonsAdd;
+
+                    case FriendStatus.NotMutual:
+                    case FriendStatus.Mutual:
+                        return FriendsStrings.ButtonsRemove;
+                }
+
+                return FriendsStrings.TitleCompact;
+            }
+        }
+
+        protected override IconUsage Icon =&gt; FontAwesome.Solid.User;
+
+        private readonly IBindableList&lt;APIRelation&gt; apiFriends = new BindableList&lt;APIRelation&gt;();
+        private readonly IBindable&lt;APIUser&gt; localUser = new Bindable&lt;APIUser&gt;();
+
+        private readonly Bindable&lt;FriendStatus&gt; status = new Bindable&lt;FriendStatus&gt;();
+
+        [Resolved]
+        private OsuColour colour { get; set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(INotificationOverlay? notifications)
+        {
+            localUser.BindTo(api.LocalUser);
+
+            status.BindValueChanged(_ =&gt;
+            {
+                updateIcon();
+                updateColor();
+            });
+
+            Action += () =&gt;
+            {
+                if (User.Value == null)
+                    return;
+
+                if (status.Value == FriendStatus.Self)
+                    return;
+
+                ShowLoadingLayer();
+
+                APIRequest req = status.Value == FriendStatus.None ? new AddFriendRequest(User.Value.User.OnlineID) : new DeleteFriendRequest(User.Value.User.OnlineID);
+
+                req.Success += () =&gt;
+                {
+                    if (req is AddFriendRequest addedRequest)
+                    {
+                        SetValue(++followerCount);
+                        status.Value = addedRequest.Response?.UserRelation.Mutual == true ? FriendStatus.Mutual : FriendStatus.NotMutual;
+                    }
+                    else
+                    {
+                        SetValue(--followerCount);
+                        status.Value = FriendStatus.None;
+                    }
+
+                    api.LocalUserState.UpdateFriends();
+                    HideLoadingLayer();
+                };
+
+                req.Failure += e =&gt;
+                {
+                    notifications?.Post(new SimpleNotification
+                    {
+                        Text = e.Message,
+                        Icon = FontAwesome.Solid.Times,
+                    });
+
+                    HideLoadingLayer();
+                };
+
+                api.Queue(req);
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            apiFriends.BindTo(api.LocalUserState.Friends);
+            apiFriends.BindCollectionChanged((_, _) =&gt; Schedule(updateStatus));
+
+            User.BindValueChanged(u =&gt;
+            {
+                followerCount = u.NewValue?.User.FollowerCount ?? 0;
+                updateStatus();
+            }, true);
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            if (status.Value &gt; FriendStatus.None)
+            {
+                SetIcon(FontAwesome.Solid.UserTimes);
+            }
+
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            base.OnHoverLost(e);
+
+            updateIcon();
+        }
+
+        private void updateStatus()
+        {
+            SetValue(followerCount);
+
+            if (localUser.Value.OnlineID == User.Value?.User.OnlineID)
+            {
+                status.Value = FriendStatus.Self;
+                return;
+            }
+
+            var friend = apiFriends.FirstOrDefault(u =&gt; User.Value?.User.OnlineID == u.TargetID);
+
+            if (friend != null)
+            {
+                status.Value = friend.Mutual ? FriendStatus.Mutual : FriendStatus.NotMutual;
+            }
+            else
+            {
+                status.Value = FriendStatus.None;
+            }
+        }
+
+        private void updateIcon()
+        {
+            switch (status.Value)
+            {
+                case FriendStatus.Self:
+                    SetIcon(FontAwesome.Solid.User);
+                    break;
+
+                case FriendStatus.None:
+                    SetIcon(FontAwesome.Solid.UserPlus);
+                    break;
+
+                case FriendStatus.NotMutual:
+                    SetIcon(FontAwesome.Solid.User);
+                    break;
+
+                case FriendStatus.Mutual:
+                    SetIcon(FontAwesome.Solid.UserFriends);
+                    break;
+            }
+        }
+
+        private void updateColor()
+        {
+            // https://github.com/ppy/osu-web/blob/0a5367a4a68a6cdf450eb483251b3cf03b3ac7d2/resources/css/bem/user-action-button.less
+
+            switch (status.Value)
+            {
+                case FriendStatus.Self:
+                case FriendStatus.None:
+                    IdleColour = colourProvider.Background6;
+                    HoverColour = colourProvider.Background5;
+                    break;
+
+                case FriendStatus.NotMutual:
+                    IdleColour = colour.Green.Opacity(0.7f);
+                    HoverColour = IdleColour.Value.Lighten(0.1f);
+                    break;
+
+                case FriendStatus.Mutual:
+                    IdleColour = colour.Pink.Opacity(0.7f);
+                    HoverColour = IdleColour.Value.Lighten(0.1f);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            EffectTargets.ForEach(d =&gt; d.FadeColour(IsHovered ? HoverColour.Value : IdleColour.Value, FADE_DURATION, Easing.OutQuint));
+        }
+
+        private enum FriendStatus
+        {
+            Self,
+            None,
+            NotMutual,
+            Mutual,
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,9,25,92,0],[34,13,34,14,0],[35,17,35,38,0],[38,25,38,63,0],[41,25,41,58,0],[45,25,45,61,0],[48,17,48,52,0],[49,13,49,14,0],[52,46,52,68,0],[54,9,54,98,0],[55,9,55,81,0],[57,9,57,87,0],[60,36,60,40,0],[60,41,60,45,0],[60,50,60,55,0],[63,56,63,60,0],[63,61,63,65,0],[63,70,63,75,0],[66,36,66,40,0],[66,41,66,45,0],[66,50,66,55,0],[70,9,70,10,0],[71,13,71,45,0],[73,13,74,13,0],[74,13,74,14,0],[74,14,75,17,0],[75,17,75,30,0],[75,30,76,17,0],[76,17,76,31,0],[76,31,77,13,0],[77,13,77,14,0],[77,14,77,16,0],[79,13,80,13,0],[80,13,80,14,0],[80,14,81,17,0],[81,17,81,40,0],[81,40,82,21,0],[82,21,82,28,0],[82,28,84,17,0],[84,17,84,55,0],[84,55,85,21,0],[85,21,85,28,0],[85,28,87,17,0],[87,17,87,36,0],[87,36,89,17,0],[89,17,89,169,0],[89,169,91,17,0],[91,17,92,17,0],[92,17,92,18,0],[92,18,93,21,0],[93,21,93,62,0],[93,62,94,21,0],[94,21,94,22,0],[94,22,95,25,0],[95,25,95,51,0],[95,51,96,25,0],[96,25,96,138,0],[96,138,97,21,0],[97,21,97,22,0],[97,22,99,21,0],[99,21,99,22,0],[99,22,100,25,0],[100,25,100,51,0],[100,51,101,25,0],[101,25,101,58,0],[101,58,102,21,0],[102,21,102,22,0],[102,22,104,21,0],[104,21,104,56,0],[104,56,105,21,0],[105,21,105,40,0],[105,40,106,17,0],[106,17,106,18,0],[106,18,106,19,0],[106,19,108,17,0],[108,17,109,17,0],[109,17,109,18,0],[109,18,110,21,0],[110,21,114,24,0],[114,24,116,21,0],[116,21,116,40,0],[116,40,117,17,0],[117,17,117,18,0],[117,18,117,19,0],[117,19,119,17,0],[119,17,119,32,0],[119,32,120,13,0],[120,13,120,14,0],[120,14,120,15,0],[121,9,121,10,0],[124,9,124,10,0],[125,13,125,33,0],[127,13,127,59,0],[128,13,128,56,0],[128,56,128,78,0],[128,78,128,80,0],[130,13,131,13,0],[131,13,131,14,0],[131,14,132,17,0],[132,17,132,69,0],[132,69,133,17,0],[133,17,133,32,0],[133,32,134,13,0],[134,13,134,14,0],[134,14,134,22,0],[135,9,135,10,0],[138,9,138,10,0],[139,13,139,50,0],[140,13,140,14,0],[141,17,141,54,0],[142,13,142,14,0],[144,13,144,36,0],[145,9,145,10,0],[148,9,148,10,0],[149,13,149,33,0],[151,13,151,26,0],[152,9,152,10,0],[155,9,155,10,0],[156,13,156,37,0],[158,13,158,71,0],[159,13,159,14,0],[160,17,160,50,0],[161,17,161,24,0],[164,13,164,57,0],[164,57,164,96,0],[164,96,164,98,0],[166,13,166,32,0],[167,13,167,14,0],[168,17,168,93,0],[169,13,169,14,0],[171,13,171,14,0],[172,17,172,50,0],[173,13,173,14,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,34,0],[181,21,181,53,0],[182,21,182,27,0],[185,21,185,57,0],[186,21,186,27,0],[189,21,189,53,0],[190,21,190,27,0],[193,21,193,60,0],[194,21,194,27,0],[196,9,196,10,0],[199,9,199,10,0],[202,13,202,34,0],[206,21,206,61,0],[207,21,207,62,0],[208,21,208,27,0],[211,21,211,61,0],[212,21,212,66,0],[213,21,213,27,0],[216,21,216,60,0],[217,21,217,66,0],[218,21,218,27,0],[221,21,221,61,0],[224,13,224,40,0],[224,40,224,134,0],[224,134,224,136,0],[225,9,225,10,0]]);
+    </script>
+  </body>
+</html>

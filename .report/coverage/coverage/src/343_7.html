@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Editors/LadderEditorScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Drawing;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Input.States;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Screens.Edit.Compose.Components;
+using osu.Game.Tournament.Components;
+using osu.Game.Overlays;
+using osu.Game.Tournament.Models;
+using osu.Game.Tournament.Screens.Editors.Components;
+using osu.Game.Tournament.Screens.Ladder;
+using osu.Game.Tournament.Screens.Ladder.Components;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Tournament.Screens.Editors
+{
+    [Cached]
+    public partial class LadderEditorScreen : LadderScreen, IHasContextMenu
+    {
+        public const float GRID_SPACING = 10;
+
+        [Cached]
+        private LadderEditorInfo editorInfo = new LadderEditorInfo();
+
+        private WarningBox rightClickMessage = null!;
+
+        private RectangularPositionSnapGrid grid = null!;
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        protected override bool DrawLoserPaths =&gt; true;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            AddInternal(new ControlPanel
+            {
+                Child = new LadderEditorSettings(),
+            });
+
+            AddInternal(rightClickMessage = new WarningBox(&quot;Right click to place and link matches&quot;));
+
+            ScrollContent.Add(grid = new RectangularPositionSnapGrid
+            {
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                BypassAutoSizeAxes = Axes.Both,
+                Depth = float.MaxValue
+            });
+
+            grid.Spacing.Value = new Vector2(GRID_SPACING);
+
+            LadderInfo.Matches.CollectionChanged += (_, _) =&gt; updateMessage();
+            updateMessage();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // Expand grid with the content to allow going beyond the bounds of the screen.
+            grid.Size = ScrollContent.Size + new Vector2(GRID_SPACING * 2);
+        }
+
+        private Vector2 lastMatchesContainerMouseDownPosition;
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            lastMatchesContainerMouseDownPosition = MatchesContainer.ToLocalSpace(e.ScreenSpaceMouseDownPosition);
+            return base.OnMouseDown(e);
+        }
+
+        private void updateMessage()
+        {
+            rightClickMessage.Alpha = LadderInfo.Matches.Count &gt; 0 ? 0 : 1;
+        }
+
+        public void BeginJoin(TournamentMatch match, bool losers)
+        {
+            ScrollContent.Add(new JoinVisualiser(MatchesContainer, match, losers, UpdateLayout));
+        }
+
+        public MenuItem[] ContextMenuItems =&gt;
+            new MenuItem[]
+            {
+                new OsuMenuItem(&quot;Create new match&quot;, MenuItemType.Highlighted, () =&gt;
+                {
+                    Vector2 pos = MatchesContainer.Count == 0 ? Vector2.Zero : lastMatchesContainerMouseDownPosition;
+
+                    TournamentMatch newMatch = new TournamentMatch { Position = { Value = new Point((int)pos.X, (int)pos.Y) } };
+
+                    LadderInfo.Matches.Add(newMatch);
+
+                    editorInfo.Selected.Value = newMatch;
+                }),
+                new OsuMenuItem(&quot;Reset teams&quot;, MenuItemType.Destructive, () =&gt;
+                {
+                    dialogOverlay?.Push(new LadderResetTeamsDialog(() =&gt;
+                    {
+                        foreach (var p in MatchesContainer)
+                            p.Match.Reset();
+                    }));
+                })
+            };
+
+        public void Remove(TournamentMatch match)
+        {
+            MatchesContainer.FirstOrDefault(p =&gt; p.Match == match)?.Remove();
+        }
+
+        private partial class JoinVisualiser : CompositeDrawable
+        {
+            private readonly Container&lt;DrawableTournamentMatch&gt; matchesContainer;
+            public readonly TournamentMatch Source;
+            private readonly bool losers;
+            private readonly Action? complete;
+
+            private ProgressionPath? path;
+
+            public JoinVisualiser(Container&lt;DrawableTournamentMatch&gt; matchesContainer, TournamentMatch source, bool losers, Action? complete)
+            {
+                this.matchesContainer = matchesContainer;
+                RelativeSizeAxes = Axes.Both;
+
+                Source = source;
+                this.losers = losers;
+                this.complete = complete;
+                if (losers)
+                    Source.LosersProgression.Value = null;
+                else
+                    Source.Progression.Value = null;
+            }
+
+            private DrawableTournamentMatch? findTarget(InputState state)
+            {
+                return matchesContainer.FirstOrDefault(d =&gt; d.ReceivePositionalInputAt(state.Mouse.Position));
+            }
+
+            public override bool ReceivePositionalInputAt(Vector2 screenSpacePos)
+            {
+                return true;
+            }
+
+            protected override bool OnMouseMove(MouseMoveEvent e)
+            {
+                var found = findTarget(e.CurrentState);
+
+                if (found == path?.Destination)
+                    return false;
+
+                path?.Expire();
+                path = null;
+
+                if (found == null)
+                    return false;
+
+                AddInternal(path = new ProgressionPath(matchesContainer.First(c =&gt; c.Match == Source), found)
+                {
+                    Colour = Color4.Yellow,
+                });
+
+                return base.OnMouseMove(e);
+            }
+
+            protected override bool OnClick(ClickEvent e)
+            {
+                var found = findTarget(e.CurrentState);
+
+                if (found != null)
+                {
+                    if (found.Match != Source)
+                    {
+                        if (losers)
+                            Source.LosersProgression.Value = found.Match;
+                        else
+                            Source.Progression.Value = found.Match;
+                    }
+
+                    complete?.Invoke();
+                    Expire();
+                    return true;
+                }
+
+                return false;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,70,0],[35,9,35,54,0],[37,9,37,58,0],[40,49,40,53,0],[40,54,40,58,0],[42,51,42,55,0],[46,9,46,10,0],[47,13,50,16,0],[52,13,52,102,0],[54,13,60,16,0],[62,13,62,60,0],[64,13,64,63,0],[64,63,64,78,0],[64,78,64,79,0],[65,13,65,29,0],[66,9,66,10,0],[69,9,69,10,0],[70,13,70,27,0],[73,13,73,76,0],[74,9,74,10,0],[79,9,79,10,0],[80,13,80,115,0],[81,13,81,40,0],[82,9,82,10,0],[85,9,85,10,0],[86,13,86,76,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,91,98,0],[92,9,92,10,0],[95,13,98,17,0],[98,17,98,18,0],[98,18,99,21,0],[99,21,99,118,0],[99,118,101,21,0],[101,21,101,129,0],[101,129,103,21,0],[103,21,103,54,0],[103,54,105,21,0],[105,21,105,58,0],[105,58,106,17,0],[106,17,106,18,0],[106,18,108,17,0],[108,17,108,18,0],[108,18,109,21,0],[109,21,110,21,0],[110,21,110,22,0],[110,22,111,25,0],[111,25,111,32,0],[111,32,111,34,0],[111,34,111,39,0],[111,39,111,40,0],[111,40,111,42,0],[111,42,111,43,0],[111,43,111,59,0],[111,59,112,29,0],[112,29,112,45,0],[112,45,113,21,0],[113,21,113,22,0],[113,22,113,25,0],[113,25,114,17,0],[114,17,114,18,0],[114,18,115,14,0],[118,9,118,10,0],[119,13,119,50,0],[119,50,119,66,0],[119,66,119,78,0],[120,9,120,10,0],[131,13,131,142,0],[132,13,132,14,0],[133,17,133,58,0],[134,17,134,46,0],[136,17,136,33,0],[137,17,137,38,0],[138,17,138,42,0],[139,17,139,28,0],[140,21,140,59,0],[142,21,142,53,0],[143,13,143,14,0],[146,13,146,14,0],[147,17,147,61,0],[147,61,147,109,0],[147,109,147,111,0],[148,13,148,14,0],[151,13,151,14,0],[152,17,152,29,0],[153,13,153,14,0],[156,13,156,14,0],[157,17,157,56,0],[159,17,159,48,0],[160,21,160,34,0],[162,17,162,32,0],[163,17,163,29,0],[165,17,165,35,0],[166,21,166,34,0],[168,17,168,84,0],[168,84,168,101,0],[168,101,171,20,0],[173,17,173,44,0],[174,13,174,14,0],[177,13,177,14,0],[178,17,178,56,0],[180,17,180,35,0],[181,17,181,18,0],[182,21,182,47,0],[183,21,183,22,0],[184,25,184,36,0],[185,29,185,74,0],[187,29,187,68,0],[188,21,188,22,0],[190,21,190,40,0],[191,21,191,30,0],[192,21,192,33,0],[195,17,195,30,0],[196,13,196,14,0]]);
+    </script>
+  </body>
+</html>

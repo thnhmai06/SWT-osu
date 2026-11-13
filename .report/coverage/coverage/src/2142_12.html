@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/BeatSnapGrid.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Caching;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Pooling;
+using osu.Framework.Graphics.Shapes;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.UI.Scrolling;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Edit.Compose.Components
+{
+    /// &lt;summary&gt;
+    /// A grid which displays coloured beat divisor lines in proximity to the selection or placement cursor.
+    /// &lt;/summary&gt;
+    public abstract partial class BeatSnapGrid : CompositeComponent
+    {
+        private const double visible_range = 750;
+
+        /// &lt;summary&gt;
+        /// The range of time values of the current selection.
+        /// &lt;/summary&gt;
+        public (double start, double end)? SelectionTimeRange
+        {
+            set
+            {
+                if (value == selectionTimeRange)
+                    return;
+
+                selectionTimeRange = value;
+                lineCache.Invalidate();
+            }
+        }
+
+        [Resolved]
+        private EditorBeatmap beatmap { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private BindableBeatDivisor beatDivisor { get; set; } = null!;
+
+        private readonly List&lt;ScrollingHitObjectContainer&gt; grids = new List&lt;ScrollingHitObjectContainer&gt;();
+
+        private readonly DrawablePool&lt;DrawableGridLine&gt; linesPool = new DrawablePool&lt;DrawableGridLine&gt;(50);
+
+        private readonly Cached lineCache = new Cached();
+
+        private (double start, double end)? selectionTimeRange;
+
+        [BackgroundDependencyLoader]
+        private void load(HitObjectComposer composer)
+        {
+            AddInternal(linesPool);
+
+            foreach (var target in GetTargetContainers(composer))
+            {
+                var lineContainer = new ScrollingHitObjectContainer();
+
+                grids.Add(lineContainer);
+                target.Add(lineContainer);
+            }
+
+            beatDivisor.BindValueChanged(_ =&gt; createLines(), true);
+        }
+
+        protected abstract IEnumerable&lt;Container&gt; GetTargetContainers(HitObjectComposer composer);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!lineCache.IsValid)
+            {
+                lineCache.Validate();
+                createLines();
+            }
+        }
+
+        private void createLines()
+        {
+            foreach (var grid in grids)
+                grid.Clear();
+
+            if (selectionTimeRange == null)
+                return;
+
+            var range = selectionTimeRange.Value;
+
+            var timingPoint = beatmap.ControlPointInfo.TimingPointAt(range.start - visible_range);
+
+            double time = timingPoint.Time;
+            int beat = 0;
+
+            // progress time until in the visible range.
+            while (time &lt; range.start - visible_range)
+            {
+                time += timingPoint.BeatLength / beatDivisor.Value;
+                beat++;
+            }
+
+            while (time &lt; range.end + visible_range)
+            {
+                var nextTimingPoint = beatmap.ControlPointInfo.TimingPointAt(time);
+
+                // switch to the next timing point if we have reached it.
+                if (nextTimingPoint.Time &gt; timingPoint.Time)
+                {
+                    beat = 0;
+                    time = nextTimingPoint.Time;
+                    timingPoint = nextTimingPoint;
+                }
+
+                Color4 colour = BindableBeatDivisor.GetColourFor(
+                    BindableBeatDivisor.GetDivisorForBeatIndex(beat, beatDivisor.Value), colours);
+
+                foreach (var grid in grids)
+                {
+                    var line = linesPool.Get();
+
+                    line.Apply(new HitObject
+                    {
+                        StartTime = time
+                    });
+
+                    line.Colour = colour;
+
+                    grid.Add(line);
+                }
+
+                beat++;
+                time += timingPoint.BeatLength / beatDivisor.Value;
+            }
+
+            foreach (var grid in grids)
+            {
+                // required to update ScrollingHitObjectContainer&#39;s cache.
+                grid.UpdateSubTree();
+
+                foreach (var line in grid.Objects.OfType&lt;DrawableGridLine&gt;())
+                {
+                    time = line.HitObject.StartTime;
+
+                    if (time &gt;= range.start &amp;&amp; time &lt;= range.end)
+                        line.Alpha = 1;
+                    else
+                    {
+                        double timeSeparation = time &lt; range.start ? range.start - time : time - range.end;
+                        line.Alpha = (float)Math.Max(0, 1 - timeSeparation / visible_range);
+                    }
+                }
+            }
+        }
+
+        private partial class DrawableGridLine : DrawableHitObject
+        {
+            [Resolved]
+            private IScrollingInfo scrollingInfo { get; set; } = null!;
+
+            private readonly IBindable&lt;ScrollingDirection&gt; direction = new Bindable&lt;ScrollingDirection&gt;();
+
+            public DrawableGridLine()
+                : base(new HitObject())
+            {
+                AddInternal(new Box { RelativeSizeAxes = Axes.Both });
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                direction.BindTo(scrollingInfo.Direction);
+                direction.BindValueChanged(onDirectionChanged, true);
+            }
+
+            private void onDirectionChanged(ValueChangedEvent&lt;ScrollingDirection&gt; direction)
+            {
+                switch (direction.NewValue)
+                {
+                    case ScrollingDirection.Up:
+                        Anchor = Anchor.TopLeft;
+                        Origin = Anchor.CentreLeft;
+                        break;
+
+                    case ScrollingDirection.Down:
+                        Anchor = Anchor.BottomLeft;
+                        Origin = Anchor.CentreLeft;
+                        break;
+
+                    case ScrollingDirection.Left:
+                        Anchor = Anchor.TopLeft;
+                        Origin = Anchor.TopCentre;
+                        break;
+
+                    case ScrollingDirection.Right:
+                        Anchor = Anchor.TopRight;
+                        Origin = Anchor.TopCentre;
+                        break;
+                }
+
+                bool isHorizontal = direction.NewValue == ScrollingDirection.Left || direction.NewValue == ScrollingDirection.Right;
+
+                if (isHorizontal)
+                {
+                    RelativeSizeAxes = Axes.Y;
+                    Width = 2;
+                }
+                else
+                {
+                    RelativeSizeAxes = Axes.X;
+                    Height = 2;
+                }
+            }
+
+            protected override void UpdateInitialTransforms()
+            {
+                // don&#39;t perform any fading – we are handling that ourselves.
+                LifetimeEnd = HitObject.StartTime + visible_range;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[36,13,36,14,0],[37,17,37,49,0],[38,21,38,28,0],[40,17,40,44,0],[41,17,41,40,0],[42,13,42,14,0],[46,41,46,45,0],[46,46,46,50,0],[46,55,46,60,0],[49,37,49,41,0],[49,42,49,46,0],[49,51,49,56,0],[52,51,52,55,0],[52,56,52,60,0],[52,65,52,70,0],[54,9,54,108,0],[56,9,56,108,0],[58,9,58,58,0],[64,9,64,10,0],[65,13,65,36,0],[67,13,67,20,0],[67,22,67,32,0],[67,33,67,35,0],[67,36,67,65,0],[68,13,68,14,0],[69,17,69,71,0],[71,17,71,42,0],[72,17,72,43,0],[73,13,73,14,0],[75,13,75,47,0],[75,47,75,60,0],[75,60,75,68,0],[76,9,76,10,0],[81,9,81,10,0],[82,13,82,27,0],[84,13,84,36,0],[85,13,85,14,0],[86,17,86,38,0],[87,17,87,31,0],[88,13,88,14,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,20,0],[93,22,93,30,0],[93,31,93,33,0],[93,34,93,39,0],[94,17,94,30,0],[96,13,96,44,0],[97,17,97,24,0],[99,13,99,50,0],[101,13,101,99,0],[103,13,103,44,0],[104,13,104,26,0],[107,13,107,55,0],[108,13,108,14,0],[109,17,109,68,0],[110,17,110,24,0],[111,13,111,14,0],[113,13,113,53,0],[114,13,114,14,0],[115,17,115,84,0],[118,17,118,61,0],[119,17,119,18,0],[120,21,120,30,0],[121,21,121,49,0],[122,21,122,51,0],[123,17,123,18,0],[125,17,126,99,0],[128,17,128,24,0],[128,26,128,34,0],[128,35,128,37,0],[128,38,128,43,0],[129,17,129,18,0],[130,21,130,48,0],[132,21,135,24,0],[137,21,137,42,0],[139,21,139,36,0],[140,17,140,18,0],[142,17,142,24,0],[143,17,143,68,0],[144,13,144,14,0],[146,13,146,20,0],[146,22,146,30,0],[146,31,146,33,0],[146,34,146,39,0],[147,13,147,14,0],[149,17,149,38,0],[151,17,151,24,0],[151,26,151,34,0],[151,35,151,37,0],[151,38,151,77,0],[152,17,152,18,0],[153,21,153,53,0],[155,21,155,66,0],[156,25,156,40,0],[158,21,158,22,0],[159,25,159,108,0],[160,25,160,93,0],[161,21,161,22,0],[162,17,162,18,0],[163,13,163,14,0],[164,9,164,10,0],[169,52,169,56,0],[169,57,169,61,0],[169,66,169,71,0],[171,13,171,107,0],[174,19,174,40,0],[175,13,175,14,0],[176,17,176,71,0],[177,13,177,14,0],[181,13,181,14,0],[182,17,182,59,0],[183,17,183,70,0],[184,13,184,14,0],[187,13,187,14,0],[188,17,188,44,0],[191,25,191,49,0],[192,25,192,52,0],[193,25,193,31,0],[196,25,196,52,0],[197,25,197,52,0],[198,25,198,31,0],[201,25,201,49,0],[202,25,202,51,0],[203,25,203,31,0],[206,25,206,50,0],[207,25,207,51,0],[208,25,208,31,0],[211,17,211,133,0],[213,17,213,34,0],[214,17,214,18,0],[215,21,215,47,0],[216,21,216,31,0],[217,17,217,18,0],[219,17,219,18,0],[220,21,220,47,0],[221,21,221,32,0],[222,17,222,18,0],[223,13,223,14,0],[226,13,226,14,0],[228,17,228,67,0],[229,13,229,14,0]]);
+    </script>
+  </body>
+</html>

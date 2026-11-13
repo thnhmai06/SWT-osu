@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Seasonal/MainMenuSeasonalLighting.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Timing;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Seasonal
+{
+    public partial class MainMenuSeasonalLighting : CompositeDrawable
+    {
+        private IBindable&lt;WorkingBeatmap&gt; working = null!;
+
+        private InterpolatingFramedClock? beatmapClock;
+
+        private List&lt;HitObject&gt; hitObjects = null!;
+
+        private RulesetInfo? osuRuleset;
+
+        private int? lastObjectIndex;
+
+        public MainMenuSeasonalLighting()
+        {
+            // match beatmap playfield
+            RelativeChildSize = new Vector2(512, 384);
+
+            RelativeSizeAxes = Axes.X;
+
+            Anchor = Anchor.Centre;
+            Origin = Anchor.Centre;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IBindable&lt;WorkingBeatmap&gt; working, RulesetStore rulesets)
+        {
+            // operate in osu! ruleset to keep things simple for now.
+            osuRuleset = rulesets.GetRuleset(0);
+
+            this.working = working.GetBoundCopy();
+            this.working.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateBeatmap), true);
+        }
+
+        private void updateBeatmap()
+        {
+            lastObjectIndex = null;
+
+            if (osuRuleset == null)
+            {
+                beatmapClock = new InterpolatingFramedClock(Clock);
+                hitObjects = new List&lt;HitObject&gt;();
+                return;
+            }
+
+            // Intentionally maintain separately so the lighting is not in audio clock space (it shouldn&#39;t rewind etc.)
+            beatmapClock = new InterpolatingFramedClock(new FramedClock(working.Value.Track));
+
+            hitObjects = working.Value
+                                .GetPlayableBeatmap(osuRuleset)
+                                .HitObjects
+                                .SelectMany(h =&gt; h.NestedHitObjects.Prepend(h))
+                                .OrderBy(h =&gt; h.StartTime)
+                                .ToList();
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (osuRuleset == null || beatmapClock == null)
+                return;
+
+            Height = DrawWidth / 16 * 10;
+
+            beatmapClock.ProcessFrame();
+
+            // intentionally slightly early since we are doing fades on the lighting.
+            double time = beatmapClock.CurrentTime + 50;
+
+            // handle seeks or OOB by skipping to current.
+            if (lastObjectIndex == null || lastObjectIndex &gt;= hitObjects.Count || (lastObjectIndex &gt;= 0 &amp;&amp; hitObjects[lastObjectIndex.Value].StartTime &gt; time)
+                || Math.Abs(beatmapClock.ElapsedFrameTime) &gt; 500)
+                lastObjectIndex = hitObjects.Count(h =&gt; h.StartTime &lt; time) - 1;
+
+            while (lastObjectIndex &lt; hitObjects.Count - 1)
+            {
+                var h = hitObjects[lastObjectIndex.Value + 1];
+
+                if (h.StartTime &gt; time)
+                    break;
+
+                // Don&#39;t add lighting if the game is running too slow.
+                if (Clock.ElapsedFrameTime &lt; 20)
+                    addLight(h);
+
+                lastObjectIndex++;
+            }
+        }
+
+        private void addLight(HitObject h)
+        {
+            var light = new Light
+            {
+                RelativePositionAxes = Axes.Both,
+                Position = ((IHasPosition)h).Position
+            };
+
+            AddInternal(light);
+
+            if (h.GetType().Name.Contains(&quot;Tick&quot;))
+            {
+                light.Colour = SeasonalUIConfig.AMBIENT_COLOUR_1;
+                light.Scale = new Vector2(0.5f);
+                light
+                    .FadeInFromZero(250)
+                    .Then()
+                    .FadeOutFromOne(1000, Easing.Out);
+
+                light.MoveToOffset(new Vector2(RNG.Next(-20, 20), RNG.Next(-20, 20)), 1400, Easing.Out);
+            }
+            else
+            {
+                // default are green
+                Color4 col = SeasonalUIConfig.PRIMARY_COLOUR_2;
+
+                // whistles are red
+                if (h.Samples.Any(s =&gt; s.Name == HitSampleInfo.HIT_WHISTLE))
+                    col = SeasonalUIConfig.PRIMARY_COLOUR_1;
+                // clap is third ambient (yellow) colour
+                else if (h.Samples.Any(s =&gt; s.Name == HitSampleInfo.HIT_CLAP))
+                    col = SeasonalUIConfig.AMBIENT_COLOUR_1;
+
+                light.Colour = col;
+
+                // finish results in larger lighting
+                if (h.Samples.Any(s =&gt; s.Name == HitSampleInfo.HIT_FINISH))
+                    light.Scale = new Vector2(3);
+
+                light
+                    .FadeInFromZero(150)
+                    .Then()
+                    .FadeOutFromOne(1000, Easing.In);
+            }
+
+            light.Expire();
+        }
+
+        private partial class Light : CompositeDrawable
+        {
+            private readonly Circle circle;
+
+            public new Color4 Colour
+            {
+                set
+                {
+                    circle.Colour = value.Darken(0.8f);
+                    circle.EdgeEffect = new EdgeEffectParameters
+                    {
+                        Type = EdgeEffectType.Glow,
+                        Colour = value,
+                        Radius = 80,
+                    };
+                }
+            }
+
+            public Light()
+            {
+                InternalChildren = new Drawable[]
+                {
+                    circle = new Circle
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Size = new Vector2(12),
+                        Colour = SeasonalUIConfig.AMBIENT_COLOUR_1,
+                        Blending = BlendingParameters.Additive,
+                        EdgeEffect = new EdgeEffectParameters
+                        {
+                            Type = EdgeEffectType.Glow,
+                            Colour = SeasonalUIConfig.AMBIENT_COLOUR_2,
+                            Radius = 80,
+                        }
+                    }
+                };
+
+                Origin = Anchor.Centre;
+                Alpha = 0.5f;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,9,28,59,0],[32,9,32,52,0],[38,9,38,42,0],[39,9,39,10,0],[41,13,41,55,0],[43,13,43,39,0],[45,13,45,36,0],[46,13,46,36,0],[47,9,47,10,0],[51,9,51,10,0],[53,13,53,49,0],[55,13,55,51,0],[56,13,56,48,0],[56,48,56,80,0],[56,80,56,88,0],[57,9,57,10,0],[60,9,60,10,0],[61,13,61,36,0],[63,13,63,36,0],[64,13,64,14,0],[65,17,65,68,0],[66,17,66,52,0],[67,17,67,24,0],[71,13,71,95,0],[73,13,76,50,0],[76,50,76,79,0],[76,79,77,47,0],[77,47,77,58,0],[77,58,78,43,0],[79,9,79,10,0],[82,9,82,10,0],[83,13,83,27,0],[85,13,85,60,0],[86,17,86,24,0],[88,13,88,42,0],[90,13,90,41,0],[93,13,93,57,0],[96,13,97,66,0],[98,17,98,57,0],[98,57,98,75,0],[98,75,98,81,0],[100,13,100,59,0],[101,13,101,14,0],[102,17,102,63,0],[104,17,104,40,0],[105,21,105,27,0],[108,17,108,49,0],[109,21,109,33,0],[111,17,111,35,0],[112,13,112,14,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,121,15,0],[123,13,123,32,0],[125,13,125,51,0],[126,13,126,14,0],[127,17,127,66,0],[128,17,128,49,0],[129,17,132,55,0],[134,17,134,105,0],[135,13,135,14,0],[137,13,137,14,0],[139,17,139,64,0],[142,17,142,40,0],[142,40,142,75,0],[142,75,142,77,0],[143,21,143,61,0],[145,22,145,45,0],[145,45,145,77,0],[145,77,145,79,0],[146,21,146,61,0],[148,17,148,36,0],[151,17,151,40,0],[151,40,151,74,0],[151,74,151,76,0],[152,21,152,50,0],[154,17,157,54,0],[158,13,158,14,0],[160,13,160,28,0],[161,9,161,10,0],[170,17,170,18,0],[171,21,171,56,0],[172,21,177,23,0],[178,17,178,18,0],[181,13,181,27,0],[182,13,182,14,0],[183,17,199,19,0],[201,17,201,40,0],[202,17,202,30,0],[203,13,203,14,0]]);
+    </script>
+  </body>
+</html>

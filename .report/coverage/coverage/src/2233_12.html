@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Scoring/Legacy/LegacyScoreEncoder.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using osu.Framework.Extensions;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.Extensions;
+using osu.Game.IO.Legacy;
+using osu.Game.IO.Serialization;
+using osu.Game.Online.Spectator;
+using osu.Game.Replays.Legacy;
+using osu.Game.Rulesets.Objects.Legacy;
+using osu.Game.Rulesets.Replays;
+using osu.Game.Rulesets.Replays.Types;
+using SharpCompress.Compressors.LZMA;
+
+namespace osu.Game.Scoring.Legacy
+{
+    /// &lt;summary&gt;
+    /// Encodes replays.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// &lt;b&gt;When making &lt;i&gt;ANY&lt;/i&gt; changes to the replay format to add new data, consider if:&lt;/b&gt;
+    /// &lt;list type=&quot;bullet&quot;&gt;
+    /// &lt;item&gt;&lt;see cref=&quot;LATEST_VERSION&quot;/&gt; should be bumped accordingly,&lt;/item&gt;
+    /// &lt;item&gt;
+    /// changes need to be made to &lt;see cref=&quot;SpectatorClient&quot;/&gt; so that spectator server receives the new data being stored,
+    /// as &lt;b&gt;&lt;i&gt;spectator server&lt;/i&gt; is responsible for the content of server-stored replays, &lt;i&gt;NOT&lt;/i&gt; the client&lt;/b&gt;.
+    /// &lt;/item&gt;
+    /// &lt;/list&gt;
+    /// &lt;/remarks&gt;
+    public class LegacyScoreEncoder
+    {
+        /// &lt;summary&gt;
+        /// Database version in stable-compatible YYYYMMDD format.
+        /// Should be incremented if any changes are made to the format/usage.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;list type=&quot;bullet&quot;&gt;
+        /// &lt;item&gt;&lt;description&gt;30000001: Appends &lt;see cref=&quot;LegacyReplaySoloScoreInfo&quot;/&gt; to the end of scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000002: Score stored to replay calculated using the Score V2 algorithm. Legacy scores on this version are candidate to Score V1 -&gt; V2 conversion.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000003: First version after converting legacy total score to standardised.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000004: Fixed mod multipliers during legacy score conversion. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000005: Introduce combo exponent in the osu! gamemode. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000006: Fix edge cases in conversion after combo exponent introduction that lead to NaNs. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000007: Adjust osu!mania combo and accuracy portions and judgement scoring values. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000008: Add accuracy conversion. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000009: Fix edge cases in conversion for scores which have 0.0x mod multiplier on stable. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000010: Fix mania score V1 conversion using score V1 accuracy rather than V2 accuracy. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000011: Re-do catch scoring to mirror stable Score V2 as closely as feasible. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;
+        /// 30000012: Fix incorrect total score conversion on selected beatmaps after implementing the more correct
+        /// &lt;see cref=&quot;LegacyRulesetExtensions.CalculateDifficultyPeppyStars&quot;/&gt; method. Reconvert all scores.
+        /// &lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000013: All local scores will use lazer definitions of ranks for consistency. Recalculates the rank of all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000014: Fix edge cases in conversion for osu! scores on selected beatmaps. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000015: Fix osu! standardised score estimation algorithm violating basic invariants. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000016: Fix taiko standardised score estimation algorithm not including swell tick score gain into bonus portion. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000017: Mod score multiplier rebalance. Recalculates the &lt;see cref=&quot;ScoreInfo.TotalScore&quot;/&gt; of all scores with &lt;see cref=&quot;ScoreInfo.TotalScoreWithoutMods&quot;/&gt; present.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000018: Further improvements to taiko standardised score estimation algorithm. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;item&gt;&lt;description&gt;30000019: Fix back-to-front combo and accuracy proportions in mania standardised score estimation algorithm. Reconvert all scores.&lt;/description&gt;&lt;/item&gt;
+        /// &lt;/list&gt;
+        /// &lt;/remarks&gt;
+        public const int LATEST_VERSION = 30000019;
+
+        /// &lt;summary&gt;
+        /// The first stable-compatible YYYYMMDD format version given to lazer usage of replays.
+        /// &lt;/summary&gt;
+        public const int FIRST_LAZER_VERSION = 30000000;
+
+        private readonly Score score;
+        private readonly IBeatmap? beatmap;
+
+        /// &lt;summary&gt;
+        /// Create a new score encoder for a specific score.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The score to be encoded.&lt;/param&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap used to convert frames for the score. May be null if the frames are already &lt;see cref=&quot;LegacyReplayFrame&quot;/&gt;s.&lt;/param&gt;
+        /// &lt;exception cref=&quot;ArgumentException&quot;&gt;&lt;/exception&gt;
+        public LegacyScoreEncoder(Score score, IBeatmap? beatmap)
+        {
+            this.score = score;
+            this.beatmap = beatmap;
+
+            if (beatmap == null &amp;&amp; !score.Replay.Frames.All(f =&gt; f is LegacyReplayFrame))
+                throw new ArgumentException(@&quot;Beatmap must be provided if frames are not already legacy frames.&quot;, nameof(beatmap));
+
+            if (!score.ScoreInfo.Ruleset.IsLegacyRuleset())
+                throw new ArgumentException(@&quot;Only scores in the osu, taiko, catch, or mania rulesets can be encoded to the legacy score format.&quot;, nameof(score));
+        }
+
+        public void Encode(Stream stream, bool leaveOpen = false)
+        {
+            using (SerializationWriter sw = new SerializationWriter(stream, leaveOpen))
+            {
+                sw.Write((byte)(score.ScoreInfo.Ruleset.OnlineID));
+                sw.Write(score.ScoreInfo.TotalScoreVersion);
+                sw.Write(score.ScoreInfo.BeatmapInfo!.MD5Hash);
+                sw.Write(score.ScoreInfo.User.Username);
+                sw.Write(FormattableString.Invariant($&quot;lazer-{score.ScoreInfo.User.Username}-{score.ScoreInfo.Date}&quot;).ComputeMD5Hash());
+                sw.Write((ushort)(score.ScoreInfo.GetCount300() ?? 0));
+                sw.Write((ushort)(score.ScoreInfo.GetCount100() ?? 0));
+                sw.Write((ushort)(score.ScoreInfo.GetCount50() ?? 0));
+                sw.Write((ushort)(score.ScoreInfo.GetCountGeki() ?? 0));
+                sw.Write((ushort)(score.ScoreInfo.GetCountKatu() ?? 0));
+                sw.Write((ushort)(score.ScoreInfo.GetCountMiss() ?? 0));
+                sw.Write((int)(score.ScoreInfo.TotalScore));
+                sw.Write((ushort)score.ScoreInfo.MaxCombo);
+                sw.Write(score.ScoreInfo.MaxCombo == score.ScoreInfo.GetMaximumAchievableCombo());
+                sw.Write((int)score.ScoreInfo.Ruleset.CreateInstance().ConvertToLegacyMods(score.ScoreInfo.Mods));
+
+                sw.Write(getHpGraphFormatted());
+                sw.Write(score.ScoreInfo.Date.DateTime);
+                sw.WriteByteArray(createReplayData());
+                sw.Write(score.ScoreInfo.LegacyOnlineID);
+                writeModSpecificData(score.ScoreInfo, sw);
+                sw.WriteByteArray(createScoreInfoData());
+            }
+        }
+
+        private void writeModSpecificData(ScoreInfo score, SerializationWriter sw)
+        {
+        }
+
+        private byte[] createReplayData() =&gt; compress(replayStringContent);
+
+        private byte[] createScoreInfoData() =&gt; compress(LegacyReplaySoloScoreInfo.FromScore(score.ScoreInfo).Serialize());
+
+        private byte[] compress(string data)
+        {
+            byte[] content = new ASCIIEncoding().GetBytes(data);
+
+            using (var outStream = new MemoryStream())
+            {
+                using (var lzma = LzmaStream.Create(new LzmaEncoderProperties(false, 1 &lt;&lt; 21, 255), false, outStream))
+                {
+                    outStream.Write(lzma.Properties);
+
+                    long fileSize = content.Length;
+                    for (int i = 0; i &lt; 8; i++)
+                        outStream.WriteByte((byte)(fileSize &gt;&gt; (8 * i)));
+
+                    lzma.Write(content);
+                }
+
+                return outStream.ToArray();
+            }
+        }
+
+        private string replayStringContent
+        {
+            get
+            {
+                StringBuilder replayData = new StringBuilder();
+
+                // As this is baked into hitobject timing (see `LegacyBeatmapDecoder`) we also need to apply this to replay frame timing.
+                double offset = beatmap?.BeatmapVersion &lt; 5 ? -LegacyBeatmapDecoder.EARLY_VERSION_TIMING_OFFSET : 0;
+
+                int lastTime = 0;
+
+                if (score.Replay != null)
+                {
+                    foreach (var f in score.Replay.Frames)
+                    {
+                        var legacyFrame = getLegacyFrame(f);
+
+                        // Rounding because stable could only parse integral values
+                        int time = (int)Math.Round(legacyFrame.Time + offset);
+                        replayData.Append(FormattableString.Invariant($&quot;{time - lastTime}|{legacyFrame.MouseX ?? 0}|{legacyFrame.MouseY ?? 0}|{(int)legacyFrame.ButtonState},&quot;));
+                        lastTime = time;
+                    }
+                }
+
+                // Warning: this is purposefully hardcoded as a string rather than interpolating, as in some cultures the minus sign is not encoded as the standard ASCII U+00C2 codepoint,
+                // which then would break decoding.
+                replayData.Append(@&quot;-12345|0|0|0&quot;);
+                return replayData.ToString();
+            }
+        }
+
+        private LegacyReplayFrame getLegacyFrame(ReplayFrame replayFrame)
+        {
+            switch (replayFrame)
+            {
+                case LegacyReplayFrame legacyFrame:
+                    return legacyFrame;
+
+                case IConvertibleReplayFrame convertibleFrame:
+                    Debug.Assert(beatmap != null);
+                    return convertibleFrame.ToLegacy(beatmap);
+
+                default:
+                    throw new ArgumentException(@&quot;Frame could not be converted to legacy frames&quot;, nameof(replayFrame));
+            }
+        }
+
+        private string getHpGraphFormatted()
+        {
+            // todo: implement, maybe?
+            return string.Empty;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[85,9,85,66,1],[86,9,86,10,1],[87,13,87,32,1],[88,13,88,36,1],[90,13,90,66,1],[90,66,90,88,1],[90,88,90,90,1],[91,17,91,132,1],[93,13,93,60,1],[94,17,94,163,1],[95,9,95,10,1],[98,9,98,10,1],[99,20,99,87,1],[100,13,100,14,1],[101,17,101,68,1],[102,17,102,61,1],[103,17,103,64,1],[104,17,104,57,1],[105,17,105,137,1],[106,17,106,72,1],[107,17,107,72,1],[108,17,108,71,1],[109,17,109,73,1],[110,17,110,73,1],[111,17,111,73,1],[112,17,112,61,1],[113,17,113,60,1],[114,17,114,99,1],[115,17,115,115,1],[117,17,117,49,1],[118,17,118,57,1],[119,17,119,55,1],[120,17,120,58,1],[121,17,121,59,1],[122,17,122,58,1],[123,13,123,14,1],[124,9,124,10,1],[127,9,127,10,1],[128,9,128,10,1],[130,46,130,75,1],[132,49,132,123,1],[135,9,135,10,1],[136,13,136,65,1],[138,20,138,54,1],[139,13,139,14,1],[140,24,140,118,1],[141,17,141,18,1],[142,21,142,54,1],[144,21,144,52,1],[145,26,145,35,1],[145,37,145,42,1],[145,44,145,47,1],[146,25,146,74,1],[148,21,148,41,1],[149,17,149,18,1],[151,17,151,44,1],[153,9,153,10,1],[158,13,158,14,1],[159,17,159,64,1],[162,17,162,117,1],[164,17,164,34,1],[166,17,166,42,1],[167,17,167,18,1],[168,21,168,28,1],[168,30,168,35,1],[168,36,168,38,1],[168,39,168,58,1],[169,21,169,22,1],[170,25,170,61,1],[173,25,173,79,1],[174,25,174,178,1],[175,25,175,41,1],[176,21,176,22,1],[177,17,177,18,1],[181,17,181,52,1],[182,17,182,46,1],[183,13,183,14,1],[187,9,187,10,1],[188,13,188,33,1],[191,21,191,40,1],[194,21,194,51,1],[195,21,195,63,1],[198,21,198,120,1],[200,9,200,10,1],[203,9,203,10,1],[205,13,205,33,1],[206,9,206,10,1]]);
+    </script>
+  </body>
+</html>

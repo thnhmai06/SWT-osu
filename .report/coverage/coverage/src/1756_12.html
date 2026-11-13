@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/PerformancePointsCounter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio.Track;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics.Textures;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Difficulty;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Skinning;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public abstract partial class PerformancePointsCounter : RollingCounter&lt;int&gt;
+    {
+        public bool UsesFixedAnchor { get; set; }
+
+        [Resolved]
+        private ScoreProcessor scoreProcessor { get; set; }
+
+        [Resolved]
+        private GameplayState gameplayState { get; set; }
+
+        [CanBeNull]
+        private List&lt;TimedDifficultyAttributes&gt; timedAttributes;
+
+        private readonly CancellationTokenSource loadCancellationSource = new CancellationTokenSource();
+
+        private JudgementResult lastJudgement;
+        private PerformanceCalculator performanceCalculator;
+        private ScoreInfo scoreInfo;
+
+        private Mod[] clonedMods;
+
+        [BackgroundDependencyLoader]
+        private void load(BeatmapDifficultyCache difficultyCache)
+        {
+            if (gameplayState != null)
+            {
+                performanceCalculator = gameplayState.Ruleset.CreatePerformanceCalculator();
+                clonedMods = gameplayState.Mods.Select(m =&gt; m.DeepClone()).ToArray();
+
+                scoreInfo = new ScoreInfo(gameplayState.Score.ScoreInfo.BeatmapInfo, gameplayState.Score.ScoreInfo.Ruleset) { Mods = clonedMods };
+
+                var gameplayWorkingBeatmap = new GameplayWorkingBeatmap(gameplayState.Beatmap);
+                difficultyCache.GetTimedDifficultyAttributesAsync(gameplayWorkingBeatmap, gameplayState.Ruleset, clonedMods, loadCancellationSource.Token)
+                               .ContinueWith(task =&gt; Schedule(() =&gt;
+                               {
+                                   timedAttributes = task.GetResultSafely();
+
+                                   IsValid = true;
+
+                                   if (lastJudgement != null)
+                                       onJudgementChanged(lastJudgement);
+                               }), TaskContinuationOptions.OnlyOnRanToCompletion);
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            if (scoreProcessor != null)
+            {
+                scoreProcessor.NewJudgement += onJudgementChanged;
+                scoreProcessor.JudgementReverted += onJudgementChanged;
+            }
+
+            if (gameplayState?.LastJudgementResult.Value != null)
+                onJudgementChanged(gameplayState.LastJudgementResult.Value);
+        }
+
+        public virtual bool IsValid { get; set; }
+
+        private void onJudgementChanged(JudgementResult judgement)
+        {
+            lastJudgement = judgement;
+
+            var attrib = getAttributeAtTime(judgement);
+
+            if (gameplayState == null || attrib == null || scoreProcessor == null)
+            {
+                IsValid = false;
+                return;
+            }
+
+            scoreProcessor.PopulateScore(scoreInfo);
+            Current.Value = (int)Math.Round(performanceCalculator?.Calculate(scoreInfo, attrib).Total ?? 0, MidpointRounding.AwayFromZero);
+            IsValid = true;
+        }
+
+        [CanBeNull]
+        private DifficultyAttributes getAttributeAtTime(JudgementResult judgement)
+        {
+            if (timedAttributes == null || timedAttributes.Count == 0)
+                return null;
+
+            int attribIndex = timedAttributes.BinarySearch(new TimedDifficultyAttributes(judgement.HitObject.GetEndTime(), null));
+            if (attribIndex &lt; 0)
+                attribIndex = ~attribIndex - 1;
+
+            return timedAttributes[Math.Clamp(attribIndex, 0, timedAttributes.Count - 1)].Attributes;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (scoreProcessor != null)
+            {
+                scoreProcessor.NewJudgement -= onJudgementChanged;
+                scoreProcessor.JudgementReverted -= onJudgementChanged;
+            }
+
+            loadCancellationSource?.Cancel();
+        }
+
+        // TODO: This class shouldn&#39;t exist, but requires breaking changes to allow DifficultyCalculator to receive an IBeatmap.
+        private class GameplayWorkingBeatmap : WorkingBeatmap
+        {
+            private readonly IBeatmap gameplayBeatmap;
+
+            public GameplayWorkingBeatmap(IBeatmap gameplayBeatmap)
+                : base(gameplayBeatmap.BeatmapInfo, null)
+            {
+                this.gameplayBeatmap = gameplayBeatmap;
+            }
+
+            public override IBeatmap GetPlayableBeatmap(IRulesetInfo ruleset, IReadOnlyList&lt;Mod&gt; mods, CancellationToken cancellationToken)
+                =&gt; gameplayBeatmap;
+
+            protected override IBeatmap GetBeatmap() =&gt; gameplayBeatmap;
+
+            public override Texture GetBackground() =&gt; throw new NotImplementedException();
+
+            protected override Track GetBeatmapTrack() =&gt; throw new NotImplementedException();
+
+            protected internal override ISkin GetSkin() =&gt; throw new NotImplementedException();
+
+            public override Stream GetStream(string storagePath) =&gt; throw new NotImplementedException();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,39,32,43,0],[32,44,32,48,0],[35,49,35,53,0],[35,54,35,58,0],[38,47,38,51,0],[38,52,38,56,0],[43,9,43,105,0],[53,9,53,10,0],[54,13,54,39,0],[55,13,55,14,0],[56,17,56,93,0],[57,17,57,61,0],[57,61,57,74,0],[57,74,57,86,0],[59,17,59,147,0],[61,17,61,96,0],[62,17,63,54,0],[63,54,64,32,0],[64,32,64,33,0],[64,33,65,36,0],[65,36,65,77,0],[65,77,67,36,0],[67,36,67,51,0],[67,51,69,36,0],[69,36,69,62,0],[69,62,70,40,0],[70,40,70,74,0],[70,74,71,32,0],[71,32,71,33,0],[71,33,71,34,0],[71,34,71,83,0],[72,13,72,14,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,33,0],[79,13,79,40,0],[80,13,80,14,0],[81,17,81,67,0],[82,17,82,72,0],[83,13,83,14,0],[85,13,85,66,0],[86,17,86,77,0],[87,9,87,10,0],[89,39,89,43,0],[89,44,89,48,0],[92,9,92,10,0],[93,13,93,39,0],[95,13,95,56,0],[97,13,97,83,0],[98,13,98,14,0],[99,17,99,33,0],[100,17,100,24,0],[103,13,103,53,0],[104,13,104,140,0],[105,13,105,28,0],[106,9,106,10,0],[110,9,110,10,0],[111,13,111,71,0],[112,17,112,29,0],[114,13,114,131,0],[115,13,115,33,0],[116,17,116,48,0],[118,13,118,102,0],[119,9,119,10,0],[122,9,122,10,0],[123,13,123,39,0],[125,13,125,40,0],[126,13,126,14,0],[127,17,127,67,0],[128,17,128,72,0],[129,13,129,14,0],[131,13,131,46,0],[132,9,132,10,0],[140,19,140,58,0],[141,13,141,14,0],[142,17,142,56,0],[143,13,143,14,0],[146,20,146,35,0],[148,57,148,72,0],[150,56,150,91,0],[152,59,152,94,0],[154,60,154,95,0],[156,69,156,104,0]]);
+    </script>
+  </body>
+</html>

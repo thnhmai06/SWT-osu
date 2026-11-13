@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Playlists/AddPlaylistToCollectionButton.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Database;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Localisation;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using Realms;
+
+namespace osu.Game.Screens.OnlinePlay.Playlists
+{
+    public partial class AddPlaylistToCollectionButton : RoundedButton
+    {
+        private readonly Room room;
+
+        private IDisposable? beatmapSubscription;
+        private IDisposable? collectionSubscription;
+
+        private Live&lt;BeatmapCollection&gt;? collection;
+        private HashSet&lt;string&gt; localBeatmapHashes = new HashSet&lt;string&gt;();
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved(canBeNull: true)]
+        private INotificationOverlay? notifications { get; set; }
+
+        public AddPlaylistToCollectionButton(Room room)
+        {
+            this.room = room;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Action = () =&gt;
+            {
+                if (room.Playlist.Count == 0)
+                    return;
+
+                int countBefore = 0;
+                int countAfter = 0;
+
+                Text = &quot;Updating collection...&quot;;
+                Enabled.Value = false;
+
+                realm.WriteAsync(r =&gt;
+                {
+                    var beatmaps = getBeatmapsForPlaylist(r).ToArray();
+                    var c = getCollectionsForPlaylist(r).FirstOrDefault()
+                            ?? r.Add(new BeatmapCollection(room.Name));
+
+                    countBefore = c.BeatmapMD5Hashes.Count;
+
+                    foreach (var item in beatmaps)
+                    {
+                        if (!c.BeatmapMD5Hashes.Contains(item.MD5Hash))
+                            c.BeatmapMD5Hashes.Add(item.MD5Hash);
+                    }
+
+                    countAfter = c.BeatmapMD5Hashes.Count;
+                }).ContinueWith(_ =&gt; Schedule(() =&gt;
+                {
+                    LocalisableString message;
+
+                    if (countBefore == 0)
+                        message = NotificationsStrings.CollectionCreated(room.Name, countAfter);
+                    else
+                        message = NotificationsStrings.CollectionBeatmapsAdded(room.Name, countAfter - countBefore);
+
+                    notifications?.Post(new SimpleNotification { Text = message });
+                }));
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // will be updated via updateButtonState() when ready.
+            Enabled.Value = false;
+
+            if (room.Playlist.Count == 0)
+                return;
+
+            beatmapSubscription = realm.RegisterForNotifications(getBeatmapsForPlaylist, (sender, _) =&gt;
+            {
+                localBeatmapHashes = sender.Select(b =&gt; b.MD5Hash).ToHashSet();
+                Schedule(updateButtonState);
+            });
+
+            collectionSubscription = realm.RegisterForNotifications(getCollectionsForPlaylist, (sender, _) =&gt;
+            {
+                collection = sender.FirstOrDefault()?.ToLive(realm);
+                Schedule(updateButtonState);
+            });
+        }
+
+        private void updateButtonState()
+        {
+            int countToAdd = getCountToBeAdded();
+
+            if (collection == null)
+                Text = $&quot;Create new collection with {countToAdd} beatmaps&quot;;
+            else if (hasAllItemsInCollection)
+                Text = &quot;Collection complete!&quot;;
+            else
+                Text = $&quot;Add {countToAdd} beatmaps to collection&quot;;
+
+            Enabled.Value = countToAdd &gt; 0;
+        }
+
+        private int getCountToBeAdded()
+        {
+            if (collection == null)
+                return localBeatmapHashes.Count;
+
+            return collection.PerformRead(c =&gt;
+            {
+                int count = localBeatmapHashes.Count;
+
+                foreach (string hash in localBeatmapHashes)
+                {
+                    if (c.BeatmapMD5Hashes.Contains(hash))
+                        count--;
+                }
+
+                return count;
+            });
+        }
+
+        private IQueryable&lt;BeatmapCollection&gt; getCollectionsForPlaylist(Realm r) =&gt; r.All&lt;BeatmapCollection&gt;().Where(c =&gt; c.Name == room.Name);
+
+        private IQueryable&lt;BeatmapInfo&gt; getBeatmapsForPlaylist(Realm r)
+        {
+            return r.All&lt;BeatmapInfo&gt;().Filter(string.Join(&quot; OR &quot;, room.Playlist.Select(item =&gt; $&quot;(OnlineID == {item.Beatmap.OnlineID})&quot;).Distinct()));
+        }
+
+        private bool hasAllItemsInCollection
+        {
+            get
+            {
+                if (collection == null)
+                    return false;
+
+                return room.Playlist.DistinctBy(i =&gt; i.Beatmap.OnlineID).Count() ==
+                       collection.PerformRead(c =&gt; c.BeatmapMD5Hashes.Count);
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            beatmapSubscription?.Dispose();
+            collectionSubscription?.Dispose();
+        }
+
+        public override LocalisableString TooltipText
+        {
+            get
+            {
+                if (Enabled.Value)
+                    return string.Empty;
+
+                if (hasAllItemsInCollection)
+                    return &quot;All beatmaps have been added!&quot;;
+
+                return &quot;Download some beatmaps first.&quot;;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,9,29,76,0],[32,37,32,41,0],[32,42,32,46,0],[32,51,32,56,0],[35,55,35,59,0],[35,60,35,64,0],[37,9,37,56,0],[38,9,38,10,0],[39,13,39,30,0],[40,9,40,10,0],[44,9,44,10,0],[45,13,46,13,0],[46,13,46,14,0],[46,14,47,17,0],[47,17,47,46,0],[47,46,48,21,0],[48,21,48,28,0],[48,28,50,17,0],[50,17,50,37,0],[50,37,51,17,0],[51,17,51,36,0],[51,36,53,17,0],[53,17,53,49,0],[53,49,54,17,0],[54,17,54,39,0],[54,39,56,17,0],[56,17,57,17,0],[57,17,57,18,0],[57,18,58,21,0],[58,21,58,72,0],[58,72,59,21,0],[59,21,60,72,0],[60,72,62,21,0],[62,21,62,60,0],[62,60,64,21,0],[64,21,64,28,0],[64,28,64,30,0],[64,30,64,38,0],[64,38,64,39,0],[64,39,64,41,0],[64,41,64,42,0],[64,42,64,50,0],[64,50,65,21,0],[65,21,65,22,0],[65,22,66,25,0],[66,25,66,72,0],[66,72,67,29,0],[67,29,67,66,0],[67,66,68,21,0],[68,21,68,22,0],[68,22,70,21,0],[70,21,70,59,0],[70,59,71,17,0],[71,17,71,18,0],[71,18,71,38,0],[71,38,72,17,0],[72,17,72,18,0],[72,18,75,21,0],[75,21,75,42,0],[75,42,76,25,0],[76,25,76,97,0],[76,97,78,25,0],[78,25,78,117,0],[78,117,80,21,0],[80,21,80,84,0],[80,84,81,17,0],[81,17,81,18,0],[81,18,81,19,0],[81,19,81,21,0],[81,21,82,13,0],[82,13,82,14,0],[82,14,82,15,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,33,0],[90,13,90,35,0],[92,13,92,42,0],[93,17,93,24,0],[95,13,96,13,0],[96,13,96,14,0],[96,14,97,17,0],[97,17,97,57,0],[97,57,97,66,0],[97,66,97,80,0],[97,80,98,17,0],[98,17,98,45,0],[98,45,99,13,0],[99,13,99,14,0],[99,14,99,16,0],[101,13,102,13,0],[102,13,102,14,0],[102,14,103,17,0],[103,17,103,69,0],[103,69,104,17,0],[104,17,104,45,0],[104,45,105,13,0],[105,13,105,14,0],[105,14,105,16,0],[106,9,106,10,0],[109,9,109,10,0],[110,13,110,50,0],[112,13,112,36,0],[113,17,113,76,0],[114,18,114,46,0],[115,17,115,47,0],[117,17,117,67,0],[119,13,119,44,0],[120,9,120,10,0],[123,9,123,10,0],[124,13,124,36,0],[125,17,125,49,0],[127,13,128,13,0],[128,13,128,14,0],[128,14,129,17,0],[129,17,129,54,0],[129,54,131,17,0],[131,17,131,24,0],[131,24,131,26,0],[131,26,131,37,0],[131,37,131,38,0],[131,38,131,40,0],[131,40,131,41,0],[131,41,131,59,0],[131,59,132,17,0],[132,17,132,18,0],[132,18,133,21,0],[133,21,133,59,0],[133,59,134,25,0],[134,25,134,33,0],[134,33,135,17,0],[135,17,135,18,0],[135,18,137,17,0],[137,17,137,30,0],[137,30,138,13,0],[138,13,138,14,0],[138,14,138,16,0],[139,9,139,10,0],[141,85,141,143,0],[144,9,144,10,0],[145,13,145,97,0],[145,97,145,137,0],[145,137,145,152,0],[146,9,146,10,0],[151,13,151,14,0],[152,17,152,40,0],[153,21,153,34,0],[155,17,155,54,0],[155,54,155,72,0],[155,72,156,52,0],[156,52,156,76,0],[156,76,156,78,0],[157,13,157,14,0],[161,9,161,10,0],[162,13,162,39,0],[164,13,164,44,0],[165,13,165,47,0],[166,9,166,10,0],[171,13,171,14,0],[172,17,172,35,0],[173,21,173,41,0],[175,17,175,45,0],[176,21,176,60,0],[178,17,178,56,0],[179,13,179,14,0]]);
+    </script>
+  </body>
+</html>

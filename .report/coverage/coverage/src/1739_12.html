@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/HUD/DrawableGameplayLeaderboardScore.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Layout;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Online.API;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Play.Leaderboards;
+using osu.Game.Users;
+using osu.Game.Users.Drawables;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play.HUD
+{
+    public partial class DrawableGameplayLeaderboardScore : CompositeDrawable
+    {
+        public const float MIN_WIDTH = extended_left_panel_width + avatar_size / 2 + 5;
+
+        private const float left_panel_extension_width = 20;
+
+        private const float regular_left_panel_width = avatar_size + avatar_size / 2;
+        private const float extended_left_panel_width = regular_left_panel_width + left_panel_extension_width;
+
+        private const float accuracy_combo_width_cutoff = 150;
+        private const float username_score_width_cutoff = 50;
+
+        private const float avatar_size = PANEL_HEIGHT;
+
+        public const float PANEL_HEIGHT = 38f;
+
+        public static readonly float SHEAR_WIDTH = PANEL_HEIGHT * OsuGame.SHEAR.X;
+
+        /// &lt;summary&gt;
+        /// Extra width lenience to account for the out-of-range values produced by elastic easing when the score panel becomes extended (due to earning first score position or is a tracked score).
+        /// &lt;/summary&gt;
+        public const float ELASTIC_WIDTH_LENIENCE = 10f;
+
+        private const double panel_transition_duration = 500;
+        private const double text_transition_duration = 200;
+
+        public Bindable&lt;bool&gt; Expanded { get; } = new BindableBool();
+
+        public BindableLong TotalScore { get; } = new BindableLong();
+        public BindableDouble Accuracy { get; } = new BindableDouble(1);
+        public BindableInt Combo { get; } = new BindableInt();
+        public BindableBool HasQuit { get; } = new BindableBool();
+        public Bindable&lt;int?&gt; ScorePosition { get; } = new Bindable&lt;int?&gt;();
+        public Bindable&lt;long&gt; DisplayOrder { get; } = new Bindable&lt;long&gt;();
+
+        private Func&lt;ScoringMode, long&gt;? getDisplayScoreFunction;
+
+        public Func&lt;ScoringMode, long&gt; GetDisplayScore
+        {
+            set =&gt; getDisplayScoreFunction = value;
+        }
+
+        public Color4? BackgroundColour { get; }
+
+        public IUser? User { get; }
+
+        /// &lt;summary&gt;
+        /// Whether this score is the local user or a replay player (and should be focused / always visible).
+        /// &lt;/summary&gt;
+        public readonly bool Tracked;
+
+        private FillFlowContainer scorePanel = null!;
+        private Container leftLayer = null!;
+        private Box leftLayerGradient = null!;
+        private Container rightLayer = null!;
+        private Box rightLayerGradient = null!;
+        private Container scoreComponents = null!;
+        private OsuSpriteText usernameText = null!;
+        private OsuSpriteText positionText = null!;
+        private OsuSpriteText accuracyText = null!;
+        private OsuSpriteText scoreText = null!;
+        private OsuSpriteText comboText = null!;
+
+        private IBindable&lt;ScoringMode&gt; scoreDisplayMode = null!;
+
+        private bool isFriend;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        private readonly LayoutValue drawSizeLayout = new LayoutValue(Invalidation.DrawSize);
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;DrawableGameplayLeaderboardScore&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public DrawableGameplayLeaderboardScore(GameplayLeaderboardScore score)
+        {
+            User = score.User;
+            Tracked = score.Tracked;
+            TotalScore.BindTo(score.TotalScore);
+            Accuracy.BindTo(score.Accuracy);
+            Combo.BindTo(score.Combo);
+            HasQuit.BindTo(score.HasQuit);
+            ScorePosition.BindTo(score.Position);
+            DisplayOrder.BindTo(score.DisplayOrder);
+            GetDisplayScore = score.GetDisplayScore;
+
+            if (score.TeamColour != null)
+                BackgroundColour = score.TeamColour.Value;
+
+            RelativeSizeAxes = Axes.X;
+            Height = PANEL_HEIGHT;
+
+            Shear = OsuGame.SHEAR;
+
+            AddLayout(drawSizeLayout);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            const float corner_radius = 10;
+
+            Container avatarLayer;
+
+            InternalChild = scorePanel = new FillFlowContainer
+            {
+                CornerRadius = corner_radius,
+                BorderThickness = 2f,
+                Masking = true,
+                AutoSizeAxes = Axes.X,
+                RelativeSizeAxes = Axes.Y,
+                Children = new[]
+                {
+                    // Apparently this whole dual layer thing is here because the design apparently called
+                    // for a different colour to the left opposed to the right.
+                    //
+                    // I don&#39;t know this makes much visual sense. If it ever becomes an issue, rip it out
+                    // and replace with a single gradient instead.
+                    leftLayer = new Container
+                    {
+                        Width = regular_left_panel_width,
+                        RelativeSizeAxes = Axes.Y,
+                        Children = new Drawable[]
+                        {
+                            leftLayerGradient = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            new Container
+                            {
+                                Anchor = Anchor.TopRight,
+                                Origin = Anchor.TopRight,
+                                Width = regular_left_panel_width,
+                                // This may not be mathematically accurate but the position text looks best aligned with it.
+                                Padding = new MarginPadding { Right = avatar_size / 2 - SHEAR_WIDTH / 2 },
+                                RelativeSizeAxes = Axes.Y,
+                                Child = positionText = new OsuSpriteText
+                                {
+                                    Anchor = Anchor.Centre,
+                                    Origin = Anchor.Centre,
+                                    Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold),
+                                    Shear = -OsuGame.SHEAR,
+                                }
+                            }
+                        },
+                    },
+                    // this is placed here between the left and right layer for layout purposes,
+                    // but it&#39;s proxied below to render in front of them.
+                    avatarLayer = new Container
+                    {
+                        Size = new Vector2(avatar_size),
+                        // precise padding so the avatar&#39;s top and bottom sides land as close to the panel borders as possible.
+                        Padding = new MarginPadding(1.3f),
+                        // negative left margin to place the avatar&#39;s center directly at the edge of the left layer.
+                        Margin = new MarginPadding { Left = -avatar_size / 2 },
+                        Child = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            CornerRadius = corner_radius,
+                            Masking = true,
+                            Child = new ScoreAvatar(User)
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                RelativeSizeAxes = Axes.Both,
+                                Shear = -OsuGame.SHEAR,
+                                // extra scaling to cover the entire sheared area.
+                                Scale = new Vector2(1.1f),
+                            },
+                        },
+                    },
+                    rightLayer = new Container
+                    {
+                        RelativeSizeAxes = Axes.Y,
+                        // negative left margin to make the X position of the right layer directly at the avatar center (rendered behind it).
+                        Margin = new MarginPadding { Left = -avatar_size / 2 },
+                        Children = new Drawable[]
+                        {
+                            rightLayerGradient = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            scoreComponents = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Padding = new MarginPadding { Left = avatar_size / 2 + 4, Right = 20, Vertical = 5 },
+                                Shear = -OsuGame.SHEAR,
+                                Children = new Drawable[]
+                                {
+                                    new GridContainer
+                                    {
+                                        RelativeSizeAxes = Axes.X,
+                                        AutoSizeAxes = Axes.Y,
+                                        ColumnDimensions = new[]
+                                        {
+                                            new Dimension(),
+                                            new Dimension(GridSizeMode.AutoSize),
+                                        },
+                                        RowDimensions = new[]
+                                        {
+                                            new Dimension(GridSizeMode.AutoSize),
+                                        },
+                                        Content = new[]
+                                        {
+                                            new[]
+                                            {
+                                                usernameText = new TruncatingSpriteText
+                                                {
+                                                    Anchor = Anchor.BottomLeft,
+                                                    Origin = Anchor.BottomLeft,
+                                                    Text = User?.Username ?? string.Empty,
+                                                    Font = OsuFont.Style.Caption1.With(weight: FontWeight.SemiBold),
+                                                    RelativeSizeAxes = Axes.X,
+                                                },
+                                                accuracyText = new OsuSpriteText
+                                                {
+                                                    Anchor = Anchor.BottomLeft,
+                                                    Origin = Anchor.BottomLeft,
+                                                    Font = OsuFont.Style.Caption2.With(weight: FontWeight.SemiBold),
+                                                },
+                                            }
+                                        },
+                                    },
+                                    new GridContainer
+                                    {
+                                        Anchor = Anchor.BottomLeft,
+                                        Origin = Anchor.BottomLeft,
+                                        RelativeSizeAxes = Axes.X,
+                                        AutoSizeAxes = Axes.Y,
+                                        ColumnDimensions = new[]
+                                        {
+                                            new Dimension(),
+                                            new Dimension(GridSizeMode.AutoSize),
+                                        },
+                                        RowDimensions = new[]
+                                        {
+                                            new Dimension(GridSizeMode.AutoSize),
+                                        },
+                                        Content = new[]
+                                        {
+                                            new[]
+                                            {
+                                                scoreText = new TruncatingSpriteText
+                                                {
+                                                    Anchor = Anchor.BottomLeft,
+                                                    Origin = Anchor.BottomLeft,
+                                                    Font = OsuFont.Style.Body.With(weight: FontWeight.Regular),
+                                                    RelativeSizeAxes = Axes.X,
+                                                },
+                                                comboText = new OsuSpriteText
+                                                {
+                                                    Anchor = Anchor.BottomRight,
+                                                    Origin = Anchor.BottomRight,
+                                                    Font = OsuFont.Style.Caption2.With(weight: FontWeight.SemiBold),
+                                                },
+                                            }
+                                        },
+                                    },
+                                },
+                            }
+                        }
+                    },
+                    avatarLayer.CreateProxy(),
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            isFriend = User != null &amp;&amp; api.LocalUserState.Friends.Any(u =&gt; User.OnlineID == u.TargetID);
+
+            scoreDisplayMode = config.GetBindable&lt;ScoringMode&gt;(OsuSetting.ScoreDisplayMode);
+            scoreDisplayMode.BindValueChanged(_ =&gt; updateScore());
+            TotalScore.BindValueChanged(_ =&gt; updateScore(), true);
+
+            Accuracy.BindValueChanged(v =&gt; accuracyText.Text = v.NewValue.FormatAccuracy(), true);
+
+            Combo.BindValueChanged(v =&gt; comboText.Text = $@&quot;{v.NewValue}x&quot;, true);
+
+            Expanded.BindValueChanged(onExpanded, true);
+
+            HasQuit.BindValueChanged(_ =&gt; updatePanelState());
+            ScorePosition.BindValueChanged(_ =&gt; updatePanelState(), true);
+
+            FinishTransforms(true);
+        }
+
+        private void updateScore() =&gt; scoreText.Text = (getDisplayScoreFunction?.Invoke(scoreDisplayMode.Value) ?? TotalScore.Value).ToString(&quot;N0&quot;);
+
+        private void onExpanded(ValueChangedEvent&lt;bool&gt; expanded)
+        {
+            if (expanded.NewValue)
+            {
+                rightLayer.ResizeWidthTo(computeRightLayerWidth(), panel_transition_duration, Easing.OutQuint);
+                scoreComponents.FadeIn(panel_transition_duration, Easing.OutQuint);
+            }
+            else
+            {
+                rightLayer.ResizeWidthTo(avatar_size / 2, panel_transition_duration, Easing.OutQuint);
+                scoreComponents.FadeOut(text_transition_duration, Easing.OutQuint);
+            }
+        }
+
+        private void updatePanelState()
+        {
+            positionText.Text = ScorePosition.Value.HasValue ? $&quot;#{ScorePosition.Value.Value.FormatRank()}&quot; : &quot;-&quot;;
+
+            Color4 usernameColour = Color4.White;
+            bool widthExtension = false;
+
+            if (HasQuit.Value)
+            {
+                setPanelColour(Color4.Gray);
+                usernameColour = colours.Red2;
+            }
+            else if (ScorePosition.Value == 1)
+            {
+                widthExtension = true;
+                setPanelColour(BackgroundColour ?? colours.Lime2);
+            }
+            else if (Tracked)
+            {
+                widthExtension = true;
+                setPanelColour(BackgroundColour ?? colours.Orange2);
+            }
+            else if (isFriend)
+            {
+                setPanelColour(BackgroundColour ?? colours.Pink1);
+                usernameColour = colours.Pink1;
+            }
+            else
+                setPanelColour(BackgroundColour ?? colours.Blue4);
+
+            usernameText.FadeColour(usernameColour, text_transition_duration, Easing.OutQuint);
+
+            scorePanel.MoveToX(widthExtension ? 0 : left_panel_extension_width, panel_transition_duration, Easing.OutElastic);
+            leftLayer.ResizeWidthTo(widthExtension ? extended_left_panel_width : regular_left_panel_width, panel_transition_duration, Easing.OutElastic);
+        }
+
+        private void setPanelColour(Color4 baseColour)
+        {
+            leftLayerGradient.Colour = ColourInfo.GradientVertical(baseColour.Opacity(0.2f), baseColour.Opacity(0.5f));
+            rightLayerGradient.Colour = ColourInfo.GradientVertical(baseColour.Opacity(0.1f), baseColour.Opacity(0.3f));
+            scorePanel.BorderColour = ColourInfo.GradientVertical(baseColour.Opacity(0.2f), baseColour);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!drawSizeLayout.IsValid)
+            {
+                if (Expanded.Value)
+                {
+                    rightLayer.ClearTransforms(targetMember: nameof(Width));
+                    rightLayer.Width = computeRightLayerWidth();
+                }
+
+                drawSizeLayout.Validate();
+            }
+
+            bool showAccuracyAndCombo = rightLayer.Width &gt;= accuracy_combo_width_cutoff;
+
+            accuracyText.Alpha = showAccuracyAndCombo ? 1 : 0;
+            comboText.Alpha = showAccuracyAndCombo ? 1 : 0;
+
+            bool showUsernameAndScore = rightLayer.Width &gt;= username_score_width_cutoff;
+
+            usernameText.Alpha = showUsernameAndScore ? 1 : 0;
+            scoreText.Alpha = showUsernameAndScore ? 1 : 0;
+        }
+
+        private float computeRightLayerWidth() =&gt; Math.Max(0, DrawWidth - extended_left_panel_width - avatar_size / 2);
+
+        private partial class ScoreAvatar : CompositeDrawable
+        {
+            private readonly IUser? user;
+
+            private Box placeholder = null!;
+
+            public ScoreAvatar(IUser? user)
+            {
+                this.user = user;
+
+                RelativeSizeAxes = Axes.Both;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                InternalChild = placeholder = new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = OsuColour.Gray(0.1f),
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                LoadComponentAsync(new DrawableAvatar(user), a =&gt;
+                {
+                    placeholder.FadeOut(300, Easing.InQuint);
+                    AddInternal(a);
+                });
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[44,9,44,83,0],[54,42,54,46,0],[54,51,54,69,0],[56,42,56,46,0],[56,51,56,69,0],[57,42,57,46,0],[57,51,57,72,0],[58,36,58,40,0],[58,45,58,62,0],[59,39,59,43,0],[59,48,59,66,0],[60,47,60,51,0],[60,56,60,76,0],[61,46,61,50,0],[61,55,61,75,0],[67,20,67,51,0],[70,43,70,47,0],[72,30,72,34,0],[79,9,79,54,0],[80,9,80,45,0],[81,9,81,47,0],[82,9,82,46,0],[83,9,83,48,0],[84,9,84,51,0],[85,9,85,52,0],[86,9,86,52,0],[87,9,87,52,0],[88,9,88,49,0],[89,9,89,49,0],[91,9,91,65,0],[96,43,96,47,0],[96,48,96,52,0],[96,57,96,62,0],[99,36,99,40,0],[99,41,99,45,0],[99,50,99,55,0],[102,37,102,41,0],[102,42,102,46,0],[102,51,102,56,0],[104,9,104,94,0],[109,9,109,80,0],[110,9,110,10,0],[111,13,111,31,0],[112,13,112,37,0],[113,13,113,49,0],[114,13,114,45,0],[115,13,115,39,0],[116,13,116,43,0],[117,13,117,50,0],[118,13,118,53,0],[119,13,119,53,0],[121,13,121,42,0],[122,17,122,59,0],[124,13,124,39,0],[125,13,125,35,0],[127,13,127,35,0],[129,13,129,39,0],[130,9,130,10,0],[134,9,134,10,0],[139,13,299,15,0],[300,9,300,10,0],[303,9,303,10,0],[304,13,304,33,0],[306,13,306,76,0],[306,76,306,103,0],[306,103,306,105,0],[308,13,308,93,0],[309,13,309,52,0],[309,52,309,65,0],[309,65,309,67,0],[310,13,310,46,0],[310,46,310,59,0],[310,59,310,67,0],[312,13,312,44,0],[312,44,312,91,0],[312,91,312,99,0],[314,13,314,41,0],[314,41,314,75,0],[314,75,314,83,0],[316,13,316,57,0],[318,13,318,43,0],[318,43,318,61,0],[318,61,318,63,0],[319,13,319,49,0],[319,49,319,67,0],[319,67,319,75,0],[321,13,321,36,0],[322,9,322,10,0],[324,39,324,148,0],[327,9,327,10,0],[328,13,328,35,0],[329,13,329,14,0],[330,17,330,112,0],[331,17,331,84,0],[332,13,332,14,0],[334,13,334,14,0],[335,17,335,103,0],[336,17,336,84,0],[337,13,337,14,0],[338,9,338,10,0],[341,9,341,10,0],[342,13,342,115,0],[344,13,344,50,0],[345,13,345,41,0],[347,13,347,31,0],[348,13,348,14,0],[349,17,349,45,0],[350,17,350,47,0],[351,13,351,14,0],[352,18,352,47,0],[353,13,353,14,0],[354,17,354,39,0],[355,17,355,67,0],[356,13,356,14,0],[357,18,357,30,0],[358,13,358,14,0],[359,17,359,39,0],[360,17,360,69,0],[361,13,361,14,0],[362,18,362,31,0],[363,13,363,14,0],[364,17,364,67,0],[365,17,365,48,0],[366,13,366,14,0],[368,17,368,67,0],[370,13,370,96,0],[372,13,372,127,0],[373,13,373,154,0],[374,9,374,10,0],[377,9,377,10,0],[378,13,378,120,0],[379,13,379,121,0],[380,13,380,105,0],[381,9,381,10,0],[384,9,384,10,0],[385,13,385,27,0],[387,13,387,41,0],[388,13,388,14,0],[389,17,389,36,0],[390,17,390,18,0],[391,21,391,77,0],[392,21,392,65,0],[393,17,393,18,0],[395,17,395,43,0],[396,13,396,14,0],[398,13,398,89,0],[400,13,400,63,0],[401,13,401,60,0],[403,13,403,89,0],[405,13,405,63,0],[406,13,406,60,0],[407,9,407,10,0],[409,51,409,119,0],[415,13,415,45,0],[417,13,417,44,0],[418,13,418,14,0],[419,17,419,34,0],[421,17,421,46,0],[422,13,422,14,0],[426,13,426,14,0],[427,17,431,19,0],[432,13,432,14,0],[435,13,435,14,0],[436,17,436,37,0],[438,17,439,17,0],[439,17,439,18,0],[439,18,440,21,0],[440,21,440,62,0],[440,62,441,21,0],[441,21,441,36,0],[441,36,442,17,0],[442,17,442,18,0],[442,18,442,20,0],[443,13,443,14,0]]);
+    </script>
+  </body>
+</html>

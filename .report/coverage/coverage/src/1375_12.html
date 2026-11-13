@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Visual/LegacyReplayPlaybackTestScene.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using NUnit.Framework;
+using osu.Framework.Extensions;
+using osu.Framework.Screens;
+using osu.Framework.Testing;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Formats;
+using osu.Game.IO.Legacy;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Screens.Play;
+
+namespace osu.Game.Tests.Visual
+{
+    /// &lt;summary&gt;
+    /// The goal of this abstract test class is to exercise correct playback of replays sourced from previous osu! versions.
+    /// Use &lt;see cref=&quot;RunTest&quot;/&gt; to exercise that property.
+    /// &lt;/summary&gt;
+    [HeadlessTest]
+    [TestFixture]
+    public abstract partial class LegacyReplayPlaybackTestScene : RateAdjustedBeatmapTestScene
+    {
+        private ReplayPlayer currentPlayer = null!;
+        private readonly List&lt;JudgementResult&gt; results = new List&lt;JudgementResult&gt;();
+
+        /// &lt;summary&gt;
+        /// This is provided as a convenience for testing behaviour against osu!stable.
+        /// Setting this field to a non-null path will cause beatmap files and replays used in all test cases
+        /// to be exported to disk so that they can be cross-checked against stable.
+        /// &lt;/summary&gt;
+        protected abstract string? ExportLocation { get; }
+
+        /// &lt;summary&gt;
+        /// Encodes the supplied &lt;paramref name=&quot;originalScore&quot;/&gt;, decodes the result of encoding, runs the result of decoding against the supplied &lt;paramref name=&quot;beatmap&quot;/&gt;,
+        /// and checks that the judgement results recorded still match &lt;paramref name=&quot;expectedResults&quot;/&gt;.
+        /// If &lt;see cref=&quot;ExportLocation&quot;/&gt; is set, exports both the beatmap and the replay to said location.
+        /// &lt;/summary&gt;
+        protected void RunTest(string beatmapName, IBeatmap beatmap, string replayName, Score originalScore, IEnumerable&lt;HitResult&gt; expectedResults)
+        {
+            IBeatmap playableBeatmap = null!;
+            MemoryStream beatmapStream = new MemoryStream();
+            MemoryStream scoreStream = new MemoryStream();
+            Score decodedScore = null!;
+
+            AddStep(@&quot;set up beatmap&quot;, () =&gt;
+            {
+                beatmap.Metadata.Title = beatmapName;
+                Beatmap.Value = CreateWorkingBeatmap(beatmap);
+                Ruleset.Value = CreateRuleset()!.RulesetInfo;
+                playableBeatmap = Beatmap.Value.GetPlayableBeatmap(Ruleset.Value);
+
+                var beatmapEncoder = new LegacyBeatmapEncoder(beatmap, null, null);
+
+                using (var writer = new StreamWriter(beatmapStream, Encoding.UTF8, leaveOpen: true))
+                    beatmapEncoder.Encode(writer);
+
+                beatmapStream.Seek(0, SeekOrigin.Begin);
+                playableBeatmap.BeatmapInfo.MD5Hash = beatmapStream.ComputeMD5Hash();
+            });
+
+            AddStep(@&quot;encode score&quot;, () =&gt;
+            {
+                originalScore.ScoreInfo.BeatmapInfo = playableBeatmap.BeatmapInfo;
+                var encoder = new LegacyScoreEncoder(originalScore, playableBeatmap);
+                encoder.Encode(scoreStream, leaveOpen: true);
+
+                // `LegacyScoreEncoder` hardcodes a replay version that belongs to lazer.
+                // here we want to simulate a stable replay, which should have the classic mod attached etc.
+                // to that end, we do a post-encode step to specify a stable-like replay version.
+                scoreStream.Position = 1;
+
+                using (var sw = new SerializationWriter(scoreStream, leaveOpen: true))
+                {
+                    const int version = 20250414;
+                    sw.Write(version);
+                }
+
+                scoreStream.Position = 0;
+            });
+
+            if (ExportLocation != null)
+            {
+                AddStep(&quot;export beatmap&quot;, () =&gt;
+                {
+                    using var stream = File.Open(Path.Combine(ExportLocation, $&quot;{beatmapName}.osu&quot;), FileMode.Create);
+                    beatmapStream.CopyTo(stream);
+                    beatmapStream.Position = 0;
+                });
+
+                AddStep(&quot;export score&quot;, () =&gt;
+                {
+                    using var stream = File.Open(Path.Combine(ExportLocation, $@&quot;{replayName}.osr&quot;), FileMode.Create);
+                    scoreStream.CopyTo(stream);
+                    scoreStream.Position = 0;
+                });
+            }
+
+            AddStep(@&quot;decode score&quot;, () =&gt;
+            {
+                using (scoreStream)
+                {
+                    scoreStream.Position = 0;
+                    decodedScore = new TestScoreDecoder(Beatmap.Value, Ruleset.Value).Parse(scoreStream);
+                }
+            });
+
+            AddAssert(@&quot;classic mod present&quot;, () =&gt; decodedScore.ScoreInfo.Mods.Any(mod =&gt; mod is ModClassic));
+            AddStep(@&quot;push player&quot;, () =&gt; pushNewPlayer(decodedScore));
+
+            AddUntilStep(@&quot;Wait until player is loaded&quot;, () =&gt; currentPlayer.IsCurrentScreen());
+            AddAssert(@&quot;classic mod present&quot;, () =&gt; currentPlayer.GameplayState.Mods.Any(mod =&gt; mod is ModClassic));
+            AddUntilStep(@&quot;Wait for completion&quot;, () =&gt; currentPlayer.GameplayState.HasCompleted);
+            AddAssert(@&quot;judgement results after encode are correct&quot;, () =&gt; results.Select(r =&gt; r.Type), () =&gt; Is.EquivalentTo(expectedResults));
+        }
+
+        private void pushNewPlayer(Score score)
+        {
+            var player = new ReplayPlayer(score);
+            SelectedMods.Value = score.ScoreInfo.Mods;
+            player.OnLoadComplete += _ =&gt;
+            {
+                player.GameplayState.ScoreProcessor.NewJudgement += result =&gt;
+                {
+                    if (currentPlayer == player)
+                        results.Add(result);
+                };
+            };
+            LoadScreen(currentPlayer = player);
+            results.Clear();
+        }
+
+        private class TestScoreDecoder : LegacyScoreDecoder
+        {
+            private readonly WorkingBeatmap beatmap;
+            private readonly Ruleset ruleset;
+
+            public TestScoreDecoder(WorkingBeatmap beatmap, RulesetInfo ruleset)
+            {
+                this.beatmap = beatmap;
+                this.ruleset = ruleset.CreateInstance();
+            }
+
+            protected override Ruleset GetRuleset(int rulesetId) =&gt; ruleset;
+            protected override WorkingBeatmap GetBeatmap(string md5Hash) =&gt; beatmap;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,52,0],[34,9,34,86,0],[49,9,49,10,0],[50,13,50,46,0],[51,13,51,61,0],[52,13,52,59,0],[53,13,53,40,0],[55,13,56,13,0],[56,13,56,14,0],[56,14,57,17,0],[57,17,57,54,0],[57,54,58,17,0],[58,17,58,63,0],[58,63,59,17,0],[59,17,59,62,0],[59,62,60,17,0],[60,17,60,83,0],[60,83,62,17,0],[62,17,62,84,0],[62,84,64,24,0],[64,24,64,100,0],[64,100,65,21,0],[65,21,65,51,0],[65,51,67,17,0],[67,17,67,57,0],[67,57,68,17,0],[68,17,68,86,0],[68,86,69,13,0],[69,13,69,14,0],[69,14,69,16,0],[71,13,72,13,0],[72,13,72,14,0],[72,14,73,17,0],[73,17,73,83,0],[73,83,74,17,0],[74,17,74,86,0],[74,86,75,17,0],[75,17,75,62,0],[75,62,80,17,0],[80,17,80,42,0],[80,42,82,24,0],[82,24,82,86,0],[82,86,83,17,0],[83,17,83,18,0],[83,18,85,21,0],[85,21,85,39,0],[85,39,86,17,0],[86,17,86,18,0],[86,18,88,17,0],[88,17,88,42,0],[88,42,89,13,0],[89,13,89,14,0],[89,14,89,16,0],[91,13,91,40,0],[92,13,92,14,0],[93,17,94,17,0],[94,17,94,18,0],[94,18,95,21,0],[95,21,95,119,0],[95,119,96,21,0],[96,21,96,50,0],[96,50,97,21,0],[97,21,97,48,0],[97,48,98,17,0],[98,17,98,18,0],[98,18,98,20,0],[100,17,101,17,0],[101,17,101,18,0],[101,18,102,21,0],[102,21,102,119,0],[102,119,103,21,0],[103,21,103,48,0],[103,48,104,21,0],[104,21,104,46,0],[104,46,105,17,0],[105,17,105,18,0],[105,18,105,20,0],[106,13,106,14,0],[108,13,109,13,0],[109,13,109,14,0],[109,14,110,17,0],[110,17,110,36,0],[110,36,111,17,0],[111,17,111,18,0],[111,18,112,21,0],[112,21,112,46,0],[112,46,113,21,0],[113,21,113,106,0],[113,106,114,17,0],[114,17,114,18,0],[114,18,115,13,0],[115,13,115,14,0],[115,14,115,16,0],[117,13,117,53,0],[117,53,117,92,0],[117,92,117,109,0],[117,109,117,110,0],[117,110,117,112,0],[118,13,118,43,0],[118,43,118,70,0],[118,70,118,72,0],[120,13,120,64,0],[120,64,120,95,0],[120,95,120,97,0],[121,13,121,53,0],[121,53,121,97,0],[121,97,121,114,0],[121,114,121,115,0],[121,115,121,117,0],[122,13,122,56,0],[122,56,122,96,0],[122,96,122,98,0],[123,13,123,76,0],[123,76,123,96,0],[123,96,123,102,0],[123,102,123,103,0],[123,103,123,111,0],[123,111,123,143,0],[123,143,123,145,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,50,0],[129,13,129,55,0],[130,13,131,13,0],[131,13,131,14,0],[131,14,132,17,0],[132,17,133,17,0],[133,17,133,18,0],[133,18,134,21,0],[134,21,134,49,0],[134,49,135,25,0],[135,25,135,45,0],[135,45,136,17,0],[136,17,136,18,0],[136,18,136,19,0],[136,19,137,13,0],[137,13,137,14,0],[137,14,137,15,0],[138,13,138,48,0],[139,13,139,29,0],[140,9,140,10,0],[147,13,147,81,0],[148,13,148,14,0],[149,17,149,40,0],[150,17,150,57,0],[151,13,151,14,0],[153,69,153,76,0],[154,77,154,84,0]]);
+    </script>
+  </body>
+</html>

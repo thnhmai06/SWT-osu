@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/HitObjectComposer.SelectionState.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Humanizer;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Screens.Edit.Components.TernaryButtons;
+using osu.Game.Screens.Edit.Compose.Components.Timeline;
+using osu.Game.Utils;
+using osuTK;
+
+namespace osu.Game.Rulesets.Edit
+{
+    public abstract partial class HitObjectComposer&lt;TObject, TAction&gt;
+        where TObject : HitObject
+        where TAction : struct, Enum
+    {
+        #region Selection State
+
+        public override IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionSampleStates =&gt; selectionSampleStates;
+        private readonly Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; selectionSampleStates = new Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt;();
+
+        public override IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionBankStates =&gt; selectionBankStates;
+        private readonly Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; selectionBankStates = new Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt;();
+
+        public override IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionAdditionBankStates =&gt; selectionAdditionBankStates;
+        private readonly Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; selectionAdditionBankStates = new Dictionary&lt;string, Bindable&lt;TernaryState&gt;&gt;();
+
+        public override Bindable&lt;bool&gt; AutoSelectionBankEnabled { get; } = new Bindable&lt;bool&gt;();
+
+        /// &lt;summary&gt;
+        /// Set up ternary state bindables and bind them to selection/hitobject changes (in both directions)
+        /// &lt;/summary&gt;
+        private void createSelectionStateBindables()
+        {
+            foreach (string bankName in HitSampleInfo.ALL_BANKS.Prepend(HIT_BANK_AUTO))
+            {
+                var bindable = new Bindable&lt;TernaryState&gt;
+                {
+                    Description = bankName.Titleize()
+                };
+
+                bindable.ValueChanged += state =&gt;
+                {
+                    switch (state.NewValue)
+                    {
+                        case TernaryState.False:
+                            if (EditorBeatmap.SelectedHitObjects.Count == 0)
+                            {
+                                // Ensure that if this is the last selected bank, it should remain selected.
+                                if (selectionBankStates.Values.All(b =&gt; b.Value == TernaryState.False))
+                                    bindable.Value = TernaryState.True;
+                            }
+                            else
+                            {
+                                // Auto should never apply when there is a selection made.
+                                // This is also required to stop a bindable feedback loop when a HitObject has zero samples (and LINQ `All` below becomes true).
+                                if (bankName == HIT_BANK_AUTO)
+                                    break;
+
+                                // Never remove a sample bank.
+                                // These are basically radio buttons, not toggles.
+                                if (EditorBeatmap.SelectedHitObjects.All(h =&gt; h.Samples.Where(o =&gt; o.Name == HitSampleInfo.HIT_NORMAL).All(s =&gt; s.Bank == bankName)))
+                                    bindable.Value = TernaryState.True;
+                            }
+
+                            break;
+
+                        case TernaryState.True:
+                            if (EditorBeatmap.SelectedHitObjects.Count == 0)
+                            {
+                                // Ensure the user can&#39;t stack multiple bank selections when there&#39;s no hitobject selection.
+                                // Note that in normal scenarios this is sorted out by the feedback from applying the bank to the selected objects.
+                                foreach (var other in selectionBankStates.Values)
+                                {
+                                    if (other != bindable)
+                                        other.Value = TernaryState.False;
+                                }
+                            }
+                            else
+                            {
+                                // Auto should just not apply if there&#39;s a selection already made.
+                                // Maybe we could make it a disabled button in the future, but right now the editor buttons don&#39;t support disabled state.
+                                if (bankName == HIT_BANK_AUTO)
+                                {
+                                    bindable.Value = TernaryState.False;
+                                    break;
+                                }
+
+                                SetSampleBank(bankName);
+                            }
+
+                            break;
+                    }
+
+                    InvokeSelectionStateChanged();
+                };
+
+                selectionBankStates[bankName] = bindable;
+            }
+
+            foreach (string bankName in HitSampleInfo.ALL_BANKS.Prepend(HIT_BANK_AUTO))
+            {
+                var bindable = new Bindable&lt;TernaryState&gt;
+                {
+                    Description = bankName.Titleize()
+                };
+
+                bindable.ValueChanged += state =&gt;
+                {
+                    switch (state.NewValue)
+                    {
+                        case TernaryState.False:
+                            if (EditorBeatmap.SelectedHitObjects.Count == 0)
+                            {
+                                // Ensure that if this is the last selected bank, it should remain selected.
+                                if (selectionAdditionBankStates.Values.All(b =&gt; b.Value == TernaryState.False))
+                                    bindable.Value = TernaryState.True;
+                            }
+                            else
+                            {
+                                // Completely empty selections should be allowed in the case that none of the selected objects have any addition samples.
+                                // This is also required to stop a bindable feedback loop when a HitObject has zero addition samples (and LINQ `All` below becomes true).
+                                if (EditorBeatmap.SelectedHitObjects.SelectMany(enumerateAllSamples).All(h =&gt; h.All(o =&gt; o.Name == HitSampleInfo.HIT_NORMAL)))
+                                    break;
+
+                                // Never remove a sample bank.
+                                // These are basically radio buttons, not toggles.
+                                if (bankName == HIT_BANK_AUTO)
+                                {
+                                    if (EditorBeatmap.SelectedHitObjects.SelectMany(enumerateAllSamples).All(h =&gt; h.Where(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL).All(s =&gt; s.EditorAutoBank)))
+                                        bindable.Value = TernaryState.True;
+                                }
+                                else
+                                {
+                                    if (EditorBeatmap.SelectedHitObjects.SelectMany(enumerateAllSamples)
+                                                     .All(h =&gt; h.Where(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL).All(s =&gt; s.Bank == bankName &amp;&amp; !s.EditorAutoBank)))
+                                        bindable.Value = TernaryState.True;
+                                }
+                            }
+
+                            break;
+
+                        case TernaryState.True:
+                            // If any of the selected objects have any addition samples, we should apply the addition bank.
+                            if (EditorBeatmap.SelectedHitObjects.SelectMany(enumerateAllSamples).Any(h =&gt; h.Any(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL)))
+                                SetSampleAdditionBank(bankName);
+
+                            // There are either no selected items, or none of the selected items have addition sounds.
+                            // This state is basically the user pre-selecting an addition bank before actually adding an addition.
+                            // Ensure the user can&#39;t stack multiple bank selections in this state.
+                            // Note that in normal scenarios this is sorted out by the feedback from applying the bank to the selected objects.
+                            foreach (var other in selectionAdditionBankStates.Values)
+                            {
+                                if (other != bindable)
+                                    other.Value = TernaryState.False;
+                            }
+
+                            break;
+                    }
+
+                    InvokeSelectionStateChanged();
+                };
+
+                selectionAdditionBankStates[bankName] = bindable;
+            }
+
+            resetTernaryStates();
+
+            foreach (string sampleName in HitSampleInfo.ALL_ADDITIONS)
+            {
+                var bindable = new Bindable&lt;TernaryState&gt;
+                {
+                    Description = sampleName.Replace(&quot;hit&quot;, string.Empty).Titleize()
+                };
+
+                bindable.ValueChanged += state =&gt;
+                {
+                    switch (state.NewValue)
+                    {
+                        case TernaryState.False:
+                            RemoveHitSample(sampleName);
+                            break;
+
+                        case TernaryState.True:
+                            AddHitSample(sampleName);
+                            break;
+                    }
+
+                    InvokeSelectionStateChanged();
+                };
+
+                selectionSampleStates[sampleName] = bindable;
+            }
+
+            // new combo
+            if (SelectionNewComboState != null)
+            {
+                SelectionNewComboState.ValueChanged += state =&gt;
+                {
+                    switch (state.NewValue)
+                    {
+                        case TernaryState.False:
+                            SetNewCombo(false);
+                            break;
+
+                        case TernaryState.True:
+                            SetNewCombo(true);
+                            break;
+                    }
+
+                    InvokeSelectionStateChanged();
+                };
+            }
+        }
+
+        private void resetTernaryStates()
+        {
+            if (EditorBeatmap.SelectedHitObjects.Count &gt; 0)
+                return;
+
+            SelectionNewComboState?.Value = TernaryState.False;
+            AutoSelectionBankEnabled.Value = true;
+            selectionBankStates[HIT_BANK_AUTO].Value = TernaryState.True;
+            selectionAdditionBankStates[HIT_BANK_AUTO].Value = TernaryState.True;
+            foreach (var (_, sampleState) in selectionSampleStates)
+                sampleState.Value = TernaryState.False;
+        }
+
+        /// &lt;summary&gt;
+        /// Called when context menu ternary states may need to be recalculated (selection changed or hitobject updated).
+        /// &lt;/summary&gt;
+        protected virtual void UpdateTernaryStates()
+        {
+            if (EditorBeatmap.SelectedHitObjects.Any() &amp;&amp; SelectionNewComboState != null)
+                SelectionNewComboState.Value = EditorBeatmap.SelectedHitObjects.OfType&lt;IHasComboInformation&gt;().GetTernaryState(h =&gt; h.NewCombo);
+            AutoSelectionBankEnabled.Value = EditorBeatmap.SelectedHitObjects.Count == 0;
+
+            var samplesInSelection = EditorBeatmap.SelectedHitObjects.SelectMany(enumerateAllSamples).ToArray();
+
+            if (samplesInSelection.Length &gt; 0)
+            {
+                foreach ((string sampleName, var bindable) in selectionSampleStates)
+                {
+                    bindable.Value = samplesInSelection.GetTernaryState(h =&gt; h.Any(s =&gt; s.Name == sampleName));
+                }
+
+                foreach ((string bankName, var bindable) in selectionBankStates)
+                {
+                    bindable.Value = samplesInSelection.SelectMany(s =&gt; s).Where(o =&gt; o.Name == HitSampleInfo.HIT_NORMAL).GetTernaryState(h =&gt; h.Bank == bankName);
+                }
+
+                // if there are no addition samples in the selection, do not touch the state of addition bank bindables.
+                // this is to reduce annoyance from the bank resetting if the user wants to e.g. remove the only addition sound on an object, but then add another addition sound
+                // while keeping the bank the same.
+                // note that deselecting all objects will still reset the addition bank selection to auto via `ResetTernaryStates()`. this may need to be reconsidered later.
+                if (samplesInSelection.SelectMany(s =&gt; s).Any(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL))
+                {
+                    foreach ((string bankName, var bindable) in selectionAdditionBankStates)
+                    {
+                        bindable.Value = samplesInSelection.SelectMany(s =&gt; s).Where(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL)
+                                                           .GetTernaryState(h =&gt;
+                                                               (bankName != HIT_BANK_AUTO &amp;&amp; h.Bank == bankName &amp;&amp; !h.EditorAutoBank) || (bankName == HIT_BANK_AUTO &amp;&amp; h.EditorAutoBank));
+                    }
+                }
+            }
+        }
+
+        private IEnumerable&lt;IList&lt;HitSampleInfo&gt;&gt; enumerateAllSamples(HitObject hitObject)
+        {
+            yield return hitObject.Samples;
+
+            if (hitObject is IHasRepeats withRepeats)
+            {
+                foreach (var node in withRepeats.NodeSamples)
+                    yield return node;
+            }
+        }
+
+        #endregion
+
+        #region Ternary button creation
+
+        /// &lt;summary&gt;
+        /// Create all ternary states required to be displayed to the user.
+        /// &lt;/summary&gt;
+        protected virtual IEnumerable&lt;Drawable&gt; CreateTernaryButtons()
+        {
+            if (SelectionNewComboState != null &amp;&amp; CompositionTools.Count &gt; 0)
+            {
+                yield return new NewComboTernaryButton
+                {
+                    Current = SelectionNewComboState,
+                    CreateIcon = () =&gt; new Container
+                    {
+                        Children = new[]
+                        {
+                            CompositionTools[0].CreateIcon()?.With(d =&gt;
+                            {
+                                d.Anchor = Anchor.BottomLeft;
+                                d.Origin = Anchor.BottomLeft;
+                                d.Size = new Vector2(15);
+                            }) ?? Empty(),
+                            new SpriteIcon
+                            {
+                                Icon = OsuIcon.EditorNewComboSparkles,
+                                Size = new Vector2(20),
+                            }
+                        },
+                    },
+                };
+            }
+
+            foreach (var kvp in SelectionSampleStates)
+            {
+                yield return new DrawableTernaryButton&lt;GlobalAction&gt;
+                {
+                    Current = kvp.Value,
+                    Description = kvp.Key.Replace(@&quot;hit&quot;, string.Empty).Titleize(),
+                    CreateIcon = () =&gt; GetIconForSample(kvp.Key),
+                    Action = GetActionForSample(kvp.Key),
+                    Hotkey = new Hotkey(GetActionForSample(kvp.Key)),
+                };
+            }
+        }
+
+        private IEnumerable&lt;SampleBankTernaryButton&gt; createSampleBankTernaryButtons()
+        {
+            foreach (string bankName in HitSampleInfo.ALL_BANKS.Prepend(HIT_BANK_AUTO))
+            {
+                yield return new SampleBankTernaryButton(bankName)
+                {
+                    NormalState = { Current = SelectionBankStates[bankName], },
+                    AdditionsState = { Current = SelectionAdditionBankStates[bankName], },
+                    NormalHotkey = getHotkeyForBank(bankName, false),
+                    AdditionsHotkey = getHotkeyForBank(bankName, true),
+                    CreateIcon = () =&gt; getIconForBank(bankName),
+                    CreateCompactIcon = () =&gt; getCompactIconForBank(bankName),
+                };
+            }
+
+            AutoSelectionBankEnabled.BindValueChanged(_ =&gt; updateAutoBankTernaryButtonTooltip(), true);
+        }
+
+        private Drawable getIconForBank(string sampleName)
+        {
+            return new SpriteIcon
+            {
+                Size = new Vector2(20, 20),
+                Icon = sampleName switch
+                {
+                    HIT_BANK_AUTO =&gt; OsuIcon.EditorBankAuto,
+                    HitSampleInfo.BANK_NORMAL =&gt; OsuIcon.EditorBankNormal,
+                    HitSampleInfo.BANK_SOFT =&gt; OsuIcon.EditorBankSoft,
+                    HitSampleInfo.BANK_DRUM =&gt; OsuIcon.EditorBankDrum,
+                    _ =&gt; throw new ArgumentOutOfRangeException(nameof(sampleName), sampleName, null)
+                },
+            };
+        }
+
+        private Drawable getCompactIconForBank(string sampleName)
+        {
+            return new SpriteIcon
+            {
+                Size = new Vector2(10, 20),
+                Icon = sampleName switch
+                {
+                    HIT_BANK_AUTO =&gt; OsuIcon.EditorBankAutoCompact,
+                    HitSampleInfo.BANK_NORMAL =&gt; OsuIcon.EditorBankNormalCompact,
+                    HitSampleInfo.BANK_SOFT =&gt; OsuIcon.EditorBankSoftCompact,
+                    HitSampleInfo.BANK_DRUM =&gt; OsuIcon.EditorBankDrumCompact,
+                    _ =&gt; throw new ArgumentOutOfRangeException(nameof(sampleName), sampleName, null)
+                },
+            };
+        }
+
+        private GlobalAction getHotkeyForBank(string sampleName, bool addition) =&gt; (sampleName, addition) switch
+        {
+            (HIT_BANK_AUTO, false) =&gt; GlobalAction.EditorToggleNormalAutoBank,
+            (HitSampleInfo.BANK_NORMAL, false) =&gt; GlobalAction.EditorToggleNormalNormalBank,
+            (HitSampleInfo.BANK_SOFT, false) =&gt; GlobalAction.EditorToggleNormalSoftBank,
+            (HitSampleInfo.BANK_DRUM, false) =&gt; GlobalAction.EditorToggleNormalDrumBank,
+
+            (HIT_BANK_AUTO, true) =&gt; GlobalAction.EditorToggleAdditionAutoBank,
+            (HitSampleInfo.BANK_NORMAL, true) =&gt; GlobalAction.EditorToggleAdditionNormalBank,
+            (HitSampleInfo.BANK_SOFT, true) =&gt; GlobalAction.EditorToggleAdditionSoftBank,
+            (HitSampleInfo.BANK_DRUM, true) =&gt; GlobalAction.EditorToggleAdditionDrumBank,
+
+            _ =&gt; throw new ArgumentOutOfRangeException(nameof(sampleName), sampleName, null)
+        };
+
+        private void updateAutoBankTernaryButtonTooltip()
+        {
+            bool enabled = AutoSelectionBankEnabled.Value;
+
+            var autoBankButton = sampleBankTogglesCollection.Single(t =&gt; t.BankName == HIT_BANK_AUTO);
+            autoBankButton.NormalButton.Enabled.Value = enabled;
+            autoBankButton.NormalButton.TooltipText = !enabled ? &quot;Auto normal bank can only be used during hit object placement&quot; : string.Empty;
+        }
+
+        #endregion
+
+        #region Ternary state changes
+
+        /// &lt;summary&gt;
+        /// Sets the sample bank for all selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Should be kept in sync with &lt;see cref=&quot;SamplePointPiece.SampleEditPopover.setBank&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;bankName&quot;&gt;The name of the sample bank.&lt;/param&gt;
+        public void SetSampleBank(string bankName)
+        {
+            bool hasRelevantBank(HitObject hitObject)
+            {
+                bool result = hitObject.Samples.Where(o =&gt; o.Name == HitSampleInfo.HIT_NORMAL).All(s =&gt; s.Bank == bankName);
+
+                if (hitObject is IHasRepeats hasRepeats)
+                {
+                    foreach (var node in hasRepeats.NodeSamples)
+                        result &amp;= node.Where(o =&gt; o.Name == HitSampleInfo.HIT_NORMAL).All(s =&gt; s.Bank == bankName);
+                }
+
+                return result;
+            }
+
+            if (EditorBeatmap.SelectedHitObjects.All(hasRelevantBank))
+                return;
+
+            EditorBeatmap.PerformOnSelection(h =&gt;
+            {
+                if (hasRelevantBank(h))
+                    return;
+
+                h.Samples = h.Samples.Select(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL || s.EditorAutoBank ? s.With(newBank: bankName) : s).ToList();
+
+                if (h is IHasRepeats hasRepeats)
+                {
+                    for (int i = 0; i &lt; hasRepeats.NodeSamples.Count; ++i)
+                        hasRepeats.NodeSamples[i] = hasRepeats.NodeSamples[i].Select(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL || s.EditorAutoBank ? s.With(newBank: bankName) : s).ToList();
+                }
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Sets the sample addition bank for all selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Should be kept in sync with &lt;see cref=&quot;SamplePointPiece.SampleEditPopover.setAdditionBank&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;bankName&quot;&gt;The name of the sample bank.&lt;/param&gt;
+        public void SetSampleAdditionBank(string bankName)
+        {
+            bool hasRelevantBank(HitObject hitObject) =&gt;
+                bankName == HIT_BANK_AUTO
+                    ? enumerateAllSamples(hitObject).SelectMany(o =&gt; o).Where(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL).All(s =&gt; s.EditorAutoBank)
+                    : enumerateAllSamples(hitObject).SelectMany(o =&gt; o).Where(o =&gt; o.Name != HitSampleInfo.HIT_NORMAL).All(s =&gt; s.Bank == bankName &amp;&amp; !s.EditorAutoBank);
+
+            if (EditorBeatmap.SelectedHitObjects.All(hasRelevantBank))
+                return;
+
+            EditorBeatmap.PerformOnSelection(h =&gt;
+            {
+                if (hasRelevantBank(h))
+                    return;
+
+                string normalBank = h.Samples.FirstOrDefault(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL)?.Bank ?? HitSampleInfo.BANK_SOFT;
+                h.Samples = h.Samples.Select(s =&gt;
+                                 s.Name != HitSampleInfo.HIT_NORMAL
+                                     ? bankName == HIT_BANK_AUTO ? s.With(newBank: normalBank, newEditorAutoBank: true) : s.With(newBank: bankName, newEditorAutoBank: false)
+                                     : s)
+                             .ToList();
+
+                if (h is IHasRepeats hasRepeats)
+                {
+                    for (int i = 0; i &lt; hasRepeats.NodeSamples.Count; ++i)
+                    {
+                        normalBank = hasRepeats.NodeSamples[i].FirstOrDefault(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL)?.Bank ?? HitSampleInfo.BANK_SOFT;
+                        hasRepeats.NodeSamples[i] = hasRepeats.NodeSamples[i].Select(s =&gt;
+                            s.Name != HitSampleInfo.HIT_NORMAL
+                                ? bankName == HIT_BANK_AUTO ? s.With(newBank: normalBank, newEditorAutoBank: true) : s.With(newBank: bankName, newEditorAutoBank: false)
+                                : s).ToList();
+                    }
+                }
+            });
+        }
+
+        private bool hasRelevantSample(HitObject hitObject, string sampleName)
+        {
+            bool result = hitObject.Samples.Any(s =&gt; s.Name == sampleName);
+
+            if (hitObject is IHasRepeats hasRepeats)
+            {
+                foreach (var node in hasRepeats.NodeSamples)
+                    result &amp;= node.Any(s =&gt; s.Name == sampleName);
+            }
+
+            return result;
+        }
+
+        /// &lt;summary&gt;
+        /// Adds a hit sample to all selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Should be kept in sync with &lt;see cref=&quot;SamplePointPiece.SampleEditPopover.addHitSample&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;sampleName&quot;&gt;The name of the hit sample.&lt;/param&gt;
+        public void AddHitSample(string sampleName)
+        {
+            if (EditorBeatmap.SelectedHitObjects.All(h =&gt; hasRelevantSample(h, sampleName)))
+                return;
+
+            EditorBeatmap.PerformOnSelection(h =&gt;
+            {
+                string? forcedBank = null;
+                // if the selected object(s) only have normal samples, check whether the user has preselected a singular non-auto bank using `SelectionAdditionBankStates`.
+                // other scenarios are already handled by `CreateHitSampleInfo()`:
+                // - if the selected object(s) already have addition samples, `CreateHitSampleInfo()` will copy the bank from said addition samples.
+                // - if the selected object(s) do not have addition samples but the user has preselected auto bank, `CreateHitSampleInfo()` will use the auto bank anyway.
+                if (h.Samples.All(s =&gt; s.Name == HitSampleInfo.HIT_NORMAL))
+                    forcedBank = selectionAdditionBankStates.SingleOrDefault(kv =&gt; kv.Value.Value == TernaryState.True).Key;
+
+                // Make sure there isn&#39;t already an existing sample
+                if (h.Samples.All(s =&gt; s.Name != sampleName))
+                {
+                    var hitSample = h.CreateHitSampleInfo(sampleName);
+
+                    if (forcedBank != null &amp;&amp; forcedBank != HIT_BANK_AUTO)
+                        hitSample = hitSample.With(newBank: forcedBank, newEditorAutoBank: false);
+
+                    h.Samples.Add(hitSample);
+                }
+
+                if (h is IHasRepeats hasRepeats)
+                {
+                    foreach (var node in hasRepeats.NodeSamples)
+                    {
+                        if (node.Any(s =&gt; s.Name == sampleName))
+                            continue;
+
+                        var hitSample = h.CreateHitSampleInfo(sampleName);
+
+                        HitSampleInfo? existingAddition = node.FirstOrDefault(s =&gt; s.Name != HitSampleInfo.HIT_NORMAL);
+                        if (existingAddition != null)
+                            hitSample = hitSample.With(newBank: existingAddition.Bank, newEditorAutoBank: existingAddition.EditorAutoBank);
+
+                        node.Add(hitSample);
+                    }
+                }
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Removes a hit sample from all selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;sampleName&quot;&gt;The name of the hit sample.&lt;/param&gt;
+        public void RemoveHitSample(string sampleName)
+        {
+            if (EditorBeatmap.SelectedHitObjects.All(h =&gt; !hasRelevantSample(h, sampleName)))
+                return;
+
+            EditorBeatmap.PerformOnSelection(h =&gt;
+            {
+                h.SamplesBindable.RemoveAll(s =&gt; s.Name == sampleName);
+
+                if (h is IHasRepeats hasRepeats)
+                {
+                    for (int i = 0; i &lt; hasRepeats.NodeSamples.Count; ++i)
+                        hasRepeats.NodeSamples[i] = hasRepeats.NodeSamples[i].Where(s =&gt; s.Name != sampleName).ToList();
+                }
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Set the new combo state of all selected &lt;see cref=&quot;HitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;state&quot;&gt;Whether to set or unset.&lt;/param&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;Throws if any selected object doesn&#39;t implement &lt;see cref=&quot;IHasComboInformation&quot;/&gt;&lt;/exception&gt;
+        public void SetNewCombo(bool state)
+        {
+            if (EditorBeatmap.SelectedHitObjects.OfType&lt;IHasComboInformation&gt;().All(h =&gt; h.NewCombo == state))
+                return;
+
+            EditorBeatmap.PerformOnSelection(h =&gt;
+            {
+                var comboInfo = h as IHasComboInformation;
+
+                if (comboInfo == null || comboInfo.NewCombo == state) return;
+
+                comboInfo.NewCombo = state;
+            });
+        }
+
+        #endregion
+    }
+
+    public abstract partial class HitObjectComposer
+    {
+        #region Selection State
+
+        /// &lt;summary&gt;
+        /// A special bank name that is only used in the editor UI.
+        /// When selected and in placement mode, the bank of the last hit object will always be used.
+        /// &lt;/summary&gt;
+        public const string HIT_BANK_AUTO = @&quot;auto&quot;;
+
+        public event Action? SelectionStateChanged;
+
+        public void InvokeSelectionStateChanged() =&gt; SelectionStateChanged?.Invoke();
+
+        /// &lt;summary&gt;
+        /// The state of &quot;new combo&quot; for all selected hitobjects.
+        /// &lt;/summary&gt;
+        public abstract Bindable&lt;TernaryState&gt;? SelectionNewComboState { get; }
+
+        /// &lt;summary&gt;
+        /// The state of each sample type for all selected hitobjects. Keys match with &lt;see cref=&quot;HitSampleInfo&quot;/&gt; constant specifications.
+        /// &lt;/summary&gt;
+        public abstract IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionSampleStates { get; }
+
+        /// &lt;summary&gt;
+        /// The state of each sample bank type for all selected hitobjects.
+        /// &lt;/summary&gt;
+        public abstract IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionBankStates { get; }
+
+        /// &lt;summary&gt;
+        /// The state of each sample addition bank type for all selected hitobjects.
+        /// &lt;/summary&gt;
+        public abstract IReadOnlyDictionary&lt;string, Bindable&lt;TernaryState&gt;&gt; SelectionAdditionBankStates { get; }
+
+        /// &lt;summary&gt;
+        /// Whether there is no selection and the auto &lt;see cref=&quot;SelectionBankStates&quot;/&gt; can be used.
+        /// &lt;/summary&gt;
+        public abstract Bindable&lt;bool&gt; AutoSelectionBankEnabled { get; }
+
+        #endregion
+
+        public static GlobalAction GetActionForSample(string sampleName) =&gt; sampleName switch
+        {
+            HitSampleInfo.HIT_CLAP =&gt; GlobalAction.EditorToggleClapSound,
+            HitSampleInfo.HIT_WHISTLE =&gt; GlobalAction.EditorToggleWhistleSound,
+            HitSampleInfo.HIT_FINISH =&gt; GlobalAction.EditorToggleFinishSound,
+            _ =&gt; throw new ArgumentOutOfRangeException(nameof(sampleName), sampleName, null),
+        };
+
+        public static Drawable GetIconForSample(string sampleName)
+        {
+            switch (sampleName)
+            {
+                case HitSampleInfo.HIT_CLAP:
+                    return new SpriteIcon { Icon = OsuIcon.EditorClap };
+
+                case HitSampleInfo.HIT_WHISTLE:
+                    return new SpriteIcon { Icon = OsuIcon.EditorWhistle };
+
+                case HitSampleInfo.HIT_FINISH:
+                    return new SpriteIcon { Icon = OsuIcon.EditorFinish };
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(sampleName), sampleName, null);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,102,31,123,0],[32,9,32,142,0],[34,100,34,119,0],[35,9,35,140,0],[37,108,37,135,0],[38,9,38,148,0],[40,67,40,71,0],[40,76,40,96,0],[46,9,46,10,0],[47,13,47,20,0],[47,22,47,37,0],[47,38,47,40,0],[47,41,47,87,0],[48,13,48,14,0],[49,17,52,19,0],[54,17,55,17,0],[55,17,55,18,0],[55,18,56,21,0],[56,21,56,44,0],[56,44,59,29,0],[59,29,59,77,0],[59,77,60,29,0],[60,29,60,30,0],[60,30,62,33,0],[62,33,62,73,0],[62,73,62,102,0],[62,102,62,104,0],[62,104,63,37,0],[63,37,63,72,0],[63,72,64,29,0],[64,29,64,30,0],[64,30,66,29,0],[66,29,66,30,0],[66,30,69,33,0],[69,33,69,63,0],[69,63,70,37,0],[70,37,70,43,0],[70,43,74,33,0],[74,33,74,79,0],[74,79,74,100,0],[74,100,74,134,0],[74,134,74,145,0],[74,145,74,163,0],[74,163,74,164,0],[74,164,74,166,0],[74,166,75,37,0],[75,37,75,72,0],[75,72,76,29,0],[76,29,76,30,0],[76,30,78,29,0],[78,29,78,35,0],[78,35,81,29,0],[81,29,81,77,0],[81,77,82,29,0],[82,29,82,30,0],[82,30,85,33,0],[85,33,85,40,0],[85,40,85,42,0],[85,42,85,51,0],[85,51,85,52,0],[85,52,85,54,0],[85,54,85,55,0],[85,55,85,81,0],[85,81,86,33,0],[86,33,86,34,0],[86,34,87,37,0],[87,37,87,59,0],[87,59,88,41,0],[88,41,88,74,0],[88,74,89,33,0],[89,33,89,34,0],[89,34,90,29,0],[90,29,90,30,0],[90,30,92,29,0],[92,29,92,30,0],[92,30,95,33,0],[95,33,95,63,0],[95,63,96,33,0],[96,33,96,34,0],[96,34,97,37,0],[97,37,97,73,0],[97,73,98,37,0],[98,37,98,43,0],[98,43,101,33,0],[101,33,101,57,0],[101,57,102,29,0],[102,29,102,30,0],[102,30,104,29,0],[104,29,104,35,0],[104,35,107,21,0],[107,21,107,51,0],[107,51,108,17,0],[108,17,108,18,0],[108,18,108,19,0],[110,17,110,58,0],[111,13,111,14,0],[113,13,113,20,0],[113,22,113,37,0],[113,38,113,40,0],[113,41,113,87,0],[114,13,114,14,0],[115,17,118,19,0],[120,17,121,17,0],[121,17,121,18,0],[121,18,122,21,0],[122,21,122,44,0],[122,44,125,29,0],[125,29,125,77,0],[125,77,126,29,0],[126,29,126,30,0],[126,30,128,33,0],[128,33,128,81,0],[128,81,128,110,0],[128,110,128,112,0],[128,112,129,37,0],[129,37,129,72,0],[129,72,130,29,0],[130,29,130,30,0],[130,30,132,29,0],[132,29,132,30,0],[132,30,135,33,0],[135,33,135,111,0],[135,111,135,122,0],[135,122,135,156,0],[135,156,135,157,0],[135,157,135,159,0],[135,159,136,37,0],[136,37,136,43,0],[136,43,140,33,0],[140,33,140,63,0],[140,63,141,33,0],[141,33,141,34,0],[141,34,142,37,0],[142,37,142,115,0],[142,115,142,128,0],[142,128,142,162,0],[142,162,142,173,0],[142,173,142,189,0],[142,189,142,190,0],[142,190,142,192,0],[142,192,143,41,0],[143,41,143,76,0],[143,76,144,33,0],[144,33,144,34,0],[144,34,146,33,0],[146,33,146,34,0],[146,34,147,37,0],[147,37,148,64,0],[148,64,148,77,0],[148,77,148,111,0],[148,111,148,122,0],[148,122,148,161,0],[148,161,148,162,0],[148,162,148,164,0],[148,164,149,41,0],[149,41,149,76,0],[149,76,150,33,0],[150,33,150,34,0],[150,34,151,29,0],[151,29,151,30,0],[151,30,153,29,0],[153,29,153,35,0],[153,35,157,29,0],[157,29,157,107,0],[157,107,157,118,0],[157,118,157,152,0],[157,152,157,153,0],[157,153,157,155,0],[157,155,158,33,0],[158,33,158,65,0],[158,65,164,29,0],[164,29,164,36,0],[164,36,164,38,0],[164,38,164,47,0],[164,47,164,48,0],[164,48,164,50,0],[164,50,164,51,0],[164,51,164,85,0],[164,85,165,29,0],[165,29,165,30,0],[165,30,166,33,0],[166,33,166,55,0],[166,55,167,37,0],[167,37,167,70,0],[167,70,168,29,0],[168,29,168,30,0],[168,30,170,29,0],[170,29,170,35,0],[170,35,173,21,0],[173,21,173,51,0],[173,51,174,17,0],[174,17,174,18,0],[174,18,174,19,0],[176,17,176,66,0],[177,13,177,14,0],[179,13,179,34,0],[181,13,181,20,0],[181,22,181,39,0],[181,40,181,42,0],[181,43,181,70,0],[182,13,182,14,0],[183,17,186,19,0],[188,17,189,17,0],[189,17,189,18,0],[189,18,190,21,0],[190,21,190,44,0],[190,44,193,29,0],[193,29,193,57,0],[193,57,194,29,0],[194,29,194,35,0],[194,35,197,29,0],[197,29,197,54,0],[197,54,198,29,0],[198,29,198,35,0],[198,35,201,21,0],[201,21,201,51,0],[201,51,202,17,0],[202,17,202,18,0],[202,18,202,19,0],[204,17,204,62,0],[205,13,205,14,0],[208,13,208,48,0],[209,13,209,14,0],[210,17,211,17,0],[211,17,211,18,0],[211,18,212,21,0],[212,21,212,44,0],[212,44,215,29,0],[215,29,215,48,0],[215,48,216,29,0],[216,29,216,35,0],[216,35,219,29,0],[219,29,219,47,0],[219,47,220,29,0],[220,29,220,35,0],[220,35,223,21,0],[223,21,223,51,0],[223,51,224,17,0],[224,17,224,18,0],[224,18,224,19,0],[225,13,225,14,0],[226,9,226,10,0],[229,9,229,10,0],[230,13,230,60,0],[231,17,231,24,0],[233,13,233,64,0],[234,13,234,51,0],[235,13,235,74,0],[236,13,236,82,0],[237,13,237,20,0],[237,22,237,42,0],[237,43,237,45,0],[237,46,237,67,0],[238,17,238,56,0],[239,9,239,10,0],[245,9,245,10,0],[246,13,246,90,0],[247,17,247,133,0],[247,133,247,143,0],[247,143,247,145,0],[248,13,248,90,0],[250,13,250,113,0],[252,13,252,47,0],[253,13,253,14,0],[254,17,254,24,0],[254,26,254,59,0],[254,60,254,62,0],[254,63,254,84,0],[255,17,255,18,0],[256,21,256,78,0],[256,78,256,89,0],[256,89,256,109,0],[256,109,256,110,0],[256,110,256,112,0],[257,17,257,18,0],[259,17,259,24,0],[259,26,259,57,0],[259,58,259,60,0],[259,61,259,80,0],[260,17,260,18,0],[261,21,261,73,0],[261,73,261,74,0],[261,74,261,87,0],[261,87,261,121,0],[261,121,261,144,0],[261,144,261,162,0],[261,162,261,164,0],[262,17,262,18,0],[268,17,268,56,0],[268,56,268,57,0],[268,57,268,68,0],[268,68,268,102,0],[268,102,268,104,0],[269,17,269,18,0],[270,21,270,28,0],[270,30,270,61,0],[270,62,270,64,0],[270,65,270,92,0],[271,21,271,22,0],[272,25,272,77,0],[272,77,272,78,0],[272,78,272,91,0],[272,91,272,125,0],[272,125,274,64,0],[274,64,274,185,0],[274,185,274,187,0],[275,21,275,22,0],[276,17,276,18,0],[277,13,277,14,0],[278,9,278,10,0],[281,9,281,10,0],[282,13,282,44,0],[284,13,284,54,0],[285,13,285,14,0],[286,17,286,24,0],[286,26,286,34,0],[286,35,286,37,0],[286,38,286,61,0],[287,21,287,39,0],[288,13,288,14,0],[289,9,289,10,0],[299,9,299,10,0],[300,13,300,78,0],[301,13,301,14,0],[302,17,305,40,0],[305,40,310,29,0],[310,29,310,30,0],[310,30,311,33,0],[311,33,311,62,0],[311,62,312,33,0],[312,33,312,62,0],[312,62,313,33,0],[313,33,313,58,0],[313,58,314,29,0],[314,29,314,30,0],[314,30,321,22,0],[321,22,322,19,0],[323,13,323,14,0],[325,13,325,20,0],[325,22,325,29,0],[325,30,325,32,0],[325,33,325,54,0],[326,13,326,14,0],[327,17,331,40,0],[331,40,331,65,0],[331,65,334,19,0],[335,13,335,14,0],[336,9,336,10,0],[339,9,339,10,0],[340,13,340,20,0],[340,22,340,37,0],[340,38,340,40,0],[340,41,340,87,0],[341,13,341,14,0],[342,17,348,40,0],[348,40,348,64,0],[348,64,349,47,0],[349,47,349,78,0],[349,78,350,19,0],[351,13,351,14,0],[353,13,353,60,0],[353,60,353,96,0],[353,96,353,104,0],[354,9,354,10,0],[357,9,357,10,0],[358,13,363,38,0],[363,38,363,60,0],[363,60,364,50,0],[364,50,364,74,0],[364,74,365,48,0],[365,48,365,70,0],[365,70,366,48,0],[366,48,366,70,0],[366,70,367,26,0],[367,26,367,101,0],[367,101,369,15,0],[370,9,370,10,0],[373,9,373,10,0],[374,13,379,38,0],[379,38,379,67,0],[379,67,380,50,0],[380,50,380,81,0],[380,81,381,48,0],[381,48,381,77,0],[381,77,382,48,0],[382,48,382,77,0],[382,77,383,26,0],[383,26,383,101,0],[383,101,385,15,0],[386,9,386,10,0],[388,84,390,39,0],[390,39,390,78,0],[390,78,391,51,0],[391,51,391,92,0],[391,92,392,49,0],[392,49,392,88,0],[392,88,393,49,0],[393,49,393,88,0],[393,88,395,38,0],[395,38,395,79,0],[395,79,396,50,0],[396,50,396,93,0],[396,93,397,48,0],[397,48,397,89,0],[397,89,398,48,0],[398,48,398,89,0],[398,89,400,18,0],[400,18,400,93,0],[400,93,401,10,0],[404,9,404,10,0],[405,13,405,59,0],[407,13,407,74,0],[407,74,407,101,0],[407,101,407,103,0],[408,13,408,65,0],[409,13,409,145,0],[410,9,410,10,0],[424,9,424,10,0],[426,13,426,14,0],[427,17,427,60,0],[427,60,427,94,0],[427,94,427,105,0],[427,105,427,123,0],[427,123,427,125,0],[429,17,429,57,0],[430,17,430,18,0],[431,21,431,28,0],[431,30,431,38,0],[431,39,431,41,0],[431,42,431,64,0],[432,25,432,51,0],[432,51,432,85,0],[432,85,432,96,0],[432,96,432,114,0],[432,114,432,116,0],[433,17,433,18,0],[435,17,435,31,0],[436,13,436,14,0],[438,13,438,71,0],[439,17,439,24,0],[441,13,442,13,0],[442,13,442,14,0],[442,14,443,17,0],[443,17,443,40,0],[443,40,444,21,0],[444,21,444,28,0],[444,28,446,17,0],[446,17,446,51,0],[446,51,446,137,0],[446,137,446,148,0],[446,148,448,17,0],[448,17,448,49,0],[448,49,449,17,0],[449,17,449,18,0],[449,18,450,26,0],[450,26,450,35,0],[450,35,450,37,0],[450,37,450,69,0],[450,69,450,71,0],[450,71,450,74,0],[450,74,451,25,0],[451,25,451,91,0],[451,91,451,177,0],[451,177,451,188,0],[451,188,452,17,0],[452,17,452,18,0],[452,18,453,13,0],[453,13,453,14,0],[453,14,453,16,0],[454,9,454,10,0],[464,9,464,10,0],[466,17,467,70,0],[467,70,467,71,0],[467,71,467,84,0],[467,84,467,118,0],[467,118,467,129,0],[467,129,467,145,0],[467,145,468,70,0],[468,70,468,71,0],[468,71,468,84,0],[468,84,468,118,0],[468,118,468,129,0],[468,129,468,168,0],[468,168,468,169,0],[470,13,470,71,0],[471,17,471,24,0],[473,13,474,13,0],[474,13,474,14,0],[474,14,475,17,0],[475,17,475,40,0],[475,40,476,21,0],[476,21,476,28,0],[476,28,478,17,0],[478,17,478,67,0],[478,67,478,101,0],[478,101,478,136,0],[478,136,479,17,0],[479,17,480,34,0],[480,34,482,41,0],[482,41,483,40,0],[483,40,485,17,0],[485,17,485,49,0],[485,49,486,17,0],[486,17,486,18,0],[486,18,487,26,0],[487,26,487,35,0],[487,35,487,37,0],[487,37,487,69,0],[487,69,487,71,0],[487,71,487,74,0],[487,74,488,21,0],[488,21,488,22,0],[488,22,489,25,0],[489,25,489,84,0],[489,84,489,118,0],[489,118,489,153,0],[489,153,490,25,0],[490,25,491,29,0],[491,29,493,36,0],[493,36,493,47,0],[493,47,494,21,0],[494,21,494,22,0],[494,22,495,17,0],[495,17,495,18,0],[495,18,496,13,0],[496,13,496,14,0],[496,14,496,16,0],[497,9,497,10,0],[500,9,500,10,0],[501,13,501,54,0],[501,54,501,74,0],[501,74,501,76,0],[503,13,503,53,0],[504,13,504,14,0],[505,17,505,24,0],[505,26,505,34,0],[505,35,505,37,0],[505,38,505,60,0],[506,21,506,45,0],[506,45,506,65,0],[506,65,506,67,0],[507,13,507,14,0],[509,13,509,27,0],[510,9,510,10,0],[520,9,520,10,0],[521,13,521,59,0],[521,59,521,91,0],[521,91,521,93,0],[522,17,522,24,0],[524,13,525,13,0],[525,13,525,14,0],[525,14,526,17,0],[526,17,526,43,0],[526,43,531,17,0],[531,17,531,40,0],[531,40,531,74,0],[531,74,531,76,0],[531,76,532,21,0],[532,21,532,84,0],[532,84,532,119,0],[532,119,532,125,0],[532,125,535,17,0],[535,17,535,40,0],[535,40,535,60,0],[535,60,535,62,0],[535,62,536,17,0],[536,17,536,18,0],[536,18,537,21,0],[537,21,537,71,0],[537,71,539,21,0],[539,21,539,75,0],[539,75,540,25,0],[540,25,540,99,0],[540,99,542,21,0],[542,21,542,46,0],[542,46,543,17,0],[543,17,543,18,0],[543,18,545,17,0],[545,17,545,49,0],[545,49,546,17,0],[546,17,546,18,0],[546,18,547,21,0],[547,21,547,28,0],[547,28,547,30,0],[547,30,547,38,0],[547,38,547,39,0],[547,39,547,41,0],[547,41,547,42,0],[547,42,547,64,0],[547,64,548,21,0],[548,21,548,22,0],[548,22,549,25,0],[549,25,549,43,0],[549,43,549,63,0],[549,63,549,65,0],[549,65,550,29,0],[550,29,550,38,0],[550,38,552,25,0],[552,25,552,75,0],[552,75,554,25,0],[554,25,554,84,0],[554,84,554,118,0],[554,118,554,120,0],[554,120,555,25,0],[555,25,555,54,0],[555,54,556,29,0],[556,29,556,140,0],[556,140,558,25,0],[558,25,558,45,0],[558,45,559,21,0],[559,21,559,22,0],[559,22,560,17,0],[560,17,560,18,0],[560,18,561,13,0],[561,13,561,14,0],[561,14,561,16,0],[562,9,562,10,0],[569,9,569,10,0],[570,13,570,59,0],[570,59,570,92,0],[570,92,570,94,0],[571,17,571,24,0],[573,13,574,13,0],[574,13,574,14,0],[574,14,575,17,0],[575,17,575,50,0],[575,50,575,70,0],[575,70,575,72,0],[575,72,577,17,0],[577,17,577,49,0],[577,49,578,17,0],[578,17,578,18,0],[578,18,579,26,0],[579,26,579,35,0],[579,35,579,37,0],[579,37,579,69,0],[579,69,579,71,0],[579,71,579,74,0],[579,74,580,25,0],[580,25,580,90,0],[580,90,580,110,0],[580,110,580,121,0],[580,121,581,17,0],[581,17,581,18,0],[581,18,582,13,0],[582,13,582,14,0],[582,14,582,16,0],[583,9,583,10,0],[591,9,591,10,0],[592,13,592,90,0],[592,90,592,109,0],[592,109,592,111,0],[593,17,593,24,0],[595,13,596,13,0],[596,13,596,14,0],[596,14,597,17,0],[597,17,597,59,0],[597,59,599,17,0],[599,17,599,70,0],[599,70,599,71,0],[599,71,599,78,0],[599,78,601,17,0],[601,17,601,44,0],[601,44,602,13,0],[602,13,602,14,0],[602,14,602,16,0],[603,9,603,10,0],[620,54,620,85,0],[649,77,651,39,0],[651,39,651,73,0],[651,73,652,42,0],[652,42,652,79,0],[652,79,653,41,0],[653,41,653,77,0],[653,77,654,18,0],[654,18,654,93,0],[654,93,655,10,0],[658,9,658,10,0],[659,13,659,32,0],[662,21,662,73,0],[665,21,665,76,0],[668,21,668,75,0],[671,13,671,89,0],[672,9,672,10,0]]);
+    </script>
+  </body>
+</html>

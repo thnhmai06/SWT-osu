@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Playlists/PlaylistItemResultsScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Models;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Rooms;
+using osu.Game.Rulesets;
+using osu.Game.Scoring;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Screens.Ranking;
+
+namespace osu.Game.Screens.OnlinePlay.Playlists
+{
+    public abstract partial class PlaylistItemResultsScreen : ResultsScreen
+    {
+        protected readonly long RoomId;
+        protected readonly PlaylistItem PlaylistItem;
+
+        protected LoadingSpinner LeftSpinner { get; private set; } = null!;
+        protected LoadingSpinner CentreSpinner { get; private set; } = null!;
+        protected LoadingSpinner RightSpinner { get; private set; } = null!;
+
+        private MultiplayerScores? higherScores;
+        private MultiplayerScores? lowerScores;
+        private WorkingBeatmap itemBeatmap = null!;
+
+        [Resolved]
+        protected IAPIProvider API { get; private set; } = null!;
+
+        [Resolved]
+        protected ScoreManager ScoreManager { get; private set; } = null!;
+
+        [Resolved]
+        protected RulesetStore Rulesets { get; private set; } = null!;
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapManager beatmapManager { get; set; } = null!;
+
+        protected PlaylistItemResultsScreen(ScoreInfo? score, long roomId, PlaylistItem playlistItem)
+            : base(score)
+        {
+            RoomId = roomId;
+            PlaylistItem = playlistItem;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            var localBeatmap = beatmapManager.QueryOnlineBeatmapId(PlaylistItem.Beatmap.OnlineID);
+            itemBeatmap = beatmapManager.GetWorkingBeatmap(localBeatmap);
+
+            AddInternal(new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Padding = new MarginPadding { Bottom = TwoLayerButton.SIZE_EXTENDED.Y },
+                Children = new Drawable[]
+                {
+                    LeftSpinner = new PanelListLoadingSpinner(ScorePanelList)
+                    {
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.Centre,
+                    },
+                    CentreSpinner = new PanelListLoadingSpinner(ScorePanelList)
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        State = { Value = Score == null ? Visibility.Visible : Visibility.Hidden },
+                    },
+                    RightSpinner = new PanelListLoadingSpinner(ScorePanelList)
+                    {
+                        Anchor = Anchor.CentreRight,
+                        Origin = Anchor.Centre,
+                    },
+                }
+            });
+        }
+
+        protected abstract APIRequest&lt;MultiplayerScore&gt; CreateScoreRequest();
+
+        protected override async Task&lt;ScoreInfo[]&gt; FetchScores()
+        {
+            // This performs two requests:
+            // 1. A request to show the relevant score (and scores around).
+            // 2. If that fails, a request to index the room starting from the highest score.
+
+            var requestTaskSource = new TaskCompletionSource&lt;MultiplayerScore&gt;();
+            var userScoreReq = CreateScoreRequest();
+            userScoreReq.Success += requestTaskSource.SetResult;
+            userScoreReq.Failure += requestTaskSource.SetException;
+            API.Queue(userScoreReq);
+
+            try
+            {
+                var userScore = await requestTaskSource.Task.ConfigureAwait(false);
+                var allScores = new List&lt;MultiplayerScore&gt; { userScore };
+
+                // Other scores could have arrived between score submission and entering the results screen. Ensure the local player score position is up to date.
+                if (Score != null)
+                {
+                    Score.Position = userScore.Position;
+                    ScorePanelList.GetPanelForScore(Score).ScorePosition.Value = userScore.Position;
+                }
+
+                if (userScore.ScoresAround?.Higher != null)
+                {
+                    allScores.AddRange(userScore.ScoresAround.Higher.Scores);
+                    higherScores = userScore.ScoresAround.Higher;
+
+                    Debug.Assert(userScore.Position != null);
+                    setPositions(higherScores, userScore.Position.Value, -1);
+                }
+
+                if (userScore.ScoresAround?.Lower != null)
+                {
+                    allScores.AddRange(userScore.ScoresAround.Lower.Scores);
+                    lowerScores = userScore.ScoresAround.Lower;
+
+                    Debug.Assert(userScore.Position != null);
+                    setPositions(lowerScores, userScore.Position.Value, 1);
+                }
+
+                return await transformScores(allScores).ConfigureAwait(false);
+            }
+            catch
+            {
+                return await fetchScoresAround().ConfigureAwait(false);
+            }
+        }
+
+        protected override async Task&lt;ScoreInfo[]&gt; FetchNextPage(int direction)
+        {
+            Debug.Assert(direction == 1 || direction == -1);
+
+            MultiplayerScores? pivot = direction == -1 ? higherScores : lowerScores;
+            if (pivot?.Cursor == null)
+                return [];
+
+            Schedule(() =&gt;
+            {
+                if (pivot == higherScores)
+                    LeftSpinner.Show();
+                else
+                    RightSpinner.Show();
+            });
+
+            return await fetchScoresAround(pivot).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;IndexPlaylistScoresRequest&quot;/&gt; with an optional score pivot.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;Does not queue the request.&lt;/remarks&gt;
+        /// &lt;param name=&quot;pivot&quot;&gt;An optional score pivot to retrieve scores around. Can be null to retrieve scores from the highest score.&lt;/param&gt;
+        private async Task&lt;ScoreInfo[]&gt; fetchScoresAround(MultiplayerScores? pivot = null)
+        {
+            var requestTaskSource = new TaskCompletionSource&lt;IndexedMultiplayerScores&gt;();
+            var indexReq = pivot != null
+                ? new IndexPlaylistScoresRequest(RoomId, PlaylistItem.ID, pivot.Cursor, pivot.Params)
+                : new IndexPlaylistScoresRequest(RoomId, PlaylistItem.ID);
+            indexReq.Success += requestTaskSource.SetResult;
+            indexReq.Failure += requestTaskSource.SetException;
+            API.Queue(indexReq);
+
+            try
+            {
+                var index = await requestTaskSource.Task.ConfigureAwait(false);
+
+                if (pivot == lowerScores)
+                {
+                    lowerScores = index;
+                    setPositions(index, pivot, 1);
+                }
+                else
+                {
+                    higherScores = index;
+                    setPositions(index, pivot, -1);
+
+                    // when paginating the results, it&#39;s possible for the user&#39;s score to naturally fall down the rankings.
+                    // unmitigated, this can cause scores at the very top of the rankings to have zero or negative positions
+                    // because the positions are counted backwards from the user&#39;s score, which has increased in this case during pagination.
+                    // if this happens, just give the top score the first position.
+                    // note that this isn&#39;t 100% correct, but it *is* however the most reliable way to mask the problem.
+                    int smallestPosition = index.Scores.Min(s =&gt; s.Position ?? 1);
+
+                    if (smallestPosition &lt; 1)
+                    {
+                        int offset = 1 - smallestPosition;
+
+                        foreach (var scorePanel in ScorePanelList.GetScorePanels())
+                            scorePanel.ScorePosition.Value += offset;
+
+                        foreach (var score in index.Scores)
+                            score.Position += offset;
+                    }
+                }
+
+                return await transformScores(index.Scores).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Failed to fetch scores (room: {RoomId}, item: {PlaylistItem.ID}): {ex}&quot;);
+                return [];
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Transforms returned &lt;see cref=&quot;MultiplayerScores&quot;/&gt; into &lt;see cref=&quot;ScoreInfo&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scores&quot;&gt;The &lt;see cref=&quot;MultiplayerScore&quot;/&gt;s that were retrieved from &lt;see cref=&quot;APIRequest&quot;/&gt;s.&lt;/param&gt;
+        private async Task&lt;ScoreInfo[]&gt; transformScores(List&lt;MultiplayerScore&gt; scores)
+        {
+            int[] allBeatmapIds = scores.Select(s =&gt; s.BeatmapId).Distinct().ToArray();
+            BeatmapInfo[] localBeatmaps = allBeatmapIds.Select(id =&gt; beatmapManager.QueryBeatmap(b =&gt; b.OnlineID == id))
+                                                       .Where(b =&gt; b != null)
+                                                       .ToArray()!;
+
+            int[] missingBeatmapIds = allBeatmapIds.Except(localBeatmaps.Select(b =&gt; b.OnlineID)).ToArray();
+            APIBeatmap[] onlineBeatmaps = (await beatmapLookupCache.GetBeatmapsAsync(missingBeatmapIds).ConfigureAwait(false)).Where(b =&gt; b != null).ToArray()!;
+
+            Dictionary&lt;int, BeatmapInfo&gt; beatmapsById = new Dictionary&lt;int, BeatmapInfo&gt;();
+
+            foreach (var beatmap in localBeatmaps)
+                beatmapsById[beatmap.OnlineID] = beatmap;
+
+            foreach (var beatmap in onlineBeatmaps)
+            {
+                // Minimal data required to get various components in this screen to display correctly.
+                beatmapsById[beatmap.OnlineID] = new BeatmapInfo
+                {
+                    Difficulty = new BeatmapDifficulty(beatmap.Difficulty),
+                    Metadata =
+                    {
+                        Artist = beatmap.Metadata.Artist,
+                        Title = beatmap.Metadata.Title,
+                        Author = new RealmUser
+                        {
+                            Username = beatmap.Metadata.Author.Username,
+                            OnlineID = beatmap.Metadata.Author.OnlineID,
+                        }
+                    },
+                    DifficultyName = beatmap.DifficultyName,
+                    StarRating = beatmap.StarRating,
+                    Length = beatmap.Length,
+                    BPM = beatmap.BPM
+                };
+            }
+
+            // Validate that we have all beatmaps we need.
+            foreach (int id in allBeatmapIds)
+            {
+                if (!beatmapsById.ContainsKey(id))
+                {
+                    Logger.Log($&quot;Failed to fetch beatmap {id} to display scores for playlist item {PlaylistItem.ID}&quot;);
+                    beatmapsById[id] = Beatmap.Value.BeatmapInfo;
+                }
+            }
+
+            // Exclude the score provided to this screen since it&#39;s added already.
+            return scores
+                   .Where(s =&gt; s.ID != Score?.OnlineID)
+                   .Select(s =&gt; s.CreateScoreInfo(ScoreManager, Rulesets, beatmapsById[s.BeatmapId]))
+                   .OrderByTotalScore()
+                   .ToArray();
+        }
+
+        protected override void OnScoresAdded(ScoreInfo[] scores)
+        {
+            base.OnScoresAdded(scores);
+
+            CentreSpinner.Hide();
+            RightSpinner.Hide();
+            LeftSpinner.Hide();
+        }
+
+        /// &lt;summary&gt;
+        /// Applies positions to all &lt;see cref=&quot;MultiplayerScore&quot;/&gt;s referenced to a given pivot.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scores&quot;&gt;The &lt;see cref=&quot;MultiplayerScores&quot;/&gt; to set positions on.&lt;/param&gt;
+        /// &lt;param name=&quot;pivot&quot;&gt;The pivot.&lt;/param&gt;
+        /// &lt;param name=&quot;increment&quot;&gt;The amount to increment the pivot position by for each &lt;see cref=&quot;MultiplayerScore&quot;/&gt; in &lt;paramref name=&quot;scores&quot;/&gt;.&lt;/param&gt;
+        private static void setPositions(MultiplayerScores scores, MultiplayerScores? pivot, int increment)
+            =&gt; setPositions(scores, pivot?.Scores[^1].Position ?? 0, increment);
+
+        /// &lt;summary&gt;
+        /// Applies positions to all &lt;see cref=&quot;MultiplayerScore&quot;/&gt;s referenced to a given pivot.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scores&quot;&gt;The &lt;see cref=&quot;MultiplayerScores&quot;/&gt; to set positions on.&lt;/param&gt;
+        /// &lt;param name=&quot;pivotPosition&quot;&gt;The pivot position.&lt;/param&gt;
+        /// &lt;param name=&quot;increment&quot;&gt;The amount to increment the pivot position by for each &lt;see cref=&quot;MultiplayerScore&quot;/&gt; in &lt;paramref name=&quot;scores&quot;/&gt;.&lt;/param&gt;
+        private static void setPositions(MultiplayerScores scores, int pivotPosition, int increment)
+        {
+            foreach (var s in scores.Scores)
+            {
+                pivotPosition += increment;
+                s.Position = pivotPosition;
+            }
+        }
+
+        protected override BackgroundScreen CreateBackground() =&gt; new BackgroundScreenBeatmap(itemBeatmap);
+
+        private partial class PanelListLoadingSpinner : LoadingSpinner
+        {
+            private readonly ScorePanelList list;
+
+            /// &lt;summary&gt;
+            /// Creates a new &lt;see cref=&quot;PanelListLoadingSpinner&quot;/&gt;.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;list&quot;&gt;The list to track.&lt;/param&gt;
+            /// &lt;param name=&quot;withBox&quot;&gt;Whether the spinner should have a surrounding black box for visibility.&lt;/param&gt;
+            public PanelListLoadingSpinner(ScorePanelList list, bool withBox = true)
+                : base(withBox)
+            {
+                this.list = list;
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                float panelOffset = list.DrawWidth / 2 - ScorePanel.EXPANDED_WIDTH;
+
+                if ((Anchor &amp; Anchor.x0) &gt; 0)
+                    X = (float)(panelOffset - list.Current);
+                else if ((Anchor &amp; Anchor.x2) &gt; 0)
+                    X = (float)(list.ScrollableExtent - list.Current - panelOffset);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,48,32,52,0],[32,53,32,65,0],[32,70,32,75,0],[33,50,33,54,0],[33,55,33,67,0],[33,72,33,77,0],[34,49,34,53,0],[34,54,34,66,0],[34,71,34,76,0],[38,9,38,52,0],[41,38,41,42,0],[41,43,41,55,0],[41,60,41,65,0],[44,47,44,51,0],[44,52,44,64,0],[44,69,44,74,0],[47,43,47,47,0],[47,48,47,60,0],[47,65,47,70,0],[50,57,50,61,0],[50,62,50,66,0],[50,71,50,76,0],[53,49,53,53,0],[53,54,53,58,0],[53,63,53,68,0],[56,15,56,26,0],[57,9,57,10,0],[58,13,58,29,0],[59,13,59,41,0],[60,9,60,10,0],[64,9,64,10,0],[65,13,65,99,0],[66,13,66,74,0],[68,13,91,16,0],[92,9,92,10,0],[97,9,97,10,0],[102,13,102,82,0],[103,13,103,53,0],[104,13,104,65,0],[105,13,105,68,0],[106,13,106,37,0],[109,13,109,14,0],[110,17,110,84,0],[111,17,111,74,0],[114,17,114,35,0],[115,17,115,18,0],[116,21,116,57,0],[117,21,117,101,0],[118,17,118,18,0],[120,17,120,60,0],[121,17,121,18,0],[122,21,122,78,0],[123,21,123,66,0],[125,21,125,62,0],[126,21,126,78,0],[127,17,127,18,0],[129,17,129,59,0],[130,17,130,18,0],[131,21,131,77,0],[132,21,132,64,0],[134,21,134,62,0],[135,21,135,76,0],[136,17,136,18,0],[138,17,138,79,0],[140,13,140,18,0],[141,13,141,14,0],[142,17,142,72,0],[144,9,144,10,0],[147,9,147,10,0],[148,13,148,61,0],[150,13,150,85,0],[151,13,151,39,0],[152,17,152,27,0],[154,13,155,13,0],[155,13,155,14,0],[155,14,156,17,0],[156,17,156,43,0],[156,43,157,21,0],[157,21,157,40,0],[157,40,159,21,0],[159,21,159,41,0],[159,41,160,13,0],[160,13,160,14,0],[160,14,160,16,0],[162,13,162,73,0],[163,9,163,10,0],[171,9,171,10,0],[172,13,172,90,0],[173,13,175,75,0],[176,13,176,61,0],[177,13,177,64,0],[178,13,178,33,0],[181,13,181,14,0],[182,17,182,80,0],[184,17,184,42,0],[185,17,185,18,0],[186,21,186,41,0],[187,21,187,51,0],[188,17,188,18,0],[190,17,190,18,0],[191,21,191,42,0],[192,21,192,52,0],[199,21,199,66,0],[199,66,199,81,0],[199,81,199,83,0],[201,21,201,46,0],[202,21,202,22,0],[203,25,203,59,0],[205,25,205,32,0],[205,34,205,48,0],[205,49,205,51,0],[205,52,205,83,0],[206,29,206,70,0],[208,25,208,32,0],[208,34,208,43,0],[208,44,208,46,0],[208,47,208,59,0],[209,29,209,54,0],[210,21,210,22,0],[211,17,211,18,0],[213,17,213,82,0],[215,13,215,33,0],[216,13,216,14,0],[217,17,217,103,0],[218,17,218,27,0],[220,9,220,10,0],[227,9,227,10,0],[228,13,228,54,0],[228,54,228,65,0],[228,65,228,88,0],[229,13,229,70,0],[229,70,229,120,0],[229,120,230,68,0],[230,68,230,77,0],[230,77,231,68,0],[233,13,233,86,0],[233,86,233,96,0],[233,96,233,109,0],[234,13,234,139,0],[234,139,234,148,0],[234,148,234,161,0],[236,13,236,92,0],[238,13,238,20,0],[238,22,238,33,0],[238,34,238,36,0],[238,37,238,50,0],[239,17,239,58,0],[241,13,241,20,0],[241,22,241,33,0],[241,34,241,36,0],[241,37,241,51,0],[242,13,242,14,0],[244,17,261,19,0],[262,13,262,14,0],[265,13,265,20,0],[265,22,265,28,0],[265,29,265,31,0],[265,32,265,45,0],[266,13,266,14,0],[267,17,267,51,0],[268,17,268,18,0],[269,21,269,119,0],[270,21,270,66,0],[271,17,271,18,0],[272,13,272,14,0],[275,13,276,32,0],[276,32,276,55,0],[276,55,277,33,0],[277,33,277,101,0],[277,101,279,31,0],[280,9,280,10,0],[283,9,283,10,0],[284,13,284,40,0],[286,13,286,34,0],[287,13,287,33,0],[288,13,288,32,0],[289,9,289,10,0],[298,16,298,80,0],[307,9,307,10,0],[308,13,308,20,0],[308,22,308,27,0],[308,28,308,30,0],[308,31,308,44,0],[309,13,309,14,0],[310,17,310,44,0],[311,17,311,44,0],[312,13,312,14,0],[313,9,313,10,0],[315,67,315,107,0],[327,19,327,32,0],[328,13,328,14,0],[329,17,329,34,0],[330,13,330,14,0],[333,13,333,14,0],[334,17,334,31,0],[336,17,336,84,0],[338,17,338,46,0],[339,21,339,61,0],[340,22,340,51,0],[341,21,341,85,0],[342,13,342,14,0]]);
+    </script>
+  </body>
+</html>

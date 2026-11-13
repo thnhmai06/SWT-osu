@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/SkipOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using JetBrains.Annotations;
+using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Backgrounds;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Input.Bindings;
+using osu.Game.Screens.Ranking;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play
+{
+    public partial class SkipOverlay : Container, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        /// &lt;summary&gt;
+        /// The total number of successful skips performed by this overlay.
+        /// &lt;/summary&gt;
+        public int SkipCount { get; private set; }
+
+        private readonly double startTime;
+
+        public Action RequestSkip;
+
+        protected FadeContainer FadingContent { get; private set; }
+
+        private OsuClickableContainer button;
+
+        private ButtonContainer buttonContainer;
+        protected Circle RemainingTimeBox { get; private set; }
+
+        private double displayTime;
+
+        /// &lt;summary&gt;
+        /// Whether the gameplay clock is currently at the skippable period.
+        /// &lt;/summary&gt;
+        private readonly BindableBool inSkipPeriod = new BindableBool();
+
+        private bool skipQueued;
+
+        [Resolved]
+        private IGameplayClock gameplayClock { get; set; }
+
+        internal bool IsButtonVisible =&gt; FadingContent.State == Visibility.Visible &amp;&amp; buttonContainer.State.Value == Visibility.Visible;
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt; true;
+
+        /// &lt;summary&gt;
+        /// Displays a skip overlay, giving the user the ability to skip forward.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;startTime&quot;&gt;The time at which gameplay begins to appear.&lt;/param&gt;
+        public SkipOverlay(double startTime)
+        {
+            this.startTime = startTime;
+
+            RelativePositionAxes = Axes.Both;
+            RelativeSizeAxes = Axes.X;
+
+            Position = new Vector2(0.5f, 0.7f);
+            Size = new Vector2(1, 100);
+
+            Origin = Anchor.Centre;
+        }
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuColour colours)
+        {
+            InternalChild = buttonContainer = new ButtonContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Child = FadingContent = new FadeContainer
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Children = new Drawable[]
+                    {
+                        button = CreateButton(inSkipPeriod),
+                        RemainingTimeBox = new Circle
+                        {
+                            Height = 5,
+                            Anchor = Anchor.BottomCentre,
+                            Origin = Anchor.BottomCentre,
+                            Colour = colours.Orange3,
+                            RelativeSizeAxes = Axes.X
+                        }
+                    }
+                }
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a skip button.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;inSkipPeriod&quot;&gt;Whether the gameplay clock is currently at the skippable period.&lt;/param&gt;
+        protected virtual OsuClickableContainer CreateButton(IBindable&lt;bool&gt; inSkipPeriod) =&gt; new Button
+        {
+            Anchor = Anchor.Centre,
+            Origin = Anchor.Centre,
+            Enabled = { BindTarget = inSkipPeriod },
+        };
+
+        private const double fade_time = 300;
+
+        private double fadeOutBeginTime =&gt; startTime - MasterGameplayClockContainer.MINIMUM_SKIP_TIME;
+
+        public override void Hide()
+        {
+            base.Hide();
+            FadingContent.Hide();
+        }
+
+        public override void Show()
+        {
+            base.Show();
+            FadingContent.TriggerShow();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            displayTime = gameplayClock.CurrentTime;
+
+            // skip is not required if there is no extra &quot;empty&quot; time to skip.
+            // we may need to remove this if rewinding before the initial player load position becomes a thing.
+            if (fadeOutBeginTime &lt;= displayTime)
+            {
+                Expire();
+                return;
+            }
+
+            button.Action = () =&gt;
+            {
+                SkipCount++;
+                RequestSkip?.Invoke();
+            };
+
+            FadingContent.TriggerShow();
+        }
+
+        /// &lt;summary&gt;
+        /// Triggers an &quot;automated&quot; skip to happen as soon as available.
+        /// &lt;/summary&gt;
+        public void SkipWhenReady()
+        {
+            if (skipQueued) return;
+
+            skipQueued = true;
+            attemptNextSkip();
+
+            void attemptNextSkip() =&gt; Scheduler.AddDelayed(() =&gt;
+            {
+                if (!button.Enabled.Value)
+                {
+                    skipQueued = false;
+                    return;
+                }
+
+                button.TriggerClick();
+                attemptNextSkip();
+            }, 200);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // This case causes an immediate expire in `LoadComplete`, but `Update` may run once after that.
+            // Avoid div-by-zero below.
+            if (fadeOutBeginTime &lt;= displayTime)
+                return;
+
+            double progress = Math.Max(0, 1 - (gameplayClock.CurrentTime - displayTime) / (fadeOutBeginTime - displayTime));
+
+            RemainingTimeBox.Width = (float)Interpolation.DampContinuously(RemainingTimeBox.Width, progress, 40, Math.Abs(Time.Elapsed));
+
+            inSkipPeriod.Value = progress &gt; 0;
+            buttonContainer.State.Value = inSkipPeriod.Value ? Visibility.Visible : Visibility.Hidden;
+        }
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            if (inSkipPeriod.Value &amp;&amp; !e.HasAnyButtonPressed)
+                FadingContent.TriggerShow();
+
+            return base.OnMouseMove(e);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.SkipCutscene:
+                    if (!button.Enabled.Value)
+                        return false;
+
+                    button.TriggerClick();
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        public partial class FadeContainer : Container, IStateful&lt;Visibility&gt;
+        {
+            [CanBeNull]
+            public event Action&lt;Visibility&gt; StateChanged;
+
+            private Visibility state;
+            private double? nextHideTime;
+
+            public override bool IsPresent =&gt; true;
+
+            public void TriggerShow()
+            {
+                Show();
+
+                if (!IsHovered &amp;&amp; !IsDragged)
+                    nextHideTime = Time.Current + 1000;
+                else
+                    nextHideTime = null;
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+
+                if (nextHideTime != null &amp;&amp; nextHideTime &lt;= Time.Current)
+                {
+                    Hide();
+                    nextHideTime = null;
+                }
+            }
+
+            public Visibility State
+            {
+                get =&gt; state;
+                set
+                {
+                    if (value == state)
+                        return;
+
+                    state = value;
+
+                    switch (state)
+                    {
+                        case Visibility.Visible:
+                            this.FadeIn(500, Easing.OutExpo);
+                            break;
+
+                        case Visibility.Hidden:
+                            this.FadeOut(1000, Easing.OutExpo);
+                            break;
+                    }
+
+                    StateChanged?.Invoke(State);
+                }
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+                Show();
+            }
+
+            protected override bool OnMouseDown(MouseDownEvent e)
+            {
+                Show();
+                nextHideTime = null;
+                return true;
+            }
+
+            protected override void OnMouseUp(MouseUpEvent e)
+            {
+                Show();
+            }
+
+            public override void Hide() =&gt; State = Visibility.Hidden;
+
+            public override void Show() =&gt; State = Visibility.Visible;
+        }
+
+        private partial class ButtonContainer : VisibilityContainer
+        {
+            protected override void PopIn() =&gt; this.FadeIn(fade_time);
+
+            protected override void PopOut() =&gt; this.FadeOut(fade_time);
+        }
+
+        private partial class Button : OsuClickableContainer
+        {
+            private Color4 colourNormal;
+            private Color4 colourHover;
+            private Box box;
+            private FillFlowContainer flow;
+            private Box background;
+            private AspectContainer aspect;
+
+            private Sample sampleConfirm;
+
+            public Button()
+            {
+                RelativeSizeAxes = Axes.Both;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours, AudioManager audio)
+            {
+                colourNormal = colours.Orange3;
+                colourHover = colours.Orange3.Lighten(0.2f);
+
+                sampleConfirm = audio.Samples.Get(@&quot;UI/submit-select&quot;);
+
+                Children = new Drawable[]
+                {
+                    background = new Box
+                    {
+                        Alpha = 0.2f,
+                        Colour = Color4.Black,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    aspect = new AspectContainer
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        RelativeSizeAxes = Axes.Y,
+                        Height = 0.6f,
+                        Masking = true,
+                        CornerRadius = 15,
+                        Children = new Drawable[]
+                        {
+                            box = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = colourNormal,
+                            },
+                            new TrianglesV2
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = ColourInfo.GradientVertical(colourNormal.Lighten(0.2f), colourNormal)
+                            },
+                            flow = new FillFlowContainer
+                            {
+                                Anchor = Anchor.TopCentre,
+                                RelativePositionAxes = Axes.Y,
+                                Y = 0.4f,
+                                AutoSizeAxes = Axes.Both,
+                                Origin = Anchor.Centre,
+                                Direction = FillDirection.Horizontal,
+                                Children = new[]
+                                {
+                                    new SpriteIcon { Size = new Vector2(15), Shadow = true, Icon = FontAwesome.Solid.ChevronRight },
+                                    new SpriteIcon { Size = new Vector2(15), Shadow = true, Icon = FontAwesome.Solid.ChevronRight },
+                                    new SpriteIcon { Size = new Vector2(15), Shadow = true, Icon = FontAwesome.Solid.ChevronRight },
+                                }
+                            },
+                            new OsuSpriteText
+                            {
+                                Anchor = Anchor.TopCentre,
+                                RelativePositionAxes = Axes.Y,
+                                Y = 0.7f,
+                                Font = OsuFont.GetFont(weight: FontWeight.Bold, size: 12),
+                                Origin = Anchor.Centre,
+                                Text = @&quot;SKIP&quot;,
+                            },
+                        }
+                    }
+                };
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                flow.TransformSpacingTo(new Vector2(5), 500, Easing.OutQuint);
+                box.FadeColour(colourHover, 500, Easing.OutQuint);
+                background.FadeTo(0.4f, 500, Easing.OutQuint);
+                return true;
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                flow.TransformSpacingTo(new Vector2(0), 500, Easing.OutQuint);
+                box.FadeColour(colourNormal, 500, Easing.OutQuint);
+                background.FadeTo(0.2f, 500, Easing.OutQuint);
+                base.OnHoverLost(e);
+            }
+
+            protected override bool OnMouseDown(MouseDownEvent e)
+            {
+                aspect.ScaleTo(0.75f, 2000, Easing.OutQuint);
+                return base.OnMouseDown(e);
+            }
+
+            protected override void OnMouseUp(MouseUpEvent e)
+            {
+                aspect.ScaleTo(1, 1000, Easing.OutElastic);
+                base.OnMouseUp(e);
+            }
+
+            protected override bool OnClick(ClickEvent e)
+            {
+                if (!Enabled.Value)
+                    return false;
+
+                sampleConfirm.Play();
+
+                box.FlashColour(Color4.White, 500, Easing.OutQuint);
+                aspect.ScaleTo(1.2f, 2000, Easing.OutQuint);
+
+                return base.OnClick(e);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[38,32,38,36,0],[38,37,38,49,0],[44,49,44,53,0],[44,54,44,66,0],[49,45,49,49,0],[49,50,49,62,0],[56,9,56,73,0],[61,48,61,52,0],[61,53,61,57,0],[63,42,63,136,0],[64,82,64,86,0],[70,9,70,45,0],[71,9,71,10,0],[72,13,72,40,0],[74,13,74,46,0],[75,13,75,39,0],[77,13,77,48,0],[78,13,78,40,0],[80,13,80,36,0],[81,9,81,10,0],[85,9,85,10,0],[86,13,105,15,0],[106,9,106,10,0],[112,95,117,10,0],[121,44,121,102,0],[124,9,124,10,0],[125,13,125,25,0],[126,13,126,34,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,25,0],[132,13,132,41,0],[133,9,133,10,0],[136,9,136,10,0],[137,13,137,33,0],[139,13,139,53,0],[143,13,143,49,0],[144,13,144,14,0],[145,17,145,26,0],[146,17,146,24,0],[149,13,150,13,0],[150,13,150,14,0],[150,14,151,17,0],[151,17,151,29,0],[151,29,152,17,0],[152,17,152,39,0],[152,39,153,13,0],[153,13,153,14,0],[153,14,153,15,0],[155,13,155,41,0],[156,9,156,10,0],[162,9,162,10,0],[163,13,163,28,0],[163,29,163,36,0],[165,13,165,31,0],[166,13,166,31,0],[168,39,169,13,0],[169,13,169,14,0],[169,14,170,17,0],[170,17,170,43,0],[170,43,171,17,0],[171,17,171,18,0],[171,18,172,21,0],[172,21,172,40,0],[172,40,173,21,0],[173,21,173,28,0],[173,28,176,17,0],[176,17,176,39,0],[176,39,177,17,0],[177,17,177,35,0],[177,35,178,13,0],[178,13,178,14,0],[178,14,178,20,0],[179,9,179,10,0],[182,9,182,10,0],[183,13,183,27,0],[187,13,187,49,0],[188,17,188,24,0],[190,13,190,125,0],[192,13,192,138,0],[194,13,194,47,0],[195,13,195,103,0],[196,9,196,10,0],[199,9,199,10,0],[200,13,200,62,0],[201,17,201,45,0],[203,13,203,40,0],[204,9,204,10,0],[207,9,207,10,0],[208,13,208,26,0],[209,17,209,30,0],[211,13,211,30,0],[214,21,214,47,0],[215,25,215,38,0],[217,21,217,43,0],[218,21,218,33,0],[221,13,221,26,0],[222,9,222,10,0],[225,9,225,10,0],[226,9,226,10,0],[236,47,236,51,0],[239,13,239,14,0],[240,17,240,24,0],[242,17,242,46,0],[243,21,243,56,0],[245,21,245,41,0],[246,13,246,14,0],[249,13,249,14,0],[250,17,250,31,0],[252,17,252,74,0],[253,17,253,18,0],[254,21,254,28,0],[255,21,255,41,0],[256,17,256,18,0],[257,13,257,14,0],[261,24,261,29,0],[263,17,263,18,0],[264,21,264,40,0],[265,25,265,32,0],[267,21,267,35,0],[269,21,269,35,0],[272,29,272,62,0],[273,29,273,35,0],[276,29,276,64,0],[277,29,277,35,0],[280,21,280,49,0],[281,17,281,18,0],[285,13,285,14,0],[286,17,286,37,0],[287,17,287,24,0],[288,13,288,14,0],[291,13,291,14,0],[292,17,292,24,0],[293,17,293,37,0],[294,17,294,29,0],[295,13,295,14,0],[298,13,298,14,0],[299,17,299,24,0],[300,13,300,14,0],[302,44,302,69,0],[304,44,304,70,0],[309,48,309,70,0],[311,49,311,72,0],[325,13,325,28,0],[326,13,326,14,0],[327,17,327,46,0],[328,13,328,14,0],[332,13,332,14,0],[333,17,333,48,0],[334,17,334,61,0],[336,17,336,72,0],[338,17,392,19,0],[393,13,393,14,0],[396,13,396,14,0],[397,17,397,79,0],[398,17,398,67,0],[399,17,399,63,0],[400,17,400,29,0],[401,13,401,14,0],[404,13,404,14,0],[405,17,405,79,0],[406,17,406,68,0],[407,17,407,63,0],[408,17,408,37,0],[409,13,409,14,0],[412,13,412,14,0],[413,17,413,62,0],[414,17,414,44,0],[415,13,415,14,0],[418,13,418,14,0],[419,17,419,60,0],[420,17,420,35,0],[421,13,421,14,0],[424,13,424,14,0],[425,17,425,36,0],[426,21,426,34,0],[428,17,428,38,0],[430,17,430,69,0],[431,17,431,61,0],[433,17,433,40,0],[434,13,434,14,0]]);
+    </script>
+  </body>
+</html>

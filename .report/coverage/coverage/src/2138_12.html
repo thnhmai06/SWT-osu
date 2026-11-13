@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/ComposeScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.IO.Serialization;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Screens.Edit.Compose.Components.Timeline;
+
+namespace osu.Game.Screens.Edit.Compose
+{
+    public partial class ComposeScreen : EditorScreenWithTimeline, IGameplaySettings
+    {
+        [Resolved]
+        private Clipboard hostClipboard { get; set; } = null!;
+
+        [Resolved]
+        private EditorClock clock { get; set; }
+
+        [Resolved]
+        private IGameplaySettings globalGameplaySettings { get; set; }
+
+        [Resolved]
+        private IBeatSnapProvider beatSnapProvider { get; set; }
+
+        private Bindable&lt;string&gt; clipboard { get; set; }
+
+        private HitObjectComposer composer;
+
+        public ComposeScreen()
+            : base(EditorScreenMode.Compose)
+        {
+        }
+
+        private Ruleset ruleset;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        {
+            var dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+            ruleset = parent.Get&lt;IBindable&lt;WorkingBeatmap&gt;&gt;().Value.BeatmapInfo.Ruleset.CreateInstance();
+            composer = ruleset?.CreateHitObjectComposer();
+
+            // make the composer available to the timeline and other components in this screen.
+            if (composer != null)
+                dependencies.CacheAs(composer);
+
+            return dependencies;
+        }
+
+        protected override Drawable CreateMainContent()
+        {
+            if (ruleset == null || composer == null)
+                return new ScreenWhiteBox.UnderConstructionMessage(ruleset == null ? &quot;This beatmap&quot; : $&quot;{ruleset.Description}&#39;s composer&quot;);
+
+            return wrapSkinnableContent(composer);
+        }
+
+        protected override Drawable CreateTimelineContent()
+        {
+            if (ruleset == null || composer == null)
+                return base.CreateTimelineContent();
+
+            TimelineBreakDisplay breakDisplay = new TimelineBreakDisplay
+            {
+                RelativeSizeAxes = Axes.Both,
+                Anchor = Anchor.CentreLeft,
+                Origin = Anchor.CentreLeft,
+                Height = 0.75f,
+            };
+
+            return wrapSkinnableContent(new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Children = new[]
+                {
+                    // We want to display this below hitobjects to better expose placement objects visually.
+                    // It needs to be above the blueprint container to handle drags on breaks though.
+                    breakDisplay.CreateProxy(),
+                    new TimelineBlueprintContainer(composer),
+                    breakDisplay
+                }
+            });
+        }
+
+        private Drawable wrapSkinnableContent(Drawable content)
+        {
+            Debug.Assert(ruleset != null);
+
+            return new EditorSkinProvidingContainer(EditorBeatmap).WithChild(content);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(EditorClipboard clipboard)
+        {
+            this.clipboard = clipboard.Content.GetBoundCopy();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            // May be null in the case of a ruleset that doesn&#39;t have editor support, see CreateMainContent().
+            if (composer == null)
+                return;
+
+            EditorBeatmap.SelectedHitObjects.BindCollectionChanged((_, _) =&gt; updateClipboardActionAvailability());
+            clipboard.BindValueChanged(_ =&gt; updateClipboardActionAvailability());
+            composer.OnLoadComplete += _ =&gt; updateClipboardActionAvailability();
+            updateClipboardActionAvailability();
+        }
+
+        #region Clipboard operations
+
+        public override void Cut()
+        {
+            if (!CanCut.Value)
+                return;
+
+            Copy();
+            EditorBeatmap.RemoveRange(EditorBeatmap.SelectedHitObjects.ToArray());
+        }
+
+        public override void Copy()
+        {
+            // on stable, pressing Ctrl-C would copy the current timestamp to system clipboard
+            // regardless of whether anything was even selected at all.
+            // UX-wise this is generally strange and unexpected, but make it work anyways to preserve muscle memory.
+            // note that this means that `getTimestamp()` must handle no-selection case, too.
+            // additionally, note we&#39;re intentionally not using `OsuGame.CopyToClipboard()`
+            // because we do not want toasts to pop up on every Ctrl-C press - it&#39;d be disruptive to mappers.
+            hostClipboard.SetText(getTimestamp());
+
+            if (CanCopy.Value)
+                clipboard.Value = new ClipboardContent(EditorBeatmap).Serialize();
+        }
+
+        public override void Paste()
+        {
+            if (!CanPaste.Value)
+                return;
+
+            var objects = clipboard.Value.Deserialize&lt;ClipboardContent&gt;().HitObjects;
+
+            Debug.Assert(objects.Any());
+
+            double timeOffset = beatSnapProvider.SnapTime(clock.CurrentTime) - objects.Min(o =&gt; o.StartTime);
+
+            foreach (var h in objects)
+                h.StartTime += timeOffset;
+
+            EditorBeatmap.BeginChange();
+
+            EditorBeatmap.SelectedHitObjects.Clear();
+
+            EditorBeatmap.AddRange(objects);
+            EditorBeatmap.SelectedHitObjects.AddRange(objects);
+
+            EditorBeatmap.EndChange();
+        }
+
+        private void updateClipboardActionAvailability()
+        {
+            CanCut.Value = CanCopy.Value = EditorBeatmap.SelectedHitObjects.Any();
+            CanPaste.Value = composer.IsLoaded &amp;&amp; !string.IsNullOrEmpty(clipboard.Value);
+        }
+
+        private string getTimestamp()
+        {
+            if (composer == null)
+                return string.Empty;
+
+            double displayTime = EditorBeatmap.SelectedHitObjects.MinBy(h =&gt; h.StartTime)?.StartTime ?? clock.CurrentTime;
+            string selectionAsString = composer.ConvertSelectionToString();
+
+            return !string.IsNullOrEmpty(selectionAsString)
+                ? $&quot;{displayTime.ToEditorFormattedString()} ({selectionAsString}) - &quot;
+                : $&quot;{displayTime.ToEditorFormattedString()} - &quot;;
+        }
+
+        #endregion
+
+        // Combo colour normalisation should not be applied in the editor.
+        // Note this doesn&#39;t affect editor test mode.
+        IBindable&lt;float&gt; IGameplaySettings.ComboColourNormalisationAmount =&gt; new Bindable&lt;float&gt;();
+
+        // Arguable.
+        IBindable&lt;float&gt; IGameplaySettings.PositionalHitsoundsLevel =&gt; globalGameplaySettings.PositionalHitsoundsLevel;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,43,26,47,0],[26,48,26,52,0],[26,57,26,62,0],[29,37,29,41,0],[29,42,29,46,0],[32,60,32,64,0],[32,65,32,69,0],[35,54,35,58,0],[35,59,35,63,0],[37,46,37,50,0],[37,51,37,55,0],[42,15,42,45,0],[43,9,43,10,0],[44,9,44,10,0],[49,9,49,10,0],[50,13,50,94,0],[52,13,52,106,0],[53,13,53,59,0],[56,13,56,34,0],[57,17,57,48,0],[59,13,59,33,0],[60,9,60,10,0],[63,9,63,10,0],[64,13,64,53,0],[65,17,65,140,0],[67,13,67,51,0],[68,9,68,10,0],[71,9,71,10,0],[72,13,72,53,0],[73,17,73,53,0],[75,13,81,15,0],[83,13,94,16,0],[95,9,95,10,0],[98,9,98,10,0],[99,13,99,43,0],[101,13,101,87,0],[102,9,102,10,0],[106,9,106,10,0],[107,13,107,63,0],[108,9,108,10,0],[111,9,111,10,0],[112,13,112,33,0],[115,13,115,34,0],[116,17,116,24,0],[118,13,118,78,0],[118,78,118,113,0],[118,113,118,115,0],[119,13,119,45,0],[119,45,119,80,0],[119,80,119,82,0],[120,13,120,45,0],[120,45,120,80,0],[120,80,120,81,0],[121,13,121,49,0],[122,9,122,10,0],[127,9,127,10,0],[128,13,128,31,0],[129,17,129,24,0],[131,13,131,20,0],[132,13,132,83,0],[133,9,133,10,0],[136,9,136,10,0],[143,13,143,51,0],[145,13,145,31,0],[146,17,146,83,0],[147,9,147,10,0],[150,9,150,10,0],[151,13,151,33,0],[152,17,152,24,0],[154,13,154,86,0],[156,13,156,41,0],[158,13,158,97,0],[158,97,158,108,0],[158,108,158,110,0],[160,13,160,20,0],[160,22,160,27,0],[160,28,160,30,0],[160,31,160,38,0],[161,17,161,43,0],[163,13,163,41,0],[165,13,165,54,0],[167,13,167,45,0],[168,13,168,64,0],[170,13,170,39,0],[171,9,171,10,0],[174,9,174,10,0],[175,13,175,83,0],[176,13,176,90,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,34,0],[182,17,182,37,0],[184,13,184,78,0],[184,78,184,89,0],[184,89,184,123,0],[185,13,185,76,0],[187,13,189,65,0],[190,9,190,10,0],[196,78,196,99,0],[199,72,199,119,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Skinning/SkinImporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Extensions;
+using osu.Game.IO;
+using osu.Game.IO.Archives;
+using osu.Game.Overlays.Notifications;
+using Realms;
+
+namespace osu.Game.Skinning
+{
+    public class SkinImporter : RealmArchiveModelImporter&lt;SkinInfo&gt;
+    {
+        private const string skin_info_file = &quot;skininfo.json&quot;;
+
+        private readonly IStorageResourceProvider skinResources;
+
+        private readonly ModelManager&lt;SkinInfo&gt; modelManager;
+
+        public SkinImporter(Storage storage, RealmAccess realm, IStorageResourceProvider skinResources)
+            : base(storage, realm)
+        {
+            this.skinResources = skinResources;
+
+            modelManager = new ModelManager&lt;SkinInfo&gt;(storage, realm);
+        }
+
+        public override IEnumerable&lt;string&gt; HandledExtensions =&gt; new[] { &quot;.osk&quot; };
+
+        protected override string[] HashableFileTypes =&gt; new[] { &quot;.ini&quot;, &quot;.json&quot; };
+
+        protected override bool ShouldDeleteArchive(string path) =&gt; string.Equals(Path.GetExtension(path), @&quot;.osk&quot;, StringComparison.OrdinalIgnoreCase);
+
+        protected override SkinInfo CreateModel(ArchiveReader archive, ImportParameters parameters) =&gt; new SkinInfo { Name = archive.Name ?? @&quot;No name&quot; };
+
+        private const string unknown_creator_string = @&quot;Unknown&quot;;
+
+        /// &lt;summary&gt;
+        /// Update an existing skin with the contents of a path
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;notification&quot;&gt;The progress notification&lt;/param&gt;
+        /// &lt;param name=&quot;task&quot;&gt;The &lt;see cref=&quot;ImportTask&quot;/&gt; to update the &lt;paramref name=&quot;original&quot;/&gt; with&lt;/param&gt;
+        /// &lt;param name=&quot;original&quot;&gt;The &lt;see cref=&quot;SkinInfo&quot;/&gt; to update&lt;/param&gt;
+        /// &lt;returns&gt;&lt;/returns&gt;
+        public override async Task&lt;Live&lt;SkinInfo&gt;?&gt; ImportAsUpdate(ProgressNotification notification, ImportTask task, SkinInfo original)
+        {
+            return await Realm.WriteAsync&lt;Live&lt;SkinInfo&gt;?&gt;(r =&gt;
+            {
+                var skinInfo = r.Find&lt;SkinInfo&gt;(original.ID)!;
+                skinInfo.Files.Clear();
+
+                string[] filesInMountedDirectory = Directory.EnumerateFiles(task.Path, &quot;*.*&quot;, SearchOption.AllDirectories).Select(f =&gt; Path.GetRelativePath(task.Path, f)).ToArray();
+
+                foreach (string file in filesInMountedDirectory)
+                {
+                    using var stream = File.OpenRead(Path.Combine(task.Path, file));
+
+                    modelManager.AddFile(skinInfo, stream, file, r);
+                }
+
+                string skinIniPath = Path.Combine(task.Path, &quot;skin.ini&quot;);
+
+                if (File.Exists(skinIniPath))
+                {
+                    using (var stream = File.OpenRead(skinIniPath))
+                    using (var lineReader = new LineBufferedReader(stream))
+                    {
+                        var decodedSkinIni = new LegacySkinDecoder().Decode(lineReader);
+
+                        if (!string.IsNullOrEmpty(decodedSkinIni.SkinInfo.Name))
+                            skinInfo.Name = decodedSkinIni.SkinInfo.Name;
+
+                        if (!string.IsNullOrEmpty(decodedSkinIni.SkinInfo.Creator))
+                            skinInfo.Creator = decodedSkinIni.SkinInfo.Creator;
+                    }
+                }
+
+                return skinInfo.ToLive(Realm);
+            }).ConfigureAwait(false);
+        }
+
+        protected override void Populate(SkinInfo model, ArchiveReader? archive, Realm realm, CancellationToken cancellationToken = default)
+        {
+            var skinInfoFile = model.GetFile(skin_info_file);
+
+            if (skinInfoFile != null)
+            {
+                try
+                {
+                    using (var existingStream = Files.Storage.GetStream(skinInfoFile.File.GetStoragePath()))
+                    using (var reader = new StreamReader(existingStream))
+                    {
+                        var deserialisedSkinInfo = JsonConvert.DeserializeObject&lt;SkinInfo&gt;(reader.ReadToEnd());
+
+                        if (deserialisedSkinInfo != null)
+                        {
+                            // for now we only care about the instantiation info.
+                            // eventually we probably want to transfer everything across.
+                            model.InstantiationInfo = deserialisedSkinInfo.InstantiationInfo;
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogForModel(model, $&quot;Error during {skin_info_file} parsing, falling back to default&quot;, e);
+
+                    // Not sure if we should still run the import in the case of failure here, but let&#39;s do so for now.
+                    model.InstantiationInfo = string.Empty;
+                }
+            }
+
+            // Always rewrite instantiation info (even after parsing in from the skin json) for sanity.
+            model.InstantiationInfo = createInstance(model).GetType().GetInvariantInstantiationInfo();
+
+            checkSkinIniMetadata(model, realm);
+        }
+
+        private void checkSkinIniMetadata(SkinInfo item, Realm realm)
+        {
+            var instance = createInstance(item);
+
+            // This function can be run on fresh import or save. The logic here ensures a skin.ini file is in a good state for both operations.
+            // `Skin` will parse the skin.ini and populate `Skin.Configuration` during construction above.
+            string skinIniSourcedName = instance.Configuration.SkinInfo.Name;
+            string skinIniSourcedCreator = instance.Configuration.SkinInfo.Creator;
+            string archiveName = item.Name.Replace(@&quot;.osk&quot;, string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            bool isImport = !item.IsManaged;
+
+            if (isImport)
+            {
+                item.Name = !string.IsNullOrEmpty(skinIniSourcedName) ? skinIniSourcedName : archiveName;
+                item.Creator = !string.IsNullOrEmpty(skinIniSourcedCreator) ? skinIniSourcedCreator : unknown_creator_string;
+
+                // For imports, we want to use the archive or folder name as part of the metadata, in addition to any existing skin.ini metadata.
+                // In an ideal world, skin.ini would be the only source of metadata, but a lot of skin creators and users don&#39;t update it when making modifications.
+                // In both of these cases, the expectation from the user is that the filename or folder name is displayed somewhere to identify the skin.
+                if (archiveName != item.Name
+                    // lazer exports use this format
+                    // GetValidFilename accounts for skins with non-ASCII characters in the name that have been exported by lazer.
+                    &amp;&amp; archiveName != item.GetDisplayString().GetValidFilename())
+                    item.Name = @$&quot;{item.Name} [{archiveName}]&quot;;
+            }
+
+            // By this point, the metadata in SkinInfo will be correct.
+            // Regardless of whether this is an import or not, let&#39;s write the skin.ini if non-existing or non-matching.
+            // This is (weirdly) done inside ComputeHash to avoid adding a new method to handle this case. After switching to realm it can be moved into another place.
+            if (skinIniSourcedName != item.Name)
+                UpdateSkinIniMetadata(item, realm);
+        }
+
+        public void UpdateSkinIniMetadata(SkinInfo item, Realm realm)
+        {
+            var existingFile = item.GetFile(@&quot;skin.ini&quot;);
+
+            // create a working instance of the skin.
+            // this implicitly decodes all contents of `skin.ini` into `skin.Configuration` and others.
+            // of note, `item` and `skin.Configuration.SkinInfo` are not the same object.
+            var skin = createInstance(item);
+
+            // `skin.Configuration.SkinInfo` will be in a post-decoding state,
+            // which means it will potentially be in a different state than `item`.
+            // write changes from `item` to `skin.SkinInfo` to definitively apply them.
+            skin.Configuration.SkinInfo.Name = item.Name;
+            skin.Configuration.SkinInfo.Creator = item.Creator;
+
+            using var outStream = new MemoryStream();
+
+            // now with the skin having the updated metadata, write out the full `skin.ini`.
+            using (var outWriter = new StreamWriter(outStream, Encoding.UTF8, 1024, true))
+            {
+                var encoder = new LegacySkinEncoder(skin);
+                encoder.Encode(outWriter);
+            }
+
+            if (existingFile == null)
+                modelManager.AddFile(item, outStream, @&quot;skin.ini&quot;, realm);
+            else
+                modelManager.ReplaceFile(existingFile, outStream, realm);
+
+            // The hash is already populated at this point in import.
+            // As we have changed files, it needs to be recomputed.
+            item.Hash = ComputeHash(item);
+        }
+
+        private Skin createInstance(SkinInfo item) =&gt; item.CreateInstance(skinResources);
+
+        /// &lt;summary&gt;
+        /// Save a skin, serialising any changes to skin layouts to relevant JSON structures.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether any change actually occurred.&lt;/returns&gt;
+        public bool Save(Skin skin)
+        {
+            bool hadChanges = false;
+
+            skin.SkinInfo.PerformWrite(s =&gt;
+            {
+                // Update for safety
+                s.InstantiationInfo = skin.GetType().GetInvariantInstantiationInfo();
+
+                // Serialise out the SkinInfo itself.
+                string skinInfoJson = JsonConvert.SerializeObject(s, new JsonSerializerSettings { Formatting = Formatting.Indented });
+
+                using (var streamContent = new MemoryStream(Encoding.UTF8.GetBytes(skinInfoJson)))
+                {
+                    modelManager.AddFile(s, streamContent, skin_info_file, s.Realm!);
+                }
+
+                // Then serialise each of the drawable component groups into respective files.
+                foreach (var drawableInfo in skin.LayoutInfos)
+                {
+                    string json = JsonConvert.SerializeObject(drawableInfo.Value, new JsonSerializerSettings { Formatting = Formatting.Indented });
+
+                    using (var streamContent = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+                    {
+                        string filename = @$&quot;{drawableInfo.Key}.json&quot;;
+
+                        var oldFile = s.GetFile(filename);
+
+                        if (oldFile != null)
+                            modelManager.ReplaceFile(oldFile, streamContent, s.Realm!);
+                        else
+                            modelManager.AddFile(s, streamContent, filename, s.Realm!);
+                    }
+                }
+
+                string newHash = ComputeHash(s);
+
+                hadChanges = newHash != s.Hash;
+
+                s.Hash = newHash;
+            });
+
+            return hadChanges;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,15,32,35,0],[33,9,33,10,0],[34,13,34,48,0],[36,13,36,71,0],[37,9,37,10,0],[39,66,39,82,0],[41,58,41,83,0],[43,69,43,152,0],[45,104,45,154,0],[57,9,57,10,0],[58,13,59,13,0],[59,13,59,14,0],[59,14,60,17,0],[60,17,60,63,0],[60,63,61,17,0],[61,17,61,40,0],[61,40,63,17,0],[63,17,63,136,0],[63,136,63,170,0],[63,170,63,182,0],[63,182,65,17,0],[65,17,65,24,0],[65,24,65,26,0],[65,26,65,37,0],[65,37,65,38,0],[65,38,65,40,0],[65,40,65,41,0],[65,41,65,64,0],[65,64,66,17,0],[66,17,66,18,0],[66,18,67,21,0],[67,21,67,85,0],[67,85,69,21,0],[69,21,69,69,0],[69,69,70,17,0],[70,17,70,18,0],[70,18,72,17,0],[72,17,72,74,0],[72,74,74,17,0],[74,17,74,46,0],[74,46,75,17,0],[75,17,75,18,0],[75,18,76,28,0],[76,28,76,67,0],[76,67,77,28,0],[77,28,77,75,0],[77,75,78,21,0],[78,21,78,22,0],[78,22,79,25,0],[79,25,79,89,0],[79,89,81,25,0],[81,25,81,81,0],[81,81,82,29,0],[82,29,82,74,0],[82,74,84,25,0],[84,25,84,84,0],[84,84,85,29,0],[85,29,85,80,0],[85,80,86,21,0],[86,21,86,22,0],[86,22,87,17,0],[87,17,87,18,0],[87,18,89,17,0],[89,17,89,47,0],[89,47,90,13,0],[90,13,90,14,0],[90,14,90,38,0],[91,9,91,10,0],[94,9,94,10,0],[95,13,95,62,0],[97,13,97,38,0],[98,13,98,14,0],[100,17,100,18,0],[101,28,101,108,0],[102,28,102,73,0],[103,21,103,22,0],[104,25,104,112,0],[106,25,106,58,0],[107,25,107,26,0],[110,29,110,94,0],[111,25,111,26,0],[112,21,112,22,0],[113,17,113,18,0],[114,17,114,36,0],[115,17,115,18,0],[116,21,116,110,0],[119,21,119,60,0],[120,17,120,18,0],[121,13,121,14,0],[124,13,124,103,0],[126,13,126,48,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,49,0],[135,13,135,78,0],[136,13,136,84,0],[137,13,137,111,0],[139,13,139,45,0],[141,13,141,26,0],[142,13,142,14,0],[143,17,143,106,0],[144,17,144,126,0],[149,17,152,82,0],[153,21,153,65,0],[154,13,154,14,0],[159,13,159,49,0],[160,17,160,52,0],[161,9,161,10,0],[164,9,164,10,0],[165,13,165,58,0],[170,13,170,45,0],[175,13,175,58,0],[176,13,176,64,0],[178,13,178,54,0],[181,20,181,90,0],[182,13,182,14,0],[183,17,183,59,0],[184,17,184,43,0],[185,13,185,14,0],[187,13,187,38,0],[188,17,188,75,0],[190,17,190,74,0],[194,13,194,43,0],[195,9,195,10,0],[197,55,197,89,0],[204,9,204,10,0],[205,13,205,37,0],[207,13,208,13,0],[208,13,208,14,0],[208,14,210,17,0],[210,17,210,86,0],[210,86,213,17,0],[213,17,213,135,0],[213,135,215,24,0],[215,24,215,98,0],[215,98,216,17,0],[216,17,216,18,0],[216,18,217,21,0],[217,21,217,86,0],[217,86,218,17,0],[218,17,218,18,0],[218,18,221,17,0],[221,17,221,24,0],[221,24,221,26,0],[221,26,221,42,0],[221,42,221,43,0],[221,43,221,45,0],[221,45,221,46,0],[221,46,221,62,0],[221,62,222,17,0],[222,17,222,18,0],[222,18,223,21,0],[223,21,223,148,0],[223,148,225,28,0],[225,28,225,94,0],[225,94,226,21,0],[226,21,226,22,0],[226,22,227,25,0],[227,25,227,71,0],[227,71,229,25,0],[229,25,229,59,0],[229,59,231,25,0],[231,25,231,45,0],[231,45,232,29,0],[232,29,232,88,0],[232,88,234,29,0],[234,29,234,88,0],[234,88,235,21,0],[235,21,235,22,0],[235,22,236,17,0],[236,17,236,18,0],[236,18,238,17,0],[238,17,238,49,0],[238,49,240,17,0],[240,17,240,48,0],[240,48,242,17,0],[242,17,242,34,0],[242,34,243,13,0],[243,13,243,14,0],[243,14,243,16,0],[245,13,245,31,0],[246,9,246,10,0]]);
+    </script>
+  </body>
+</html>

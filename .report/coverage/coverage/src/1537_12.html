@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Utility/LatencyCertifierScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Configuration;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Platform;
+using osu.Framework.Platform.Windows;
+using osu.Framework.Screens;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Settings;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Utility
+{
+    [Cached]
+    public partial class LatencyCertifierScreen : OsuScreen
+    {
+        private FrameSync previousFrameSyncMode;
+        private double previousActiveHz;
+
+        private readonly OsuTextFlowContainer statusText;
+
+        public override bool HideOverlaysOnEnter =&gt; true;
+
+        public override float BackgroundParallaxAmount =&gt; 0;
+
+        private readonly LinkFlowContainer explanatoryText;
+
+        private readonly Container&lt;LatencyArea&gt; mainArea;
+
+        private readonly Container resultsArea;
+
+        public readonly BindableDouble SampleBPM = new BindableDouble(120) { MinValue = 60, MaxValue = 300, Precision = 1 };
+        public readonly BindableDouble SampleApproachRate = new BindableDouble(9) { MinValue = 5, MaxValue = 12, Precision = 0.1 };
+        public readonly BindableFloat SampleVisualSpacing = new BindableFloat(0.5f) { MinValue = 0f, MaxValue = 1, Precision = 0.1f };
+
+        /// &lt;summary&gt;
+        /// The rate at which the game host should attempt to run.
+        /// &lt;/summary&gt;
+        private const int target_host_update_frames = 4000;
+
+        [Cached]
+        private readonly OverlayColourProvider overlayColourProvider = new OverlayColourProvider(OverlayColourScheme.Orange);
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private FrameworkConfigManager config { get; set; } = null!;
+
+        public readonly Bindable&lt;LatencyVisualMode&gt; VisualMode = new Bindable&lt;LatencyVisualMode&gt;();
+
+        private const int rounds_to_complete = 5;
+
+        private const int rounds_to_complete_certified = 20;
+
+        /// &lt;summary&gt;
+        /// Whether we are now in certification mode and decreasing difficulty.
+        /// &lt;/summary&gt;
+        private bool isCertifying;
+
+        private int totalRoundForNextResultsScreen =&gt; isCertifying ? rounds_to_complete_certified : rounds_to_complete;
+
+        private int attemptsAtCurrentDifficulty;
+        private int correctAtCurrentDifficulty;
+
+        public int DifficultyLevel { get; private set; } = 1;
+
+        private double lastPoll;
+        private int pollingMax;
+
+        private readonly FillFlowContainer settings;
+
+        [Resolved]
+        private GameHost host { get; set; } = null!;
+
+        [Resolved]
+        private MusicController musicController { get; set; } = null!;
+
+        public LatencyCertifierScreen()
+        {
+            InternalChildren = new Drawable[]
+            {
+                new Box
+                {
+                    Colour = overlayColourProvider.Background6,
+                    RelativeSizeAxes = Axes.Both,
+                },
+                mainArea = new Container&lt;LatencyArea&gt;
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
+                // Make sure the edge between the two comparisons can&#39;t be used to ascertain latency.
+                new Box
+                {
+                    Name = &quot;separator&quot;,
+                    Colour = ColourInfo.GradientHorizontal(overlayColourProvider.Background6, overlayColourProvider.Background6.Opacity(0)),
+                    Width = 100,
+                    RelativeSizeAxes = Axes.Y,
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopLeft,
+                },
+                new Box
+                {
+                    Name = &quot;separator&quot;,
+                    Colour = ColourInfo.GradientHorizontal(overlayColourProvider.Background6.Opacity(0), overlayColourProvider.Background6),
+                    Width = 100,
+                    RelativeSizeAxes = Axes.Y,
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopRight,
+                },
+                settings = new FillFlowContainer
+                {
+                    Name = &quot;Settings&quot;,
+                    AutoSizeAxes = Axes.Y,
+                    Width = 800,
+                    Padding = new MarginPadding(10),
+                    Spacing = new Vector2(2),
+                    Direction = FillDirection.Vertical,
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    Children = new Drawable[]
+                    {
+                        explanatoryText = new LinkFlowContainer(cp =&gt; cp.Font = OsuFont.Default.With(size: 20))
+                        {
+                            AutoSizeAxes = Axes.Y,
+                            RelativeSizeAxes = Axes.X,
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            TextAnchor = Anchor.TopCentre,
+                        },
+                        new SettingsSlider&lt;double&gt;
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            RelativeSizeAxes = Axes.None,
+                            Width = 400,
+                            LabelText = &quot;bpm&quot;,
+                            Current = SampleBPM
+                        },
+                        new SettingsSlider&lt;float&gt;
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            RelativeSizeAxes = Axes.None,
+                            Width = 400,
+                            LabelText = &quot;visual spacing&quot;,
+                            Current = SampleVisualSpacing
+                        },
+                        new SettingsSlider&lt;double&gt;
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            RelativeSizeAxes = Axes.None,
+                            Width = 400,
+                            LabelText = &quot;approach rate&quot;,
+                            Current = SampleApproachRate
+                        },
+                    },
+                },
+                resultsArea = new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                },
+                statusText = new OsuTextFlowContainer(cp =&gt; cp.Font = OsuFont.Default.With(size: 40))
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    TextAnchor = Anchor.TopCentre,
+                    Y = 150,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                },
+            };
+
+            explanatoryText.AddParagraph(@&quot;Welcome to the latency certifier!&quot;);
+            explanatoryText.AddParagraph(@&quot;Do whatever you need to try and perceive the difference in latency, then choose your best side. Read more about the methodology &quot;);
+            explanatoryText.AddLink(&quot;here&quot;, &quot;https://github.com/ppy/osu/wiki/Latency-and-unlimited-frame-rates#methodology&quot;);
+            explanatoryText.AddParagraph(@&quot;Use the arrow keys or Z/X/F/J to control the display.&quot;);
+            explanatoryText.AddParagraph(@&quot;Tab key to change focus. Space to change display mode&quot;);
+        }
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            if (lastPoll &gt; 0 &amp;&amp; Clock.CurrentTime != lastPoll)
+                pollingMax = (int)Math.Max(pollingMax, 1000 / (Clock.CurrentTime - lastPoll));
+            lastPoll = Clock.CurrentTime;
+            return base.OnMouseMove(e);
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            previousFrameSyncMode = config.Get&lt;FrameSync&gt;(FrameworkSetting.FrameSync);
+            previousActiveHz = host.UpdateThread.ActiveHz;
+            config.SetValue(FrameworkSetting.FrameSync, FrameSync.Unlimited);
+            host.UpdateThread.ActiveHz = target_host_update_frames;
+            host.AllowBenchmarkUnlimitedFrames = true;
+
+            musicController.Stop();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            host.AllowBenchmarkUnlimitedFrames = false;
+            config.SetValue(FrameworkSetting.FrameSync, previousFrameSyncMode);
+            host.UpdateThread.ActiveHz = previousActiveHz;
+            return base.OnExiting(e);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            loadNextRound();
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            switch (e.Key)
+            {
+                case Key.Space:
+                    int availableModes = Enum.GetValues&lt;LatencyVisualMode&gt;().Length;
+                    VisualMode.Value = (LatencyVisualMode)(((int)VisualMode.Value + 1) % availableModes);
+                    return true;
+
+                case Key.Tab:
+                    var firstArea = mainArea.FirstOrDefault(a =&gt; !a.IsActiveArea.Value);
+                    firstArea?.IsActiveArea.Value = true;
+                    return true;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        private void showResults()
+        {
+            mainArea.Clear();
+            resultsArea.Clear();
+            settings.Hide();
+
+            var displayMode = host.Window?.CurrentDisplayMode.Value;
+
+            string exclusive = (host.Renderer as IWindowsRenderer)?.FullscreenCapability.ToString() ?? &quot;unknown&quot;;
+
+            statusText.Clear();
+
+            float successRate = (float)correctAtCurrentDifficulty / attemptsAtCurrentDifficulty;
+            bool isPass = successRate == 1;
+
+            statusText.AddParagraph($&quot;You scored {correctAtCurrentDifficulty} out of {attemptsAtCurrentDifficulty} ({successRate:0%})!&quot;, cp =&gt; cp.Colour = isPass ? colours.Green : colours.Red);
+            statusText.AddParagraph($&quot;Level {DifficultyLevel} ({mapDifficultyToTargetFrameRate(DifficultyLevel):N0} Hz)&quot;,
+                cp =&gt; cp.Font = OsuFont.Default.With(size: 24));
+
+            statusText.AddParagraph(string.Empty);
+            statusText.AddParagraph(string.Empty);
+            statusText.AddIcon(isPass ? FontAwesome.Regular.CheckCircle : FontAwesome.Regular.TimesCircle, cp =&gt; cp.Colour = isPass ? colours.Green : colours.Red);
+            statusText.AddParagraph(string.Empty);
+
+            if (!isPass &amp;&amp; DifficultyLevel &gt; 1)
+            {
+                statusText.AddParagraph(&quot;To complete certification, the difficulty level will now decrease until you can get 20 rounds correct in a row!&quot;,
+                    cp =&gt; cp.Font = OsuFont.Default.With(size: 24, weight: FontWeight.SemiBold));
+                statusText.AddParagraph(string.Empty);
+            }
+
+            statusText.AddParagraph($&quot;Polling: {pollingMax} Hz Monitor: {displayMode?.RefreshRate ?? 0:N0} Hz Exclusive: {exclusive}&quot;,
+                cp =&gt; cp.Font = OsuFont.Default.With(size: 15, weight: FontWeight.SemiBold));
+
+            statusText.AddParagraph($&quot;Input: {host.InputThread.Clock.FramesPerSecond} Hz &quot;
+                                    + $&quot;Update: {host.UpdateThread.Clock.FramesPerSecond} Hz &quot;
+                                    + $&quot;Draw: {host.DrawThread.Clock.FramesPerSecond} Hz&quot;
+                , cp =&gt; cp.Font = OsuFont.Default.With(size: 15, weight: FontWeight.SemiBold));
+
+            if (isCertifying &amp;&amp; isPass)
+            {
+                showCertifiedScreen();
+                return;
+            }
+
+            string cannotIncreaseReason = string.Empty;
+
+            if (mapDifficultyToTargetFrameRate(DifficultyLevel + 1) &gt; target_host_update_frames)
+                cannotIncreaseReason = &quot;You&#39;ve reached the maximum level.&quot;;
+            else if (mapDifficultyToTargetFrameRate(DifficultyLevel + 1) &gt; Clock.FramesPerSecond)
+                cannotIncreaseReason = &quot;Game is not running fast enough to test this level&quot;;
+
+            FillFlowContainer buttonFlow;
+
+            resultsArea.Add(buttonFlow = new FillFlowContainer
+            {
+                RelativeSizeAxes = Axes.X,
+                AutoSizeAxes = Axes.Y,
+                Anchor = Anchor.BottomLeft,
+                Origin = Anchor.BottomLeft,
+                Spacing = new Vector2(20),
+                Padding = new MarginPadding(20),
+            });
+
+            if (isPass)
+            {
+                buttonFlow.Add(new ButtonWithKeyBind(Key.Enter)
+                {
+                    Text = &quot;Continue to next level&quot;,
+                    BackgroundColour = colours.Green,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Action = () =&gt; changeDifficulty(DifficultyLevel + 1),
+                    Enabled = { Value = string.IsNullOrEmpty(cannotIncreaseReason) },
+                    TooltipText = cannotIncreaseReason
+                });
+            }
+            else
+            {
+                if (DifficultyLevel == 1)
+                {
+                    buttonFlow.Add(new ButtonWithKeyBind(Key.Enter)
+                    {
+                        Text = &quot;Retry&quot;,
+                        TooltipText = &quot;Are you even trying..?&quot;,
+                        BackgroundColour = colours.Pink2,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Action = () =&gt;
+                        {
+                            isCertifying = false;
+                            changeDifficulty(1);
+                        },
+                    });
+                }
+                else
+                {
+                    buttonFlow.Add(new ButtonWithKeyBind(Key.Enter)
+                    {
+                        Text = &quot;Begin certification at last level&quot;,
+                        BackgroundColour = colours.Yellow,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Action = () =&gt;
+                        {
+                            isCertifying = true;
+                            changeDifficulty(DifficultyLevel - 1);
+                        },
+                        TooltipText = isPass
+                            ? $&quot;Chain {rounds_to_complete_certified} rounds to confirm your perception!&quot;
+                            : &quot;You&#39;ve reached your limits. Go to the previous level to complete certification!&quot;,
+                    });
+                }
+            }
+        }
+
+        private void showCertifiedScreen()
+        {
+            Drawable background;
+            Drawable certifiedText;
+
+            resultsArea.AddRange(new[]
+            {
+                background = new Box
+                {
+                    Colour = overlayColourProvider.Background4,
+                    RelativeSizeAxes = Axes.Both,
+                },
+                (certifiedText = new OsuSpriteText
+                {
+                    Alpha = 0,
+                    Font = OsuFont.TorusAlternate.With(size: 80, weight: FontWeight.Bold),
+                    Text = &quot;Certified!&quot;,
+                    Blending = BlendingParameters.Additive,
+                }).WithEffect(new GlowEffect
+                {
+                    Colour = overlayColourProvider.Colour1,
+                    PadExtent = true
+                }).With(e =&gt;
+                {
+                    e.Anchor = Anchor.Centre;
+                    e.Origin = Anchor.Centre;
+                }),
+                new OsuSpriteText
+                {
+                    Text = $&quot;You should use a frame limiter with update rate of {mapDifficultyToTargetFrameRate(DifficultyLevel + 1)} Hz (or fps) for best results!&quot;,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Font = OsuFont.Torus.With(size: 24, weight: FontWeight.SemiBold),
+                    Y = 80,
+                }
+            });
+
+            background.FadeInFromZero(1000, Easing.OutQuint);
+
+            certifiedText.FadeInFromZero(500, Easing.InQuint);
+
+            certifiedText
+                .ScaleTo(10)
+                .ScaleTo(1, 600, Easing.InQuad)
+                .Then()
+                .ScaleTo(1.05f, 10000, Easing.OutQuint);
+        }
+
+        private void changeDifficulty(int difficulty)
+        {
+            Debug.Assert(difficulty &gt; 0);
+
+            resultsArea.Clear();
+
+            correctAtCurrentDifficulty = 0;
+            attemptsAtCurrentDifficulty = 0;
+
+            pollingMax = 0;
+            lastPoll = 0;
+
+            DifficultyLevel = difficulty;
+
+            loadNextRound();
+        }
+
+        private void loadNextRound()
+        {
+            settings.Show();
+
+            attemptsAtCurrentDifficulty++;
+            statusText.Text = $&quot;Level {DifficultyLevel}\nRound {attemptsAtCurrentDifficulty} of {totalRoundForNextResultsScreen}&quot;;
+
+            mainArea.Clear();
+
+            int betterSide = RNG.Next(0, 2);
+
+            mainArea.AddRange(new[]
+            {
+                new LatencyArea(Key.Number1, betterSide == 1 ? mapDifficultyToTargetFrameRate(DifficultyLevel) : null)
+                {
+                    Width = 0.5f,
+                    VisualMode = { BindTarget = VisualMode },
+                    IsActiveArea = { Value = true },
+                    ReportUserBest = () =&gt; recordResult(betterSide == 0),
+                },
+                new LatencyArea(Key.Number2, betterSide == 0 ? mapDifficultyToTargetFrameRate(DifficultyLevel) : null)
+                {
+                    Width = 0.5f,
+                    VisualMode = { BindTarget = VisualMode },
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    ReportUserBest = () =&gt; recordResult(betterSide == 1)
+                }
+            });
+
+            foreach (var area in mainArea)
+            {
+                area.IsActiveArea.BindValueChanged(active =&gt;
+                {
+                    if (active.NewValue)
+                        mainArea.Children.First(a =&gt; a != area).IsActiveArea.Value = false;
+                });
+            }
+        }
+
+        private void recordResult(bool correct)
+        {
+            // Fading this out will improve the frame rate after the first round due to less text on screen.
+            explanatoryText.FadeOut(500, Easing.OutQuint);
+
+            if (correct)
+                correctAtCurrentDifficulty++;
+
+            if (attemptsAtCurrentDifficulty &lt; totalRoundForNextResultsScreen)
+                loadNextRound();
+            else
+                showResults();
+        }
+
+        private static int mapDifficultyToTargetFrameRate(int difficulty)
+        {
+            switch (difficulty)
+            {
+                case 1:
+                    return 15;
+
+                case 2:
+                    return 30;
+
+                case 3:
+                    return 45;
+
+                case 4:
+                    return 60;
+
+                case 5:
+                    return 120;
+
+                case 6:
+                    return 240;
+
+                case 7:
+                    return 480;
+
+                case 8:
+                    return 720;
+
+                case 9:
+                    return 960;
+
+                default:
+                    return 1000 + ((difficulty - 10) * 500);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,53,40,57,0],[42,59,42,60,0],[50,9,50,125,0],[51,9,51,132,0],[52,9,52,135,0],[60,9,60,126,0],[63,37,63,41,0],[63,42,63,46,0],[63,51,63,56,0],[66,49,66,53,0],[66,54,66,58,0],[66,63,66,68,0],[68,9,68,100,0],[79,55,79,119,0],[84,38,84,42,0],[84,43,84,55,0],[84,60,84,61,0],[92,33,92,37,0],[92,38,92,42,0],[92,47,92,52,0],[95,51,95,55,0],[95,56,95,60,0],[95,65,95,70,0],[97,9,97,40,0],[98,9,98,10,0],[99,13,141,71,0],[141,71,141,111,0],[141,111,182,61,0],[182,61,182,101,0],[182,101,191,15,0],[193,13,193,80,0],[194,13,194,175,0],[195,13,195,126,0],[196,13,196,100,0],[197,13,197,100,0],[198,9,198,10,0],[201,9,201,10,0],[202,13,202,63,0],[203,17,203,95,0],[204,13,204,42,0],[205,13,205,40,0],[206,9,206,10,0],[209,9,209,10,0],[210,13,210,32,0],[212,13,212,87,0],[213,13,213,59,0],[214,13,214,78,0],[215,13,215,68,0],[216,13,216,55,0],[218,13,218,36,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,56,0],[224,13,224,80,0],[225,13,225,59,0],[226,13,226,38,0],[227,9,227,10,0],[230,9,230,10,0],[231,13,231,33,0],[232,13,232,29,0],[233,9,233,10,0],[236,9,236,10,0],[237,13,237,27,0],[240,21,240,85,0],[241,21,241,106,0],[242,21,242,33,0],[245,21,245,66,0],[245,66,245,87,0],[245,87,245,89,0],[246,21,246,58,0],[247,21,247,33,0],[250,13,250,38,0],[251,9,251,10,0],[254,9,254,10,0],[255,13,255,30,0],[256,13,256,33,0],[257,13,257,29,0],[259,13,259,69,0],[261,13,261,114,0],[263,13,263,32,0],[265,13,265,97,0],[266,13,266,44,0],[268,13,268,144,0],[268,144,268,192,0],[268,192,268,194,0],[269,13,270,23,0],[270,23,270,63,0],[270,63,270,65,0],[272,13,272,51,0],[273,13,273,51,0],[274,13,274,114,0],[274,114,274,162,0],[274,162,274,164,0],[275,13,275,51,0],[277,13,277,48,0],[278,13,278,14,0],[279,17,280,27,0],[280,27,280,96,0],[280,96,280,98,0],[281,17,281,55,0],[282,13,282,14,0],[284,13,285,23,0],[285,23,285,92,0],[285,92,285,94,0],[287,13,290,25,0],[290,25,290,94,0],[290,94,290,96,0],[292,13,292,40,0],[293,13,293,14,0],[294,17,294,39,0],[295,17,295,24,0],[298,13,298,56,0],[300,13,300,97,0],[301,17,301,76,0],[302,18,302,98,0],[303,17,303,93,0],[307,13,315,16,0],[317,13,317,24,0],[318,13,318,14,0],[319,17,325,36,0],[325,36,325,73,0],[325,73,328,20,0],[329,13,329,14,0],[331,13,331,14,0],[332,17,332,42,0],[333,17,333,18,0],[334,21,342,25,0],[342,25,342,26,0],[342,26,343,29,0],[343,29,343,50,0],[343,50,344,29,0],[344,29,344,49,0],[344,49,345,25,0],[345,25,345,26,0],[345,26,346,24,0],[347,17,347,18,0],[349,17,349,18,0],[350,21,357,25,0],[357,25,357,26,0],[357,26,358,29,0],[358,29,358,49,0],[358,49,359,29,0],[359,29,359,67,0],[359,67,360,25,0],[360,25,360,26,0],[360,26,364,24,0],[365,17,365,18,0],[366,13,366,14,0],[367,9,367,10,0],[370,9,370,10,0],[374,13,392,17,0],[392,17,392,18,0],[392,18,393,21,0],[393,21,393,46,0],[393,46,394,21,0],[394,21,394,46,0],[394,46,395,17,0],[395,17,395,18,0],[395,18,404,16,0],[406,13,406,62,0],[408,13,408,63,0],[410,13,414,57,0],[415,9,415,10,0],[418,9,418,10,0],[419,13,419,42,0],[421,13,421,33,0],[423,13,423,44,0],[424,13,424,45,0],[426,13,426,28,0],[427,13,427,26,0],[429,13,429,42,0],[431,13,431,29,0],[432,9,432,10,0],[435,9,435,10,0],[436,13,436,29,0],[438,13,438,43,0],[439,13,439,131,0],[441,13,441,30,0],[443,13,443,45,0],[445,13,452,44,0],[452,44,452,73,0],[452,73,460,44,0],[460,44,460,73,0],[460,73,462,16,0],[464,13,464,20,0],[464,22,464,30,0],[464,31,464,33,0],[464,34,464,42,0],[465,13,465,14,0],[466,17,467,17,0],[467,17,467,18,0],[467,18,468,21,0],[468,21,468,41,0],[468,41,469,25,0],[469,25,469,54,0],[469,54,469,63,0],[469,63,469,92,0],[469,92,470,17,0],[470,17,470,18,0],[470,18,470,20,0],[471,13,471,14,0],[472,9,472,10,0],[475,9,475,10,0],[477,13,477,59,0],[479,13,479,25,0],[480,17,480,46,0],[482,13,482,78,0],[483,17,483,33,0],[485,17,485,31,0],[486,9,486,10,0],[489,9,489,10,0],[490,13,490,32,0],[493,21,493,31,0],[496,21,496,31,0],[499,21,499,31,0],[502,21,502,31,0],[505,21,505,32,0],[508,21,508,32,0],[511,21,511,32,0],[514,21,514,32,0],[517,21,517,32,0],[520,21,520,61,0],[522,9,522,10,0]]);
+    </script>
+  </body>
+</html>

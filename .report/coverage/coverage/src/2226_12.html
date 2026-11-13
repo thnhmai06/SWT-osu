@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Scoring/ScoreInfo.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using Newtonsoft.Json;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Models;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Users;
+using osu.Game.Utils;
+using Realms;
+
+namespace osu.Game.Scoring
+{
+    /// &lt;summary&gt;
+    /// A realm model containing metadata for a single score.
+    /// &lt;/summary&gt;
+    [MapTo(&quot;Score&quot;)]
+    public class ScoreInfo : RealmObject, IHasGuidPrimaryKey, IHasRealmFiles, ISoftDelete, IEquatable&lt;ScoreInfo&gt;, IScoreInfo
+    {
+        [PrimaryKey]
+        public Guid ID { get; set; }
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;BeatmapInfo&quot;/&gt; this score was made against.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;para&gt;
+        /// This property may be &lt;see langword=&quot;null&quot;/&gt; if the score was set on a beatmap (or a version of the beatmap) that is not available locally
+        /// e.g. due to online updates, or local modifications to the beatmap.
+        /// The property will only link to a &lt;see cref=&quot;BeatmapInfo&quot;/&gt; if its &lt;see cref=&quot;Beatmaps.BeatmapInfo.Hash&quot;/&gt; matches &lt;see cref=&quot;BeatmapHash&quot;/&gt;.
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// Due to the above, whenever setting this, make sure to also set &lt;see cref=&quot;BeatmapHash&quot;/&gt; to allow relational consistency when a beatmap is potentially changed.
+        /// &lt;/para&gt;
+        /// &lt;/remarks&gt;
+        public BeatmapInfo? BeatmapInfo { get; set; }
+
+        /// &lt;summary&gt;
+        /// The version of the client this score was set using.
+        /// Sourced from &lt;see cref=&quot;OsuGameBase.Version&quot;/&gt; at the point of score submission.
+        /// &lt;/summary&gt;
+        public string ClientVersion { get; set; } = string.Empty;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;osu.Game.Beatmaps.BeatmapInfo.Hash&quot;/&gt; at the point in time when the score was set.
+        /// &lt;/summary&gt;
+        [Indexed]
+        public string BeatmapHash { get; set; } = string.Empty;
+
+        public RulesetInfo Ruleset { get; set; } = null!;
+
+        public IList&lt;RealmNamedFileUsage&gt; Files { get; } = null!;
+
+        public string Hash { get; set; } = string.Empty;
+
+        public bool DeletePending { get; set; }
+
+        /// &lt;summary&gt;
+        /// The total number of points awarded for the score.
+        /// &lt;/summary&gt;
+        public long TotalScore { get; set; }
+
+        /// &lt;summary&gt;
+        /// The total number of points awarded for the score without including mod multipliers.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The purpose of this property is to enable future lossless rebalances of mod multipliers.
+        /// &lt;/remarks&gt;
+        public long TotalScoreWithoutMods { get; set; }
+
+        /// &lt;summary&gt;
+        /// The version of processing applied to calculate total score as stored in the database.
+        /// If this does not match &lt;see cref=&quot;LegacyScoreEncoder.LATEST_VERSION&quot;/&gt;,
+        /// the total score has not yet been updated to reflect the current scoring values.
+        ///
+        /// See &lt;see cref=&quot;BackgroundDataStoreProcessor&quot;/&gt;&#39;s conversion logic.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This may not match the version stored in the replay files.
+        /// &lt;/remarks&gt;
+        public int TotalScoreVersion { get; set; } = LegacyScoreEncoder.LATEST_VERSION;
+
+        /// &lt;summary&gt;
+        /// Used to preserve the total score for legacy scores.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Not populated if &lt;see cref=&quot;IsLegacyScore&quot;/&gt; is &lt;c&gt;false&lt;/c&gt;.
+        /// Always 0 on scores set in lazer.
+        /// &lt;/remarks&gt;
+        public long? LegacyTotalScore { get; set; }
+
+        /// &lt;summary&gt;
+        /// If background processing of this beatmap failed in some way, this flag will become &lt;c&gt;true&lt;/c&gt;.
+        /// Should be used to ensure we don&#39;t repeatedly attempt to reprocess the same scores each startup even though we already know they will fail.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// See https://github.com/ppy/osu/issues/24301 for one example of how this can occur (missing beatmap file on disk).
+        /// &lt;/remarks&gt;
+        public bool BackgroundReprocessingFailed { get; set; }
+
+        public int MaxCombo { get; set; }
+
+        public double Accuracy { get; set; }
+
+        [Ignored]
+        public bool HasOnlineReplay { get; set; }
+
+        public DateTimeOffset Date { get; set; }
+
+        public double? PP { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether the performance points in this score is awarded to the player. This is used for online display purposes (see &lt;see cref=&quot;SoloScoreInfo.Ranked&quot;/&gt;).
+        /// &lt;/summary&gt;
+        [Ignored]
+        public bool Ranked { get; set; }
+
+        /// &lt;summary&gt;
+        /// The online ID of this score.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// In the osu-web database, this ID (if present) comes from the new &lt;c&gt;solo_scores&lt;/c&gt; table.
+        /// &lt;/remarks&gt;
+        [Indexed]
+        public long OnlineID { get; set; } = -1;
+
+        /// &lt;summary&gt;
+        /// The legacy online ID of this score.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// In the osu-web database, this ID (if present) comes from the legacy &lt;c&gt;osu_scores_*_high&lt;/c&gt; tables.
+        /// This ID is also stored to replays set on osu!stable.
+        /// &lt;/remarks&gt;
+        [Indexed]
+        public long LegacyOnlineID { get; set; } = -1;
+
+        [MapTo(&quot;User&quot;)]
+        public RealmUser RealmUser { get; set; } = null!;
+
+        [MapTo(&quot;Mods&quot;)]
+        public string ModsJson { get; set; } = string.Empty;
+
+        [MapTo(&quot;Statistics&quot;)]
+        public string StatisticsJson { get; set; } = string.Empty;
+
+        [MapTo(&quot;MaximumStatistics&quot;)]
+        public string MaximumStatisticsJson { get; set; } = string.Empty;
+
+        public IList&lt;int&gt; Pauses { get; } = null!;
+
+        public ScoreInfo(BeatmapInfo? beatmap = null, RulesetInfo? ruleset = null, RealmUser? realmUser = null)
+        {
+            Ruleset = ruleset ?? new RulesetInfo();
+            BeatmapInfo = beatmap ?? new BeatmapInfo();
+            BeatmapHash = BeatmapInfo.Hash;
+            RealmUser = realmUser ?? new RealmUser();
+            ID = Guid.NewGuid();
+        }
+
+        [UsedImplicitly] // Realm
+        protected ScoreInfo()
+        {
+        }
+
+        // TODO: this is a bit temporary to account for the fact that this class is used to ferry API user data to certain UI components.
+        // Eventually we should either persist enough information to realm to not require the API lookups, or perform the API lookups locally.
+        private APIUser? user;
+
+        [Ignored]
+        public APIUser User
+        {
+            get =&gt; user ??= new APIUser
+            {
+                Id = RealmUser.OnlineID,
+                Username = RealmUser.Username,
+                CountryCode = RealmUser.CountryCode,
+            };
+            set
+            {
+                user = value;
+
+                RealmUser = new RealmUser
+                {
+                    OnlineID = user.OnlineID,
+                    Username = user.Username,
+                    CountryCode = user.CountryCode,
+                };
+            }
+        }
+
+        [Ignored]
+        public ScoreRank Rank
+        {
+            get =&gt; (ScoreRank)RankInt;
+            set =&gt; RankInt = (int)value;
+        }
+
+        [MapTo(nameof(Rank))]
+        public int RankInt { get; set; }
+
+        IRulesetInfo IScoreInfo.Ruleset =&gt; Ruleset;
+        IBeatmapInfo? IScoreInfo.Beatmap =&gt; BeatmapInfo;
+        IUser IScoreInfo.User =&gt; User;
+
+        #region Properties required to make things work with existing usages
+
+        public int UserID =&gt; RealmUser.OnlineID;
+
+        public int RulesetID =&gt; Ruleset.OnlineID;
+
+        [Ignored]
+        public List&lt;HitEvent&gt; HitEvents { get; set; } = new List&lt;HitEvent&gt;();
+
+        public ScoreInfo DeepClone()
+        {
+            var clone = (ScoreInfo)this.Detach().MemberwiseClone();
+
+            clone.Statistics = new Dictionary&lt;HitResult, int&gt;(clone.Statistics);
+            clone.MaximumStatistics = new Dictionary&lt;HitResult, int&gt;(clone.MaximumStatistics);
+            clone.HitEvents = new List&lt;HitEvent&gt;(clone.HitEvents);
+
+            // Ensure we have fresh mods to avoid any references (ie. after gameplay).
+            clone.clearAllMods();
+            clone.ModsJson = ModsJson;
+
+            clone.RealmUser = new RealmUser
+            {
+                OnlineID = RealmUser.OnlineID,
+                Username = RealmUser.Username,
+                CountryCode = RealmUser.CountryCode,
+            };
+
+            return clone;
+        }
+
+        [Ignored]
+        public bool Passed { get; set; } = true;
+
+        public int Combo { get; set; }
+
+        /// &lt;summary&gt;
+        /// The position of this score, starting at 1.
+        /// &lt;/summary&gt;
+        [Ignored]
+        public int? Position { get; set; } // TODO: remove after all calls to `CreateScoreInfo` are gone.
+
+        [Ignored]
+        public LocalisableString DisplayAccuracy =&gt; Accuracy.FormatAccuracy();
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;ScoreInfo&quot;/&gt; represents a legacy (osu!stable) score.
+        /// &lt;/summary&gt;
+        public bool IsLegacyScore { get; set; }
+
+        private Dictionary&lt;HitResult, int&gt;? statistics;
+
+        [Ignored]
+        public Dictionary&lt;HitResult, int&gt; Statistics
+        {
+            get
+            {
+                if (statistics != null)
+                    return statistics;
+
+                if (!string.IsNullOrEmpty(StatisticsJson))
+                    statistics = JsonConvert.DeserializeObject&lt;Dictionary&lt;HitResult, int&gt;&gt;(StatisticsJson);
+
+                return statistics ??= new Dictionary&lt;HitResult, int&gt;();
+            }
+            set =&gt; statistics = value;
+        }
+
+        private Dictionary&lt;HitResult, int&gt;? maximumStatistics;
+
+        [Ignored]
+        public Dictionary&lt;HitResult, int&gt; MaximumStatistics
+        {
+            get
+            {
+                if (maximumStatistics != null)
+                    return maximumStatistics;
+
+                if (!string.IsNullOrEmpty(MaximumStatisticsJson))
+                    maximumStatistics = JsonConvert.DeserializeObject&lt;Dictionary&lt;HitResult, int&gt;&gt;(MaximumStatisticsJson);
+
+                return maximumStatistics ??= new Dictionary&lt;HitResult, int&gt;();
+            }
+            set =&gt; maximumStatistics = value;
+        }
+
+        private Mod[]? mods;
+
+        [Ignored]
+        public Mod[] Mods
+        {
+            get
+            {
+                if (mods != null)
+                    return mods;
+
+                return APIMods.Select(m =&gt; m.ToMod(Ruleset.CreateInstance())).ToArray();
+            }
+            set
+            {
+                clearAllMods();
+                mods = value;
+                updateModsJson();
+            }
+        }
+
+        private APIMod[]? apiMods;
+
+        // Used for API serialisation/deserialisation.
+        [Ignored]
+        public APIMod[] APIMods
+        {
+            get
+            {
+                if (apiMods != null) return apiMods;
+
+                // prioritise reading from realm backing
+                if (!string.IsNullOrEmpty(ModsJson))
+                    apiMods = JsonConvert.DeserializeObject&lt;APIMod[]&gt;(ModsJson);
+
+                // then check mods set via Mods property.
+                if (mods != null)
+                    apiMods ??= mods.Select(m =&gt; new APIMod(m)).ToArray();
+
+                return apiMods ?? Array.Empty&lt;APIMod&gt;();
+            }
+            set
+            {
+                clearAllMods();
+                apiMods = value;
+                updateModsJson();
+            }
+        }
+
+        private void clearAllMods()
+        {
+            ModsJson = string.Empty;
+            mods = null;
+            apiMods = null;
+        }
+
+        private void updateModsJson()
+        {
+            ModsJson = APIMods.Length &gt; 0
+                ? JsonConvert.SerializeObject(APIMods)
+                : string.Empty;
+        }
+
+        public IEnumerable&lt;HitResultDisplayStatistic&gt; GetStatisticsForDisplay()
+        {
+            foreach (var r in Ruleset.CreateInstance().GetHitResultsForDisplay())
+            {
+                int value = Statistics.GetValueOrDefault(r.result);
+
+                switch (r.result)
+                {
+                    case HitResult.SmallTickHit:
+                    case HitResult.LargeTickHit:
+                    case HitResult.SliderTailHit:
+                    case HitResult.LargeBonus:
+                    case HitResult.SmallBonus:
+                        if (MaximumStatistics.TryGetValue(r.result, out int count) &amp;&amp; count &gt; 0)
+                            yield return new HitResultDisplayStatistic(r.result, value, count, r.displayName);
+
+                        break;
+
+                    case HitResult.SmallTickMiss:
+                    case HitResult.LargeTickMiss:
+                        break;
+
+                    default:
+                        yield return new HitResultDisplayStatistic(r.result, value, null, r.displayName);
+
+                        break;
+                }
+            }
+        }
+
+        #endregion
+
+        public bool Equals(ScoreInfo? other) =&gt; other?.ID == ID;
+
+        public override string ToString() =&gt; this.GetDisplayTitle();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,26,32,30,0],[32,31,32,35,1],[47,43,47,47,1],[47,48,47,52,1],[53,39,53,43,1],[53,44,53,48,1],[53,53,53,65,1],[53,53,53,65,0],[59,37,59,41,0],[59,42,59,46,1],[59,51,59,63,0],[59,51,59,63,1],[61,38,61,42,1],[61,43,61,47,1],[61,52,61,57,1],[61,52,61,57,0],[63,51,63,55,0],[63,60,63,65,0],[63,60,63,65,1],[65,30,65,34,0],[65,35,65,39,0],[65,44,65,56,0],[65,44,65,56,1],[67,37,67,41,0],[67,42,67,46,0],[72,34,72,38,1],[72,39,72,43,1],[80,45,80,49,1],[80,50,80,54,1],[92,40,92,44,1],[92,45,92,49,1],[92,54,92,87,1],[92,54,92,87,0],[101,41,101,45,1],[101,46,101,50,1],[110,52,110,56,0],[110,57,110,61,0],[112,31,112,35,1],[112,36,112,40,1],[114,34,114,38,1],[114,39,114,43,1],[117,39,117,43,0],[117,44,117,48,0],[119,38,119,42,1],[119,43,119,47,1],[121,29,121,33,0],[121,34,121,38,0],[127,30,127,34,0],[127,35,127,39,0],[136,32,136,36,1],[136,37,136,41,1],[136,46,136,48,1],[136,46,136,48,0],[146,38,146,42,1],[146,43,146,47,1],[146,52,146,54,1],[146,52,146,54,0],[149,38,149,42,0],[149,43,149,47,1],[149,52,149,57,1],[149,52,149,57,0],[152,34,152,38,1],[152,39,152,43,1],[152,48,152,60,1],[152,48,152,60,0],[155,40,155,44,1],[155,45,155,49,0],[155,54,155,66,0],[155,54,155,66,1],[158,47,158,51,1],[158,52,158,56,0],[158,61,158,73,0],[158,61,158,73,1],[160,36,160,40,1],[160,45,160,50,0],[160,45,160,50,1],[162,9,162,112,1],[163,9,163,10,1],[164,13,164,52,1],[165,13,165,56,1],[166,13,166,44,1],[167,13,167,54,1],[168,13,168,33,1],[169,9,169,10,1],[172,9,172,30,0],[173,9,173,10,0],[174,9,174,10,0],[183,20,188,14,1],[190,13,190,14,1],[191,17,191,30,1],[193,17,198,19,1],[199,13,199,14,1],[205,20,205,38,1],[206,20,206,40,1],[210,30,210,34,1],[210,35,210,39,1],[212,44,212,51,0],[213,45,213,56,0],[214,34,214,38,0],[218,30,218,48,0],[220,33,220,49,0],[223,43,223,47,1],[223,48,223,52,1],[223,57,223,77,0],[223,57,223,77,1],[226,9,226,10,0],[227,13,227,68,0],[229,13,229,81,0],[230,13,230,95,0],[231,13,231,67,0],[234,13,234,34,0],[235,13,235,39,0],[237,13,242,15,0],[244,13,244,26,0],[245,9,245,10,0],[248,30,248,34,1],[248,35,248,39,1],[248,44,248,48,1],[248,44,248,48,0],[250,28,250,32,1],[250,33,250,37,1],[256,32,256,36,0],[256,37,256,41,0],[259,53,259,78,0],[264,37,264,41,1],[264,42,264,46,1],[272,13,272,14,1],[273,17,273,40,1],[274,21,274,39,1],[276,17,276,59,1],[277,21,277,108,0],[279,17,279,72,1],[280,13,280,14,1],[281,20,281,38,1],[290,13,290,14,1],[291,17,291,47,1],[292,21,292,46,1],[294,17,294,66,1],[295,21,295,122,0],[297,17,297,79,1],[298,13,298,14,1],[299,20,299,45,1],[308,13,308,14,1],[309,17,309,34,1],[310,21,310,33,1],[312,17,312,44,1],[312,44,312,77,0],[312,77,312,89,1],[313,13,313,14,1],[315,13,315,14,1],[316,17,316,32,1],[317,17,317,30,1],[318,17,318,34,1],[319,13,319,14,1],[329,13,329,14,1],[330,17,330,37,1],[330,38,330,53,1],[333,17,333,53,1],[334,21,334,81,0],[337,17,337,34,1],[338,21,338,50,1],[338,50,338,63,1],[338,63,338,75,1],[340,17,340,57,1],[341,13,341,14,1],[343,13,343,14,0],[344,17,344,32,0],[345,17,345,33,0],[346,17,346,34,0],[347,13,347,14,0],[351,9,351,10,1],[352,13,352,37,1],[353,13,353,25,1],[354,13,354,28,1],[355,9,355,10,1],[358,9,358,10,1],[359,13,361,32,1],[362,9,362,10,1],[365,9,365,10,0],[366,13,366,20,0],[366,22,366,27,0],[366,28,366,30,0],[366,31,366,81,0],[367,13,367,14,0],[368,17,368,68,0],[370,17,370,34,0],[377,25,377,97,0],[378,29,378,111,0],[380,25,380,31,0],[384,25,384,31,0],[387,25,387,106,0],[389,25,389,31,0],[391,13,391,14,0],[392,9,392,10,0],[396,49,396,64,0],[398,46,398,68,0]]);
+    </script>
+  </body>
+</html>

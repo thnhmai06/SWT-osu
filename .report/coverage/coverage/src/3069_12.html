@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/Chat/Channel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using Newtonsoft.Json;
+using osu.Framework.Bindables;
+using osu.Framework.Lists;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.Chat;
+using osu.Game.Overlays.Chat.Listing;
+
+namespace osu.Game.Online.Chat
+{
+    public class Channel
+    {
+        public const int MAX_HISTORY = 300;
+
+        /// &lt;summary&gt;
+        /// Contains every joined user except the current logged in user. Currently only returned for PM channels.
+        /// &lt;/summary&gt;
+        public readonly ObservableCollection&lt;APIUser&gt; Users = new ObservableCollection&lt;APIUser&gt;();
+
+        [JsonProperty(@&quot;users&quot;)]
+        private int[] userIds
+        {
+            set
+            {
+                foreach (int id in value)
+                    Users.Add(new APIUser { Id = id });
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Contains all the messages send in the channel.
+        /// &lt;/summary&gt;
+        public readonly SortedList&lt;Message&gt; Messages = new SortedList&lt;Message&gt;(Comparer&lt;Message&gt;.Default);
+
+        /// &lt;summary&gt;
+        /// Contains all the messages that weren&#39;t read by the user.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;Message&gt; UnreadMessages =&gt; Messages.Where(m =&gt; LastReadId &lt; m.Id);
+
+        /// &lt;summary&gt;
+        /// Contains all the messages that are still pending for submission to the server.
+        /// &lt;/summary&gt;
+        private readonly List&lt;LocalEchoMessage&gt; pendingMessages = new List&lt;LocalEchoMessage&gt;();
+
+        /// &lt;summary&gt;
+        /// An event that fires when new messages arrived.
+        /// &lt;/summary&gt;
+        public event Action&lt;IEnumerable&lt;Message&gt;&gt; NewMessagesArrived;
+
+        /// &lt;summary&gt;
+        /// An event that fires when a pending message gets resolved.
+        /// &lt;/summary&gt;
+        public event Action&lt;LocalEchoMessage, Message&gt; PendingMessageResolved;
+
+        /// &lt;summary&gt;
+        /// An event that fires when a pending message gets removed.
+        /// &lt;/summary&gt;
+        public event Action&lt;Message&gt; MessageRemoved;
+
+        public bool ReadOnly =&gt; false; // todo: not yet used.
+
+        public override string ToString() =&gt; Name;
+
+        [JsonProperty(@&quot;name&quot;)]
+        public string Name;
+
+        [JsonProperty(@&quot;description&quot;)]
+        public string Topic;
+
+        [JsonProperty(@&quot;type&quot;)]
+        public ChannelType Type;
+
+        [JsonProperty(@&quot;channel_id&quot;)]
+        public long Id;
+
+        [JsonProperty(@&quot;last_message_id&quot;)]
+        public long? LastMessageId;
+
+        [JsonProperty(@&quot;last_read_id&quot;)]
+        public long? LastReadId;
+
+        /// &lt;remarks&gt;
+        /// Purposefully nullable for the sake of &lt;see cref=&quot;ChannelListing.ChannelListingChannel&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        [JsonProperty(@&quot;message_length_limit&quot;)]
+        public int? MessageLengthLimit;
+
+        /// &lt;summary&gt;
+        /// Signals if the current user joined this channel or not. Defaults to false.
+        /// Note that this does not guarantee a join has completed. Check Id &gt; 0 for confirmation.
+        /// &lt;/summary&gt;
+        public Bindable&lt;bool&gt; Joined = new Bindable&lt;bool&gt;();
+
+        /// &lt;summary&gt;
+        /// Signals if there is a message to highlight.
+        /// This is automatically cleared by the associated &lt;see cref=&quot;DrawableChannel&quot;/&gt; after highlighting.
+        /// &lt;/summary&gt;
+        public Bindable&lt;Message&gt; HighlightedMessage = new Bindable&lt;Message&gt;();
+
+        /// &lt;summary&gt;
+        /// The current text box message while in this &lt;see cref=&quot;Channel&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public Bindable&lt;string&gt; TextBoxMessage = new Bindable&lt;string&gt;(string.Empty);
+
+        [JsonConstructor]
+        public Channel()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Create a private messaging channel with the specified user.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;user&quot;&gt;The user to create the private conversation with.&lt;/param&gt;
+        public Channel(APIUser user)
+        {
+            Type = ChannelType.PM;
+            Users.Add(user);
+            Name = user.Username;
+        }
+
+        /// &lt;summary&gt;
+        /// Adds the argument message as a local echo. When this local echo is resolved &lt;see cref=&quot;PendingMessageResolved&quot;/&gt; will get called.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;message&quot;&gt;&lt;/param&gt;
+        public void AddLocalEcho(LocalEchoMessage message)
+        {
+            pendingMessages.Add(message);
+            Messages.Add(message);
+
+            NewMessagesArrived?.Invoke(new[] { message });
+        }
+
+        public bool MessagesLoaded;
+
+        /// &lt;summary&gt;
+        /// Adds new messages to the channel and purges old messages. Triggers the &lt;see cref=&quot;NewMessagesArrived&quot;/&gt; event.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;messages&quot;&gt;&lt;/param&gt;
+        public void AddNewMessages(params Message[] messages)
+        {
+            foreach (var m in messages)
+            {
+                LocalEchoMessage localEcho = pendingMessages.FirstOrDefault(local =&gt; local.Uuid == m.Uuid);
+
+                if (localEcho != null)
+                    ReplaceMessage(localEcho, m);
+            }
+
+            messages = messages.Except(Messages).ToArray();
+
+            if (messages.Length == 0) return;
+
+            Messages.AddRange(messages);
+
+            long? maxMessageId = messages.Max(m =&gt; m.Id);
+            if (LastMessageId == null || maxMessageId &gt; LastMessageId)
+                LastMessageId = maxMessageId;
+
+            purgeOldMessages();
+
+            NewMessagesArrived?.Invoke(messages);
+        }
+
+        public void RemoveMessagesFromUser(int userId)
+        {
+            for (int i = 0; i &lt; Messages.Count; i++)
+            {
+                var message = Messages[i];
+
+                if (message.SenderId == userId)
+                {
+                    Messages.RemoveAt(i--);
+                    MessageRemoved?.Invoke(message);
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Replace or remove a message from the channel.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;echo&quot;&gt;The local echo message (client-side).&lt;/param&gt;
+        /// &lt;param name=&quot;final&quot;&gt;The response message, or null if the message became invalid.&lt;/param&gt;
+        public void ReplaceMessage(LocalEchoMessage echo, Message final)
+        {
+            if (!pendingMessages.Remove(echo))
+                throw new InvalidOperationException(&quot;Attempted to remove echo that wasn&#39;t present&quot;);
+
+            Messages.Remove(echo);
+
+            if (final == null)
+            {
+                MessageRemoved?.Invoke(echo);
+                return;
+            }
+
+            if (Messages.Contains(final))
+                throw new InvalidOperationException(&quot;Attempted to add the same message again&quot;);
+
+            Messages.Add(final);
+
+            if (final.Id &gt; LastMessageId)
+                LastMessageId = final.Id;
+
+            PendingMessageResolved?.Invoke(echo, final);
+        }
+
+        private void purgeOldMessages()
+        {
+            // never purge local echos
+            int messageCount = Messages.Count - pendingMessages.Count;
+            if (messageCount &gt; MAX_HISTORY)
+                Messages.RemoveRange(0, messageCount - MAX_HISTORY);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,99,0],[26,9,26,99,0],[32,13,32,14,0],[33,17,33,24,0],[33,26,33,32,0],[33,33,33,35,0],[33,36,33,41,0],[34,21,34,56,0],[35,13,35,14,0],[41,9,41,107,0],[41,9,41,107,0],[46,55,46,75,0],[46,75,46,92,0],[46,92,46,93,0],[51,9,51,96,0],[51,9,51,96,0],[68,33,68,38,0],[70,46,70,50,0],[100,9,100,61,0],[100,9,100,61,0],[106,9,106,79,0],[106,9,106,79,0],[111,9,111,85,0],[111,9,111,85,0],[114,9,114,25,0],[115,9,115,10,0],[116,9,116,10,0],[122,9,122,37,0],[123,9,123,10,0],[124,13,124,35,0],[125,13,125,29,0],[126,13,126,34,0],[127,9,127,10,0],[134,9,134,10,0],[135,13,135,42,0],[136,13,136,35,0],[138,13,138,59,0],[139,9,139,10,0],[148,9,148,10,0],[149,13,149,20,0],[149,22,149,27,0],[149,28,149,30,0],[149,31,149,39,0],[150,13,150,14,0],[151,17,151,86,0],[151,86,151,106,0],[151,106,151,108,0],[153,17,153,39,0],[154,21,154,50,0],[155,13,155,14,0],[157,13,157,60,0],[159,13,159,38,0],[159,39,159,46,0],[161,13,161,41,0],[163,13,163,52,0],[163,52,163,56,0],[163,56,163,58,0],[164,13,164,71,0],[165,17,165,46,0],[167,13,167,32,0],[169,13,169,50,0],[170,9,170,10,0],[173,9,173,10,0],[174,18,174,27,0],[174,29,174,47,0],[174,49,174,52,0],[175,13,175,14,0],[176,17,176,43,0],[178,17,178,48,0],[179,17,179,18,0],[180,21,180,44,0],[181,21,181,53,0],[182,17,182,18,0],[183,13,183,14,0],[184,9,184,10,0],[192,9,192,10,0],[193,13,193,47,0],[194,17,194,101,0],[196,13,196,35,0],[198,13,198,31,0],[199,13,199,14,0],[200,17,200,46,0],[201,17,201,24,0],[204,13,204,42,0],[205,17,205,96,0],[207,13,207,33,0],[209,13,209,42,0],[210,17,210,42,0],[212,13,212,57,0],[213,9,213,10,0],[216,9,216,10,0],[218,13,218,71,0],[219,13,219,44,0],[220,17,220,69,0],[221,9,221,10,0]]);
+    </script>
+  </body>
+</html>

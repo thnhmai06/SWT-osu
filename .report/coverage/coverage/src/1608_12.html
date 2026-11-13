@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Ranking/ResultsScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Screens;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.Placeholders;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Volume;
+using osu.Game.Scoring;
+using osu.Game.Screens.Play;
+using osu.Game.Screens.Ranking.Expanded.Accuracy;
+using osu.Game.Screens.Ranking.Statistics;
+using osu.Game.Skinning;
+using osuTK;
+
+namespace osu.Game.Screens.Ranking
+{
+    [Cached]
+    public abstract partial class ResultsScreen : ScreenWithBeatmapBackground, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        protected const float BACKGROUND_BLUR = 10;
+        private static readonly float screen_height = 768 - TwoLayerButton.SIZE_EXTENDED.Y;
+
+        public override bool DisallowExternalBeatmapRulesetChanges =&gt; true;
+
+        public override bool? AllowGlobalTrackControl =&gt; true;
+
+        protected override OverlayActivation InitialOverlayActivationMode =&gt; OverlayActivation.UserTriggered;
+
+        public readonly Bindable&lt;ScoreInfo?&gt; SelectedScore = new Bindable&lt;ScoreInfo?&gt;();
+
+        public readonly ScoreInfo? Score;
+
+        protected ScorePanelList ScorePanelList { get; private set; } = null!;
+
+        protected VerticalScrollContainer VerticalScrollContent { get; private set; } = null!;
+
+        [Resolved]
+        private Player? player { get; set; }
+
+        private bool skipExitTransition;
+
+        protected StatisticsPanel StatisticsPanel { get; private set; } = null!;
+
+        private Drawable bottomPanel = null!;
+        private Container&lt;ScorePanel&gt; detachedPanelContainer = null!;
+
+        private Task lastFetchTask = Task.CompletedTask;
+
+        /// &lt;summary&gt;
+        /// Whether the user can retry the beatmap from the results screen.
+        /// &lt;/summary&gt;
+        public bool AllowRetry { get; init; }
+
+        /// &lt;summary&gt;
+        /// Whether the user can watch the replay of the completed play from the results screen.
+        /// &lt;/summary&gt;
+        public bool AllowWatchingReplay { get; init; } = true;
+
+        /// &lt;summary&gt;
+        /// Whether the provided score is for a local user&#39;s play.
+        /// This will trigger elements like the user&#39;s ranking to display.
+        /// &lt;/summary&gt;
+        public bool IsLocalPlay { get; init; }
+
+        private Sample? popInSample;
+
+        [Cached]
+        private OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Aquamarine);
+
+        protected ResultsScreen(ScoreInfo? score)
+        {
+            Score = score;
+
+            SelectedScore.Value = score;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            FillFlowContainer buttons;
+
+            popInSample = audio.Samples.Get(@&quot;UI/overlay-pop-in&quot;);
+
+            InternalChild = new PopoverContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                Child = new GridContainer
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Content = new[]
+                    {
+                        new Drawable[]
+                        {
+                            VerticalScrollContent = new VerticalScrollContainer
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                ScrollbarVisible = false,
+                                Child = new Container
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Children = new Drawable[]
+                                    {
+                                        new GlobalScrollAdjustsVolume(),
+                                        StatisticsPanel = new StatisticsPanel
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            Score = { BindTarget = SelectedScore },
+                                            AchievedScore = IsLocalPlay &amp;&amp; Score != null ? Score : null,
+                                        },
+                                        ScorePanelList = new ScorePanelList
+                                        {
+                                            RelativeSizeAxes = Axes.Both,
+                                            SelectedScore = { BindTarget = SelectedScore },
+                                            PostExpandAction = () =&gt; StatisticsPanel.ToggleVisibility()
+                                        },
+                                        detachedPanelContainer = new Container&lt;ScorePanel&gt;
+                                        {
+                                            RelativeSizeAxes = Axes.Both
+                                        },
+                                    }
+                                }
+                            },
+                        },
+                        new[]
+                        {
+                            bottomPanel = new Container
+                            {
+                                Anchor = Anchor.BottomLeft,
+                                Origin = Anchor.BottomLeft,
+                                RelativeSizeAxes = Axes.X,
+                                Height = TwoLayerButton.SIZE_EXTENDED.Y,
+                                Alpha = 0,
+                                Children = new Drawable[]
+                                {
+                                    new Box
+                                    {
+                                        RelativeSizeAxes = Axes.Both,
+                                        Colour = Color4Extensions.FromHex(&quot;#333&quot;)
+                                    },
+                                    buttons = new FillFlowContainer
+                                    {
+                                        Anchor = Anchor.Centre,
+                                        Origin = Anchor.Centre,
+                                        AutoSizeAxes = Axes.Both,
+                                        Spacing = new Vector2(5),
+                                        Direction = FillDirection.Horizontal
+                                    },
+                                }
+                            }
+                        }
+                    },
+                    RowDimensions = new[]
+                    {
+                        new Dimension(),
+                        new Dimension(GridSizeMode.AutoSize)
+                    }
+                }
+            };
+
+            if (Score != null)
+            {
+                // only show flair / animation when arriving after watching a play that isn&#39;t autoplay.
+                bool shouldFlair = player != null &amp;&amp; !Score.User.IsBot;
+
+                ScorePanelList.AddScore(Score, shouldFlair);
+                // this is mostly for medal display.
+                // we don&#39;t want the medal animation to trample on the results screen animation, so we (ab)use `OverlayActivationMode`
+                // to give the results screen enough time to play the animation out before the medals can be shown.
+                Scheduler.AddDelayed(() =&gt; OverlayActivationMode.Value = OverlayActivation.All, shouldFlair ? AccuracyCircle.TOTAL_DURATION + 1000 : 0);
+            }
+
+            bool allowHotkeyRetry = false;
+
+            if (AllowWatchingReplay)
+            {
+                buttons.Add(new ReplayDownloadButton(SelectedScore.Value)
+                {
+                    Score = { BindTarget = SelectedScore },
+                    Width = 300
+                });
+
+                // for simplicity, only allow this when coming from a replay player where we know the replay is ready to be played.
+                //
+                // if we show it in all cases, consider the case where a user comes from song select and potentially has to download
+                // the replay before it can be played back. it wouldn&#39;t flow well with the quick retry in such a case.
+                allowHotkeyRetry = player is ReplayPlayer;
+            }
+
+            if (player != null &amp;&amp; AllowRetry)
+            {
+                buttons.Add(new RetryButton { Width = 300 });
+                allowHotkeyRetry = true;
+            }
+
+            if (allowHotkeyRetry)
+            {
+                AddInternal(new HotkeyRetryOverlay
+                {
+                    Action = () =&gt;
+                    {
+                        if (!this.IsCurrentScreen()) return;
+
+                        skipExitTransition = true;
+                        player?.Restart(true);
+                    },
+                });
+            }
+
+            if (Score?.BeatmapInfo != null)
+                buttons.Add(new CollectionButton(Score.BeatmapInfo));
+
+            if (Score?.BeatmapInfo?.BeatmapSet != null &amp;&amp; Score.BeatmapInfo.BeatmapSet.OnlineID &gt; 0)
+                buttons.Add(new FavouriteButton(Score.BeatmapInfo.BeatmapSet));
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            StatisticsPanel.State.BindValueChanged(onStatisticsStateChanged, true);
+
+            fetchScores(null);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (ScorePanelList.IsScrolledToStart)
+                fetchScores(-1);
+            else if (ScorePanelList.IsScrolledToEnd)
+                fetchScores(1);
+        }
+
+        #region Applause
+
+        private PoolableSkinnableSample? rankApplauseSound;
+
+        public void PlayApplause(ScoreRank rank)
+        {
+            const double applause_volume = 0.8f;
+
+            if (!this.IsCurrentScreen())
+                return;
+
+            rankApplauseSound?.Dispose();
+
+            var applauseSamples = new List&lt;string&gt;();
+
+            if (rank &gt;= ScoreRank.B)
+                // when rank is B or higher, play legacy applause sample on legacy skins.
+                applauseSamples.Insert(0, @&quot;applause&quot;);
+
+            switch (rank)
+            {
+                default:
+                case ScoreRank.D:
+                    applauseSamples.Add(@&quot;Results/applause-d&quot;);
+                    break;
+
+                case ScoreRank.C:
+                    applauseSamples.Add(@&quot;Results/applause-c&quot;);
+                    break;
+
+                case ScoreRank.B:
+                    applauseSamples.Add(@&quot;Results/applause-b&quot;);
+                    break;
+
+                case ScoreRank.A:
+                    applauseSamples.Add(@&quot;Results/applause-a&quot;);
+                    break;
+
+                case ScoreRank.S:
+                case ScoreRank.SH:
+                case ScoreRank.X:
+                case ScoreRank.XH:
+                    applauseSamples.Add(@&quot;Results/applause-s&quot;);
+                    break;
+            }
+
+            LoadComponentAsync(rankApplauseSound = new PoolableSkinnableSample(new SampleInfo(applauseSamples.ToArray())), s =&gt;
+            {
+                if (!this.IsCurrentScreen() || s != rankApplauseSound)
+                    return;
+
+                AddInternal(rankApplauseSound);
+
+                rankApplauseSound.VolumeTo(applause_volume);
+                rankApplauseSound.Play();
+            });
+        }
+
+        #endregion
+
+        /// &lt;summary&gt;
+        /// Fetches the next page of scores in the given direction.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;The direction, or &lt;c&gt;null&lt;/c&gt; to fetch any scores.&lt;/param&gt;
+        private void fetchScores(int? direction)
+        {
+            Debug.Assert(direction == null || direction == -1 || direction == 1);
+
+            if (!lastFetchTask.IsCompleted)
+                return;
+
+            lastFetchTask = Task.Run(async () =&gt;
+            {
+                ScoreInfo[] scores;
+
+                switch (direction)
+                {
+                    default:
+                        scores = await FetchScores().ConfigureAwait(false);
+                        break;
+
+                    case -1:
+                    case 1:
+                        scores = await FetchNextPage(direction.Value).ConfigureAwait(false);
+                        break;
+                }
+
+                await addScores(scores).ConfigureAwait(false);
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Performs a fetch/refresh of scores to be displayed.
+        /// &lt;/summary&gt;
+        protected virtual Task&lt;ScoreInfo[]&gt; FetchScores() =&gt; Task.FromResult&lt;ScoreInfo[]&gt;([]);
+
+        /// &lt;summary&gt;
+        /// Performs a fetch of the next page of scores. This is invoked every frame.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;direction&quot;&gt;The fetch direction. -1 to fetch scores greater than the current start of the list, and 1 to fetch scores lower than the current end of the list.&lt;/param&gt;
+        protected virtual Task&lt;ScoreInfo[]&gt; FetchNextPage(int direction) =&gt; Task.FromResult&lt;ScoreInfo[]&gt;([]);
+
+        private Task addScores(ScoreInfo[] scores)
+        {
+            var tcs = new TaskCompletionSource();
+
+            Schedule(() =&gt;
+            {
+                foreach (var s in scores)
+                {
+                    var panel = ScorePanelList.AddScore(s);
+                    if (detachedPanel != null)
+                        panel.Alpha = 0;
+                }
+
+                // allow a frame for scroll container to adjust its dimensions with the added scores before fetching again.
+                Schedule(tcs.SetResult);
+
+                if (ScorePanelList.IsEmpty)
+                {
+                    // This can happen if for example a beatmap that is part of a playlist hasn&#39;t been played yet.
+                    VerticalScrollContent.Add(new MessagePlaceholder(LeaderboardStrings.NoRecordsYet));
+                }
+
+                OnScoresAdded(scores);
+            });
+
+            return tcs.Task;
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked after online scores are fetched and added to the list.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;scores&quot;&gt;The scores that were added.&lt;/param&gt;
+        protected virtual void OnScoresAdded(ScoreInfo[] scores)
+        {
+        }
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+
+            ApplyToBackground(b =&gt;
+            {
+                b.BlurAmount.Value = BACKGROUND_BLUR;
+                b.FadeColour(OsuColour.Gray(0.5f), 250);
+            });
+
+            bottomPanel.FadeTo(1, 250);
+
+            popInSample?.Play();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            if (base.OnExiting(e))
+                return true;
+
+            // This is a stop-gap safety against components holding references to gameplay after exiting the gameplay flow.
+            // Right now, HitEvents are only used up to the results screen. If this changes in the future we need to remove
+            // HitObject references from HitEvent.
+            Score?.HitEvents.Clear();
+
+            if (!skipExitTransition)
+                this.FadeOut(100);
+
+            rankApplauseSound?.Stop();
+            return false;
+        }
+
+        public override bool OnBackButton()
+        {
+            if (StatisticsPanel.State.Value == Visibility.Visible)
+            {
+                StatisticsPanel.Hide();
+                return true;
+            }
+
+            return false;
+        }
+
+        private ScorePanel? detachedPanel;
+
+        private void onStatisticsStateChanged(ValueChangedEvent&lt;Visibility&gt; state)
+        {
+            if (state.NewValue == Visibility.Visible)
+            {
+                Debug.Assert(SelectedScore.Value != null);
+                // Detach the panel in its original location, and move into the desired location in the local container.
+                var expandedPanel = ScorePanelList.GetPanelForScore(SelectedScore.Value);
+                var screenSpacePos = expandedPanel.ScreenSpaceDrawQuad.TopLeft;
+
+                // Detach and move into the local container.
+                ScorePanelList.Detach(expandedPanel);
+                detachedPanelContainer.Add(expandedPanel);
+
+                // Move into its original location in the local container first, then to the final location.
+                float origLocation = detachedPanelContainer.ToLocalSpace(screenSpacePos).X;
+                expandedPanel.MoveToX(origLocation)
+                             .Then()
+                             .MoveToX(StatisticsPanel.SIDE_PADDING, 400, Easing.OutElasticQuarter);
+
+                // Hide contracted panels.
+                foreach (var contracted in ScorePanelList.GetScorePanels().Where(p =&gt; p.State == PanelState.Contracted))
+                    contracted.FadeOut(150, Easing.OutQuint);
+                ScorePanelList.HandleInput = false;
+
+                // Dim background.
+                ApplyToBackground(b =&gt; b.FadeColour(OsuColour.Gray(0.4f), 400, Easing.OutQuint));
+
+                detachedPanel = expandedPanel;
+            }
+            else if (detachedPanel != null)
+            {
+                var screenSpacePos = detachedPanel.ScreenSpaceDrawQuad.TopLeft;
+
+                // Remove from the local container and re-attach.
+                detachedPanelContainer.Remove(detachedPanel, false);
+                ScorePanelList.Attach(detachedPanel);
+
+                // Move into its original location in the attached container first, then to the final location.
+                float origLocation = detachedPanel.Parent!.ToLocalSpace(screenSpacePos).X;
+                detachedPanel.MoveToX(origLocation)
+                             .Then()
+                             .MoveToX(0, 250, Easing.OutElasticQuarter);
+
+                // Show contracted panels.
+                foreach (var contracted in ScorePanelList.GetScorePanels().Where(p =&gt; p.State == PanelState.Contracted))
+                    contracted.FadeIn(150, Easing.OutQuint);
+                ScorePanelList.HandleInput = true;
+
+                // Un-dim background.
+                ApplyToBackground(b =&gt; b.FadeColour(OsuColour.Gray(0.5f), 250, Easing.OutQuint));
+
+                detachedPanel = null;
+            }
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.QuickExit:
+                    if (this.IsCurrentScreen())
+                    {
+                        this.Exit();
+                        return true;
+                    }
+
+                    break;
+
+                case GlobalAction.Select:
+                    if (SelectedScore.Value != null)
+                        StatisticsPanel.ToggleVisibility();
+                    return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        protected override bool OnScroll(ScrollEvent e)
+        {
+            // Match stable behaviour of only alt-scroll adjusting volume.
+            // This is the same behaviour as the song selection screen.
+            if (!e.CurrentState.Keyboard.AltPressed)
+                return true;
+
+            return base.OnScroll(e);
+        }
+
+        protected partial class VerticalScrollContainer : OsuScrollContainer
+        {
+            protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+            private readonly Container content;
+
+            protected override bool OnScroll(ScrollEvent e) =&gt; !e.ControlPressed &amp;&amp; !e.AltPressed &amp;&amp; !e.ShiftPressed &amp;&amp; !e.SuperPressed;
+
+            public VerticalScrollContainer()
+            {
+                Masking = false;
+
+                base.Content.Add(content = new Container { RelativeSizeAxes = Axes.X });
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                content.Height = Math.Max(screen_height, DrawHeight);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[43,9,43,92,0],[45,71,45,75,0],[47,58,47,62,0],[49,78,49,109,0],[51,9,51,89,0],[55,51,55,55,0],[55,56,55,68,0],[55,73,55,78,0],[57,67,57,71,0],[57,72,57,84,0],[57,89,57,94,0],[60,34,60,38,0],[60,39,60,43,0],[64,53,64,57,0],[64,58,64,70,0],[64,75,64,80,0],[66,9,66,46,0],[67,9,67,70,0],[69,9,69,57,0],[74,34,74,38,0],[74,39,74,44,0],[79,43,79,47,0],[79,48,79,53,0],[79,58,79,62,0],[85,35,85,39,0],[85,40,85,45,0],[90,9,90,114,0],[92,9,92,50,0],[93,9,93,10,0],[94,13,94,27,0],[96,13,96,41,0],[97,9,97,10,0],[101,9,101,10,0],[104,13,104,67,0],[106,13,136,70,0],[136,70,136,104,0],[136,104,180,15,0],[182,13,182,31,0],[183,13,183,14,0],[185,17,185,72,0],[187,17,187,61,0],[191,17,191,44,0],[191,44,191,95,0],[191,95,191,153,0],[192,13,192,14,0],[194,13,194,43,0],[196,13,196,37,0],[197,13,197,14,0],[198,17,202,20,0],[208,17,208,59,0],[209,13,209,14,0],[211,13,211,46,0],[212,13,212,14,0],[213,17,213,62,0],[214,17,214,41,0],[215,13,215,14,0],[217,13,217,34,0],[218,13,218,14,0],[219,17,222,21,0],[222,21,222,22,0],[222,22,223,25,0],[223,25,223,53,0],[223,53,223,54,0],[223,54,223,61,0],[223,61,225,25,0],[225,25,225,51,0],[225,51,226,25,0],[226,25,226,47,0],[226,47,227,21,0],[227,21,227,22,0],[227,22,228,20,0],[229,13,229,14,0],[231,13,231,44,0],[232,17,232,70,0],[234,13,234,101,0],[235,17,235,80,0],[236,9,236,10,0],[239,9,239,10,0],[240,13,240,33,0],[242,13,242,84,0],[244,13,244,31,0],[245,9,245,10,0],[248,9,248,10,0],[249,13,249,27,0],[251,13,251,50,0],[252,17,252,33,0],[253,18,253,53,0],[254,17,254,32,0],[255,9,255,10,0],[262,9,262,10,0],[265,13,265,41,0],[266,17,266,24,0],[268,13,268,42,0],[270,13,270,54,0],[272,13,272,37,0],[274,17,274,56,0],[276,13,276,26,0],[280,21,280,64,0],[281,21,281,27,0],[284,21,284,64,0],[285,21,285,27,0],[288,21,288,64,0],[289,21,289,27,0],[292,21,292,64,0],[293,21,293,27,0],[299,21,299,64,0],[300,21,300,27,0],[303,13,304,13,0],[304,13,304,14,0],[304,14,305,17,0],[305,17,305,71,0],[305,71,306,21,0],[306,21,306,28,0],[306,28,308,17,0],[308,17,308,48,0],[308,48,310,17,0],[310,17,310,61,0],[310,61,311,17,0],[311,17,311,42,0],[311,42,312,13,0],[312,13,312,14,0],[312,14,312,16,0],[313,9,313,10,0],[322,9,322,10,0],[323,13,323,82,0],[325,13,325,44,0],[326,17,326,24,0],[328,13,329,13,0],[329,13,329,14,0],[329,14,332,17,0],[332,17,332,35,0],[332,35,335,25,0],[335,25,335,76,0],[335,76,336,25,0],[336,25,336,31,0],[336,31,340,25,0],[340,25,340,93,0],[340,93,341,25,0],[341,25,341,31,0],[341,31,344,17,0],[344,17,344,63,0],[344,63,345,13,0],[345,13,345,14,0],[345,14,345,16,0],[346,9,346,10,0],[351,62,351,94,0],[357,77,357,109,0],[360,9,360,10,0],[361,13,361,50,0],[363,13,364,13,0],[364,13,364,14,0],[364,14,365,17,0],[365,17,365,24,0],[365,24,365,26,0],[365,26,365,31,0],[365,31,365,32,0],[365,32,365,34,0],[365,34,365,35,0],[365,35,365,41,0],[365,41,366,17,0],[366,17,366,18,0],[366,18,367,21,0],[367,21,367,60,0],[367,60,368,21,0],[368,21,368,47,0],[368,47,369,25,0],[369,25,369,41,0],[369,41,370,17,0],[370,17,370,18,0],[370,18,373,17,0],[373,17,373,41,0],[373,41,375,17,0],[375,17,375,44,0],[375,44,376,17,0],[376,17,376,18,0],[376,18,378,21,0],[378,21,378,104,0],[378,104,379,17,0],[379,17,379,18,0],[379,18,381,17,0],[381,17,381,39,0],[381,39,382,13,0],[382,13,382,14,0],[382,14,382,16,0],[384,13,384,29,0],[385,9,385,10,0],[392,9,392,10,0],[393,9,393,10,0],[396,9,396,10,0],[397,13,397,32,0],[399,13,400,13,0],[400,13,400,14,0],[400,14,401,17,0],[401,17,401,54,0],[401,54,402,17,0],[402,17,402,57,0],[402,57,403,13,0],[403,13,403,14,0],[403,14,403,16,0],[405,13,405,40,0],[407,13,407,33,0],[408,9,408,10,0],[411,9,411,10,0],[412,13,412,35,0],[413,17,413,29,0],[418,13,418,38,0],[420,13,420,37,0],[421,17,421,35,0],[423,13,423,39,0],[424,13,424,26,0],[425,9,425,10,0],[428,9,428,10,0],[429,13,429,67,0],[430,13,430,14,0],[431,17,431,40,0],[432,17,432,29,0],[435,13,435,26,0],[436,9,436,10,0],[441,9,441,10,0],[442,13,442,54,0],[443,13,443,14,0],[444,17,444,59,0],[446,17,446,90,0],[447,17,447,80,0],[450,17,450,54,0],[451,17,451,59,0],[454,17,454,92,0],[455,17,457,100,0],[460,17,460,24,0],[460,26,460,40,0],[460,41,460,43,0],[460,44,460,87,0],[460,87,460,119,0],[460,119,460,120,0],[461,21,461,62,0],[462,17,462,52,0],[465,17,465,40,0],[465,40,465,96,0],[465,96,465,98,0],[467,17,467,47,0],[468,13,468,14,0],[469,18,469,44,0],[470,13,470,14,0],[471,17,471,80,0],[474,17,474,69,0],[475,17,475,54,0],[478,17,478,91,0],[479,17,481,73,0],[484,17,484,24,0],[484,26,484,40,0],[484,41,484,43,0],[484,44,484,87,0],[484,87,484,119,0],[484,119,484,120,0],[485,21,485,61,0],[486,17,486,51,0],[489,17,489,40,0],[489,40,489,96,0],[489,96,489,98,0],[491,17,491,38,0],[492,13,492,14,0],[493,9,493,10,0],[496,9,496,10,0],[497,13,497,26,0],[498,17,498,30,0],[500,13,500,30,0],[503,21,503,48,0],[504,21,504,22,0],[505,25,505,37,0],[506,25,506,37,0],[509,21,509,27,0],[512,21,512,53,0],[513,25,513,60,0],[514,21,514,33,0],[517,13,517,26,0],[518,9,518,10,0],[521,9,521,10,0],[522,9,522,10,0],[525,9,525,10,0],[528,13,528,53,0],[529,17,529,29,0],[531,13,531,37,0],[532,9,532,10,0],[536,63,536,70,0],[540,64,540,136,0],[542,13,542,45,0],[543,13,543,14,0],[544,17,544,33,0],[546,17,546,89,0],[547,13,547,14,0],[550,13,550,14,0],[551,17,551,31,0],[552,17,552,70,0],[553,13,553,14,0]]);
+    </script>
+  </body>
+</html>

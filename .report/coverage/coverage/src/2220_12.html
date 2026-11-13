@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Backgrounds/BackgroundScreenDefault.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics.Backgrounds;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Skinning;
+
+namespace osu.Game.Screens.Backgrounds
+{
+    public partial class BackgroundScreenDefault : BackgroundScreen
+    {
+        private Background background;
+
+        private int currentDisplay;
+        private const int background_count = 8;
+        private IBindable&lt;APIUser&gt; user;
+        private Bindable&lt;Skin&gt; skin;
+        private Bindable&lt;BackgroundSource&gt; source;
+        private Bindable&lt;IntroSequence&gt; introSequence;
+        private readonly SeasonalBackgroundLoader seasonalBackgroundLoader = new SeasonalBackgroundLoader();
+
+        [Resolved]
+        private IBindable&lt;WorkingBeatmap&gt; beatmap { get; set; }
+
+        [Resolved]
+        private GameHost gameHost { get; set; }
+
+        protected virtual bool AllowStoryboardBackground =&gt; true;
+
+        [BackgroundDependencyLoader]
+        private void load(IAPIProvider api, SkinManager skinManager, OsuConfigManager config)
+        {
+            user = api.LocalUser.GetBoundCopy();
+            skin = skinManager.CurrentSkin.GetBoundCopy();
+            source = config.GetBindable&lt;BackgroundSource&gt;(OsuSetting.MenuBackgroundSource);
+            introSequence = config.GetBindable&lt;IntroSequence&gt;(OsuSetting.IntroSequence);
+
+            AddInternal(seasonalBackgroundLoader);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            user.ValueChanged += _ =&gt; Scheduler.AddOnce(next);
+            skin.ValueChanged += _ =&gt; Scheduler.AddOnce(next);
+            source.ValueChanged += _ =&gt; Scheduler.AddOnce(next);
+            beatmap.ValueChanged += _ =&gt; Scheduler.AddOnce(next);
+            introSequence.ValueChanged += _ =&gt; Scheduler.AddOnce(next);
+            seasonalBackgroundLoader.SeasonalBackgroundChanged += () =&gt; Scheduler.AddOnce(next);
+
+            currentDisplay = RNG.Next(0, background_count);
+            Next();
+
+            // helper function required for AddOnce usage.
+            void next() =&gt; Next();
+        }
+
+        private ScheduledDelegate storyboardUnloadDelegate;
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            if (background is BeatmapBackgroundWithStoryboard storyboardBackground)
+                storyboardUnloadDelegate = gameHost.UpdateThread.Scheduler.AddDelayed(storyboardBackground.UnloadStoryboard, TRANSITION_LENGTH);
+
+            base.OnSuspending(e);
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            if (background is BeatmapBackgroundWithStoryboard storyboardBackground)
+            {
+                if (storyboardUnloadDelegate?.Completed == false)
+                    storyboardUnloadDelegate.Cancel();
+                else
+                    storyboardBackground.LoadStoryboard();
+
+                storyboardUnloadDelegate = null;
+            }
+
+            base.OnResuming(e);
+        }
+
+        private ScheduledDelegate nextTask;
+        private CancellationTokenSource cancellationTokenSource;
+
+        /// &lt;summary&gt;
+        /// Request loading the next background.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether a new background was queued for load. May return false if the current background is still valid.&lt;/returns&gt;
+        public virtual bool Next()
+        {
+            var nextBackground = createBackground();
+
+            // in the case that the background hasn&#39;t changed, we want to avoid cancelling any tasks that could still be loading.
+            if (nextBackground == background)
+                return false;
+
+            Logger.Log(@&quot;&#127749; Global background change queued&quot;);
+
+            cancellationTokenSource?.Cancel();
+            cancellationTokenSource = new CancellationTokenSource();
+
+            nextTask?.Cancel();
+            nextTask = Scheduler.AddDelayed(() =&gt;
+            {
+                Logger.Log(@&quot;&#127749; Global background loading&quot;);
+                LoadComponentAsync(nextBackground, displayNext, cancellationTokenSource.Token);
+            }, 500);
+
+            return true;
+        }
+
+        private void displayNext(Background newBackground)
+        {
+            background?.FadeOut(800, Easing.OutQuint);
+            background?.Expire();
+
+            AddInternal(background = newBackground);
+            currentDisplay++;
+        }
+
+        private Background createBackground()
+        {
+            // seasonal background loading gets highest priority.
+            Background newBackground = seasonalBackgroundLoader.LoadNextBackground();
+
+            if (newBackground == null &amp;&amp; user.Value?.IsSupporter == true)
+            {
+                switch (source.Value)
+                {
+                    case BackgroundSource.Beatmap:
+                    case BackgroundSource.BeatmapWithStoryboard:
+                    {
+                        if (source.Value == BackgroundSource.BeatmapWithStoryboard &amp;&amp; AllowStoryboardBackground)
+                            newBackground = new BeatmapBackgroundWithStoryboard(beatmap.Value, getBackgroundTextureName());
+                        newBackground ??= new BeatmapBackground(beatmap.Value, getBackgroundTextureName());
+
+                        break;
+                    }
+
+                    case BackgroundSource.Skin:
+                        switch (skin.Value)
+                        {
+                            case TrianglesSkin:
+                            case ArgonSkin:
+                            case DefaultLegacySkin:
+                            case RetroSkin:
+                                // default skins should use the default background rotation, which won&#39;t be the case if a SkinBackground is created for them.
+                                break;
+
+                            default:
+                                newBackground = new SkinBackground(skin.Value, getBackgroundTextureName());
+                                break;
+                        }
+
+                        break;
+                }
+            }
+
+            // this method is called in many cases where the background might not necessarily need to change.
+            // if an equivalent background is currently being shown, we don&#39;t want to load it again.
+            if (newBackground?.Equals(background) == true)
+                return background;
+
+            newBackground ??= new Background(getBackgroundTextureName());
+            newBackground.Depth = currentDisplay;
+
+            return newBackground;
+        }
+
+        private string getBackgroundTextureName()
+        {
+            switch (introSequence.Value)
+            {
+                case IntroSequence.Welcome:
+                    return @&quot;Intro/Welcome/menu-background&quot;;
+
+                default:
+                    return $@&quot;Menu/menu-background-{currentDisplay % background_count + 1}&quot;;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,9,34,109,0],[37,53,37,57,0],[37,58,37,62,0],[40,37,40,41,0],[40,42,40,46,0],[42,61,42,65,0],[46,9,46,10,0],[47,13,47,49,0],[48,13,48,59,0],[49,13,49,92,0],[50,13,50,89,0],[52,13,52,51,0],[53,9,53,10,0],[56,9,56,10,0],[57,13,57,33,0],[59,13,59,39,0],[59,39,59,62,0],[59,62,59,63,0],[60,13,60,39,0],[60,39,60,62,0],[60,62,60,63,0],[61,13,61,41,0],[61,41,61,64,0],[61,64,61,65,0],[62,13,62,42,0],[62,42,62,65,0],[62,65,62,66,0],[63,13,63,48,0],[63,48,63,71,0],[63,71,63,72,0],[64,13,64,73,0],[64,73,64,96,0],[64,96,64,97,0],[66,13,66,60,0],[67,13,67,20,0],[70,28,70,34,0],[71,9,71,10,0],[76,9,76,10,0],[77,13,77,84,0],[78,17,78,145,0],[80,13,80,34,0],[81,9,81,10,0],[84,9,84,10,0],[85,13,85,84,0],[86,13,86,14,0],[87,17,87,66,0],[88,21,88,55,0],[90,21,90,59,0],[92,17,92,49,0],[93,13,93,14,0],[95,13,95,32,0],[96,9,96,10,0],[106,9,106,10,0],[107,13,107,53,0],[110,13,110,46,0],[111,17,111,30,0],[113,13,113,63,0],[115,13,115,47,0],[116,13,116,69,0],[118,13,118,32,0],[119,13,120,13,0],[120,13,120,14,0],[120,14,121,17,0],[121,17,121,61,0],[121,61,122,17,0],[122,17,122,96,0],[122,96,123,13,0],[123,13,123,14,0],[123,14,123,21,0],[125,13,125,25,0],[126,9,126,10,0],[129,9,129,10,0],[130,13,130,55,0],[131,13,131,34,0],[133,13,133,53,0],[134,13,134,30,0],[135,9,135,10,0],[138,9,138,10,0],[140,13,140,86,0],[142,13,142,74,0],[143,13,143,14,0],[144,17,144,38,0],[148,21,148,22,0],[149,25,149,113,0],[150,29,150,124,0],[151,25,151,108,0],[153,25,153,31,0],[157,25,157,44,0],[164,33,164,39,0],[167,33,167,108,0],[168,33,168,39,0],[171,25,171,31,0],[173,13,173,14,0],[177,13,177,59,0],[178,17,178,35,0],[180,13,180,74,0],[181,13,181,50,0],[183,13,183,34,0],[184,9,184,10,0],[187,9,187,10,0],[188,13,188,41,0],[191,21,191,61,0],[194,21,194,93,0],[196,9,196,10,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Lounge/Components/RoomPanel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Localisation;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Drawables;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Screens.OnlinePlay.Components;
+using osuTK;
+using Container = osu.Framework.Graphics.Containers.Container;
+
+namespace osu.Game.Screens.OnlinePlay.Lounge.Components
+{
+    public abstract partial class RoomPanel : CompositeDrawable, IHasContextMenu
+    {
+        protected const float CORNER_RADIUS = 10;
+        private const float height = 80;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        public readonly Room Room;
+
+        protected readonly Bindable&lt;PlaylistItem?&gt; SelectedItem = new Bindable&lt;PlaylistItem?&gt;();
+        protected Container ButtonsContainer { get; private set; } = null!;
+
+        protected bool ShowExternalLink { get; init; } = true;
+
+        public bool ShowDescription { get; init; }
+
+        private DrawableRoomParticipantsList? drawableRoomParticipantsList;
+        private RoomSpecialCategoryPill? specialCategoryPill;
+        private CornerIcon? passwordIcon;
+        private CornerIcon? pinnedIcon;
+        private EndDateInfo? endDateInfo;
+        private RoomNameLine? roomName;
+        private DelayedLoadWrapper wrapper = null!;
+        private CancellationTokenSource? beatmapLookupCancellation;
+
+        /// &lt;summary&gt;
+        /// A fully-populated representation of the selected item&#39;s current beatmap.
+        /// &lt;/summary&gt;
+        private readonly Bindable&lt;IBeatmapInfo?&gt; currentBeatmap = new Bindable&lt;IBeatmapInfo?&gt;();
+
+        protected RoomPanel(Room room)
+        {
+            Room = room;
+
+            RelativeSizeAxes = Axes.X;
+            Height = height;
+
+            Masking = true;
+            CornerRadius = CORNER_RADIUS;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider, OsuColour colours)
+        {
+            ButtonsContainer = new Container
+            {
+                Anchor = Anchor.CentreRight,
+                Origin = Anchor.CentreRight,
+                RelativeSizeAxes = Axes.Y,
+                AutoSizeAxes = Axes.X
+            };
+
+            EdgeEffect = new EdgeEffectParameters
+            {
+                Type = EdgeEffectType.Shadow,
+                Colour = colourProvider.Background6.Opacity(0.4f),
+                Radius = 4,
+            };
+
+            IEnumerable&lt;Drawable&gt; createNameAndStatus()
+            {
+                yield return roomName = new RoomNameLine();
+
+                if (ShowDescription &amp;&amp; !string.IsNullOrEmpty(Room.Description))
+                {
+                    Height = height + 16;
+
+                    yield return new TruncatingSpriteText
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        Text = Room.Description,
+                        Font = OsuFont.Style.Caption2,
+                        Colour = colourProvider.Content2,
+                    };
+                }
+
+                yield return new RoomStatusText(Room)
+                {
+                    Beatmap = { BindTarget = currentBeatmap }
+                };
+            }
+
+            InternalChildren = new Drawable[]
+            {
+                // This resolves internal 1px gaps due to applying the (parenting) corner radius and masking across multiple filling background sprites.
+                new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colourProvider.Background5,
+                },
+                CreateBackground().With(d =&gt;
+                {
+                    d.RelativeSizeAxes = Axes.Both;
+                    d.Beatmap.BindTarget = currentBeatmap;
+                }),
+                wrapper = new DelayedLoadWrapper(() =&gt;
+                    new Container
+                    {
+                        Name = @&quot;Room content&quot;,
+                        RelativeSizeAxes = Axes.Both,
+                        // This negative padding resolves 1px gaps between this background and the background above.
+                        Padding = new MarginPadding { Left = 10, Vertical = -0.5f },
+                        Child = new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Masking = true,
+                            CornerRadius = CORNER_RADIUS,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = colourProvider.Background5,
+                                    Width = 0.2f,
+                                },
+                                new Box
+                                {
+                                    Anchor = Anchor.TopRight,
+                                    Origin = Anchor.TopRight,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = ColourInfo.GradientHorizontal(colourProvider.Background5, colourProvider.Background5.Opacity(0.3f)),
+                                    Width = 0.8f,
+                                },
+                                new GridContainer
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    ColumnDimensions = new[]
+                                    {
+                                        new Dimension(),
+                                        new Dimension(GridSizeMode.AutoSize),
+                                    },
+                                    Content = new[]
+                                    {
+                                        new Drawable[]
+                                        {
+                                            new Container
+                                            {
+                                                Name = @&quot;Left details&quot;,
+                                                RelativeSizeAxes = Axes.Both,
+                                                Padding = new MarginPadding
+                                                {
+                                                    Left = 10,
+                                                    Right = 10,
+                                                    Vertical = 5
+                                                },
+                                                Children = new Drawable[]
+                                                {
+                                                    new FillFlowContainer
+                                                    {
+                                                        RelativeSizeAxes = Axes.X,
+                                                        AutoSizeAxes = Axes.Y,
+                                                        Direction = FillDirection.Vertical,
+                                                        Children = new Drawable[]
+                                                        {
+                                                            new FillFlowContainer
+                                                            {
+                                                                AutoSizeAxes = Axes.Both,
+                                                                Direction = FillDirection.Horizontal,
+                                                                Spacing = new Vector2(5),
+                                                                Children = new Drawable[]
+                                                                {
+                                                                    new RoomStatusPill(Room)
+                                                                    {
+                                                                        Anchor = Anchor.CentreLeft,
+                                                                        Origin = Anchor.CentreLeft
+                                                                    },
+                                                                    specialCategoryPill = new RoomSpecialCategoryPill(Room)
+                                                                    {
+                                                                        Anchor = Anchor.CentreLeft,
+                                                                        Origin = Anchor.CentreLeft
+                                                                    },
+                                                                    new FreestyleStatusPill(Room)
+                                                                    {
+                                                                        Anchor = Anchor.CentreLeft,
+                                                                        Origin = Anchor.CentreLeft
+                                                                    },
+                                                                    endDateInfo = new EndDateInfo(Room)
+                                                                    {
+                                                                        Anchor = Anchor.CentreLeft,
+                                                                        Origin = Anchor.CentreLeft,
+                                                                    },
+                                                                }
+                                                            },
+                                                            new FillFlowContainer
+                                                            {
+                                                                RelativeSizeAxes = Axes.X,
+                                                                AutoSizeAxes = Axes.Y,
+                                                                Padding = new MarginPadding { Top = 3 },
+                                                                Direction = FillDirection.Vertical,
+                                                                ChildrenEnumerable = createNameAndStatus()
+                                                            }
+                                                        },
+                                                    },
+                                                    new FillFlowContainer
+                                                    {
+                                                        Anchor = Anchor.BottomLeft,
+                                                        Origin = Anchor.BottomLeft,
+                                                        AutoSizeAxes = Axes.Both,
+                                                        Direction = FillDirection.Horizontal,
+                                                        Spacing = new Vector2(5),
+                                                        ChildrenEnumerable = CreateBottomDetails()
+                                                    }
+                                                }
+                                            },
+                                            new FillFlowContainer
+                                            {
+                                                Name = &quot;Right content&quot;,
+                                                Anchor = Anchor.CentreRight,
+                                                Origin = Anchor.CentreRight,
+                                                AutoSizeAxes = Axes.X,
+                                                RelativeSizeAxes = Axes.Y,
+                                                Spacing = new Vector2(5),
+                                                Padding = new MarginPadding
+                                                {
+                                                    Right = 10,
+                                                    Vertical = 20,
+                                                },
+                                                Children = new Drawable[]
+                                                {
+                                                    ButtonsContainer,
+                                                    drawableRoomParticipantsList = new DrawableRoomParticipantsList(Room)
+                                                    {
+                                                        Anchor = Anchor.CentreRight,
+                                                        Origin = Anchor.CentreRight,
+                                                        NumberOfCircles = NumberOfAvatars
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                },
+                                passwordIcon = new CornerIcon
+                                {
+                                    Alpha = 0,
+                                    Background = { Colour = colours.Gray8, },
+                                    Icon =
+                                    {
+                                        Icon = FontAwesome.Solid.Lock,
+                                        Colour = colours.Gray3,
+                                        Rotation = 45,
+                                    },
+                                },
+                                pinnedIcon = new CornerIcon
+                                {
+                                    Alpha = 0,
+                                    Background = { Colour = colours.Orange2 },
+                                    Icon =
+                                    {
+                                        Icon = FontAwesome.Solid.Thumbtack,
+                                        Colour = colours.Gray3,
+                                        Rotation = 45,
+                                    },
+                                }
+                            },
+                        },
+                    }, 0)
+                {
+                    RelativeSizeAxes = Axes.Both,
+                }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Room.PropertyChanged += onRoomPropertyChanged;
+
+            wrapper.DelayedLoadComplete += _ =&gt;
+            {
+                Debug.Assert(specialCategoryPill != null);
+                Debug.Assert(endDateInfo != null);
+                Debug.Assert(passwordIcon != null);
+
+                wrapper.FadeInFromZero(200);
+
+                updateRoomID();
+                updateRoomName();
+                updateRoomCategory();
+                updateRoomType();
+                updateRoomHasPassword();
+                updateRoomPinned();
+            };
+
+            SelectedItem.BindValueChanged(onSelectedItemChanged, true);
+        }
+
+        private void onRoomPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            switch (e.PropertyName)
+            {
+                case nameof(Room.RoomID):
+                    updateRoomID();
+                    break;
+
+                case nameof(Room.Name):
+                    updateRoomName();
+                    break;
+
+                case nameof(Room.Category):
+                    updateRoomCategory();
+                    break;
+
+                case nameof(Room.Type):
+                    updateRoomType();
+                    break;
+
+                case nameof(Room.HasPassword):
+                    updateRoomHasPassword();
+                    break;
+
+                case nameof(Room.Pinned):
+                    updateRoomPinned();
+                    break;
+            }
+        }
+
+        private void onSelectedItemChanged(ValueChangedEvent&lt;PlaylistItem?&gt; item)
+        {
+            if (item.NewValue?.Beatmap.OnlineID == item.OldValue?.Beatmap.OnlineID)
+                return;
+
+            beatmapLookupCancellation?.Cancel();
+            beatmapLookupCancellation?.Dispose();
+            beatmapLookupCancellation = null;
+
+            if (item.NewValue?.Beatmap == null)
+            {
+                currentBeatmap.Value = null;
+                return;
+            }
+
+            var cancellationSource = beatmapLookupCancellation = new CancellationTokenSource();
+
+            beatmapLookupCache.GetBeatmapAsync(item.NewValue.Beatmap.OnlineID, cancellationSource.Token)
+                              .ContinueWith(task =&gt; Schedule(() =&gt;
+                              {
+                                  if (!cancellationSource.IsCancellationRequested)
+                                      currentBeatmap.Value = task.GetResultSafely();
+                              }), cancellationSource.Token);
+        }
+
+        private void updateRoomID()
+        {
+            if (roomName != null &amp;&amp; ShowExternalLink)
+                roomName.Link = Room.GetOnlineURL(api);
+        }
+
+        private void updateRoomName()
+        {
+            roomName?.Text = Room.Name;
+        }
+
+        private void updateRoomCategory()
+        {
+            if (Room.Category &gt; RoomCategory.Normal)
+                specialCategoryPill?.Show();
+            else
+                specialCategoryPill?.Hide();
+        }
+
+        private void updateRoomType()
+        {
+            endDateInfo?.Alpha = Room.Type == MatchType.Playlists ? 1 : 0;
+        }
+
+        private void updateRoomHasPassword()
+        {
+            passwordIcon?.Alpha = Room.HasPassword ? 1 : 0;
+        }
+
+        private void updateRoomPinned()
+        {
+            pinnedIcon?.Alpha = Room.Pinned ? 1 : 0;
+        }
+
+        private int numberOfAvatars = 7;
+
+        public int NumberOfAvatars
+        {
+            get =&gt; numberOfAvatars;
+            set
+            {
+                numberOfAvatars = value;
+
+                drawableRoomParticipantsList?.NumberOfCircles = value;
+            }
+        }
+
+        public virtual MenuItem[] ContextMenuItems
+        {
+            get
+            {
+                var items = new List&lt;MenuItem&gt;();
+
+                string? url = Room.GetOnlineURL(api);
+
+                if (url != null)
+                {
+                    items.AddRange([
+                        new OsuMenuItem(CommonStrings.ViewInBrowser, MenuItemType.Standard, () =&gt; game?.OpenUrlExternally(url)),
+                        new OsuMenuItem(CommonStrings.CopyLink, MenuItemType.Standard, () =&gt; game?.CopyToClipboard(url))
+                    ]);
+                }
+
+                return items.ToArray();
+            }
+        }
+
+        protected virtual UpdateableBeatmapBackgroundSprite CreateBackground() =&gt; new UpdateableBeatmapBackgroundSprite();
+
+        protected virtual IEnumerable&lt;Drawable&gt; CreateBottomDetails()
+        {
+            var pills = new List&lt;Drawable&gt;();
+
+            if (Room.Type != MatchType.Playlists)
+            {
+                pills.AddRange(new Drawable[]
+                {
+                    new MatchTypePill(Room),
+                    new QueueModePill(Room),
+                });
+            }
+
+            pills.AddRange(new Drawable[]
+            {
+                new PlaylistCountPill(Room)
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                },
+                new StarRatingRangeDisplay(Room)
+                {
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreLeft,
+                    Scale = new Vector2(0.8f)
+                }
+            });
+
+            return pills;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            Room.PropertyChanged -= onRoomPropertyChanged;
+        }
+
+        private partial class RoomStatusText : CompositeDrawable
+        {
+            public readonly Bindable&lt;IBeatmapInfo?&gt; Beatmap = new Bindable&lt;IBeatmapInfo?&gt;();
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            private readonly Room room;
+            private SpriteText statusText = null!;
+            private LinkFlowContainer beatmapText = null!;
+
+            public RoomStatusText(Room room)
+            {
+                this.room = room;
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                InternalChild = new GridContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    ColumnDimensions = new[]
+                    {
+                        new Dimension(GridSizeMode.AutoSize),
+                    },
+                    RowDimensions = new[]
+                    {
+                        new Dimension(GridSizeMode.AutoSize)
+                    },
+                    Content = new[]
+                    {
+                        new Drawable[]
+                        {
+                            statusText = new OsuSpriteText
+                            {
+                                Font = OsuFont.Style.Caption2,
+                                Colour = colours.Lime1
+                            },
+                            beatmapText = new LinkFlowContainer(s =&gt;
+                            {
+                                s.Font = OsuFont.Style.Caption2;
+                                s.Colour = colours.Lime1;
+                            })
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                // workaround to ensure only the first line of text shows, emulating truncation (but without ellipsis at the end).
+                                // TODO: remove when text/link flow can support truncation with ellipsis natively.
+                                Height = 16,
+                                Masking = true
+                            }
+                        }
+                    }
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Beatmap.BindValueChanged(onBeatmapChanged, true);
+            }
+
+            private void onBeatmapChanged(ValueChangedEvent&lt;IBeatmapInfo?&gt; beatmap)
+            {
+                beatmapText.Clear();
+
+                if (room.Type == MatchType.Playlists)
+                {
+                    statusText.Text = &quot;Ready to play&quot;;
+                    return;
+                }
+
+                statusText.Text = &quot;Currently playing &quot;;
+
+                if (beatmap.NewValue != null)
+                {
+                    beatmapText.AddLink(beatmap.NewValue.GetDisplayTitleRomanisable(),
+                        LinkAction.OpenBeatmap,
+                        beatmap.NewValue.OnlineID.ToString(),
+                        creationParameters: s =&gt; s.Truncate = true);
+                }
+                else
+                    beatmapText.AddText(&quot;unknown beatmap&quot;);
+            }
+        }
+
+        public partial class CornerIcon : CompositeDrawable
+        {
+            public SpriteIcon Icon { get; }
+            public Box Background { get; }
+
+            public CornerIcon()
+            {
+                Anchor = Anchor.TopRight;
+                Origin = Anchor.TopRight;
+
+                Size = new Vector2(32);
+
+                InternalChildren = new Drawable[]
+                {
+                    Background = new Box
+                    {
+                        Anchor = Anchor.TopRight,
+                        Origin = Anchor.TopCentre,
+                        Rotation = 45,
+                        RelativeSizeAxes = Axes.Both,
+                        Width = 2,
+                    },
+                    Icon = new SpriteIcon
+                    {
+                        Anchor = Anchor.TopRight,
+                        Origin = Anchor.Centre,
+                        Position = new Vector2(-13, 13),
+                        Margin = new MarginPadding(6),
+                        Size = new Vector2(14),
+                    }
+                };
+            }
+        }
+
+        public partial class RoomNameLine : FillFlowContainer
+        {
+            private readonly TruncatingSpriteText spriteText;
+            private readonly ExternalLinkButton linkButton;
+
+            public LocalisableString Text
+            {
+                get =&gt; spriteText.Text;
+                set =&gt; spriteText.Text = value;
+            }
+
+            private string? link;
+
+            public string? Link
+            {
+                get =&gt; link;
+                set
+                {
+                    link = value;
+                    updateLink();
+                }
+            }
+
+            public RoomNameLine()
+            {
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+                Direction = FillDirection.Horizontal;
+
+                Children = new Drawable[]
+                {
+                    spriteText = new TruncatingSpriteText
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        Font = OsuFont.Style.Heading2,
+                    },
+                    linkButton = new ExternalLinkButton
+                    {
+                        Anchor = Anchor.BottomLeft,
+                        Origin = Anchor.BottomLeft,
+                        Margin = new MarginPadding { Horizontal = 6, Bottom = 4 },
+                        Alpha = 0f,
+                    },
+                };
+            }
+
+            private void updateLink()
+            {
+                if (link == null)
+                    linkButton.Hide();
+                else
+                {
+                    linkButton.Show();
+                    linkButton.Link = link;
+                }
+            }
+
+            protected override void Update()
+            {
+                base.Update();
+                spriteText.MaxWidth = DrawWidth - linkButton.LayoutSize.X;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[45,36,45,40,0],[45,41,45,45,0],[45,50,45,55,0],[48,33,48,37,0],[48,38,48,42,0],[51,57,51,61,0],[51,62,51,66,0],[51,71,51,76,0],[55,9,55,97,0],[56,48,56,52,0],[56,53,56,65,0],[56,70,56,75,0],[58,43,58,47,0],[58,48,58,53,0],[58,58,58,62,0],[60,39,60,43,0],[60,44,60,49,0],[68,9,68,52,0],[74,9,74,97,0],[76,9,76,39,0],[77,9,77,10,0],[78,13,78,25,0],[80,13,80,39,0],[81,13,81,29,0],[83,13,83,28,0],[84,13,84,42,0],[85,9,85,10,0],[89,9,89,10,0],[90,13,96,15,0],[98,13,103,15,0],[106,13,106,14,0],[107,17,107,60,0],[109,17,109,80,0],[110,17,110,18,0],[111,21,111,42,0],[113,21,119,23,0],[120,17,120,18,0],[122,17,125,19,0],[126,13,126,14,0],[128,13,137,17,0],[137,17,137,18,0],[137,18,138,21,0],[138,21,138,52,0],[138,52,139,21,0],[139,21,139,59,0],[139,59,140,17,0],[140,17,140,18,0],[140,18,142,21,0],[142,21,301,22,0],[301,22,305,15,0],[306,9,306,10,0],[309,9,309,10,0],[310,13,310,33,0],[312,13,312,59,0],[314,13,315,13,0],[315,13,315,14,0],[315,14,316,17,0],[316,17,316,59,0],[316,59,317,17,0],[317,17,317,51,0],[317,51,318,17,0],[318,17,318,52,0],[318,52,320,17,0],[320,17,320,45,0],[320,45,322,17,0],[322,17,322,32,0],[322,32,323,17,0],[323,17,323,34,0],[323,34,324,17,0],[324,17,324,38,0],[324,38,325,17,0],[325,17,325,34,0],[325,34,326,17,0],[326,17,326,41,0],[326,41,327,17,0],[327,17,327,36,0],[327,36,328,13,0],[328,13,328,14,0],[328,14,328,15,0],[330,13,330,72,0],[331,9,331,10,0],[334,9,334,10,0],[335,13,335,36,0],[338,21,338,36,0],[339,21,339,27,0],[342,21,342,38,0],[343,21,343,27,0],[346,21,346,42,0],[347,21,347,27,0],[350,21,350,38,0],[351,21,351,27,0],[354,21,354,45,0],[355,21,355,27,0],[358,21,358,40,0],[359,21,359,27,0],[361,9,361,10,0],[364,9,364,10,0],[365,13,365,84,0],[366,17,366,24,0],[368,13,368,49,0],[369,13,369,50,0],[370,13,370,46,0],[372,13,372,48,0],[373,13,373,14,0],[374,17,374,45,0],[375,17,375,24,0],[378,13,378,96,0],[380,13,381,53,0],[381,53,382,31,0],[382,31,382,32,0],[382,32,383,35,0],[383,35,383,83,0],[383,83,384,39,0],[384,39,384,85,0],[384,85,385,31,0],[385,31,385,32,0],[385,32,385,33,0],[385,33,385,61,0],[386,9,386,10,0],[389,9,389,10,0],[390,13,390,54,0],[391,17,391,56,0],[392,9,392,10,0],[395,9,395,10,0],[396,13,396,40,0],[397,9,397,10,0],[400,9,400,10,0],[401,13,401,53,0],[402,17,402,45,0],[404,17,404,45,0],[405,9,405,10,0],[408,9,408,10,0],[409,13,409,75,0],[410,9,410,10,0],[413,9,413,10,0],[414,13,414,60,0],[415,9,415,10,0],[418,9,418,10,0],[419,13,419,53,0],[420,9,420,10,0],[422,9,422,41,0],[426,20,426,35,0],[428,13,428,14,0],[429,17,429,41,0],[431,17,431,71,0],[432,13,432,14,0],[438,13,438,14,0],[439,17,439,50,0],[441,17,441,54,0],[443,17,443,33,0],[444,17,444,18,0],[445,21,446,99,0],[446,99,446,127,0],[446,127,447,94,0],[447,94,447,120,0],[447,120,448,24,0],[449,17,449,18,0],[451,17,451,40,0],[452,13,452,14,0],[455,83,455,122,0],[458,9,458,10,0],[459,13,459,46,0],[461,13,461,50,0],[462,13,462,14,0],[463,17,467,20,0],[468,13,468,14,0],[470,13,483,16,0],[485,13,485,26,0],[486,9,486,10,0],[489,9,489,10,0],[490,13,490,39,0],[491,13,491,59,0],[492,9,492,10,0],[496,13,496,93,0],[499,41,499,45,0],[499,46,499,50,0],[499,55,499,60,0],[502,13,502,51,0],[503,13,503,59,0],[505,13,505,45,0],[506,13,506,14,0],[507,17,507,34,0],[508,17,508,43,0],[509,17,509,39,0],[510,13,510,14,0],[514,13,514,14,0],[515,17,537,29,0],[537,29,537,30,0],[537,30,538,33,0],[538,33,538,65,0],[538,65,539,33,0],[539,33,539,58,0],[539,58,540,29,0],[540,29,540,30,0],[540,30,550,19,0],[551,13,551,14,0],[554,13,554,14,0],[555,17,555,37,0],[557,17,557,66,0],[558,13,558,14,0],[561,13,561,14,0],[562,17,562,37,0],[564,17,564,54,0],[565,17,565,18,0],[566,21,566,55,0],[567,21,567,28,0],[570,17,570,56,0],[572,17,572,46,0],[573,17,573,18,0],[574,21,577,50,0],[577,50,577,67,0],[577,67,577,69,0],[578,17,578,18,0],[580,21,580,60,0],[581,13,581,14,0],[586,38,586,42,0],[587,37,587,41,0],[589,13,589,32,0],[590,13,590,14,0],[591,17,591,42,0],[592,17,592,42,0],[594,17,594,40,0],[596,17,614,19,0],[615,13,615,14,0],[625,24,625,39,0],[626,24,626,47,0],[633,24,633,28,0],[635,17,635,18,0],[636,21,636,34,0],[637,21,637,34,0],[638,17,638,18,0],[641,13,641,34,0],[642,13,642,14,0],[643,17,643,43,0],[644,17,644,39,0],[645,17,645,54,0],[647,17,662,19,0],[663,13,663,14,0],[666,13,666,14,0],[667,17,667,34,0],[668,21,668,39,0],[670,17,670,18,0],[671,21,671,39,0],[672,21,672,44,0],[673,17,673,18,0],[674,13,674,14,0],[677,13,677,14,0],[678,17,678,31,0],[679,17,679,75,0],[680,13,680,14,0]]);
+    </script>
+  </body>
+</html>

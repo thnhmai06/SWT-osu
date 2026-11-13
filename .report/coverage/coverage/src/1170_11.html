@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Osu/Skinning/SmokeSegment.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Rendering.Vertices;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Utils;
+using osu.Game.Utils;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Osu.Skinning
+{
+    public abstract partial class SmokeSegment : Drawable, ITexturedShaderDrawable
+    {
+        // fade anim values
+        private const double initial_fade_out_duration = 4000;
+
+        private const double re_fade_in_speed = 3;
+        private const double re_fade_in_duration = 50;
+
+        private const double final_fade_out_speed = 2;
+        private const double final_fade_out_duration = 8000;
+
+        private const float initial_alpha = 0.6f;
+        private const float re_fade_in_alpha = 1f;
+
+        private readonly int rotationSeed = RNG.Next();
+
+        // scale anim values
+        private const double scale_duration = 1200;
+
+        private const float initial_scale = 0.65f;
+        private const float final_scale = 1f;
+
+        // rotation anim values
+        private const double rotation_duration = 500;
+
+        private const float max_rotation = 0.25f;
+
+        public IShader? TextureShader { get; private set; }
+
+        protected Texture? Texture { get; set; }
+
+        private float height =&gt; Texture?.DisplayHeight * 0.165f ?? 3;
+
+        private float width =&gt; Texture?.DisplayWidth * 0.165f ?? 3;
+
+        protected readonly List&lt;SmokePoint&gt; SmokePoints = new List&lt;SmokePoint&gt;();
+
+        private float pointInterval =&gt; width * 7f / 8;
+
+        private double smokeStartTime { get; set; } = double.MinValue;
+
+        private double smokeEndTime { get; set; } = double.MaxValue;
+
+        private float totalDistance;
+        private Vector2? lastPosition;
+
+        [BackgroundDependencyLoader]
+        private void load(ShaderManager shaders)
+        {
+            TextureShader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        public void StartDrawing(double time)
+        {
+            LifetimeStart = smokeStartTime = time;
+            LifetimeEnd = smokeEndTime = double.MaxValue;
+            SmokePoints.Clear();
+            lastPosition = null;
+            totalDistance = pointInterval;
+        }
+
+        public void AddPosition(Vector2 position, double time)
+        {
+            lastPosition ??= position;
+
+            float delta = (position - (Vector2)lastPosition).LengthFast;
+            totalDistance += delta;
+            int count = (int)(totalDistance / pointInterval);
+
+            if (count &gt; 0)
+            {
+                Vector2 increment = position - (Vector2)lastPosition;
+                increment.NormalizeFast();
+
+                Vector2 pointPos = (pointInterval - (totalDistance - delta)) * increment + (Vector2)lastPosition;
+                increment *= pointInterval;
+
+                totalDistance %= pointInterval;
+
+                if (SmokePoints.Count == 0 || SmokePoints[^1].Time &lt;= time)
+                {
+                    for (int i = 0; i &lt; count; i++)
+                    {
+                        SmokePoints.Add(new SmokePoint
+                        {
+                            Position = pointPos,
+                            Time = time,
+                            Angle = RNG.NextSingle(0, 2 * MathF.PI),
+                        });
+
+                        pointPos += increment;
+                    }
+                }
+
+                Invalidate(Invalidation.DrawNode);
+            }
+
+            lastPosition = position;
+        }
+
+        public void FinishDrawing(double time)
+        {
+            smokeEndTime = time;
+
+            double initialFadeOutDurationTrunc = Math.Min(initial_fade_out_duration, smokeEndTime - smokeStartTime);
+            LifetimeEnd = smokeEndTime + final_fade_out_duration + initialFadeOutDurationTrunc / re_fade_in_speed + initialFadeOutDurationTrunc / final_fade_out_speed;
+        }
+
+        protected override DrawNode CreateDrawNode() =&gt; new SmokeDrawNode(this);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            Invalidate(Invalidation.DrawNode);
+        }
+
+        protected struct SmokePoint
+        {
+            public Vector2 Position;
+            public double Time;
+            public float Angle;
+
+            public struct UpperBoundComparer : IComparer&lt;SmokePoint&gt;
+            {
+                public int Compare(SmokePoint x, SmokePoint target)
+                {
+                    // By returning -1 when the target value is equal to x, guarantees that the
+                    // element at BinarySearch&#39;s returned index will always be the first element
+                    // larger. Since 0 is never returned, the target is never &quot;found&quot;, so the return
+                    // value will be the index&#39;s complement.
+
+                    return x.Time &gt; target.Time ? 1 : -1;
+                }
+            }
+
+            public struct LowerBoundComparer : IComparer&lt;SmokePoint&gt;
+            {
+                public int Compare(SmokePoint x, SmokePoint target)
+                {
+                    // Similar logic as UpperBoundComparer, except returned index will always be
+                    // the first element larger or equal
+
+                    return x.Time &lt; target.Time ? -1 : 1;
+                }
+            }
+        }
+
+        protected class SmokeDrawNode : TexturedShaderDrawNode
+        {
+            protected new SmokeSegment Source =&gt; (SmokeSegment)base.Source;
+
+            protected double SmokeStartTime { get; private set; }
+            protected double SmokeEndTime { get; private set; }
+            protected double CurrentTime { get; private set; }
+
+            private readonly List&lt;SmokePoint&gt; points = new List&lt;SmokePoint&gt;();
+            private IVertexBatch&lt;TexturedVertex2D&gt;? quadBatch;
+            private float width;
+            private float height;
+            private Vector2 drawSize;
+            private Texture? texture;
+            private int rotationSeed;
+            private int firstVisiblePointIndex;
+
+            // anim calculation vars (color, scale, direction)
+            private double initialFadeOutDurationTrunc;
+            private double firstVisiblePointTimeAfterSmokeEnded;
+
+            private double initialFadeOutTime;
+            private double reFadeInTime;
+            private double finalFadeOutTime;
+
+            public SmokeDrawNode(ITexturedShaderDrawable source)
+                : base(source)
+            {
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                width = Source.width;
+                height = Source.height;
+                drawSize = Source.DrawSize;
+                texture = Source.Texture;
+
+                SmokeStartTime = Source.smokeStartTime;
+                SmokeEndTime = Source.smokeEndTime;
+                CurrentTime = Source.Clock.CurrentTime;
+
+                rotationSeed = Source.rotationSeed;
+
+                initialFadeOutDurationTrunc = Math.Min(initial_fade_out_duration, SmokeEndTime - SmokeStartTime);
+                firstVisiblePointTimeAfterSmokeEnded = SmokeEndTime - initialFadeOutDurationTrunc;
+
+                initialFadeOutTime = Math.Min(CurrentTime, SmokeEndTime);
+                reFadeInTime = CurrentTime - initialFadeOutDurationTrunc - firstVisiblePointTimeAfterSmokeEnded * (1 - 1 / re_fade_in_speed);
+                finalFadeOutTime = CurrentTime - initialFadeOutDurationTrunc - firstVisiblePointTimeAfterSmokeEnded * (1 - 1 / final_fade_out_speed);
+
+                double firstVisiblePointTime = Math.Min(SmokeEndTime, CurrentTime) - initialFadeOutDurationTrunc;
+                firstVisiblePointIndex = ~Source.SmokePoints.BinarySearch(new SmokePoint { Time = firstVisiblePointTime }, new SmokePoint.LowerBoundComparer());
+                int futurePointIndex = ~Source.SmokePoints.BinarySearch(new SmokePoint { Time = CurrentTime }, new SmokePoint.UpperBoundComparer());
+
+                points.Clear();
+
+                for (int i = firstVisiblePointIndex; i &lt; futurePointIndex; i++)
+                    points.Add(Source.SmokePoints[i]);
+            }
+
+            protected sealed override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                if (points.Count == 0)
+                    return;
+
+                quadBatch ??= renderer.CreateQuadBatch&lt;TexturedVertex2D&gt;(200, 4);
+
+                if (points.Count &gt; quadBatch.Size &amp;&amp; quadBatch.Size != IRenderer.MAX_QUADS)
+                {
+                    int batchSize = Math.Min(quadBatch.Size * 2, IRenderer.MAX_QUADS);
+                    quadBatch = renderer.CreateQuadBatch&lt;TexturedVertex2D&gt;(batchSize, 4);
+                }
+
+                texture ??= renderer.WhitePixel;
+                RectangleF textureRect = texture.GetTextureRect();
+
+                renderer.SetBlend(BlendingParameters.Additive);
+                renderer.PushLocalMatrix(DrawInfo.Matrix);
+
+                BindTextureShader(renderer);
+
+                texture.Bind();
+
+                for (int i = 0; i &lt; points.Count; i++)
+                    drawPointQuad(renderer, points[i], textureRect, i + firstVisiblePointIndex);
+
+                UnbindTextureShader(renderer);
+                renderer.PopLocalMatrix();
+            }
+
+            protected Color4 ColourAtPosition(Vector2 localPos) =&gt; DrawColourInfo.Colour.HasSingleColour
+                ? ((SRGBColour)DrawColourInfo.Colour).Linear
+                : DrawColourInfo.Colour.Interpolate(Vector2.Divide(localPos, drawSize)).Linear;
+
+            protected virtual Color4 PointColour(SmokePoint point)
+            {
+                var color = Color4.White;
+
+                double timeDoingFinalFadeOut = finalFadeOutTime - point.Time / final_fade_out_speed;
+
+                if (timeDoingFinalFadeOut &gt; 0 &amp;&amp; point.Time &gt;= firstVisiblePointTimeAfterSmokeEnded)
+                {
+                    float fraction = Math.Clamp((float)(timeDoingFinalFadeOut / final_fade_out_duration), 0, 1);
+                    fraction = MathF.Pow(fraction, 5);
+                    color.A = (1 - fraction) * re_fade_in_alpha;
+                }
+                else
+                {
+                    double timeDoingInitialFadeOut = initialFadeOutTime - point.Time;
+
+                    if (timeDoingInitialFadeOut &gt; 0)
+                    {
+                        float fraction = Math.Clamp((float)(timeDoingInitialFadeOut / initial_fade_out_duration), 0, 1);
+                        color.A = (1 - fraction) * initial_alpha;
+                    }
+
+                    if (point.Time &gt; firstVisiblePointTimeAfterSmokeEnded)
+                    {
+                        double timeDoingReFadeIn = reFadeInTime - point.Time / re_fade_in_speed;
+
+                        if (timeDoingReFadeIn &gt; 0)
+                        {
+                            float fraction = Math.Clamp((float)(timeDoingReFadeIn / re_fade_in_duration), 0, 1);
+                            fraction = 1 - MathF.Pow(1 - fraction, 5);
+                            color.A = fraction * (re_fade_in_alpha - color.A) + color.A;
+                        }
+                    }
+                }
+
+                return color;
+            }
+
+            protected virtual float PointScale(SmokePoint point)
+            {
+                double timeDoingScale = CurrentTime - point.Time;
+                float fraction = Math.Clamp((float)(timeDoingScale / scale_duration), 0, 1);
+                fraction = 1 - MathF.Pow(1 - fraction, 5);
+                return fraction * (final_scale - initial_scale) + initial_scale;
+            }
+
+            protected virtual Vector2 PointDirection(SmokePoint point, int index)
+            {
+                double timeDoingRotation = CurrentTime - point.Time;
+                float fraction = Math.Clamp((float)(timeDoingRotation / rotation_duration), 0, 1);
+                fraction = 1 - MathF.Pow(1 - fraction, 5);
+                float angle = fraction * getRotation(index) + point.Angle;
+
+                return new Vector2(MathF.Sin(angle), -MathF.Cos(angle));
+            }
+
+            private float getRotation(int index) =&gt; max_rotation * (StatelessRNG.NextSingle(rotationSeed, index) * 2 - 1);
+
+            private void drawPointQuad(IRenderer renderer, SmokePoint point, RectangleF textureRect, int index)
+            {
+                Debug.Assert(quadBatch != null);
+
+                var colour = PointColour(point);
+                if (colour.A == 0)
+                    return;
+
+                float scale = PointScale(point);
+                if (scale == 0)
+                    return;
+
+                var dir = PointDirection(point, index);
+                var ortho = dir.PerpendicularLeft;
+                dir *= scale * width;
+                ortho *= scale * height;
+
+                var localTopLeft = point.Position - ortho - dir;
+                var localTopRight = point.Position - ortho + dir;
+                var localBotLeft = point.Position + ortho - dir;
+                var localBotRight = point.Position + ortho + dir;
+
+                quadBatch.Add(new TexturedVertex2D(renderer)
+                {
+                    Position = localTopLeft,
+                    TexturePosition = textureRect.TopLeft,
+                    Colour = Color4Extensions.Multiply(ColourAtPosition(localTopLeft), colour),
+                });
+                quadBatch.Add(new TexturedVertex2D(renderer)
+                {
+                    Position = localTopRight,
+                    TexturePosition = textureRect.TopRight,
+                    Colour = Color4Extensions.Multiply(ColourAtPosition(localTopRight), colour),
+                });
+                quadBatch.Add(new TexturedVertex2D(renderer)
+                {
+                    Position = localBotRight,
+                    TexturePosition = textureRect.BottomRight,
+                    Colour = Color4Extensions.Multiply(ColourAtPosition(localBotRight), colour),
+                });
+                quadBatch.Add(new TexturedVertex2D(renderer)
+                {
+                    Position = localBotLeft,
+                    TexturePosition = textureRect.BottomLeft,
+                    Colour = Color4Extensions.Multiply(ColourAtPosition(localBotLeft), colour),
+                });
+            }
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+                quadBatch?.Dispose();
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[37,9,37,56,0],[50,41,50,45,0],[50,46,50,58,0],[52,38,52,42,0],[52,43,52,47,0],[54,33,54,69,0],[56,32,56,67,0],[58,9,58,82,0],[60,40,60,54,0],[62,41,62,45,0],[62,46,62,50,0],[62,55,62,70,0],[64,39,64,43,0],[64,44,64,48,0],[64,53,64,68,0],[71,9,71,10,0],[72,13,72,110,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,33,0],[79,13,79,42,0],[80,9,80,10,0],[83,9,83,10,0],[84,13,84,51,0],[85,13,85,58,0],[86,13,86,33,0],[87,13,87,33,0],[88,13,88,43,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,39,0],[95,13,95,73,0],[96,13,96,36,0],[97,13,97,62,0],[99,13,99,27,0],[100,13,100,14,0],[101,17,101,70,0],[102,17,102,43,0],[104,17,104,114,0],[105,17,105,44,0],[107,17,107,48,0],[109,17,109,76,0],[110,17,110,18,0],[111,26,111,35,0],[111,37,111,46,0],[111,48,111,51,0],[112,21,112,22,0],[113,25,118,28,0],[120,25,120,47,0],[121,21,121,22,0],[122,17,122,18,0],[124,17,124,51,0],[125,13,125,14,0],[127,13,127,37,0],[128,9,128,10,0],[131,9,131,10,0],[132,13,132,33,0],[134,13,134,117,0],[135,13,135,168,0],[136,9,136,10,0],[138,57,138,80,0],[141,9,141,10,0],[142,13,142,27,0],[144,13,144,47,0],[145,9,145,10,0],[156,17,156,18,0],[162,21,162,58,0],[163,17,163,18,0],[169,17,169,18,0],[173,21,173,58,0],[174,17,174,18,0],[180,50,180,75,0],[182,47,182,51,0],[182,52,182,64,0],[183,45,183,49,0],[183,50,183,62,0],[184,44,184,48,0],[184,49,184,61,0],[186,13,186,79,0],[204,19,204,31,0],[205,13,205,14,0],[206,13,206,14,0],[209,13,209,14,0],[210,17,210,35,0],[212,17,212,38,0],[213,17,213,40,0],[214,17,214,44,0],[215,17,215,42,0],[217,17,217,56,0],[218,17,218,52,0],[219,17,219,56,0],[221,17,221,52,0],[223,17,223,114,0],[224,17,224,99,0],[226,17,226,74,0],[227,17,227,142,0],[228,17,228,150,0],[230,17,230,114,0],[231,17,231,161,0],[232,17,232,149,0],[234,17,234,32,0],[236,22,236,52,0],[236,54,236,74,0],[236,76,236,79,0],[237,21,237,55,0],[238,13,238,14,0],[241,13,241,14,0],[242,17,242,37,0],[244,17,244,39,0],[245,21,245,28,0],[247,17,247,82,0],[249,17,249,92,0],[250,17,250,18,0],[251,21,251,87,0],[252,21,252,90,0],[253,17,253,18,0],[255,17,255,49,0],[256,17,256,67,0],[258,17,258,64,0],[259,17,259,59,0],[261,17,261,45,0],[263,17,263,32,0],[265,22,265,31,0],[265,33,265,49,0],[265,51,265,54,0],[266,21,266,97,0],[268,17,268,47,0],[269,17,269,43,0],[270,13,270,14,0],[272,68,274,95,0],[277,13,277,14,0],[278,17,278,42,0],[280,17,280,101,0],[282,17,282,101,0],[283,17,283,18,0],[284,21,284,113,0],[285,21,285,55,0],[286,21,286,65,0],[287,17,287,18,0],[289,17,289,18,0],[290,21,290,86,0],[292,21,292,53,0],[293,21,293,22,0],[294,25,294,121,0],[295,25,295,66,0],[296,21,296,22,0],[298,21,298,75,0],[299,21,299,22,0],[300,25,300,97,0],[302,25,302,51,0],[303,25,303,26,0],[304,29,304,113,0],[305,29,305,71,0],[306,29,306,89,0],[307,25,307,26,0],[308,21,308,22,0],[309,17,309,18,0],[311,17,311,30,0],[312,13,312,14,0],[315,13,315,14,0],[316,17,316,66,0],[317,17,317,93,0],[318,17,318,59,0],[319,17,319,81,0],[320,13,320,14,0],[323,13,323,14,0],[324,17,324,69,0],[325,17,325,99,0],[326,17,326,59,0],[327,17,327,75,0],[329,17,329,73,0],[330,13,330,14,0],[332,53,332,122,0],[335,13,335,14,0],[336,17,336,49,0],[338,17,338,49,0],[339,17,339,35,0],[340,21,340,28,0],[342,17,342,49,0],[343,17,343,32,0],[344,21,344,28,0],[346,17,346,56,0],[347,17,347,51,0],[348,17,348,38,0],[349,17,349,41,0],[351,17,351,65,0],[352,17,352,66,0],[353,17,353,65,0],[354,17,354,66,0],[356,17,361,20,0],[362,17,367,20,0],[368,17,373,20,0],[374,17,379,20,0],[380,13,380,14,0],[383,13,383,14,0],[384,17,384,43,0],[385,17,385,38,0],[386,13,386,14,0]]);
+    </script>
+  </body>
+</html>

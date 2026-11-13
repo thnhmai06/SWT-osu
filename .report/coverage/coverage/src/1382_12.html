@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Visual/OsuTestScene.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.IO.Stores;
+using osu.Framework.Platform;
+using osu.Framework.Testing;
+using osu.Framework.Timing;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.UI;
+using osu.Game.Storyboards;
+using osu.Game.Tests.Beatmaps;
+using osu.Game.Tests.Rulesets;
+
+namespace osu.Game.Tests.Visual
+{
+    public abstract partial class OsuTestScene : TestScene
+    {
+        [Cached]
+        protected Bindable&lt;WorkingBeatmap&gt; Beatmap { get; } = new Bindable&lt;WorkingBeatmap&gt;();
+
+        [Cached]
+        protected Bindable&lt;RulesetInfo&gt; Ruleset { get; } = new Bindable&lt;RulesetInfo&gt;();
+
+        [Cached]
+        protected Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt; SelectedMods { get; } = new Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;(Array.Empty&lt;Mod&gt;());
+
+        protected new DependencyContainer Dependencies { get; private set; }
+
+        protected IResourceStore&lt;byte[]&gt; Resources;
+
+        protected IAPIProvider API
+        {
+            get
+            {
+                if (UseOnlineAPI)
+                    throw new InvalidOperationException($&quot;Using the {nameof(OsuTestScene)} dummy API is not supported when {nameof(UseOnlineAPI)} is true&quot;);
+
+                return dummyAPI;
+            }
+        }
+
+        private DummyAPIAccess dummyAPI;
+
+        /// &lt;summary&gt;
+        /// Whether this test scene requires real-world API access.
+        /// If true, this will bypass the local &lt;see cref=&quot;DummyAPIAccess&quot;/&gt; and use the &lt;see cref=&quot;OsuGameBase&quot;/&gt; provided one.
+        /// &lt;/summary&gt;
+        protected virtual bool UseOnlineAPI =&gt; false;
+
+        /// &lt;summary&gt;
+        /// A database context factory to be used by test runs. Can be isolated and reset by setting &lt;see cref=&quot;UseFreshStoragePerRun&quot;/&gt; to &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// In interactive runs (ie. VisualTests) this will use the user&#39;s database if &lt;see cref=&quot;UseFreshStoragePerRun&quot;/&gt; is not set to &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/remarks&gt;
+        protected RealmAccess Realm =&gt; realm.Value;
+
+        private Lazy&lt;RealmAccess&gt; realm;
+
+        /// &lt;summary&gt;
+        /// Whether a fresh storage should be initialised per test (method) run.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// By default (ie. if not set to &lt;c&gt;true&lt;/c&gt;):
+        /// - in interactive runs, the user&#39;s storage will be used
+        /// - in headless runs, a shared temporary storage will be used per test class.
+        /// &lt;/remarks&gt;
+        protected virtual bool UseFreshStoragePerRun =&gt; false;
+
+        /// &lt;summary&gt;
+        /// A storage to be used by test runs. Can be isolated by setting &lt;see cref=&quot;UseFreshStoragePerRun&quot;/&gt; to &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// In interactive runs (ie. VisualTests) this will use the user&#39;s storage if &lt;see cref=&quot;UseFreshStoragePerRun&quot;/&gt; is not set to &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/remarks&gt;
+        protected Storage LocalStorage =&gt; localStorage.Value;
+
+        /// &lt;summary&gt;
+        /// A cache for ruleset configurations to be used in this test scene.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This &lt;see cref=&quot;IRulesetConfigCache&quot;/&gt; instance is provided to the children of this test scene via DI.
+        /// It is only exposed so that test scenes themselves can access the ruleset config cache in a safe manner
+        /// (&lt;see cref=&quot;OsuTestScene&quot;/&gt;s cannot use DI themselves, as they will end up accessing the real cached instance from &lt;see cref=&quot;OsuGameBase&quot;/&gt;).
+        /// &lt;/remarks&gt;
+        protected IRulesetConfigCache RulesetConfigs { get; private set; }
+
+        private Lazy&lt;Storage&gt; localStorage;
+
+        private Storage headlessHostStorage;
+
+        private DrawableRulesetDependencies rulesetDependencies;
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+        {
+            var host = parent.Get&lt;GameHost&gt;();
+
+            headlessHostStorage = (host as HeadlessGameHost)?.Storage;
+
+            Resources = parent.Get&lt;OsuGameBase&gt;().Resources;
+
+            realm = new Lazy&lt;RealmAccess&gt;(() =&gt; new RealmAccess(LocalStorage, OsuGameBase.CLIENT_DATABASE_FILENAME, host.UpdateThread));
+
+            RecycleLocalStorage(false);
+
+            var baseDependencies = base.CreateChildDependencies(parent);
+
+            // to isolate ruleset configs in tests from the actual database and avoid state pollution problems,
+            // as well as problems due to the implementation details of the &quot;real&quot; implementation (the configs only being available at `LoadComplete()`),
+            // cache a test implementation of the ruleset config cache over the &quot;real&quot; one.
+            var isolatedBaseDependencies = new DependencyContainer(baseDependencies);
+            isolatedBaseDependencies.CacheAs(RulesetConfigs = new TestRulesetConfigCache());
+            baseDependencies = isolatedBaseDependencies;
+
+            var providedRuleset = CreateRuleset();
+            if (providedRuleset != null)
+                isolatedBaseDependencies = rulesetDependencies = new DrawableRulesetDependencies(providedRuleset, baseDependencies);
+
+            Dependencies = isolatedBaseDependencies;
+
+            Beatmap.Default = parent.Get&lt;Bindable&lt;WorkingBeatmap&gt;&gt;().Default;
+            Beatmap.SetDefault();
+
+            Ruleset.Value = CreateRuleset()?.RulesetInfo ?? parent.Get&lt;RulesetStore&gt;().AvailableRulesets.First();
+
+            SelectedMods.SetDefault();
+
+            if (!UseOnlineAPI)
+            {
+                dummyAPI = new DummyAPIAccess();
+                Dependencies.CacheAs&lt;IAPIProvider&gt;(dummyAPI);
+                base.Content.Add(dummyAPI);
+            }
+
+            return Dependencies;
+        }
+
+        [Resolved]
+        private OsuColour colours { get; set; }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            ChangeBackgroundColour(ColourInfo.GradientVertical(colours.GreyCarmine, colours.GreyCarmineDarker));
+
+            var parentBeatmap = Parent!.Dependencies.Get&lt;Bindable&lt;WorkingBeatmap&gt;&gt;();
+            parentBeatmap.Value = Beatmap.Value;
+            Beatmap.BindTo(parentBeatmap);
+
+            var parentRuleset = Parent!.Dependencies.Get&lt;Bindable&lt;RulesetInfo&gt;&gt;();
+            parentRuleset.Value = Ruleset.Value;
+            Ruleset.BindTo(parentRuleset);
+
+            var parentMods = Parent!.Dependencies.Get&lt;Bindable&lt;IReadOnlyList&lt;Mod&gt;&gt;&gt;();
+            parentMods.Value = SelectedMods.Value;
+            SelectedMods.BindTo(parentMods);
+        }
+
+        protected override Container&lt;Drawable&gt; Content =&gt; content ?? base.Content;
+
+        private readonly Container content;
+
+        protected OsuTestScene()
+        {
+            base.Content.Add(content = new DrawSizePreservingFillContainer());
+        }
+
+        public virtual void RecycleLocalStorage(bool isDisposing)
+        {
+            if (localStorage?.IsValueCreated == true)
+            {
+                try
+                {
+                    localStorage.Value.DeleteDirectory(&quot;.&quot;);
+                }
+                catch
+                {
+                    // we don&#39;t really care if this fails; it will just leave folders lying around from test runs.
+                }
+            }
+
+            localStorage = new Lazy&lt;Storage&gt;(() =&gt;
+            {
+                // When running headless, there is an opportunity to use the host storage rather than creating a second isolated one.
+                // This is because the host is recycled per TestScene execution in headless at an nunit level.
+                // Importantly, we can&#39;t use this optimisation when `UseFreshStoragePerRun` is true, as it doesn&#39;t reset per test method.
+                if (!UseFreshStoragePerRun &amp;&amp; headlessHostStorage != null)
+                    return headlessHostStorage;
+
+                return new TemporaryNativeStorage($&quot;{GetType().Name}-{Guid.NewGuid()}&quot;);
+            });
+        }
+
+        [Resolved]
+        protected AudioManager Audio { get; private set; }
+
+        [Resolved]
+        protected MusicController MusicController { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Creates the ruleset to be used for this test scene.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// When testing against ruleset-specific components, this method must be overriden to their corresponding ruleset.
+        /// &lt;/remarks&gt;
+        [CanBeNull]
+        protected virtual Ruleset CreateRuleset() =&gt; null;
+
+        protected virtual IBeatmap CreateBeatmap(RulesetInfo ruleset) =&gt; new TestBeatmap(ruleset);
+
+        /// &lt;summary&gt;
+        /// Returns a sample API beatmap with a populated beatmap set.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset to create the sample model using. osu! ruleset will be used if not specified.&lt;/param&gt;
+        protected APIBeatmap CreateAPIBeatmap(RulesetInfo ruleset = null) =&gt; CreateAPIBeatmap(CreateBeatmap(ruleset ?? Ruleset.Value).BeatmapInfo);
+
+        /// &lt;summary&gt;
+        /// Constructs a sample API beatmap set containing a beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset to create the sample model using. osu! ruleset will be used if not specified.&lt;/param&gt;
+        protected APIBeatmapSet CreateAPIBeatmapSet(RulesetInfo ruleset = null) =&gt; CreateAPIBeatmapSet(CreateBeatmap(ruleset ?? Ruleset.Value).BeatmapInfo);
+
+        /// &lt;summary&gt;
+        /// Constructs a sample API beatmap with a populated beatmap set from a given source beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;original&quot;&gt;The source beatmap.&lt;/param&gt;
+        public static APIBeatmap CreateAPIBeatmap(IBeatmapInfo original)
+        {
+            var beatmapSet = CreateAPIBeatmapSet(original);
+
+            // Avoid circular reference.
+            var beatmap = beatmapSet.Beatmaps.First();
+            beatmapSet.Beatmaps = Array.Empty&lt;APIBeatmap&gt;();
+
+            // Populate the set as that&#39;s generally what we expect from the API.
+            beatmap.BeatmapSet = beatmapSet;
+
+            return beatmap;
+        }
+
+        /// &lt;summary&gt;
+        /// Constructs a sample API beatmap set containing a beatmap from a given source beatmap.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;original&quot;&gt;The source beatmap.&lt;/param&gt;
+        public static APIBeatmapSet CreateAPIBeatmapSet(IBeatmapInfo original)
+        {
+            Debug.Assert(original.BeatmapSet != null);
+
+            var result = new APIBeatmapSet
+            {
+                Genre = new BeatmapSetOnlineGenre { Id = 15, Name = &quot;Future genre&quot; },
+                Language = new BeatmapSetOnlineLanguage { Id = 15, Name = &quot;Future language&quot; },
+                OnlineID = original.BeatmapSet.OnlineID,
+                Status = BeatmapOnlineStatus.Ranked,
+                Covers = new BeatmapSetOnlineCovers
+                {
+                    Cover = &quot;https://assets.ppy.sh/beatmaps/163112/covers/cover.jpg&quot;,
+                    Card = &quot;https://assets.ppy.sh/beatmaps/163112/covers/card.jpg&quot;,
+                    List = &quot;https://assets.ppy.sh/beatmaps/163112/covers/list.jpg&quot;
+                },
+                Title = original.Metadata.Title,
+                TitleUnicode = original.Metadata.TitleUnicode,
+                Artist = original.Metadata.Artist,
+                ArtistUnicode = original.Metadata.ArtistUnicode,
+                Author = new APIUser
+                {
+                    Username = original.Metadata.Author.Username,
+                    Id = original.Metadata.Author.OnlineID
+                },
+                Source = original.Metadata.Source,
+                Tags = original.Metadata.Tags,
+                BPM = original.BPM,
+                HasFavourited = false,
+                PlayCount = 123,
+                FavouriteCount = 456,
+                Submitted = DateTime.Now,
+                Ranked = DateTime.Now,
+                Ratings = Enumerable.Range(0, 11).ToArray(),
+                RelatedTags =
+                [
+                    new APITag
+                    {
+                        Id = 2,
+                        Name = &quot;song representation/simple&quot;,
+                        Description = &quot;Accessible and straightforward map design.&quot;
+                    },
+                    new APITag
+                    {
+                        Id = 4,
+                        Name = &quot;style/clean&quot;,
+                        Description = &quot;Visually uncluttered and organised patterns, often involving few overlaps and equal visual spacing between objects.&quot;
+                    },
+                    new APITag
+                    {
+                        Id = 23,
+                        Name = &quot;aim/aim control&quot;,
+                        Description = &quot;Patterns with velocity or direction changes which strongly go against a player&#39;s natural movement pattern.&quot;
+                    }
+                ],
+                Beatmaps = new[]
+                {
+                    new APIBeatmap
+                    {
+                        OnlineID = original.OnlineID,
+                        OnlineBeatmapSetID = original.BeatmapSet.OnlineID,
+                        Status = ((BeatmapInfo)original).Status,
+                        Checksum = original.MD5Hash,
+                        AuthorID = original.Metadata.Author.OnlineID,
+                        RulesetID = original.Ruleset.OnlineID,
+                        StarRating = original.StarRating,
+                        DifficultyName = original.DifficultyName,
+                        CircleSize = original.Difficulty.CircleSize,
+                        DrainRate = original.Difficulty.DrainRate,
+                        OverallDifficulty = original.Difficulty.OverallDifficulty,
+                        ApproachRate = original.Difficulty.ApproachRate,
+                        Length = original.Length,
+                        HitLength = original.Length,
+                        CircleCount = 111,
+                        SliderCount = 12,
+                        PlayCount = 222,
+                        BPM = original.BPM,
+                        PassCount = 21,
+                        FailTimes = new APIFailTimes
+                        {
+                            Fails = Enumerable.Range(1, 100).Select(i =&gt; i % 12 - 6).ToArray(),
+                            Retries = Enumerable.Range(-2, 100).Select(i =&gt; i % 12 - 6).ToArray(),
+                        },
+                        TopTags =
+                        [
+                            new APIBeatmapTag { TagId = 4, VoteCount = 1 },
+                            new APIBeatmapTag { TagId = 2, VoteCount = 1 },
+                            new APIBeatmapTag { TagId = 23, VoteCount = 5 },
+                        ],
+                    }
+                }
+            };
+
+            foreach (var beatmap in result.Beatmaps)
+                beatmap.BeatmapSet = result;
+
+            return result;
+        }
+
+        protected WorkingBeatmap CreateWorkingBeatmap(RulesetInfo ruleset) =&gt;
+            CreateWorkingBeatmap(CreateBeatmap(ruleset));
+
+        protected virtual WorkingBeatmap CreateWorkingBeatmap(IBeatmap beatmap, Storyboard storyboard = null) =&gt;
+            new ClockBackedTestWorkingBeatmap(beatmap, storyboard, Clock, Audio);
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            rulesetDependencies?.Dispose();
+
+            if (MusicController?.TrackLoaded == true)
+                MusicController.Stop();
+
+            if (realm?.IsValueCreated == true)
+                Realm.Dispose();
+
+            RecycleLocalStorage(true);
+        }
+
+        protected override ITestSceneTestRunner CreateRunner() =&gt; new OsuTestSceneTestRunner();
+
+        public class ClockBackedTestWorkingBeatmap : TestWorkingBeatmap
+        {
+            private readonly Track track;
+
+            /// &lt;summary&gt;
+            /// Create an instance which creates a &lt;see cref=&quot;TestBeatmap&quot;/&gt; for the provided ruleset when requested.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;ruleset&quot;&gt;The target ruleset.&lt;/param&gt;
+            /// &lt;param name=&quot;referenceClock&quot;&gt;A clock which should be used instead of a stopwatch for virtual time progression.&lt;/param&gt;
+            /// &lt;param name=&quot;audio&quot;&gt;Audio manager. Required if a reference clock isn&#39;t provided.&lt;/param&gt;
+            public ClockBackedTestWorkingBeatmap(RulesetInfo ruleset, IFrameBasedClock referenceClock, AudioManager audio)
+                : this(new TestBeatmap(ruleset), null, referenceClock, audio)
+            {
+            }
+
+            /// &lt;summary&gt;
+            /// Create an instance which provides the &lt;see cref=&quot;IBeatmap&quot;/&gt; when requested.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap&lt;/param&gt;
+            /// &lt;param name=&quot;storyboard&quot;&gt;The storyboard.&lt;/param&gt;
+            /// &lt;param name=&quot;referenceClock&quot;&gt;An optional clock which should be used instead of a stopwatch for virtual time progression.&lt;/param&gt;
+            /// &lt;param name=&quot;audio&quot;&gt;Audio manager. Required if a reference clock isn&#39;t provided.&lt;/param&gt;
+            public ClockBackedTestWorkingBeatmap(IBeatmap beatmap, Storyboard storyboard, IFrameBasedClock referenceClock, AudioManager audio)
+                : base(beatmap, storyboard, audio)
+            {
+                double trackLength = 60000;
+
+                if (beatmap.HitObjects.Count &gt; 0)
+                    // add buffer after last hitobject to allow for final replay frames etc.
+                    trackLength = Math.Max(trackLength, beatmap.HitObjects.Max(h =&gt; h.GetEndTime()) + 2000);
+
+                if (referenceClock != null)
+                {
+                    var store = new TrackVirtualStore(referenceClock);
+                    audio.AddItem(store);
+                    track = store.GetVirtual(trackLength);
+                }
+                else
+                    track = audio?.Tracks.GetVirtual(trackLength);
+
+                // We are guaranteed to have a virtual track.
+                // To ease testability, ensure the track is available from point of construction.
+                // (Usually this would be done by MusicController for us).
+                LoadTrack();
+            }
+
+            protected override Track GetBeatmapTrack() =&gt; track;
+
+            public override bool TryTransferTrack(WorkingBeatmap target)
+            {
+                // Our track comes from a local track store that&#39;s disposed on finalizer,
+                // therefore it&#39;s unsafe to transfer it to another working beatmap.
+                return false;
+            }
+
+            public class TrackVirtualStore : AudioCollectionManager&lt;Track&gt;, ITrackStore
+            {
+                private readonly IFrameBasedClock referenceClock;
+
+                public TrackVirtualStore(IFrameBasedClock referenceClock)
+                {
+                    this.referenceClock = referenceClock;
+                }
+
+                public Track Get(string name) =&gt; throw new NotImplementedException();
+
+                public Task&lt;Track&gt; GetAsync(string name, CancellationToken cancellationToken = default) =&gt; throw new NotImplementedException();
+
+                public Stream GetStream(string name) =&gt; throw new NotImplementedException();
+
+                public IEnumerable&lt;string&gt; GetAvailableResources() =&gt; throw new NotImplementedException();
+
+                public Track GetVirtual(double length = double.PositiveInfinity, string name = &quot;virtual&quot;)
+                {
+                    var track = new TrackVirtualManual(referenceClock, name) { Length = length };
+                    AddItem(track);
+                    return track;
+                }
+            }
+
+            /// &lt;summary&gt;
+            /// A virtual track which tracks a reference clock.
+            /// &lt;/summary&gt;
+            public class TrackVirtualManual : Track
+            {
+                private readonly IFrameBasedClock referenceClock;
+
+                private bool running;
+
+                public override double Rate =&gt; base.Rate
+                                               // This is mainly to allow some tests to override the rate to zero
+                                               // and avoid interpolation.
+                                               * referenceClock.Rate;
+
+                public TrackVirtualManual(IFrameBasedClock referenceClock, string name = &quot;virtual&quot;)
+                    : base(name)
+                {
+                    this.referenceClock = referenceClock;
+                    Length = double.PositiveInfinity;
+                }
+
+                public override bool Seek(double seek)
+                {
+                    accumulated = Math.Clamp(seek, 0, Length);
+                    lastReferenceTime = null;
+
+                    return accumulated == seek;
+                }
+
+                public override Task&lt;bool&gt; SeekAsync(double seek) =&gt; Task.FromResult(Seek(seek));
+
+                public override void Start()
+                {
+                    running = true;
+                }
+
+                public override Task StartAsync()
+                {
+                    Start();
+                    return Task.CompletedTask;
+                }
+
+                public override void Reset()
+                {
+                    Seek(0);
+                    base.Reset();
+                }
+
+                public override void Stop()
+                {
+                    if (running)
+                    {
+                        running = false;
+                        lastReferenceTime = null;
+                    }
+                }
+
+                public override Task StopAsync()
+                {
+                    Stop();
+                    return Task.CompletedTask;
+                }
+
+                public override bool IsRunning =&gt; running;
+
+                private double? lastReferenceTime;
+
+                private double accumulated;
+
+                public override double CurrentTime =&gt; Math.Min(accumulated, Length);
+
+                protected override void UpdateState()
+                {
+                    base.UpdateState();
+
+                    if (running)
+                    {
+                        double refTime = referenceClock.CurrentTime;
+
+                        double? lastRefTime = lastReferenceTime;
+
+                        if (lastRefTime != null)
+                            accumulated += (refTime - lastRefTime.Value) * Rate;
+
+                        lastReferenceTime = refTime;
+                    }
+
+                    if (CurrentTime &gt;= Length)
+                    {
+                        Stop();
+                        // `RaiseCompleted` is not called here to prevent transitioning to the next song.
+                    }
+                }
+            }
+        }
+
+        public partial class OsuTestSceneTestRunner : OsuGameBase, ITestSceneTestRunner
+        {
+            private TestSceneTestRunner.TestRunner runner;
+
+            protected override void LoadAsyncComplete()
+            {
+                // this has to be run here rather than LoadComplete because
+                // TestScene.cs is checking the IsLoaded state (on another thread) and expects
+                // the runner to be loaded at that point.
+                Add(runner = new TestSceneTestRunner.TestRunner());
+            }
+
+            protected override void InitialiseFonts()
+            {
+                // skip fonts load as it&#39;s not required for testing purposes.
+            }
+
+            public void RunTestBlocking(TestScene test) =&gt; runner.RunTestBlocking(test);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[44,54,44,58,0],[44,63,44,93,0],[47,51,47,55,0],[47,60,47,87,0],[50,63,50,67,0],[50,72,50,124,0],[52,58,52,62,0],[52,63,52,75,0],[59,13,59,14,0],[60,17,60,34,0],[61,21,61,157,0],[63,17,63,33,0],[64,13,64,14,0],[73,48,73,53,0],[81,40,81,51,0],[93,57,93,62,0],[101,43,101,61,0],[111,56,111,60,0],[111,61,111,73,0],[120,9,120,10,0],[121,13,121,47,0],[123,13,123,71,0],[125,13,125,61,0],[127,13,127,49,0],[127,49,127,135,0],[127,135,127,137,0],[129,13,129,40,0],[131,13,131,73,0],[136,13,136,86,0],[137,13,137,93,0],[138,13,138,57,0],[140,13,140,51,0],[141,13,141,41,0],[142,17,142,133,0],[144,13,144,53,0],[146,13,146,78,0],[147,13,147,34,0],[149,13,149,114,0],[151,13,151,39,0],[153,13,153,31,0],[154,13,154,14,0],[155,17,155,49,0],[156,17,156,62,0],[157,17,157,44,0],[158,13,158,14,0],[160,13,160,33,0],[161,9,161,10,0],[164,37,164,41,0],[164,42,164,46,0],[167,9,167,10,0],[168,13,168,33,0],[170,13,170,113,0],[172,13,172,86,0],[173,13,173,49,0],[174,13,174,43,0],[176,13,176,83,0],[177,13,177,49,0],[178,13,178,43,0],[180,13,180,87,0],[181,13,181,51,0],[182,13,182,45,0],[183,9,183,10,0],[185,59,185,82,0],[189,9,189,33,0],[190,9,190,10,0],[191,13,191,79,0],[192,9,192,10,0],[195,9,195,10,0],[196,13,196,54,0],[197,13,197,14,0],[199,17,199,18,0],[200,21,200,61,0],[201,17,201,18,0],[202,17,202,22,0],[203,17,203,18,0],[205,17,205,18,0],[206,13,206,14,0],[208,13,209,13,0],[209,13,209,14,0],[209,14,213,17,0],[213,17,213,75,0],[213,75,214,21,0],[214,21,214,48,0],[214,48,216,17,0],[216,17,216,89,0],[216,89,217,13,0],[217,13,217,14,0],[217,14,217,16,0],[218,9,218,10,0],[221,40,221,44,0],[221,45,221,57,0],[224,53,224,57,0],[224,58,224,70,0],[233,54,233,58,0],[235,74,235,98,0],[241,78,241,147,0],[247,84,247,156,0],[254,9,254,10,0],[255,13,255,60,0],[258,13,258,55,0],[259,13,259,61,0],[262,13,262,45,0],[264,13,264,28,0],[265,9,265,10,0],[272,9,272,10,0],[273,13,273,55,0],[275,13,351,74,0],[351,74,351,84,0],[351,84,352,77,0],[352,77,352,87,0],[352,87,362,15,0],[364,13,364,20,0],[364,22,364,33,0],[364,34,364,36,0],[364,37,364,52,0],[365,17,365,45,0],[367,13,367,27,0],[368,9,368,10,0],[371,13,371,57,0],[374,13,374,81,0],[377,9,377,10,0],[378,13,378,39,0],[380,13,380,44,0],[382,13,382,54,0],[383,17,383,40,0],[385,13,385,47,0],[386,17,386,33,0],[388,13,388,39,0],[389,9,389,10,0],[391,67,391,95,0],[404,19,404,78,0],[405,13,405,14,0],[406,13,406,14,0],[416,19,416,51,0],[417,13,417,14,0],[418,17,418,44,0],[420,17,420,50,0],[422,21,422,85,0],[422,85,422,99,0],[422,99,422,109,0],[424,17,424,44,0],[425,17,425,18,0],[426,21,426,71,0],[427,21,427,42,0],[428,21,428,59,0],[429,17,429,18,0],[431,21,431,67,0],[436,17,436,29,0],[437,13,437,14,0],[439,59,439,64,0],[442,13,442,14,0],[445,17,445,30,0],[446,13,446,14,0],[452,17,452,74,0],[453,17,453,18,0],[454,21,454,58,0],[455,17,455,18,0],[457,50,457,85,0],[459,108,459,143,0],[461,57,461,92,0],[463,71,463,106,0],[466,17,466,18,0],[467,21,467,98,0],[468,21,468,36,0],[469,21,469,34,0],[470,17,470,18,0],[482,48,485,69,0],[488,23,488,33,0],[489,17,489,18,0],[490,21,490,58,0],[491,21,491,54,0],[492,17,492,18,0],[495,17,495,18,0],[496,21,496,63,0],[497,21,497,46,0],[499,21,499,48,0],[500,17,500,18,0],[502,70,502,97,0],[505,17,505,18,0],[506,21,506,36,0],[507,17,507,18,0],[510,17,510,18,0],[511,21,511,29,0],[512,21,512,47,0],[513,17,513,18,0],[516,17,516,18,0],[517,21,517,29,0],[518,21,518,34,0],[519,17,519,18,0],[522,17,522,18,0],[523,21,523,33,0],[524,21,524,22,0],[525,25,525,41,0],[526,25,526,50,0],[527,21,527,22,0],[528,17,528,18,0],[531,17,531,18,0],[532,21,532,28,0],[533,21,533,47,0],[534,17,534,18,0],[536,51,536,58,0],[542,55,542,84,0],[545,17,545,18,0],[546,21,546,40,0],[548,21,548,33,0],[549,21,549,22,0],[550,25,550,69,0],[552,25,552,65,0],[554,25,554,49,0],[555,29,555,81,0],[557,25,557,53,0],[558,21,558,22,0],[560,21,560,47,0],[561,21,561,22,0],[562,25,562,32,0],[564,21,564,22,0],[565,17,565,18,0],[574,13,574,14,0],[578,17,578,68,0],[579,13,579,14,0],[582,13,582,14,0],[584,13,584,14,0],[586,60,586,88,0]]);
+    </script>
+  </body>
+</html>

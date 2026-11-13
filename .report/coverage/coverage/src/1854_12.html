@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/Match/MatchStartControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Threading;
+using osu.Game.Localisation;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.Countdown;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Dialog;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer.Match
+{
+    public partial class MatchStartControl : CompositeDrawable
+    {
+        [Resolved]
+        private OngoingOperationTracker ongoingOperationTracker { get; set; } = null!;
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        private MatchStartCountdown? currentMatchStartCountdown =&gt; client.Room?.ActiveCountdowns.OfType&lt;MatchStartCountdown&gt;().SingleOrDefault();
+
+        private readonly MultiplayerReadyButton readyButton;
+        private readonly MultiplayerCountdownButton countdownButton;
+
+        private IBindable&lt;bool&gt; operationInProgress = null!;
+        private ScheduledDelegate? readySampleDelegate;
+        private IDisposable? clickOperation;
+        private Sample? sampleReady;
+        private Sample? sampleReadyAll;
+        private Sample? sampleUnready;
+        private int countReady;
+
+        public MatchStartControl()
+        {
+            InternalChild = new GridContainer
+            {
+                RelativeSizeAxes = Axes.Both,
+                ColumnDimensions = new[]
+                {
+                    new Dimension(),
+                    new Dimension(GridSizeMode.Absolute, 5),
+                    new Dimension(GridSizeMode.AutoSize)
+                },
+                Content = new[]
+                {
+                    new Drawable?[]
+                    {
+                        readyButton = new MultiplayerReadyButton
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Size = Vector2.One,
+                            Action = onReadyButtonClick,
+                        },
+                        null,
+                        countdownButton = new MultiplayerCountdownButton
+                        {
+                            RelativeSizeAxes = Axes.Y,
+                            Size = new Vector2(40, 1),
+                            Alpha = 0,
+                            Action = startCountdown,
+                            CancelAction = cancelCountdown
+                        }
+                    }
+                }
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            operationInProgress = ongoingOperationTracker.InProgress.GetBoundCopy();
+            operationInProgress.BindValueChanged(_ =&gt; updateState());
+
+            sampleReady = audio.Samples.Get(@&quot;Multiplayer/player-ready&quot;);
+            sampleReadyAll = audio.Samples.Get(@&quot;Multiplayer/player-ready-all&quot;);
+            sampleUnready = audio.Samples.Get(@&quot;Multiplayer/player-unready&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            client.RoomUpdated += onRoomUpdated;
+            client.LoadRequested += onLoadRequested;
+
+            updateState();
+        }
+
+        private void onRoomUpdated() =&gt; Scheduler.AddOnce(updateState);
+
+        private void onLoadRequested() =&gt; Scheduler.AddOnce(endOperation);
+
+        private void onReadyButtonClick()
+        {
+            if (client.Room == null)
+                return;
+
+            Debug.Assert(clickOperation == null);
+            clickOperation = ongoingOperationTracker.BeginOperation();
+
+            if (client.IsReferee)
+            {
+                if (client.Room.State == MultiplayerRoomState.Open &amp;&amp; currentMatchStartCountdown == null)
+                    startMatch();
+                else if (client.Room.State == MultiplayerRoomState.WaitingForLoad || client.Room.State == MultiplayerRoomState.Playing)
+                    abortMatch();
+            }
+            else if (client.IsHost)
+            {
+                if (client.Room.State == MultiplayerRoomState.Open)
+                {
+                    if (isReady() &amp;&amp; currentMatchStartCountdown == null)
+                        startMatch();
+                    else
+                        toggleReady();
+                }
+                else
+                    abortMatch();
+            }
+            else if (client.Room.State != MultiplayerRoomState.Closed)
+                toggleReady();
+
+            bool isReady() =&gt; client.LocalUser?.State == MultiplayerUserState.Ready || client.LocalUser?.State == MultiplayerUserState.Spectating;
+
+            void toggleReady() =&gt; client.ToggleReady().FireAndForget(
+                onSuccess: endOperation,
+                onError: _ =&gt; endOperation());
+
+            void startMatch() =&gt; client.StartMatch().FireAndForget(onSuccess: () =&gt;
+            {
+                // gameplay is starting, the button will be unblocked on load requested.
+            }, onError: _ =&gt;
+            {
+                // gameplay was not started due to an exception; unblock button.
+                endOperation();
+            });
+
+            void performAbort() =&gt; client.AbortMatch().FireAndForget(endOperation, _ =&gt; endOperation());
+
+            void abortMatch()
+            {
+                if (dialogOverlay == null)
+                    performAbort();
+                else
+                    dialogOverlay.Push(new ConfirmAbortDialog(performAbort, endOperation));
+            }
+        }
+
+        private void startCountdown(TimeSpan duration)
+        {
+            Debug.Assert(clickOperation == null);
+            clickOperation = ongoingOperationTracker.BeginOperation();
+
+            client.SendMatchRequest(new StartMatchCountdownRequest { Duration = duration }).ContinueWith(_ =&gt; endOperation());
+        }
+
+        private void cancelCountdown()
+        {
+            if (client.Room == null || currentMatchStartCountdown == null)
+                return;
+
+            Debug.Assert(clickOperation == null);
+            clickOperation = ongoingOperationTracker.BeginOperation();
+
+            client.SendMatchRequest(new StopCountdownRequest(currentMatchStartCountdown.ID)).ContinueWith(_ =&gt; endOperation());
+        }
+
+        private void endOperation()
+        {
+            clickOperation?.Dispose();
+            clickOperation = null;
+        }
+
+        private void updateState()
+        {
+            if (client.Room == null)
+            {
+                readyButton.Enabled.Value = false;
+                countdownButton.Enabled.Value = false;
+                return;
+            }
+
+            var localUser = client.LocalUser;
+
+            int newCountReady = client.Room.Users.Count(u =&gt; u.Role == MultiplayerRoomUserRole.Player &amp;&amp; u.State == MultiplayerUserState.Ready);
+            int newCountTotal = client.Room.Users.Count(u =&gt; u.Role == MultiplayerRoomUserRole.Player &amp;&amp; u.State != MultiplayerUserState.Spectating);
+
+            if ((!client.IsHost &amp;&amp; !client.IsReferee) || client.Room.Settings.AutoStartEnabled || client.Room.State != MultiplayerRoomState.Open)
+                countdownButton.Hide();
+            else
+            {
+                switch (localUser?.State)
+                {
+                    default:
+                        countdownButton.Hide();
+                        break;
+
+                    case MultiplayerUserState.Idle:
+                    case MultiplayerUserState.Spectating:
+                    case MultiplayerUserState.Ready:
+                        countdownButton.Show();
+                        break;
+                }
+            }
+
+            readyButton.Enabled.Value = countdownButton.Enabled.Value =
+                client.Room.State != MultiplayerRoomState.Closed
+                &amp;&amp; !client.Room.CurrentPlaylistItem.Expired
+                &amp;&amp; !operationInProgress.Value;
+
+            // When the local user is the host and spectating the match, the ready button should be enabled only if any users are ready.
+            if (localUser?.State == MultiplayerUserState.Spectating)
+                readyButton.Enabled.Value &amp;= (client.IsHost || client.IsReferee) &amp;&amp; newCountReady &gt; 0 &amp;&amp; currentMatchStartCountdown == null;
+
+            // When the local user is not the host or a referee, the button should only be enabled when no match is in progress.
+            if (!client.IsHost &amp;&amp; !client.IsReferee)
+                readyButton.Enabled.Value &amp;= client.Room.State == MultiplayerRoomState.Open;
+
+            // As a referee, readying up should not be possible, so if there is no match going on and no users readied up, prevent a match start.
+            if (client.IsReferee)
+                readyButton.Enabled.Value &amp;= client.Room.State != MultiplayerRoomState.Open || newCountReady &gt; 0;
+
+            // At all times, the countdown button should only be enabled when no match is in progress.
+            countdownButton.Enabled.Value &amp;= client.Room.State == MultiplayerRoomState.Open;
+
+            if (newCountReady == countReady)
+                return;
+
+            readySampleDelegate?.Cancel();
+            readySampleDelegate = Schedule(() =&gt;
+            {
+                if (newCountReady &gt; countReady)
+                {
+                    if (newCountReady == newCountTotal)
+                        sampleReadyAll?.Play();
+                    else
+                        sampleReady?.Play();
+                }
+                else if (newCountReady &lt; countReady)
+                {
+                    sampleUnready?.Play();
+                }
+
+                countReady = newCountReady;
+            });
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (client.IsNotNull())
+            {
+                client.RoomUpdated -= onRoomUpdated;
+                client.LoadRequested -= onLoadRequested;
+            }
+        }
+
+        public partial class ConfirmAbortDialog : DangerousActionDialog
+        {
+            public ConfirmAbortDialog(Action abortMatch, Action cancel)
+            {
+                HeaderText = DialogStrings.ConfirmAbortMatchHeaderText;
+
+                DangerousAction = abortMatch;
+                CancelAction = cancel;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,67,27,71,0],[27,72,27,76,0],[27,81,27,86,0],[30,49,30,53,0],[30,54,30,58,0],[33,44,33,48,0],[33,49,33,53,0],[33,58,33,63,0],[35,68,35,145,0],[40,9,40,61,0],[48,9,48,35,0],[49,9,49,10,0],[50,13,80,15,0],[81,9,81,10,0],[85,9,85,10,0],[86,13,86,85,0],[87,13,87,55,0],[87,55,87,68,0],[87,68,87,70,0],[89,13,89,74,0],[90,13,90,81,0],[91,13,91,78,0],[92,9,92,10,0],[95,9,95,10,0],[96,13,96,33,0],[98,13,98,49,0],[99,13,99,53,0],[101,13,101,27,0],[102,9,102,10,0],[104,41,104,71,0],[106,43,106,74,0],[109,9,109,10,0],[110,13,110,37,0],[111,17,111,24,0],[113,13,113,50,0],[114,13,114,71,0],[116,13,116,34,0],[117,13,117,14,0],[118,17,118,106,0],[119,21,119,34,0],[120,22,120,136,0],[121,21,121,34,0],[122,13,122,14,0],[123,18,123,36,0],[124,13,124,14,0],[125,17,125,68,0],[126,17,126,18,0],[127,21,127,73,0],[128,25,128,38,0],[130,25,130,39,0],[131,17,131,18,0],[133,21,133,34,0],[134,13,134,14,0],[135,18,135,71,0],[136,17,136,31,0],[138,31,138,146,0],[140,35,142,31,0],[142,31,142,45,0],[142,45,142,46,0],[144,34,145,13,0],[145,13,145,14,0],[145,14,147,13,0],[147,13,147,14,0],[147,14,148,13,0],[148,13,148,14,0],[148,14,150,17,0],[150,17,150,32,0],[150,32,151,13,0],[151,13,151,14,0],[151,14,151,15,0],[153,36,153,89,0],[153,89,153,103,0],[153,103,153,104,0],[156,13,156,14,0],[157,17,157,43,0],[158,21,158,36,0],[160,21,160,92,0],[161,13,161,14,0],[162,9,162,10,0],[165,9,165,10,0],[166,13,166,50,0],[167,13,167,71,0],[169,13,169,111,0],[169,111,169,125,0],[169,125,169,127,0],[170,9,170,10,0],[173,9,173,10,0],[174,13,174,75,0],[175,17,175,24,0],[177,13,177,50,0],[178,13,178,71,0],[180,13,180,112,0],[180,112,180,126,0],[180,126,180,128,0],[181,9,181,10,0],[184,9,184,10,0],[185,13,185,39,0],[186,13,186,35,0],[187,9,187,10,0],[190,9,190,10,0],[191,13,191,37,0],[192,13,192,14,0],[193,17,193,51,0],[194,17,194,55,0],[195,17,195,24,0],[198,13,198,46,0],[200,13,200,62,0],[200,62,200,143,0],[200,143,200,145,0],[201,13,201,62,0],[201,62,201,148,0],[201,148,201,150,0],[203,13,203,146,0],[204,17,204,40,0],[206,13,206,14,0],[207,17,207,42,0],[210,25,210,48,0],[211,25,211,31,0],[216,25,216,48,0],[217,25,217,31,0],[219,13,219,14,0],[221,13,224,47,0],[227,13,227,69,0],[228,17,228,141,0],[231,13,231,53,0],[232,17,232,93,0],[235,13,235,34,0],[236,17,236,114,0],[239,13,239,93,0],[241,13,241,45,0],[242,17,242,24,0],[244,13,244,43,0],[245,13,246,13,0],[246,13,246,14,0],[246,14,247,17,0],[247,17,247,48,0],[247,48,248,17,0],[248,17,248,18,0],[248,18,249,21,0],[249,21,249,56,0],[249,56,250,25,0],[250,25,250,48,0],[250,48,252,25,0],[252,25,252,45,0],[252,45,253,17,0],[253,17,253,18,0],[253,18,254,22,0],[254,22,254,53,0],[254,53,255,17,0],[255,17,255,18,0],[255,18,256,21,0],[256,21,256,43,0],[256,43,257,17,0],[257,17,257,18,0],[257,18,259,17,0],[259,17,259,44,0],[259,44,260,13,0],[260,13,260,14,0],[260,14,260,16,0],[261,9,261,10,0],[264,9,264,10,0],[265,13,265,39,0],[267,13,267,36,0],[268,13,268,14,0],[269,17,269,53,0],[270,17,270,57,0],[271,13,271,14,0],[272,9,272,10,0],[276,13,276,72,0],[277,13,277,14,0],[278,17,278,72,0],[280,17,280,46,0],[281,17,281,39,0],[282,13,282,14,0]]);
+    </script>
+  </body>
+</html>

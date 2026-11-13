@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Visual/OnlinePlay/OnlinePlayTestScene.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Rooms;
+using osu.Game.Rulesets;
+using osu.Game.Screens.OnlinePlay;
+
+namespace osu.Game.Tests.Visual.OnlinePlay
+{
+    /// &lt;summary&gt;
+    /// A base test scene for all online play components and screens.
+    /// &lt;/summary&gt;
+    public abstract partial class OnlinePlayTestScene : ScreenTestScene, IOnlinePlayTestSceneDependencies
+    {
+        public OngoingOperationTracker OngoingOperationTracker =&gt; OnlinePlayDependencies.OngoingOperationTracker;
+        public TestUserLookupCache UserLookupCache =&gt; OnlinePlayDependencies.UserLookupCache;
+        public BeatmapLookupCache BeatmapLookupCache =&gt; OnlinePlayDependencies.BeatmapLookupCache;
+
+        /// &lt;summary&gt;
+        /// All dependencies required for online play components and screens.
+        /// &lt;/summary&gt;
+        protected OnlinePlayTestSceneDependencies OnlinePlayDependencies =&gt; dependencies.OnlinePlayDependencies!;
+
+        protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+        private readonly Container content;
+        private readonly Container drawableDependenciesContainer;
+        private DelegatedDependencyContainer dependencies = null!;
+        private int currentRoomId;
+
+        protected OnlinePlayTestScene()
+        {
+            base.Content.AddRange(new Drawable[]
+            {
+                drawableDependenciesContainer = new Container { RelativeSizeAxes = Axes.Both },
+                content = new Container { RelativeSizeAxes = Axes.Both },
+            });
+        }
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent)
+            =&gt; dependencies = new DelegatedDependencyContainer(base.CreateChildDependencies(parent));
+
+        public override void SetUpSteps()
+        {
+            base.SetUpSteps();
+
+            AddStep(&quot;setup dependencies&quot;, () =&gt;
+            {
+                // Reset the room dependencies to a fresh state.
+                dependencies.OnlinePlayDependencies = CreateOnlinePlayDependencies();
+                drawableDependenciesContainer.Clear();
+                drawableDependenciesContainer.AddRange(dependencies.OnlinePlayDependencies.DrawableComponents);
+
+                var handler = OnlinePlayDependencies.RequestsHandler;
+
+                // Resolving the BeatmapManager in the test scene will inject the game-wide BeatmapManager, while many test scenes cache their own BeatmapManager instead.
+                // To get around this, the BeatmapManager is looked up from the dependencies provided to the children of the test scene instead.
+                var beatmapManager = dependencies.Get&lt;BeatmapManager&gt;();
+
+                ((DummyAPIAccess)API).HandleRequest = request =&gt;
+                {
+                    try
+                    {
+                        return handler.HandleRequest(request, API.LocalUser.Value, beatmapManager);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // These requests can be fired asynchronously, but potentially arrive after game components
+                        // have been disposed (ie. realm in BeatmapManager).
+                        // This only happens in tests and it&#39;s easiest to ignore them for now.
+                        Logger.Log($&quot;Handled {nameof(ObjectDisposedException)} in test request handling&quot;);
+                        return true;
+                    }
+                };
+            });
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the room dependencies. Called every &lt;see cref=&quot;SetUpSteps&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Any custom dependencies required for online play sub-classes should be added here.
+        /// &lt;/remarks&gt;
+        protected virtual OnlinePlayTestSceneDependencies CreateOnlinePlayDependencies() =&gt; new OnlinePlayTestSceneDependencies();
+
+        protected Room[] GenerateRooms(int count, RulesetInfo? ruleset = null, bool withPassword = false, bool withPinnedRooms = false)
+        {
+            Room[] rooms = new Room[count];
+
+            // Can&#39;t reference Osu ruleset project here.
+            if (ruleset == null)
+            {
+                using var assemblyRulesetStore = new AssemblyRulesetStore();
+                ruleset = assemblyRulesetStore.GetRuleset(0)!;
+            }
+
+            for (int i = 0; i &lt; count; i++)
+            {
+                rooms[i] = new Room
+                {
+                    RoomID = currentRoomId++,
+                    Name = $@&quot;Room {currentRoomId}&quot;,
+                    Host = new APIUser { Username = @&quot;Host&quot; },
+                    Duration = TimeSpan.FromSeconds(10),
+                    Password = withPassword ? @&quot;password&quot; : null,
+                    PlaylistItemStats = new Room.RoomPlaylistItemStats { RulesetIDs = [ruleset.OnlineID] },
+                    Playlist = [new PlaylistItem(new BeatmapInfo { Metadata = new BeatmapMetadata() }) { RulesetID = ruleset.OnlineID }],
+                    Pinned = withPinnedRooms &amp;&amp; i % 2 == 0,
+                };
+            }
+
+            return rooms;
+        }
+
+        /// &lt;summary&gt;
+        /// A &lt;see cref=&quot;IReadOnlyDependencyContainer&quot;/&gt; providing a mutable lookup source for online play dependencies.
+        /// &lt;/summary&gt;
+        private class DelegatedDependencyContainer : IReadOnlyDependencyContainer
+        {
+            /// &lt;summary&gt;
+            /// The online play dependencies.
+            /// &lt;/summary&gt;
+            public OnlinePlayTestSceneDependencies? OnlinePlayDependencies { get; set; }
+
+            private readonly IReadOnlyDependencyContainer parent;
+            private readonly DependencyContainer injectableDependencies;
+
+            /// &lt;summary&gt;
+            /// Creates a new &lt;see cref=&quot;DelegatedDependencyContainer&quot;/&gt;.
+            /// &lt;/summary&gt;
+            /// &lt;param name=&quot;parent&quot;&gt;The fallback &lt;see cref=&quot;IReadOnlyDependencyContainer&quot;/&gt; to use when &lt;see cref=&quot;OnlinePlayDependencies&quot;/&gt; cannot satisfy a dependency.&lt;/param&gt;
+            public DelegatedDependencyContainer(IReadOnlyDependencyContainer parent)
+            {
+                this.parent = parent;
+                injectableDependencies = new DependencyContainer(this);
+            }
+
+            public object Get(Type type)
+                =&gt; OnlinePlayDependencies?.Get(type) ?? parent.Get(type);
+
+            public object Get(Type type, CacheInfo info)
+                =&gt; OnlinePlayDependencies?.Get(type, info) ?? parent.Get(type, info);
+
+            public void Inject&lt;T&gt;(T instance)
+                where T : class, IDependencyInjectionCandidate
+                =&gt; injectableDependencies.Inject(instance);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,67,24,113,0],[25,55,25,93,0],[26,57,26,98,0],[31,77,31,113,0],[33,59,33,66,0],[37,9,37,67,0],[40,9,40,40,0],[41,9,41,10,0],[42,13,46,16,0],[47,9,47,10,0],[50,16,50,101,0],[53,9,53,10,0],[54,13,54,31,0],[56,13,57,13,0],[57,13,57,14,0],[57,14,59,17,0],[59,17,59,86,0],[59,86,60,17,0],[60,17,60,55,0],[60,55,61,17,0],[61,17,61,112,0],[61,112,63,17,0],[63,17,63,70,0],[63,70,67,17,0],[67,17,67,73,0],[67,73,69,17,0],[69,17,70,17,0],[70,17,70,18,0],[70,18,72,21,0],[72,21,72,22,0],[72,22,73,25,0],[73,25,73,100,0],[73,100,75,21,0],[75,21,75,52,0],[75,52,76,21,0],[76,21,76,22,0],[76,22,80,25,0],[80,25,80,107,0],[80,107,81,25,0],[81,25,81,37,0],[81,37,83,17,0],[83,17,83,18,0],[83,18,83,19,0],[83,19,84,13,0],[84,13,84,14,0],[84,14,84,16,0],[85,9,85,10,0],[93,93,93,130,0],[96,9,96,10,0],[97,13,97,44,0],[100,13,100,33,0],[101,13,101,14,0],[102,17,102,77,0],[103,17,103,63,0],[104,13,104,14,0],[106,18,106,27,0],[106,29,106,38,0],[106,40,106,43,0],[107,13,107,14,0],[108,17,118,19,0],[119,13,119,14,0],[121,13,121,26,0],[122,9,122,10,0],[132,78,132,82,0],[132,83,132,87,0],[141,13,141,85,0],[142,13,142,14,0],[143,17,143,38,0],[144,17,144,72,0],[145,13,145,14,0],[148,20,148,73,0],[151,20,151,85,0],[155,20,155,59,0]]);
+    </script>
+  </body>
+</html>

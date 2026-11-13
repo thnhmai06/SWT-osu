@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/UserInterfaceV2/FormSliderBar.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Numerics;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Extensions;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Overlays;
+using osuTK.Graphics;
+using Vector2 = osuTK.Vector2;
+
+namespace osu.Game.Graphics.UserInterfaceV2
+{
+    public partial class FormSliderBar&lt;T&gt; : CompositeDrawable, IHasCurrentValue&lt;T&gt;, IFormControl
+        where T : struct, INumber&lt;T&gt;, IMinMaxValue&lt;T&gt;
+    {
+        public Bindable&lt;T&gt; Current
+        {
+            get =&gt; current.Current;
+            set
+            {
+                current.Current = value;
+
+                // the above `Current` set could have disabled the instantaneous bindable too,
+                // but we still need to copy out `Default` manually,
+                // so lift that disable for a second and then restore it
+                currentNumberInstantaneous.Disabled = false;
+                currentNumberInstantaneous.Default = current.Default;
+                currentNumberInstantaneous.Disabled = current.Disabled;
+            }
+        }
+
+        private readonly BindableNumberWithCurrent&lt;T&gt; current = new BindableNumberWithCurrent&lt;T&gt;();
+
+        private readonly BindableNumber&lt;T&gt; currentNumberInstantaneous = new BindableNumber&lt;T&gt;();
+        private readonly InnerSlider slider;
+
+        /// &lt;summary&gt;
+        /// Whether changes to the value should instantaneously transfer to outside bindables.
+        /// If &lt;see langword=&quot;false&quot;/&gt;, the transfer will happen on text box commit (explicit, or implicit via focus loss), or on slider commit.
+        /// &lt;/summary&gt;
+        public bool TransferValueOnCommit { get; set; }
+
+        private CompositeDrawable? tabbableContentContainer;
+
+        public CompositeDrawable? TabbableContentContainer
+        {
+            set
+            {
+                tabbableContentContainer = value;
+
+                if (TextBox.IsNotNull())
+                    TextBox.TabbableContentContainer = tabbableContentContainer;
+            }
+        }
+
+        private LocalisableString caption;
+
+        /// &lt;summary&gt;
+        /// Caption describing this slider bar, displayed on top of the controls.
+        /// &lt;/summary&gt;
+        public LocalisableString Caption
+        {
+            get =&gt; caption;
+            set
+            {
+                caption = value;
+
+                if (IsLoaded)
+                    captionText.Caption = value;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Hint text containing an extended description of this slider bar, displayed in a tooltip when hovering the caption.
+        /// &lt;/summary&gt;
+        public LocalisableString HintText { get; init; }
+
+        /// &lt;summary&gt;
+        /// A custom step value for each key press which actuates a change on this control.
+        /// &lt;/summary&gt;
+        public float KeyboardStep
+        {
+            get =&gt; slider.KeyboardStep;
+            set =&gt; slider.KeyboardStep = value;
+        }
+
+        /// &lt;summary&gt;
+        /// Whether to format the tooltip as a percentage or the actual value.
+        /// &lt;/summary&gt;
+        public bool DisplayAsPercentage { get; init; }
+
+        /// &lt;summary&gt;
+        /// Whether sound effects should play when adjusting this slider.
+        /// &lt;/summary&gt;
+        public bool PlaySamplesOnAdjust { get; init; } = true;
+
+        private Func&lt;T, LocalisableString&gt; labelFormat;
+
+        /// &lt;summary&gt;
+        /// The string formatting function to use for the value label.
+        /// &lt;/summary&gt;
+        public Func&lt;T, LocalisableString&gt; LabelFormat
+        {
+            get =&gt; labelFormat;
+            set
+            {
+                labelFormat = value;
+
+                if (IsLoaded)
+                    updateValueDisplay();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// The string formatting function to use for the slider&#39;s tooltip text.
+        /// If not provided, &lt;see cref=&quot;LabelFormat&quot;/&gt; is used.
+        /// &lt;/summary&gt;
+        public Func&lt;T, LocalisableString&gt; TooltipFormat { get; init; }
+
+        internal FormTextBox.InnerTextBox TextBox { get; private set; } = null!;
+
+        private FormControlBackground background = null!;
+        private OsuSpriteText valueLabel = null!;
+        private FormFieldCaption captionText = null!;
+        private IFocusManager focusManager = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        private readonly Bindable&lt;Language&gt; currentLanguage = new Bindable&lt;Language&gt;();
+
+        public bool TakeFocus() =&gt; GetContainingFocusManager()?.ChangeFocus(TextBox) == true;
+
+        public FormSliderBar()
+        {
+            labelFormat ??= DefaultLabelFormat;
+            TooltipFormat ??= v =&gt; LabelFormat(v);
+
+            // the reason why this slider is created in constructor rather than in BDL like the rest of drawable hierarchy is as follows:
+            // `SliderBar&lt;T&gt;` (the base framework class for all sliders) also does its `Current` initialisation in its ctor.
+            // if that precedent is not followed, it is possible to run into a crippling issue
+            // when a `FormSliderBar` instance is on a screen and said screen is exited before said instance&#39;s `LoadComplete()` is invoked.
+            // in that case, the screen exit will unbind the `InnerSlider`&#39;s internal bindings &amp; value change callbacks:
+            // https://github.com/ppy/osu-framework/blob/23ac694fa2c342ce39f563c8a1b975119249d5e9/osu.Framework/Screens/ScreenStack.cs#L353
+            // the callbacks are supposed to propagate `{Min,Max}Value` from `Current` to its internal `currentNumberInstantaneous` bindable:
+            // https://github.com/ppy/osu-framework/blob/64624795b0816261dfc5e930e1d9b9ec7e8bb8c5/osu.Framework/Graphics/UserInterface/SliderBar.cs#L62-L63
+            // thus, the callbacks getting unbound by the screen exit prevents `{Min,Max}Value` from ever correctly propagating, which finally causes a crash at
+            // https://github.com/ppy/osu-framework/blob/64624795b0816261dfc5e930e1d9b9ec7e8bb8c5/osu.Framework/Graphics/UserInterface/SliderBar.cs#L112 -&gt;
+            // https://github.com/ppy/osu-framework/blob/64624795b0816261dfc5e930e1d9b9ec7e8bb8c5/osu.Framework/Graphics/UserInterface/SliderBar.cs#L88-L92.
+            // moving the slider creation &amp; binding to constructor does little to fix the issue other than to make it less likely to be hit.
+            slider = new InnerSlider
+            {
+                Current = currentNumberInstantaneous,
+                OnCommit = () =&gt; current.Value = currentNumberInstantaneous.Value,
+                TooltipFormat = s =&gt; TooltipFormat(s),
+                DisplayAsPercentage = DisplayAsPercentage,
+                PlaySamplesOnAdjust = PlaySamplesOnAdjust,
+                ResetToDefault = () =&gt;
+                {
+                    if (!IsDisabled)
+                        SetDefault();
+                }
+            };
+
+            current.ValueChanged += e =&gt;
+            {
+                currentNumberInstantaneous.Value = e.NewValue;
+                ValueChanged?.Invoke();
+            };
+
+            current.MinValueChanged += v =&gt; currentNumberInstantaneous.MinValue = v;
+            current.MaxValueChanged += v =&gt; currentNumberInstantaneous.MaxValue = v;
+            current.PrecisionChanged += v =&gt; currentNumberInstantaneous.Precision = v;
+            current.DefaultChanged += v =&gt; currentNumberInstantaneous.Default = v.NewValue;
+            current.DisabledChanged += disabled =&gt;
+            {
+                if (disabled)
+                {
+                    // revert any changes before disabling to make sure we are in a consistent state.
+                    currentNumberInstantaneous.Value = current.Value;
+                }
+
+                currentNumberInstantaneous.Disabled = disabled;
+                if (IsLoaded)
+                    updateState();
+            };
+
+            current.CopyTo(currentNumberInstantaneous);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours, OsuGame? game)
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChildren = new Drawable[]
+            {
+                background = new FormControlBackground(),
+                new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Padding = new MarginPadding
+                    {
+                        Vertical = 5,
+                        Left = 9,
+                        Right = 5,
+                    },
+                    Children = new Drawable[]
+                    {
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(0f, 4f),
+                            Width = 0.5f,
+                            Padding = new MarginPadding
+                            {
+                                Right = 10,
+                                Vertical = 4,
+                            },
+                            Children = new Drawable[]
+                            {
+                                captionText = new FormFieldCaption
+                                {
+                                    TooltipText = HintText,
+                                },
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Children = new Drawable[]
+                                    {
+                                        TextBox = CreateTextBox().With(box =&gt;
+                                        {
+                                            box.RelativeSizeAxes = Axes.X;
+                                            // the textbox is hidden when the control is unfocused,
+                                            // but clicking on the label should reach the textbox,
+                                            // therefore make it always present.
+                                            box.AlwaysPresent = true;
+                                            box.CommitOnFocusLost = true;
+                                            box.SelectAllOnFocus = true;
+                                            box.OnInputError = background.FlashOnInputError;
+                                            box.TabbableContentContainer = tabbableContentContainer;
+                                        }),
+                                        valueLabel = new TruncatingSpriteText
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            Padding = new MarginPadding { Right = 5 },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                        slider.With(s =&gt;
+                        {
+                            s.Anchor = Anchor.CentreRight;
+                            s.Origin = Anchor.CentreRight;
+                            s.RelativeSizeAxes = Axes.X;
+                            s.Width = 0.5f;
+                        })
+                    },
+                },
+            };
+
+            if (game != null)
+                currentLanguage.BindTo(game.CurrentLanguage);
+        }
+
+        internal virtual FormNumberBox.InnerNumberBox CreateTextBox() =&gt; new FormNumberBox.InnerNumberBox(true);
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            captionText.Caption = caption;
+
+            focusManager = GetContainingFocusManager()!;
+
+            TextBox.Focused.BindValueChanged(_ =&gt; updateState());
+            TextBox.OnCommit += textCommitted;
+            TextBox.Current.BindValueChanged(textChanged);
+
+            slider.IsDragging.BindValueChanged(_ =&gt; updateState());
+            slider.Focused.BindValueChanged(_ =&gt; updateState());
+
+            currentLanguage.BindValueChanged(_ =&gt; Schedule(updateValueDisplay));
+            currentNumberInstantaneous.BindDisabledChanged(_ =&gt; updateState());
+            currentNumberInstantaneous.BindValueChanged(e =&gt;
+            {
+                if (!TransferValueOnCommit)
+                    current.Value = e.NewValue;
+
+                updateState();
+                updateValueDisplay();
+            }, true);
+        }
+
+        private bool updatingFromTextBox;
+
+        private void textChanged(ValueChangedEvent&lt;string&gt; change)
+        {
+            tryUpdateSliderFromTextBox();
+        }
+
+        private void textCommitted(TextBox t, bool isNew)
+        {
+            tryUpdateSliderFromTextBox();
+            // If the attempted update above failed, restore text box to match the slider.
+            currentNumberInstantaneous.TriggerChange();
+            current.Value = currentNumberInstantaneous.Value;
+
+            background.FlashOnCommit();
+        }
+
+        private void tryUpdateSliderFromTextBox()
+        {
+            updatingFromTextBox = true;
+
+            try
+            {
+                switch (currentNumberInstantaneous)
+                {
+                    case Bindable&lt;int&gt; bindableInt:
+                        bindableInt.Value = int.Parse(TextBox.Current.Value);
+                        break;
+
+                    case Bindable&lt;double&gt; bindableDouble:
+                        bindableDouble.Value = double.Parse(TextBox.Current.Value) / (DisplayAsPercentage ? 100 : 1);
+                        break;
+
+                    case Bindable&lt;float&gt; bindableFloat:
+                        bindableFloat.Value = float.Parse(TextBox.Current.Value) / (DisplayAsPercentage ? 100 : 1);
+                        break;
+
+                    default:
+                        currentNumberInstantaneous.Parse(TextBox.Current.Value, CultureInfo.CurrentCulture);
+                        break;
+                }
+            }
+            catch
+            {
+                // ignore parsing failures.
+                // sane state will eventually be restored by a commit (either explicit, or implicit via focus loss).
+            }
+
+            updatingFromTextBox = false;
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            updateState();
+            return true;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            base.OnHoverLost(e);
+            updateState();
+        }
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            if (!Current.Disabled)
+                focusManager.ChangeFocus(TextBox);
+            return true;
+        }
+
+        private void updateState()
+        {
+            bool childHasFocus = slider.Focused.Value || TextBox.Focused.Value;
+
+            TextBox.ReadOnly = currentNumberInstantaneous.Disabled;
+            TextBox.Alpha = TextBox.Focused.Value ? 1 : 0;
+            valueLabel.Alpha = TextBox.Focused.Value ? 0 : 1;
+
+            captionText.Colour = currentNumberInstantaneous.Disabled ? colourProvider.Background1 : colourProvider.Content2;
+            TextBox.Colour = currentNumberInstantaneous.Disabled ? colourProvider.Background1 : colourProvider.Content1;
+            valueLabel.Colour = currentNumberInstantaneous.Disabled ? colourProvider.Background1 : colourProvider.Content1;
+
+            if (Current.Disabled)
+                background.VisualStyle = VisualStyle.Disabled;
+            else if (childHasFocus)
+                background.VisualStyle = VisualStyle.Focused;
+            else if (IsHovered || slider.IsDragging.Value)
+                background.VisualStyle = VisualStyle.Hovered;
+            else
+                background.VisualStyle = VisualStyle.Normal;
+        }
+
+        private void updateValueDisplay()
+        {
+            if (updatingFromTextBox) return;
+
+            if (DisplayAsPercentage)
+            {
+                double floatValue = double.CreateTruncating(currentNumberInstantaneous.Value);
+
+                // if `DisplayAsPercentage` is true and `T` is not `int`, then `Current` / `currentNumberInstantaneous` are in the range of [0,1].
+                // in the text box, we want to show the percentage in the range of [0,100], but without the percentage sign.
+                // the reason we don&#39;t want a percentage sign is that `TextBox`es with numerical `TextInputType`s
+                // have framework-side limitations on which characters they accept and they won&#39;t accept a percentage sign.
+                //
+                // therefore, the instantaneous value needs to be multiplied by 100 if it&#39;s not `int`, so that `ToStandardFormattedString()`,
+                // which is called *intentionally* without `asPercentage: true` specified as to not emit the percentage sign, spits out the correct number.
+                //
+                // additionally note that `ToStandardFormattedString()`, when called with `asPercentage: true` specified, does the *inverse* of this,
+                // which is that it brings the formatted number *into* the [0,1] range,
+                // because .NET number formatting *automatically* multiplies the formatted number by 100 when it is told to stringify a number as percentage
+                // (https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-numeric-format-strings#the--custom-specifier-3).
+                // it&#39;s all very confusing.
+                if (currentNumberInstantaneous.Value is not int)
+                    floatValue *= 100;
+
+                TextBox.Text = floatValue.ToStandardFormattedString(Math.Max(0, OsuSliderBar&lt;T&gt;.MAX_DECIMAL_DIGITS - 2));
+            }
+            else
+                TextBox.Text = currentNumberInstantaneous.Value.ToStandardFormattedString(OsuSliderBar&lt;T&gt;.MAX_DECIMAL_DIGITS);
+
+            valueLabel.Text = LabelFormat(currentNumberInstantaneous.Value);
+        }
+
+        public LocalisableString DefaultLabelFormat(T value) =&gt; DefaultLabelFormat(value, DisplayAsPercentage);
+
+        public static LocalisableString DefaultLabelFormat(T value, bool displayAsPercentage) =&gt; value.ToStandardFormattedString(OsuSliderBar&lt;T&gt;.MAX_DECIMAL_DIGITS, displayAsPercentage);
+
+        public partial class InnerSlider : OsuSliderBar&lt;T&gt;
+        {
+            public BindableBool Focused { get; } = new BindableBool();
+
+            public BindableBool IsDragging { get; } = new BindableBool();
+
+            public Action? ResetToDefault { get; init; }
+
+            public Action? OnCommit { get; init; }
+
+            public sealed override LocalisableString TooltipText =&gt; base.TooltipText;
+
+            public required Func&lt;T, LocalisableString&gt; TooltipFormat { get; init; }
+
+            private Box leftBox = null!;
+            private Box rightBox = null!;
+            private Container defaultLine = null!;
+
+            private InnerSliderNub nub = null!;
+
+            public const float NUB_WIDTH = 10;
+
+            [Resolved]
+            private OverlayColourProvider colourProvider { get; set; } = null!;
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                Height = 40;
+                RelativeSizeAxes = Axes.X;
+                RangePadding = NUB_WIDTH / 2;
+
+                Children = new Drawable[]
+                {
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Masking = true,
+                        CornerRadius = 5,
+                        Children = new Drawable[]
+                        {
+                            leftBox = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.CentreLeft,
+                                Origin = Anchor.CentreLeft,
+                            },
+                            rightBox = new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Anchor = Anchor.CentreRight,
+                                Origin = Anchor.CentreRight,
+                            },
+                        },
+                    },
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Padding = new MarginPadding { Horizontal = RangePadding, },
+                        Children = new Drawable[]
+                        {
+                            nub = new InnerSliderNub
+                            {
+                                ResetToDefault = ResetToDefault,
+                            },
+                            defaultLine = new Circle
+                            {
+                                Anchor = Anchor.CentreLeft,
+                                Origin = Anchor.Centre,
+                                Colour = colourProvider.Content2,
+                                Blending = BlendingParameters.Additive,
+                                Alpha = 0.3f,
+                                Size = new Vector2(4),
+                                RelativePositionAxes = Axes.X,
+                            }
+                        },
+                    },
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                Current.BindDisabledChanged(_ =&gt; updateState(), true);
+
+                Current.DefaultChanged += _ =&gt; updateDefaultValue();
+                updateDefaultValue();
+
+                FinishTransforms(true);
+            }
+
+            private void updateDefaultValue()
+            {
+                // hack to get normalised default value.
+                var copy = (BindableNumber&lt;T&gt;)Current.GetUnboundCopy();
+
+                copy.Disabled = false;
+                copy.SetDefault();
+
+                defaultLine.X = copy.NormalizedValue;
+            }
+
+            protected override void UpdateAfterChildren()
+            {
+                base.UpdateAfterChildren();
+                leftBox.Width = Math.Clamp(RangePadding + nub.DrawPosition.X, 0, Math.Max(0, DrawWidth)) / DrawWidth;
+                rightBox.Width = Math.Clamp(DrawWidth - nub.DrawPosition.X - RangePadding, 0, Math.Max(0, DrawWidth)) / DrawWidth;
+            }
+
+            protected override bool OnDragStart(DragStartEvent e)
+            {
+                bool dragging = base.OnDragStart(e);
+                IsDragging.Value = dragging;
+                updateState();
+                return dragging;
+            }
+
+            protected override void OnDragEnd(DragEndEvent e)
+            {
+                base.OnDragEnd(e);
+                IsDragging.Value = false;
+                updateState();
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                updateState();
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                updateState();
+                base.OnHoverLost(e);
+            }
+
+            protected override void OnFocus(FocusEvent e)
+            {
+                updateState();
+                Focused.Value = true;
+                base.OnFocus(e);
+            }
+
+            protected override void OnFocusLost(FocusLostEvent e)
+            {
+                updateState();
+                Focused.Value = false;
+                base.OnFocusLost(e);
+            }
+
+            private void updateState()
+            {
+                rightBox.Colour = colourProvider.Background5;
+
+                Color4 leftColour = colourProvider.Light4;
+                Color4 defaultLineColour;
+                Color4 nubColour;
+
+                if (IsHovered || HasFocus || IsDragged)
+                {
+                    defaultLineColour = colourProvider.Content1.Lighten(0.4f);
+                    nubColour = colourProvider.Highlight1;
+                }
+                else
+                {
+                    nubColour = colourProvider.Highlight1.Darken(0.1f);
+                    defaultLineColour = colourProvider.Content2;
+                }
+
+                if (Current.Disabled)
+                {
+                    nubColour = nubColour.Darken(0.4f);
+                    leftColour = leftColour.Darken(0.4f);
+                }
+
+                leftBox.FadeColour(leftColour, 250, Easing.OutQuint);
+                nub.FadeColour(nubColour, 250, Easing.OutQuint);
+                defaultLine.FadeColour(defaultLineColour, 250, Easing.OutQuint);
+            }
+
+            protected override void UpdateValue(float value)
+            {
+                nub.MoveToX(value, 250, Easing.OutElasticQuarter);
+                defaultLine.ResizeHeightTo(Current.IsDefault ? 28 : 6, 250, Easing.OutElasticQuarter);
+            }
+
+            protected override bool Commit()
+            {
+                bool result = base.Commit();
+
+                if (result)
+                    OnCommit?.Invoke();
+
+                return result;
+            }
+
+            protected sealed override LocalisableString GetTooltipText(T value) =&gt; TooltipFormat(value);
+        }
+
+        public partial class InnerSliderNub : Circle
+        {
+            public Action? ResetToDefault { get; set; }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                CornerExponent = 2.5f;
+                Width = InnerSlider.NUB_WIDTH;
+                RelativeSizeAxes = Axes.Y;
+                RelativePositionAxes = Axes.X;
+                Origin = Anchor.TopCentre;
+            }
+
+            protected override bool OnClick(ClickEvent e) =&gt; true; // must be handled for double click handler to ever fire
+
+            protected override bool OnDoubleClick(DoubleClickEvent e)
+            {
+                ResetToDefault?.Invoke();
+                return true;
+            }
+        }
+
+        public IEnumerable&lt;LocalisableString&gt; FilterTerms =&gt; new[] { Caption, HintText };
+
+        public event Action? ValueChanged;
+
+        public bool IsDefault =&gt; Current.IsDefault;
+
+        public void SetDefault() =&gt; Current.SetDefault();
+
+        public bool IsDisabled =&gt; Current.Disabled;
+
+        public float MainDrawHeight =&gt; DrawHeight;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,20,34,35,0],[36,13,36,14,0],[37,17,37,41,0],[42,17,42,61,0],[43,17,43,70,0],[44,17,44,72,0],[45,13,45,14,0],[48,9,48,100,0],[50,9,50,97,0],[57,45,57,49,0],[57,50,57,54,0],[64,13,64,14,0],[65,17,65,50,0],[67,17,67,41,0],[68,21,68,81,0],[69,13,69,14,0],[79,20,79,27,0],[81,13,81,14,0],[82,17,82,33,0],[84,17,84,30,0],[85,21,85,49,0],[86,13,86,14,0],[92,45,92,49,0],[92,50,92,55,0],[99,20,99,39,0],[100,20,100,47,0],[106,43,106,47,0],[106,48,106,53,0],[111,43,111,47,0],[111,48,111,53,0],[111,58,111,62,0],[120,20,120,31,0],[122,13,122,14,0],[123,17,123,37,0],[125,17,125,30,0],[126,21,126,42,0],[127,13,127,14,0],[134,59,134,63,0],[134,64,134,69,0],[136,53,136,57,0],[136,58,136,70,0],[136,75,136,80,0],[138,9,138,58,0],[139,9,139,50,0],[140,9,140,54,0],[141,9,141,52,0],[144,56,144,60,0],[144,61,144,65,0],[144,70,144,75,0],[146,9,146,88,0],[148,36,148,93,0],[150,9,150,31,0],[151,9,151,10,0],[152,13,152,48,0],[153,13,153,36,0],[153,36,153,50,0],[153,50,153,51,0],[167,13,170,34,0],[170,34,170,82,0],[170,82,171,38,0],[171,38,171,54,0],[171,54,175,17,0],[175,17,175,18,0],[175,18,176,21,0],[176,21,176,37,0],[176,37,177,25,0],[177,25,177,38,0],[177,38,178,17,0],[178,17,178,18,0],[178,18,179,15,0],[181,13,182,13,0],[182,13,182,14,0],[182,14,183,17,0],[183,17,183,63,0],[183,63,184,17,0],[184,17,184,40,0],[184,40,185,13,0],[185,13,185,14,0],[185,14,185,15,0],[187,13,187,45,0],[187,45,187,84,0],[187,84,187,85,0],[188,13,188,45,0],[188,45,188,84,0],[188,84,188,85,0],[189,13,189,46,0],[189,46,189,86,0],[189,86,189,87,0],[190,13,190,44,0],[190,44,190,91,0],[190,91,190,92,0],[191,13,192,13,0],[192,13,192,14,0],[192,14,193,17,0],[193,17,193,30,0],[193,30,194,17,0],[194,17,194,18,0],[194,18,196,21,0],[196,21,196,70,0],[196,70,197,17,0],[197,17,197,18,0],[197,18,199,17,0],[199,17,199,64,0],[199,64,200,17,0],[200,17,200,30,0],[200,30,201,21,0],[201,21,201,35,0],[201,35,202,13,0],[202,13,202,14,0],[202,14,202,15,0],[204,13,204,56,0],[205,9,205,10,0],[209,9,209,10,0],[210,13,210,39,0],[211,13,211,35,0],[213,13,253,41,0],[253,41,253,42,0],[253,42,254,45,0],[254,45,254,75,0],[254,75,258,45,0],[258,45,258,70,0],[258,70,259,45,0],[259,45,259,74,0],[259,74,260,45,0],[260,45,260,73,0],[260,73,261,45,0],[261,45,261,93,0],[261,93,262,45,0],[262,45,262,101,0],[262,101,263,41,0],[263,41,263,42,0],[263,42,274,25,0],[274,25,274,26,0],[274,26,275,29,0],[275,29,275,59,0],[275,59,276,29,0],[276,29,276,59,0],[276,59,277,29,0],[277,29,277,57,0],[277,57,278,29,0],[278,29,278,44,0],[278,44,279,25,0],[279,25,279,26,0],[279,26,282,15,0],[284,13,284,30,0],[285,17,285,62,0],[286,9,286,10,0],[288,74,288,112,0],[291,9,291,10,0],[292,13,292,33,0],[294,13,294,43,0],[296,13,296,57,0],[298,13,298,51,0],[298,51,298,64,0],[298,64,298,66,0],[299,13,299,47,0],[300,13,300,59,0],[302,13,302,53,0],[302,53,302,66,0],[302,66,302,68,0],[303,13,303,50,0],[303,50,303,63,0],[303,63,303,65,0],[305,13,305,51,0],[305,51,305,79,0],[305,79,305,81,0],[306,13,306,65,0],[306,65,306,78,0],[306,78,306,80,0],[307,13,308,13,0],[308,13,308,14,0],[308,14,309,17,0],[309,17,309,44,0],[309,44,310,21,0],[310,21,310,48,0],[310,48,312,17,0],[312,17,312,31,0],[312,31,313,17,0],[313,17,313,38,0],[313,38,314,13,0],[314,13,314,14,0],[314,14,314,22,0],[315,9,315,10,0],[320,9,320,10,0],[321,13,321,42,0],[322,9,322,10,0],[325,9,325,10,0],[326,13,326,42,0],[328,13,328,56,0],[329,13,329,62,0],[331,13,331,40,0],[332,9,332,10,0],[335,9,335,10,0],[336,13,336,40,0],[339,13,339,14,0],[340,17,340,52,0],[343,25,343,78,0],[344,25,344,31,0],[347,25,347,118,0],[348,25,348,31,0],[351,25,351,116,0],[352,25,352,31,0],[355,25,355,109,0],[356,25,356,31,0],[358,13,358,14,0],[359,13,359,18,0],[360,13,360,14,0],[363,13,363,14,0],[365,13,365,41,0],[366,9,366,10,0],[369,9,369,10,0],[370,13,370,27,0],[371,13,371,25,0],[372,9,372,10,0],[375,9,375,10,0],[376,13,376,33,0],[377,13,377,27,0],[378,9,378,10,0],[381,9,381,10,0],[382,13,382,35,0],[383,17,383,51,0],[384,13,384,25,0],[385,9,385,10,0],[388,9,388,10,0],[389,13,389,80,0],[391,13,391,68,0],[392,13,392,59,0],[393,13,393,62,0],[395,13,395,125,0],[396,13,396,121,0],[397,13,397,124,0],[399,13,399,34,0],[400,17,400,63,0],[401,18,401,36,0],[402,17,402,62,0],[403,18,403,59,0],[404,17,404,62,0],[406,17,406,61,0],[407,9,407,10,0],[410,9,410,10,0],[411,13,411,37,0],[411,38,411,45,0],[413,13,413,37,0],[414,13,414,14,0],[415,17,415,95,0],[430,17,430,65,0],[431,21,431,39,0],[433,17,433,122,0],[434,13,434,14,0],[436,17,436,127,0],[438,13,438,77,0],[439,9,439,10,0],[441,65,441,111,0],[443,98,443,186,0],[447,43,447,47,0],[447,52,447,70,0],[449,46,449,50,0],[449,55,449,73,0],[451,45,451,49,0],[451,50,451,55,0],[453,39,453,43,0],[453,44,453,49,0],[455,69,455,85,0],[457,72,457,76,0],[457,77,457,82,0],[459,13,459,41,0],[460,13,460,42,0],[461,13,461,51,0],[463,13,463,48,0],[468,60,468,64,0],[468,65,468,69,0],[468,74,468,79,0],[472,13,472,14,0],[473,17,473,29,0],[474,17,474,43,0],[475,17,475,46,0],[477,17,522,19,0],[523,13,523,14,0],[526,13,526,14,0],[527,17,527,37,0],[529,17,529,50,0],[529,50,529,63,0],[529,63,529,71,0],[531,17,531,48,0],[531,48,531,68,0],[531,68,531,69,0],[532,17,532,38,0],[534,17,534,40,0],[535,13,535,14,0],[538,13,538,14,0],[540,17,540,72,0],[542,17,542,39,0],[543,17,543,35,0],[545,17,545,54,0],[546,13,546,14,0],[549,13,549,14,0],[550,17,550,44,0],[551,17,551,118,0],[552,17,552,131,0],[553,13,553,14,0],[556,13,556,14,0],[557,17,557,53,0],[558,17,558,45,0],[559,17,559,31,0],[560,17,560,33,0],[561,13,561,14,0],[564,13,564,14,0],[565,17,565,35,0],[566,17,566,42,0],[567,17,567,31,0],[568,13,568,14,0],[571,13,571,14,0],[572,17,572,31,0],[573,17,573,40,0],[574,13,574,14,0],[577,13,577,14,0],[578,17,578,31,0],[579,17,579,37,0],[580,13,580,14,0],[583,13,583,14,0],[584,17,584,31,0],[585,17,585,38,0],[586,17,586,33,0],[587,13,587,14,0],[590,13,590,14,0],[591,17,591,31,0],[592,17,592,39,0],[593,17,593,37,0],[594,13,594,14,0],[597,13,597,14,0],[598,17,598,62,0],[600,17,600,59,0],[604,17,604,56,0],[605,17,605,18,0],[606,21,606,79,0],[607,21,607,59,0],[608,17,608,18,0],[610,17,610,18,0],[611,21,611,72,0],[612,21,612,65,0],[613,17,613,18,0],[615,17,615,38,0],[616,17,616,18,0],[617,21,617,56,0],[618,21,618,58,0],[619,17,619,18,0],[621,17,621,70,0],[622,17,622,65,0],[623,17,623,81,0],[624,13,624,14,0],[627,13,627,14,0],[628,17,628,67,0],[629,17,629,103,0],[630,13,630,14,0],[633,13,633,14,0],[634,17,634,45,0],[636,17,636,28,0],[637,21,637,40,0],[639,17,639,31,0],[640,13,640,14,0],[642,84,642,104,0],[647,45,647,49,0],[647,50,647,54,0],[651,13,651,14,0],[652,17,652,39,0],[653,17,653,47,0],[654,17,654,43,0],[655,17,655,47,0],[656,17,656,43,0],[657,13,657,14,0],[659,62,659,66,0],[662,13,662,14,0],[663,17,663,42,0],[664,17,664,29,0],[665,13,665,14,0],[668,62,668,89,0],[672,34,672,51,0],[674,37,674,57,0],[676,35,676,51,0],[678,40,678,50,0]]);
+    </script>
+  </body>
+</html>

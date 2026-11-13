@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Chat/ChannelList/ChannelList.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Localisation;
+using osu.Framework.Testing;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.Chat;
+using osu.Game.Overlays.Chat.Listing;
+using osu.Game.Resources.Localisation.Web;
+using osuTK;
+
+namespace osu.Game.Overlays.Chat.ChannelList
+{
+    public partial class ChannelList : Container
+    {
+        public Action&lt;Channel&gt;? OnRequestSelect;
+        public Action&lt;Channel&gt;? OnRequestLeave;
+
+        public IEnumerable&lt;Channel&gt; Channels =&gt; groupFlow.Children
+                                                         .OfType&lt;ChannelGroup&gt;()
+                                                         .SelectMany(channelGroup =&gt; channelGroup.ItemFlow)
+                                                         .Select(item =&gt; item.Channel);
+
+        public readonly ChannelListing.ChannelListingChannel ChannelListingChannel = new ChannelListing.ChannelListingChannel();
+
+        private readonly Dictionary&lt;Channel, ChannelListItem&gt; channelMap = new Dictionary&lt;Channel, ChannelListItem&gt;();
+
+        public ChannelGroup AnnounceChannelGroup { get; private set; } = null!;
+        public ChannelGroup PublicChannelGroup { get; private set; } = null!;
+        public ChannelGroup TeamChannelGroup { get; private set; } = null!;
+        public ChannelGroup PrivateChannelGroup { get; private set; } = null!;
+
+        private OsuScrollContainer scroll = null!;
+        private SearchContainer groupFlow = null!;
+
+        private ChannelListItem selector = null!;
+        private TextBox searchTextBox = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(OverlayColourProvider colourProvider)
+        {
+            Children = new Drawable[]
+            {
+                new Box
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Colour = colourProvider.Background6,
+                },
+                scroll = new OsuScrollContainer
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    ScrollbarAnchor = Anchor.TopRight,
+                    ScrollDistance = 35f,
+                    Child = groupFlow = new SearchContainer
+                    {
+                        Direction = FillDirection.Vertical,
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Children = new Drawable[]
+                        {
+                            new Container
+                            {
+                                RelativeSizeAxes = Axes.X,
+                                AutoSizeAxes = Axes.Y,
+                                Padding = new MarginPadding { Horizontal = 10, Top = 8 },
+                                Child = searchTextBox = new ChannelSearchTextBox
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                }
+                            },
+                            // cross-reference for icons: https://github.com/ppy/osu-web/blob/3c9e99eaf4bd9e73d2712f60d67f5bc95f9dfe2b/resources/js/chat/conversation-list.tsx#L13-L19
+                            AnnounceChannelGroup = new ChannelGroup(ChatStrings.ChannelsListTitleANNOUNCE.ToUpper(), FontAwesome.Solid.Bullhorn, false),
+                            PublicChannelGroup = new ChannelGroup(ChatStrings.ChannelsListTitlePUBLIC.ToUpper(), FontAwesome.Solid.Comments, false),
+                            selector = new ChannelListItem(ChannelListingChannel),
+                            TeamChannelGroup = new ChannelGroup(ChatStrings.ChannelsListTitleTEAM.ToUpper(), FontAwesome.Solid.Users, false),
+                            PrivateChannelGroup = new ChannelGroup(ChatStrings.ChannelsListTitlePM.ToUpper(), FontAwesome.Solid.Envelope, true),
+                        },
+                    },
+                },
+            };
+
+            searchTextBox.Current.BindValueChanged(_ =&gt; groupFlow.SearchTerm = searchTextBox.Current.Value, true);
+            searchTextBox.OnCommit += (_, _) =&gt;
+            {
+                if (string.IsNullOrEmpty(searchTextBox.Current.Value))
+                    return;
+
+                var firstMatchingItem = this.ChildrenOfType&lt;ChannelListItem&gt;().FirstOrDefault(item =&gt; item.MatchingFilter);
+                if (firstMatchingItem == null)
+                    return;
+
+                OnRequestSelect?.Invoke(firstMatchingItem.Channel);
+            };
+
+            selector.OnRequestSelect += chan =&gt; OnRequestSelect?.Invoke(chan);
+            updateVisibility();
+        }
+
+        public void AddChannel(Channel channel)
+        {
+            if (channelMap.ContainsKey(channel))
+                return;
+
+            ChannelListItem item = new ChannelListItem(channel)
+            {
+                CanLeave = channel.Type != ChannelType.Team
+            };
+            item.OnRequestSelect += chan =&gt; OnRequestSelect?.Invoke(chan);
+            if (item.CanLeave)
+                item.OnRequestLeave += chan =&gt; OnRequestLeave?.Invoke(chan);
+
+            ChannelGroup group = getGroupFromChannel(channel);
+            channelMap.Add(channel, item);
+            group.AddChannel(item);
+
+            updateVisibility();
+        }
+
+        public void RemoveChannel(Channel channel)
+        {
+            if (!channelMap.TryGetValue(channel, out var item))
+                return;
+
+            ChannelGroup group = getGroupFromChannel(channel);
+
+            channelMap.Remove(channel);
+            group.RemoveChannel(item);
+
+            updateVisibility();
+        }
+
+        public ChannelListItem GetItem(Channel channel)
+        {
+            if (!channelMap.TryGetValue(channel, out var item))
+                throw new ArgumentOutOfRangeException();
+
+            return item;
+        }
+
+        public void ScrollChannelIntoView(Channel channel) =&gt; scroll.ScrollIntoView(GetItem(channel));
+
+        private ChannelGroup getGroupFromChannel(Channel channel)
+        {
+            switch (channel.Type)
+            {
+                case ChannelType.Public:
+                    return PublicChannelGroup;
+
+                case ChannelType.PM:
+                    return PrivateChannelGroup;
+
+                case ChannelType.Announce:
+                    return AnnounceChannelGroup;
+
+                case ChannelType.Team:
+                    return TeamChannelGroup;
+
+                default:
+                    return PublicChannelGroup;
+            }
+        }
+
+        private void updateVisibility()
+        {
+            AnnounceChannelGroup.Alpha = AnnounceChannelGroup.ItemFlow.Any() ? 1 : 0;
+            TeamChannelGroup.Alpha = TeamChannelGroup.ItemFlow.Any() ? 1 : 0;
+        }
+
+        public partial class ChannelGroup : FillFlowContainer
+        {
+            private readonly bool sortByRecent;
+            public readonly ChannelListItemFlow ItemFlow;
+
+            public ChannelGroup(LocalisableString label, IconUsage icon, bool sortByRecent)
+            {
+                this.sortByRecent = sortByRecent;
+                Direction = FillDirection.Vertical;
+                RelativeSizeAxes = Axes.X;
+                AutoSizeAxes = Axes.Y;
+                Padding = new MarginPadding { Top = 8 };
+
+                Children = new Drawable[]
+                {
+                    new FillFlowContainer
+                    {
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                        Direction = FillDirection.Horizontal,
+                        Spacing = new Vector2(5),
+                        Children = new Drawable[]
+                        {
+                            new OsuSpriteText
+                            {
+                                Text = label,
+                                Margin = new MarginPadding { Left = 10, Bottom = 5 },
+                                Font = OsuFont.Torus.With(size: 12, weight: FontWeight.SemiBold),
+                            },
+                            new SpriteIcon
+                            {
+                                Icon = icon,
+                                Size = new Vector2(12),
+                            },
+                        }
+                    },
+                    ItemFlow = new ChannelListItemFlow(sortByRecent)
+                    {
+                        Direction = FillDirection.Vertical,
+                        RelativeSizeAxes = Axes.X,
+                        AutoSizeAxes = Axes.Y,
+                    },
+                };
+            }
+
+            public partial class ChannelListItemFlow : FillFlowContainer&lt;ChannelListItem&gt;
+            {
+                private readonly bool sortByRecent;
+
+                public ChannelListItemFlow(bool sortByRecent)
+                {
+                    this.sortByRecent = sortByRecent;
+                }
+
+                public void Reflow() =&gt; InvalidateLayout();
+
+                public override IEnumerable&lt;Drawable&gt; FlowingChildren =&gt; sortByRecent
+                    ? base.FlowingChildren.OfType&lt;ChannelListItem&gt;().OrderByDescending(i =&gt; i.Channel.LastMessageId ?? long.MinValue)
+                    : base.FlowingChildren.OfType&lt;ChannelListItem&gt;().OrderBy(i =&gt; i.Channel.Name);
+            }
+
+            public void AddChannel(ChannelListItem item)
+            {
+                ItemFlow.Add(item);
+
+                if (sortByRecent)
+                {
+                    item.Channel.NewMessagesArrived += newMessagesArrived;
+                    item.Channel.PendingMessageResolved += pendingMessageResolved;
+                }
+
+                ItemFlow.Reflow();
+            }
+
+            public void RemoveChannel(ChannelListItem item)
+            {
+                if (sortByRecent)
+                {
+                    item.Channel.NewMessagesArrived -= newMessagesArrived;
+                    item.Channel.PendingMessageResolved -= pendingMessageResolved;
+                }
+
+                ItemFlow.Remove(item, true);
+            }
+
+            private void pendingMessageResolved(LocalEchoMessage _, Message __) =&gt; ItemFlow.Reflow();
+            private void newMessagesArrived(IEnumerable&lt;Message&gt; _) =&gt; ItemFlow.Reflow();
+
+            protected override void Dispose(bool isDisposing)
+            {
+                base.Dispose(isDisposing);
+
+                foreach (var item in ItemFlow)
+                {
+                    item.Channel.NewMessagesArrived -= newMessagesArrived;
+                    item.Channel.PendingMessageResolved -= pendingMessageResolved;
+                }
+            }
+        }
+
+        private partial class ChannelSearchTextBox : BasicSearchTextBox
+        {
+            protected override bool AllowCommit =&gt; true;
+
+            public ChannelSearchTextBox()
+            {
+                const float scale_factor = 0.8f;
+                Scale = new Vector2(scale_factor);
+                Width = 1 / scale_factor;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,49,34,86,0],[34,86,34,107,0],[34,107,35,74,0],[35,74,35,86,0],[35,86,35,87,0],[37,9,37,129,0],[39,9,39,119,0],[41,52,41,56,0],[41,57,41,69,0],[41,74,41,79,0],[42,50,42,54,0],[42,55,42,67,0],[42,72,42,77,0],[43,48,43,52,0],[43,53,43,65,0],[43,70,43,75,0],[44,51,44,55,0],[44,56,44,68,0],[44,73,44,78,0],[46,9,46,51,0],[47,9,47,51,0],[49,9,49,50,0],[50,9,50,47,0],[54,9,54,10,0],[55,13,93,15,0],[95,13,95,57,0],[95,57,95,107,0],[95,107,95,115,0],[96,13,97,13,0],[97,13,97,14,0],[97,14,98,17,0],[98,17,98,71,0],[98,71,99,21,0],[99,21,99,28,0],[99,28,101,17,0],[101,17,101,103,0],[101,103,101,122,0],[101,122,101,124,0],[101,124,102,17,0],[102,17,102,47,0],[102,47,103,21,0],[103,21,103,28,0],[103,28,105,17,0],[105,17,105,68,0],[105,68,106,13,0],[106,13,106,14,0],[106,14,106,15,0],[108,13,108,49,0],[108,49,108,78,0],[108,78,108,79,0],[109,13,109,32,0],[110,9,110,10,0],[113,9,113,10,0],[114,13,114,49,0],[115,17,115,24,0],[117,13,120,15,0],[121,13,121,45,0],[121,45,121,74,0],[121,74,121,75,0],[122,13,122,31,0],[123,17,123,48,0],[123,48,123,76,0],[123,76,123,77,0],[125,13,125,63,0],[126,13,126,43,0],[127,13,127,36,0],[129,13,129,32,0],[130,9,130,10,0],[133,9,133,10,0],[134,13,134,64,0],[135,17,135,24,0],[137,13,137,63,0],[139,13,139,40,0],[140,13,140,39,0],[142,13,142,32,0],[143,9,143,10,0],[146,9,146,10,0],[147,13,147,64,0],[148,17,148,57,0],[150,13,150,25,0],[151,9,151,10,0],[153,63,153,102,0],[156,9,156,10,0],[157,13,157,34,0],[160,21,160,47,0],[163,21,163,48,0],[166,21,166,49,0],[169,21,169,45,0],[172,21,172,47,0],[174,9,174,10,0],[177,9,177,10,0],[178,13,178,86,0],[179,13,179,78,0],[180,9,180,10,0],[187,13,187,92,0],[188,13,188,14,0],[189,17,189,50,0],[190,17,190,52,0],[191,17,191,43,0],[192,17,192,39,0],[193,17,193,57,0],[195,17,224,19,0],[225,13,225,14,0],[231,17,231,62,0],[232,17,232,18,0],[233,21,233,54,0],[234,17,234,18,0],[236,41,236,59,0],[238,74,239,93,0],[239,93,239,133,0],[239,133,240,83,0],[240,83,240,97,0],[240,97,240,98,0],[244,13,244,14,0],[245,17,245,36,0],[247,17,247,34,0],[248,17,248,18,0],[249,21,249,75,0],[250,21,250,83,0],[251,17,251,18,0],[253,17,253,35,0],[254,13,254,14,0],[257,13,257,14,0],[258,17,258,34,0],[259,17,259,18,0],[260,21,260,75,0],[261,21,261,83,0],[262,17,262,18,0],[264,17,264,45,0],[265,13,265,14,0],[267,84,267,101,0],[268,72,268,89,0],[271,13,271,14,0],[272,17,272,43,0],[274,17,274,24,0],[274,26,274,34,0],[274,35,274,37,0],[274,38,274,46,0],[275,17,275,18,0],[276,21,276,75,0],[277,21,277,83,0],[278,17,278,18,0],[279,13,279,14,0],[284,52,284,56,0],[286,13,286,42,0],[287,13,287,14,0],[289,17,289,51,0],[290,17,290,42,0],[291,13,291,14,0]]);
+    </script>
+  </body>
+</html>

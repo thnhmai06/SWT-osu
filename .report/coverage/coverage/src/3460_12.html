@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Graphics/UserInterface/SegmentedGraph.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Rendering;
+using osu.Framework.Graphics.Shaders;
+using osu.Framework.Graphics.Textures;
+using osuTK;
+
+namespace osu.Game.Graphics.UserInterface
+{
+    public partial class SegmentedGraph&lt;T&gt; : Drawable
+        where T : struct, IComparable&lt;T&gt;, IConvertible, IEquatable&lt;T&gt;
+    {
+        private bool graphNeedsUpdate;
+
+        private T[]? values;
+        private int[] tiers = Array.Empty&lt;int&gt;();
+        private readonly SegmentManager segments;
+
+        private int tierCount;
+
+        public SegmentedGraph(int tierCount = 1)
+        {
+            this.tierCount = tierCount;
+            tierColours = new[]
+            {
+                new Colour4(0, 0, 0, 0)
+            };
+            segments = new SegmentManager(tierCount);
+        }
+
+        public T[] Values
+        {
+            get =&gt; values ?? Array.Empty&lt;T&gt;();
+            set
+            {
+                if (value == values) return;
+
+                values = value;
+                graphNeedsUpdate = true;
+            }
+        }
+
+        private IReadOnlyList&lt;Colour4&gt; tierColours;
+
+        public IReadOnlyList&lt;Colour4&gt; TierColours
+        {
+            get =&gt; tierColours;
+            set
+            {
+                tierCount = value.Count;
+                tierColours = value;
+
+                graphNeedsUpdate = true;
+            }
+        }
+
+        private Texture texture = null!;
+        private IShader shader = null!;
+
+        [BackgroundDependencyLoader]
+        private void load(IRenderer renderer, ShaderManager shaders)
+        {
+            texture = renderer.WhitePixel;
+            shader = shaders.Load(VertexShaderDescriptor.TEXTURE_2, FragmentShaderDescriptor.TEXTURE);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (graphNeedsUpdate)
+            {
+                recalculateTiers(values);
+                recalculateSegments();
+                Invalidate(Invalidation.DrawNode);
+                graphNeedsUpdate = false;
+            }
+        }
+
+        private void recalculateTiers(T[]? arr)
+        {
+            if (arr == null || arr.Length == 0)
+            {
+                tiers = Array.Empty&lt;int&gt;();
+                return;
+            }
+
+            float[] floatValues = arr.Select(v =&gt; Convert.ToSingle(v)).ToArray();
+
+            // Shift values to eliminate negative ones
+            float min = floatValues.Min();
+
+            if (min &lt; 0)
+            {
+                for (int i = 0; i &lt; floatValues.Length; i++)
+                    floatValues[i] += Math.Abs(min);
+            }
+
+            // Normalize values
+            float max = floatValues.Max();
+
+            for (int i = 0; i &lt; floatValues.Length; i++)
+                floatValues[i] /= max;
+
+            // Deduce tiers from values
+            tiers = floatValues.Select(v =&gt; (int)Math.Floor(v * tierCount)).ToArray();
+        }
+
+        private void recalculateSegments()
+        {
+            segments.Clear();
+
+            if (tiers.Length == 0)
+            {
+                segments.Add(0, 0, 1);
+                return;
+            }
+
+            for (int i = 0; i &lt; tiers.Length; i++)
+            {
+                for (int tier = 0; tier &lt; tierCount; tier++)
+                {
+                    if (tier &lt; 0)
+                        continue;
+
+                    // One tier covers itself and all tiers above it.
+                    // By layering multiple transparent boxes, higher tiers will be brighter.
+                    // If using opaque colors, higher tiers will be on front, covering lower tiers.
+                    if (tiers[i] &gt;= tier)
+                    {
+                        if (!segments.IsTierStarted(tier))
+                            segments.StartSegment(tier, i * 1f / tiers.Length);
+                    }
+                    else
+                    {
+                        if (segments.IsTierStarted(tier))
+                            segments.EndSegment(tier, i * 1f / tiers.Length);
+                    }
+                }
+            }
+
+            segments.EndAllPendingSegments();
+            segments.Sort();
+        }
+
+        protected override DrawNode CreateDrawNode() =&gt; new SegmentedGraphDrawNode(this);
+
+        protected struct SegmentInfo
+        {
+            /// &lt;summary&gt;
+            /// The tier this segment is at.
+            /// &lt;/summary&gt;
+            public int Tier;
+
+            /// &lt;summary&gt;
+            /// The progress at which this segment starts.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// The value is a normalized float (from 0 to 1).
+            /// &lt;/remarks&gt;
+            public float Start;
+
+            /// &lt;summary&gt;
+            /// The progress at which this segment ends.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// The value is a normalized float (from 0 to 1).
+            /// &lt;/remarks&gt;
+            public float End;
+
+            /// &lt;summary&gt;
+            /// The length of this segment.
+            /// &lt;/summary&gt;
+            /// &lt;remarks&gt;
+            /// The value is a normalized float (from 0 to 1).
+            /// &lt;/remarks&gt;
+            public float Length =&gt; End - Start;
+
+            public override string ToString()
+            {
+                return $&quot;({Tier}, {Start * 100}%, {End * 100}%)&quot;;
+            }
+        }
+
+        private class SegmentedGraphDrawNode : DrawNode
+        {
+            public new SegmentedGraph&lt;T&gt; Source =&gt; (SegmentedGraph&lt;T&gt;)base.Source;
+
+            private Texture texture = null!;
+            private IShader shader = null!;
+            private readonly List&lt;SegmentInfo&gt; segments = new List&lt;SegmentInfo&gt;();
+            private Vector2 drawSize;
+            private readonly List&lt;Colour4&gt; tierColours = new List&lt;Colour4&gt;();
+
+            public SegmentedGraphDrawNode(SegmentedGraph&lt;T&gt; source)
+                : base(source)
+            {
+            }
+
+            public override void ApplyState()
+            {
+                base.ApplyState();
+
+                texture = Source.texture;
+                shader = Source.shader;
+                drawSize = Source.DrawSize;
+
+                segments.Clear();
+                segments.AddRange(Source.segments.Where(s =&gt; s.Length * drawSize.X &gt; 1));
+
+                tierColours.Clear();
+                tierColours.AddRange(Source.tierColours);
+            }
+
+            protected override void Draw(IRenderer renderer)
+            {
+                base.Draw(renderer);
+
+                shader.Bind();
+
+                foreach (SegmentInfo segment in segments)
+                {
+                    Vector2 topLeft = new Vector2(segment.Start * drawSize.X, 0);
+                    Vector2 topRight = new Vector2(segment.End * drawSize.X, 0);
+                    Vector2 bottomLeft = new Vector2(segment.Start * drawSize.X, drawSize.Y);
+                    Vector2 bottomRight = new Vector2(segment.End * drawSize.X, drawSize.Y);
+
+                    renderer.DrawQuad(
+                        texture,
+                        new Quad(
+                            Vector2Extensions.Transform(topLeft, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(topRight, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(bottomLeft, DrawInfo.Matrix),
+                            Vector2Extensions.Transform(bottomRight, DrawInfo.Matrix)),
+                        getSegmentColour(segment));
+                }
+
+                shader.Unbind();
+            }
+
+            private ColourInfo getSegmentColour(SegmentInfo segment)
+            {
+                var segmentColour = DrawColourInfo.Colour.Interpolate(new Quad(segment.Start, 0f, segment.End - segment.Start, 1f));
+
+                var tierColour = segment.Tier &gt;= 0 ? tierColours[segment.Tier] : new Colour4(0, 0, 0, 0);
+                segmentColour.ApplyChild(tierColour);
+
+                return segmentColour;
+            }
+        }
+
+        protected class SegmentManager : IEnumerable&lt;SegmentInfo&gt;
+        {
+            private readonly List&lt;SegmentInfo&gt; segments = new List&lt;SegmentInfo&gt;();
+
+            private readonly SegmentInfo?[] pendingSegments;
+
+            public SegmentManager(int tierCount)
+            {
+                pendingSegments = new SegmentInfo?[tierCount];
+            }
+
+            public void StartSegment(int tier, float start)
+            {
+                if (pendingSegments[tier] != null)
+                    throw new InvalidOperationException($&quot;Another {nameof(SegmentInfo)} of tier {tier.ToString()} has already been started.&quot;);
+
+                pendingSegments[tier] = new SegmentInfo
+                {
+                    Tier = tier,
+                    Start = Math.Clamp(start, 0, 1)
+                };
+            }
+
+            public void EndSegment(int tier, float end)
+            {
+                SegmentInfo? pendingSegment = pendingSegments[tier];
+                if (pendingSegment == null)
+                    throw new InvalidOperationException($&quot;Cannot end {nameof(SegmentInfo)} of tier {tier.ToString()} that has not been started.&quot;);
+
+                SegmentInfo segment = pendingSegment.Value;
+                segment.End = Math.Clamp(end, 0, 1);
+                segments.Add(segment);
+                pendingSegments[tier] = null;
+            }
+
+            public void EndAllPendingSegments()
+            {
+                foreach (SegmentInfo? pendingSegment in pendingSegments)
+                {
+                    if (pendingSegment == null)
+                        continue;
+
+                    SegmentInfo finalizedSegment = pendingSegment.Value;
+                    finalizedSegment.End = 1;
+                    segments.Add(finalizedSegment);
+                }
+            }
+
+            public void Sort() =&gt;
+                segments.Sort((a, b) =&gt;
+                    a.Tier != b.Tier
+                        ? a.Tier.CompareTo(b.Tier)
+                        : a.Start.CompareTo(b.Start));
+
+            public void Add(SegmentInfo segment) =&gt; segments.Add(segment);
+
+            public void Clear()
+            {
+                segments.Clear();
+
+                for (int i = 0; i &lt; pendingSegments.Length; i++)
+                    pendingSegments[i] = null;
+            }
+
+            public int Count =&gt; segments.Count;
+
+            public void Add(int tier, float start, float end)
+            {
+                SegmentInfo segment = new SegmentInfo
+                {
+                    Tier = tier,
+                    Start = Math.Clamp(start, 0, 1),
+                    End = Math.Clamp(end, 0, 1)
+                };
+
+                if (segment.Start &gt; segment.End)
+                    throw new InvalidOperationException(&quot;Segment start cannot be after segment end.&quot;);
+
+                Add(segment);
+            }
+
+            public bool IsTierStarted(int tier) =&gt; tier &gt;= 0 &amp;&amp; pendingSegments[tier].HasValue;
+
+            public IEnumerator&lt;SegmentInfo&gt; GetEnumerator() =&gt; segments.GetEnumerator();
+            IEnumerator IEnumerable.GetEnumerator() =&gt; GetEnumerator();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[25,9,25,50,0],[30,9,30,49,0],[31,9,31,10,0],[32,13,32,40,0],[33,13,36,15,0],[37,13,37,54,0],[38,9,38,10,0],[42,20,42,46,0],[44,13,44,14,0],[45,17,45,37,0],[45,38,45,45,0],[47,17,47,32,0],[48,17,48,41,0],[49,13,49,14,0],[56,20,56,31,0],[58,13,58,14,0],[59,17,59,41,0],[60,17,60,37,0],[62,17,62,41,0],[63,13,63,14,0],[66,9,66,41,0],[67,9,67,40,0],[71,9,71,10,0],[72,13,72,43,0],[73,13,73,103,0],[74,9,74,10,0],[77,9,77,10,0],[78,13,78,27,0],[80,13,80,34,0],[81,13,81,14,0],[82,17,82,42,0],[83,17,83,39,0],[84,17,84,51,0],[85,17,85,42,0],[86,13,86,14,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,91,48,0],[92,13,92,14,0],[93,17,93,44,0],[94,17,94,24,0],[97,13,97,51,0],[97,51,97,70,0],[97,70,97,82,0],[100,13,100,43,0],[102,13,102,25,0],[103,13,103,14,0],[104,22,104,31,0],[104,33,104,55,0],[104,57,104,60,0],[105,21,105,53,0],[106,13,106,14,0],[109,13,109,43,0],[111,18,111,27,0],[111,29,111,51,0],[111,53,111,56,0],[112,17,112,39,0],[115,13,115,45,0],[115,45,115,75,0],[115,75,115,87,0],[116,9,116,10,0],[119,9,119,10,0],[120,13,120,30,0],[122,13,122,35,0],[123,13,123,14,0],[124,17,124,39,0],[125,17,125,24,0],[128,18,128,27,0],[128,29,128,45,0],[128,47,128,50,0],[129,13,129,14,0],[130,22,130,34,0],[130,36,130,52,0],[130,54,130,60,0],[131,17,131,18,0],[132,21,132,34,0],[133,25,133,34,0],[138,21,138,42,0],[139,21,139,22,0],[140,25,140,59,0],[141,29,141,80,0],[142,21,142,22,0],[144,21,144,22,0],[145,25,145,58,0],[146,29,146,78,0],[147,21,147,22,0],[148,17,148,18,0],[149,13,149,14,0],[151,13,151,46,0],[152,13,152,29,0],[153,9,153,10,0],[155,57,155,89,0],[186,36,186,47,0],[189,13,189,14,0],[190,17,190,66,0],[191,13,191,14,0],[196,52,196,82,0],[198,13,198,45,0],[199,13,199,44,0],[200,13,200,83,0],[202,13,202,78,0],[205,19,205,31,0],[206,13,206,14,0],[207,13,207,14,0],[210,13,210,14,0],[211,17,211,35,0],[213,17,213,42,0],[214,17,214,40,0],[215,17,215,44,0],[217,17,217,34,0],[218,17,218,62,0],[218,62,218,87,0],[218,87,218,90,0],[220,17,220,37,0],[221,17,221,58,0],[222,13,222,14,0],[225,13,225,14,0],[226,17,226,37,0],[228,17,228,31,0],[230,17,230,24,0],[230,26,230,45,0],[230,46,230,48,0],[230,49,230,57,0],[231,17,231,18,0],[232,21,232,82,0],[233,21,233,81,0],[234,21,234,94,0],[235,21,235,93,0],[237,21,244,52,0],[245,17,245,18,0],[247,17,247,33,0],[248,13,248,14,0],[251,13,251,14,0],[252,17,252,133,0],[254,17,254,106,0],[255,17,255,54,0],[257,17,257,38,0],[258,13,258,14,0],[263,13,263,83,0],[267,13,267,49,0],[268,13,268,14,0],[269,17,269,63,0],[270,13,270,14,0],[273,13,273,14,0],[274,17,274,51,0],[275,21,275,143,0],[277,17,281,19,0],[282,13,282,14,0],[285,13,285,14,0],[286,17,286,69,0],[287,17,287,44,0],[288,21,288,147,0],[290,17,290,60,0],[291,17,291,53,0],[292,17,292,39,0],[293,17,293,46,0],[294,13,294,14,0],[297,13,297,14,0],[298,17,298,24,0],[298,26,298,53,0],[298,54,298,56,0],[298,57,298,72,0],[299,17,299,18,0],[300,21,300,48,0],[301,25,301,34,0],[303,21,303,73,0],[304,21,304,46,0],[305,21,305,52,0],[306,17,306,18,0],[307,13,307,14,0],[310,17,311,21,0],[311,21,313,53,0],[313,53,313,54,0],[315,53,315,74,0],[318,13,318,14,0],[319,17,319,34,0],[321,22,321,31,0],[321,33,321,59,0],[321,61,321,64,0],[322,21,322,47,0],[323,13,323,14,0],[325,33,325,47,0],[328,13,328,14,0],[329,17,334,19,0],[336,17,336,49,0],[337,21,337,103,0],[339,17,339,30,0],[340,13,340,14,0],[342,52,342,95,0],[344,64,344,88,0],[345,56,345,71,0]]);
+    </script>
+  </body>
+</html>

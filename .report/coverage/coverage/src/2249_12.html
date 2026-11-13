@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/UI/HitObjectContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.Objects.Pooling;
+
+namespace osu.Game.Rulesets.UI
+{
+    public partial class HitObjectContainer : PooledDrawableWithLifetimeContainer&lt;HitObjectLifetimeEntry, DrawableHitObject&gt;, IHitObjectContainer
+    {
+        public IEnumerable&lt;DrawableHitObject&gt; Objects =&gt; InternalChildren.Cast&lt;DrawableHitObject&gt;().OrderBy(h =&gt; h.HitObject.StartTime);
+
+        public IEnumerable&lt;DrawableHitObject&gt; AliveObjects =&gt; AliveEntries.Values.OrderBy(h =&gt; h.HitObject.StartTime);
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;DrawableHitObject&quot;/&gt; is judged.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject, JudgementResult&gt; NewResult;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; becomes used by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If this &lt;see cref=&quot;HitObjectContainer&quot;/&gt; uses pooled objects, this represents the time when the &lt;see cref=&quot;HitObject&quot;/&gt;s become alive.
+        /// &lt;/remarks&gt;
+        internal event Action&lt;HitObject&gt; HitObjectUsageBegan;
+
+        /// &lt;summary&gt;
+        /// Invoked when a &lt;see cref=&quot;HitObject&quot;/&gt; becomes unused by a &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If this &lt;see cref=&quot;HitObjectContainer&quot;/&gt; uses pooled objects, this represents the time when the &lt;see cref=&quot;HitObject&quot;/&gt;s become dead.
+        /// &lt;/remarks&gt;
+        internal event Action&lt;HitObject&gt; HitObjectUsageFinished;
+
+        private readonly Dictionary&lt;DrawableHitObject, IBindable&gt; startTimeMap = new Dictionary&lt;DrawableHitObject, IBindable&gt;();
+
+        private readonly Dictionary&lt;HitObjectLifetimeEntry, DrawableHitObject&gt; nonPooledDrawableMap = new Dictionary&lt;HitObjectLifetimeEntry, DrawableHitObject&gt;();
+
+        [Resolved(CanBeNull = true)]
+        private IPooledHitObjectProvider pooledObjectProvider { get; set; }
+
+        public HitObjectContainer()
+        {
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        protected override void LoadAsyncComplete()
+        {
+            base.LoadAsyncComplete();
+
+            // Application of hitobjects during load() may have changed their start times, so ensure the correct sorting order.
+            SortInternal();
+        }
+
+        #region Pooling support
+
+        public override bool Remove(HitObjectLifetimeEntry entry)
+        {
+            if (!base.Remove(entry)) return false;
+
+            // This logic is not in `Remove(DrawableHitObject)` because a non-pooled drawable may be removed by specifying its entry.
+            if (nonPooledDrawableMap.Remove(entry, out var drawable))
+                removeDrawable(drawable);
+
+            return true;
+        }
+
+        protected sealed override DrawableHitObject GetDrawable(HitObjectLifetimeEntry entry)
+        {
+            if (nonPooledDrawableMap.TryGetValue(entry, out var drawable))
+                return drawable;
+
+            return pooledObjectProvider?.GetPooledDrawableRepresentation(entry.HitObject, null) ??
+                   throw new InvalidOperationException($&quot;A drawable representation could not be retrieved for hitobject type: {entry.HitObject.GetType().ReadableName()}.&quot;);
+        }
+
+        protected override void AddDrawable(HitObjectLifetimeEntry entry, DrawableHitObject drawable)
+        {
+            if (nonPooledDrawableMap.ContainsKey(entry)) return;
+
+            addDrawable(drawable);
+            HitObjectUsageBegan?.Invoke(entry.HitObject);
+        }
+
+        protected override void RemoveDrawable(HitObjectLifetimeEntry entry, DrawableHitObject drawable)
+        {
+            drawable.OnKilled();
+            if (nonPooledDrawableMap.ContainsKey(entry)) return;
+
+            removeDrawable(drawable);
+            HitObjectUsageFinished?.Invoke(entry.HitObject);
+        }
+
+        private void addDrawable(DrawableHitObject drawable)
+        {
+            drawable.OnNewResult += onNewResult;
+
+            bindStartTime(drawable);
+            AddInternal(drawable);
+        }
+
+        private void removeDrawable(DrawableHitObject drawable)
+        {
+            drawable.OnNewResult -= onNewResult;
+
+            unbindStartTime(drawable);
+
+            RemoveInternal(drawable, false);
+        }
+
+        #endregion
+
+        #region Non-pooling support
+
+        public virtual void Add(DrawableHitObject drawable)
+        {
+            if (drawable.Entry == null)
+                throw new InvalidOperationException($&quot;May not add a {nameof(DrawableHitObject)} without {nameof(HitObject)} associated&quot;);
+
+            nonPooledDrawableMap.Add(drawable.Entry, drawable);
+            addDrawable(drawable);
+            Add(drawable.Entry);
+        }
+
+        public virtual bool Remove(DrawableHitObject drawable)
+        {
+            if (drawable.Entry == null)
+                return false;
+
+            return Remove(drawable.Entry);
+        }
+
+        public int IndexOf(DrawableHitObject hitObject) =&gt; IndexOfInternal(hitObject);
+
+        #endregion
+
+        private void onNewResult(DrawableHitObject d, JudgementResult r) =&gt; NewResult?.Invoke(d, r);
+
+        #region Comparator + StartTime tracking
+
+        private void bindStartTime(DrawableHitObject hitObject)
+        {
+            var bindable = hitObject.StartTimeBindable.GetBoundCopy();
+
+            bindable.BindValueChanged(_ =&gt;
+            {
+                if (LoadState &gt;= LoadState.Ready)
+                    SortInternal();
+            });
+
+            startTimeMap[hitObject] = bindable;
+        }
+
+        private void unbindStartTime(DrawableHitObject hitObject)
+        {
+            startTimeMap[hitObject].UnbindAll();
+            startTimeMap.Remove(hitObject);
+        }
+
+        private void unbindAllStartTimes()
+        {
+            foreach (var kvp in startTimeMap)
+                kvp.Value.UnbindAll();
+            startTimeMap.Clear();
+        }
+
+        protected override int Compare(Drawable x, Drawable y)
+        {
+            if (!(x is DrawableHitObject xObj) || !(y is DrawableHitObject yObj))
+                return base.Compare(x, y);
+
+            // Put earlier hitobjects towards the end of the list, so they handle input first
+            int i = yObj.HitObject.StartTime.CompareTo(xObj.HitObject.StartTime);
+            return i == 0 ? CompareReverseChildID(x, y) : i;
+        }
+
+        #endregion
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            unbindAllStartTimes();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[22,58,22,114,0],[22,114,22,135,0],[22,135,22,136,0],[24,63,24,96,0],[24,96,24,117,0],[24,117,24,118,0],[47,9,47,129,0],[49,9,49,163,0],[52,65,52,69,0],[52,70,52,74,0],[54,9,54,36,0],[55,9,55,10,0],[56,13,56,42,0],[57,9,57,10,0],[60,9,60,10,0],[61,13,61,38,0],[64,13,64,28,0],[65,9,65,10,0],[70,9,70,10,0],[71,13,71,37,0],[71,38,71,51,0],[74,13,74,70,0],[75,17,75,42,0],[77,13,77,25,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,75,0],[83,17,83,33,0],[85,13,86,173,0],[87,9,87,10,0],[90,9,90,10,0],[91,13,91,57,0],[91,58,91,65,0],[93,13,93,35,0],[94,13,94,58,0],[95,9,95,10,0],[98,9,98,10,0],[99,13,99,33,0],[100,13,100,57,0],[100,58,100,65,0],[102,13,102,38,0],[103,13,103,61,0],[104,9,104,10,0],[107,9,107,10,0],[108,13,108,49,0],[110,13,110,37,0],[111,13,111,35,0],[112,9,112,10,0],[115,9,115,10,0],[116,13,116,49,0],[118,13,118,39,0],[120,13,120,45,0],[121,9,121,10,0],[128,9,128,10,0],[129,13,129,40,0],[130,17,130,138,0],[132,13,132,64,0],[133,13,133,35,0],[134,13,134,33,0],[135,9,135,10,0],[138,9,138,10,0],[139,13,139,40,0],[140,17,140,30,0],[142,13,142,43,0],[143,9,143,10,0],[145,60,145,86,0],[149,77,149,100,0],[154,9,154,10,0],[155,13,155,71,0],[157,13,158,13,0],[158,13,158,14,0],[158,14,159,17,0],[159,17,159,50,0],[159,50,160,21,0],[160,21,160,36,0],[160,36,161,13,0],[161,13,161,14,0],[161,14,161,16,0],[163,13,163,48,0],[164,9,164,10,0],[167,9,167,10,0],[168,13,168,49,0],[169,13,169,44,0],[170,9,170,10,0],[173,9,173,10,0],[174,13,174,20,0],[174,22,174,29,0],[174,30,174,32,0],[174,33,174,45,0],[175,17,175,39,0],[176,13,176,34,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,82,0],[182,17,182,43,0],[185,13,185,82,0],[186,13,186,61,0],[187,9,187,10,0],[192,9,192,10,0],[193,13,193,39,0],[194,13,194,35,0],[195,9,195,10,0]]);
+    </script>
+  </body>
+</html>

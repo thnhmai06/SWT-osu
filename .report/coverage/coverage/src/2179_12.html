@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Compose/Components/Timeline/TimelineBreak.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Game.Beatmaps.Timing;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Rulesets.Objects;
+using osuTK;
+
+namespace osu.Game.Screens.Edit.Compose.Components.Timeline
+{
+    public partial class TimelineBreak : CompositeDrawable, IHasContextMenu
+    {
+        public Bindable&lt;BreakPeriod&gt; Break { get; } = new Bindable&lt;BreakPeriod&gt;();
+
+        public Action&lt;BreakPeriod&gt;? OnDeleted { get; init; }
+
+        public TimelineBreak(BreakPeriod b)
+        {
+            Break.Value = b;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(OsuColour colours)
+        {
+            RelativePositionAxes = Axes.X;
+            RelativeSizeAxes = Axes.Both;
+            Origin = Anchor.TopLeft;
+            Padding = new MarginPadding { Horizontal = -5 };
+
+            InternalChildren = new Drawable[]
+            {
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding { Horizontal = 5 },
+                    Child = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = colours.Gray5,
+                        Alpha = 0.9f,
+                    },
+                },
+                new DragHandle(isStartHandle: true)
+                {
+                    Break = { BindTarget = Break },
+                    Anchor = Anchor.TopLeft,
+                    Origin = Anchor.TopLeft,
+                    Action = (time, breakPeriod) =&gt; new ManualBreakPeriod(time, breakPeriod.EndTime),
+                },
+                new DragHandle(isStartHandle: false)
+                {
+                    Break = { BindTarget = Break },
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    Action = (time, breakPeriod) =&gt; new ManualBreakPeriod(breakPeriod.StartTime, time),
+                },
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Break.BindValueChanged(_ =&gt;
+            {
+                X = (float)Break.Value.StartTime;
+                Width = (float)Break.Value.Duration;
+            }, true);
+        }
+
+        public MenuItem[] ContextMenuItems =&gt; new MenuItem[]
+        {
+            new OsuMenuItem(CommonStrings.ButtonsDelete, MenuItemType.Destructive, () =&gt; OnDeleted?.Invoke(Break.Value)),
+        };
+
+        private partial class DragHandle : FillFlowContainer
+        {
+            public Bindable&lt;BreakPeriod&gt; Break { get; } = new Bindable&lt;BreakPeriod&gt;();
+
+            public new Anchor Anchor
+            {
+                get =&gt; base.Anchor;
+                init =&gt; base.Anchor = value;
+            }
+
+            public Func&lt;double, BreakPeriod, BreakPeriod&gt;? Action { get; init; }
+
+            private readonly bool isStartHandle;
+
+            private Container handle = null!;
+            private (double min, double max)? allowedDragRange;
+
+            [Resolved]
+            private EditorBeatmap beatmap { get; set; } = null!;
+
+            [Resolved]
+            private Timeline timeline { get; set; } = null!;
+
+            [Resolved]
+            private IEditorChangeHandler? changeHandler { get; set; }
+
+            [Resolved]
+            private OsuColour colours { get; set; } = null!;
+
+            public DragHandle(bool isStartHandle)
+            {
+                this.isStartHandle = isStartHandle;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                AutoSizeAxes = Axes.X;
+                RelativeSizeAxes = Axes.Y;
+                Direction = FillDirection.Horizontal;
+                Spacing = new Vector2(5);
+
+                Children = new Drawable[]
+                {
+                    handle = new Container
+                    {
+                        Anchor = Anchor,
+                        Origin = Anchor,
+                        RelativeSizeAxes = Axes.Y,
+                        CornerRadius = 4,
+                        Masking = true,
+                        Child = new Box
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = Colour4.White,
+                        },
+                    },
+                    new OsuSpriteText
+                    {
+                        BypassAutoSizeAxes = Axes.X,
+                        Anchor = Anchor,
+                        Origin = Anchor,
+                        Text = &quot;Break&quot;,
+                        Margin = new MarginPadding { Top = 2, },
+                    },
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                base.LoadComplete();
+
+                updateState();
+                FinishTransforms(true);
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                updateState();
+                return true;
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                updateState();
+                base.OnHoverLost(e);
+            }
+
+            protected override bool OnDragStart(DragStartEvent e)
+            {
+                changeHandler?.BeginChange();
+                updateState();
+
+                double min = beatmap.HitObjects.LastOrDefault(ho =&gt; ho.GetEndTime() &lt;= Break.Value.StartTime)?.GetEndTime() ?? double.NegativeInfinity;
+                double max = beatmap.HitObjects.FirstOrDefault(ho =&gt; ho.StartTime &gt;= Break.Value.EndTime)?.StartTime ?? double.PositiveInfinity;
+
+                if (isStartHandle)
+                    max = Math.Min(max, Break.Value.EndTime - BreakPeriod.MIN_BREAK_DURATION);
+                else
+                    min = Math.Max(min, Break.Value.StartTime + BreakPeriod.MIN_BREAK_DURATION);
+
+                allowedDragRange = (min, max);
+
+                return true;
+            }
+
+            protected override void OnDrag(DragEvent e)
+            {
+                base.OnDrag(e);
+
+                Debug.Assert(allowedDragRange != null);
+
+                if (Action != null
+                    &amp;&amp; timeline.FindSnappedPositionAndTime(e.ScreenSpaceMousePosition).Time is double time
+                    &amp;&amp; time &gt; allowedDragRange.Value.min
+                    &amp;&amp; time &lt; allowedDragRange.Value.max)
+                {
+                    int index = beatmap.Breaks.IndexOf(Break.Value);
+                    beatmap.Breaks[index] = Break.Value = Action.Invoke(time, Break.Value);
+                }
+
+                updateState();
+            }
+
+            protected override void OnDragEnd(DragEndEvent e)
+            {
+                changeHandler?.EndChange();
+                updateState();
+                base.OnDragEnd(e);
+            }
+
+            private void updateState()
+            {
+                bool active = IsHovered || IsDragged;
+
+                var colour = colours.Gray8;
+                if (active)
+                    colour = colour.Lighten(0.3f);
+
+                handle.FadeColour(colour, 400, Easing.OutQuint);
+                handle.ResizeWidthTo(active ? 10 : 8, 400, Easing.OutElasticHalf);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[28,46,28,50,0],[28,55,28,82,0],[30,49,30,53,0],[30,54,30,59,0],[32,9,32,44,0],[33,9,33,10,0],[34,13,34,29,0],[35,9,35,10,0],[39,9,39,10,0],[40,13,40,43,0],[41,13,41,42,0],[42,13,42,37,0],[43,13,43,61,0],[45,13,63,53,0],[63,53,63,101,0],[63,101,70,53,0],[70,53,70,103,0],[70,103,72,15,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,33,0],[79,13,80,13,0],[80,13,80,14,0],[80,14,81,17,0],[81,17,81,50,0],[81,50,82,17,0],[82,17,82,53,0],[82,53,83,13,0],[83,13,83,14,0],[83,14,83,22,0],[84,9,84,10,0],[86,47,88,90,0],[88,90,88,120,0],[88,120,89,10,0],[93,50,93,54,0],[93,59,93,86,0],[97,24,97,35,0],[98,25,98,44,0],[101,69,101,73,0],[101,74,101,79,0],[105,13,105,46,0],[109,45,109,49,0],[109,50,109,54,0],[109,59,109,64,0],[112,41,112,45,0],[112,46,112,50,0],[112,55,112,60,0],[115,59,115,63,0],[115,64,115,68,0],[118,41,118,45,0],[118,46,118,50,0],[118,55,118,60,0],[120,13,120,50,0],[121,13,121,14,0],[122,17,122,52,0],[123,13,123,14,0],[127,13,127,14,0],[128,17,128,39,0],[129,17,129,43,0],[130,17,130,54,0],[131,17,131,42,0],[133,17,156,19,0],[157,13,157,14,0],[160,13,160,14,0],[161,17,161,37,0],[163,17,163,31,0],[164,17,164,40,0],[165,13,165,14,0],[168,13,168,14,0],[169,17,169,31,0],[170,17,170,29,0],[171,13,171,14,0],[174,13,174,14,0],[175,17,175,31,0],[176,17,176,37,0],[177,13,177,14,0],[180,13,180,14,0],[181,17,181,46,0],[182,17,182,31,0],[184,17,184,69,0],[184,69,184,109,0],[184,109,184,152,0],[185,17,185,70,0],[185,70,185,105,0],[185,105,185,145,0],[187,17,187,35,0],[188,21,188,95,0],[190,21,190,97,0],[192,17,192,47,0],[194,17,194,29,0],[195,13,195,14,0],[198,13,198,14,0],[199,17,199,32,0],[201,17,201,56,0],[203,17,206,58,0],[207,17,207,18,0],[208,21,208,69,0],[209,21,209,92,0],[210,17,210,18,0],[212,17,212,31,0],[213,13,213,14,0],[216,13,216,14,0],[217,17,217,44,0],[218,17,218,31,0],[219,17,219,35,0],[220,13,220,14,0],[223,13,223,14,0],[224,17,224,54,0],[226,17,226,44,0],[227,17,227,28,0],[228,21,228,51,0],[230,17,230,65,0],[231,17,231,83,0],[232,13,232,14,0]]);
+    </script>
+  </body>
+</html>

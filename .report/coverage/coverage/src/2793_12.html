@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Dialog/PopupDialog.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Graphics.Backgrounds;
+using osu.Game.Graphics.Containers;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Overlays.Dialog
+{
+    public abstract partial class PopupDialog : VisibilityContainer
+    {
+        public const float ENTER_DURATION = 500;
+        public const float EXIT_DURATION = 500;
+
+        private readonly Vector2 ringSize = new Vector2(100f);
+        private readonly Vector2 ringMinifiedSize = new Vector2(20f);
+
+        private readonly Box flashLayer;
+        private Sample? flashSample;
+
+        private readonly Container content;
+        private readonly Container ring;
+        private readonly FillFlowContainer&lt;PopupDialogButton&gt; buttonsContainer;
+        private readonly SpriteIcon icon;
+        private readonly TextFlowContainer header;
+        private readonly TextFlowContainer body;
+
+        protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+        public Container MainContent { get; private set; }
+
+        private bool actionInvoked;
+
+        public IconUsage Icon
+        {
+            get =&gt; icon.Icon;
+            set =&gt; icon.Icon = value;
+        }
+
+        private LocalisableString headerText;
+
+        public LocalisableString HeaderText
+        {
+            get =&gt; headerText;
+            set
+            {
+                if (headerText == value)
+                    return;
+
+                headerText = value;
+                header.Text = value;
+            }
+        }
+
+        private LocalisableString bodyText;
+
+        public LocalisableString BodyText
+        {
+            get =&gt; bodyText;
+            set
+            {
+                if (bodyText == value)
+                    return;
+
+                bodyText = value;
+
+                body.Text = value;
+                body.TextAnchor = bodyText.ToString().Contains(&#39;\n&#39;) ? Anchor.TopLeft : Anchor.TopCentre;
+            }
+        }
+
+        public IEnumerable&lt;PopupDialogButton&gt; Buttons
+        {
+            get =&gt; buttonsContainer.Children;
+            set
+            {
+                buttonsContainer.ChildrenEnumerable = value;
+
+                // Hide the container if it is empty, so that it doesn&#39;t unnecessarily
+                // insert its padding into the parent container.
+                if (buttonsContainer.Children.Any())
+                    buttonsContainer.Show();
+                else
+                    buttonsContainer.Hide();
+
+                foreach (PopupDialogButton b in value)
+                {
+                    var action = b.Action;
+                    b.Action = () =&gt;
+                    {
+                        // Hide the dialog before running the action.
+                        // This is important as the code which is performed may check for a dialog being present (ie. `OsuGame.PerformFromScreen`)
+                        // and we don&#39;t want it to see the already dismissed dialog.
+                        //
+                        // Can be overriden using `PopupDialogButton.HideDialogOnAction` if a dialog needs to remain
+                        // open after invoking an action (eg. report forms).
+                        if (b.HideDialogOnAction)
+                        {
+                            actionInvoked = true;
+                            Hide();
+                        }
+
+                        action?.Invoke();
+
+                        // Delay setting `actionInvoke` for buttons requesting not to hide the dialog before invoke
+                        // until after the action has been invoked, so that the popup hide logic in `PopOut` can fire properly.
+                        //
+                        // This is done assuming the invoked action will handle hiding the dialog itself.
+                        if (!b.HideDialogOnAction)
+                            actionInvoked = true;
+                    };
+                }
+            }
+        }
+
+        protected PopupDialog()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            Anchor = Anchor.Centre;
+            Origin = Anchor.Centre;
+
+            InternalChildren = new Drawable[]
+            {
+                content = new Container
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Masking = true,
+                    CornerRadius = 20,
+                    CornerExponent = 2.5f,
+                    EdgeEffect = new EdgeEffectParameters
+                    {
+                        Type = EdgeEffectType.Shadow,
+                        Colour = Color4.Black.Opacity(0.2f),
+                        Radius = 14,
+                    },
+                    Alpha = 0f,
+                    Children = new Drawable[]
+                    {
+                        new Container
+                        {
+                            RelativeSizeAxes = Axes.Both,
+                            Children = new Drawable[]
+                            {
+                                new Box
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    Colour = Color4Extensions.FromHex(@&quot;221a21&quot;),
+                                },
+                                new Triangles
+                                {
+                                    RelativeSizeAxes = Axes.Both,
+                                    ColourLight = Color4Extensions.FromHex(@&quot;271e26&quot;),
+                                    ColourDark = Color4Extensions.FromHex(@&quot;1e171e&quot;),
+                                    TriangleScale = 4,
+                                },
+                                flashLayer = new Box
+                                {
+                                    Alpha = 0,
+                                    RelativeSizeAxes = Axes.Both,
+                                    Blending = BlendingParameters.Additive,
+                                    Colour = Color4Extensions.FromHex(@&quot;221a21&quot;),
+                                },
+                            },
+                        },
+                        new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(0f, 10f),
+                            Padding = new MarginPadding { Top = 60, Bottom = 30 },
+                            Children = new Drawable[]
+                            {
+                                new Container
+                                {
+                                    Origin = Anchor.TopCentre,
+                                    Anchor = Anchor.TopCentre,
+                                    Padding = new MarginPadding { Bottom = 30 },
+                                    Size = ringSize,
+                                    Children = new Drawable[]
+                                    {
+                                        ring = new CircularContainer
+                                        {
+                                            Origin = Anchor.Centre,
+                                            Anchor = Anchor.Centre,
+                                            Masking = true,
+                                            BorderColour = Color4.White,
+                                            BorderThickness = 5f,
+                                            Children = new Drawable[]
+                                            {
+                                                new Box
+                                                {
+                                                    RelativeSizeAxes = Axes.Both,
+                                                    Colour = Color4.Black.Opacity(0),
+                                                },
+                                                icon = new SpriteIcon
+                                                {
+                                                    Origin = Anchor.Centre,
+                                                    Anchor = Anchor.Centre,
+                                                    Icon = FontAwesome.Solid.TimesCircle,
+                                                    Y = -2,
+                                                    Size = new Vector2(50),
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                                header = new OsuTextFlowContainer(t =&gt; t.Font = t.Font.With(size: 25))
+                                {
+                                    Origin = Anchor.TopCentre,
+                                    Anchor = Anchor.TopCentre,
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    TextAnchor = Anchor.TopCentre,
+                                    Padding = new MarginPadding { Horizontal = 15, Bottom = 10 },
+                                },
+                                body = new OsuTextFlowContainer(t =&gt; t.Font = t.Font.With(size: 18))
+                                {
+                                    Origin = Anchor.TopCentre,
+                                    Anchor = Anchor.TopCentre,
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Padding = new MarginPadding { Horizontal = 15 },
+                                },
+                                MainContent = new Container
+                                {
+                                    Origin = Anchor.TopCentre,
+                                    Anchor = Anchor.TopCentre,
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                },
+                                buttonsContainer = new FillFlowContainer&lt;PopupDialogButton&gt;
+                                {
+                                    Anchor = Anchor.TopCentre,
+                                    Origin = Anchor.TopCentre,
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Direction = FillDirection.Vertical,
+                                    Spacing = new Vector2(5),
+                                    Padding = new MarginPadding { Top = 30 },
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+
+            // It&#39;s important we start in a visible state so our state fires on hide, even before load.
+            // This is used by the dialog overlay to know when the dialog was dismissed.
+            Show();
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            flashSample = audio.Samples.Get(@&quot;UI/default-select-disabled&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Programmatically clicks the first &lt;see cref=&quot;PopupDialogOkButton&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void PerformOkAction() =&gt; PerformAction&lt;PopupDialogOkButton&gt;();
+
+        /// &lt;summary&gt;
+        /// Programmatically clicks the first button of the provided type.
+        /// &lt;/summary&gt;
+        public void PerformAction&lt;T&gt;() where T : PopupDialogButton
+        {
+            // Buttons are regularly added in BDL or LoadComplete, so let&#39;s schedule to ensure
+            // they are ready to be pressed.
+            Scheduler.AddOnce(() =&gt; Buttons.OfType&lt;T&gt;().FirstOrDefault()?.TriggerClick());
+        }
+
+        public void Flash()
+        {
+            flashLayer.FadeInFromZero(80, Easing.OutQuint)
+                      .Then()
+                      .FadeOutFromOne(1500, Easing.OutQuint);
+            flashSample?.Play();
+        }
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            if (e.Repeat) return false;
+
+            // press button at number if 1-9 on number row or keypad are pressed
+            var k = e.Key;
+
+            if (k &gt;= Key.Number1 &amp;&amp; k &lt;= Key.Number9)
+            {
+                pressButtonAtIndex(k - Key.Number1);
+                return true;
+            }
+
+            if (k &gt;= Key.Keypad1 &amp;&amp; k &lt;= Key.Keypad9)
+            {
+                pressButtonAtIndex(k - Key.Keypad1);
+                return true;
+            }
+
+            return base.OnKeyDown(e);
+        }
+
+        protected override void PopIn()
+        {
+            actionInvoked = false;
+
+            // Reset various animations but only if the dialog animation fully completed
+            if (content.Alpha == 0)
+            {
+                content.ScaleTo(0.7f);
+                ring.ResizeTo(ringMinifiedSize);
+                icon.ScaleTo(0f);
+            }
+
+            content
+                .ScaleTo(1, 750, Easing.OutElasticHalf)
+                .FadeIn(ENTER_DURATION, Easing.OutQuint);
+
+            ring.ResizeTo(ringSize, ENTER_DURATION * 1.5f, Easing.OutQuint);
+            icon.Delay(100).ScaleTo(1, ENTER_DURATION * 1.5f, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            if (!actionInvoked)
+                // In the case a user did not choose an action before a hide was triggered, press the last button.
+                // This is presumed to always be a sane default &quot;cancel&quot; action.
+                buttonsContainer.Last().TriggerClick();
+
+            content
+                .ScaleTo(0.7f, EXIT_DURATION, Easing.Out)
+                .FadeOut(EXIT_DURATION, Easing.OutQuint);
+        }
+
+        private void pressButtonAtIndex(int index)
+        {
+            if (index &lt; Buttons.Count())
+                Buttons.Skip(index).First().TriggerClick();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,9,30,63,0],[31,9,31,70,0],[43,59,43,66,0],[45,40,45,44,0],[45,45,45,57,0],[51,20,51,29,0],[52,20,52,37,0],[59,20,59,30,0],[61,13,61,14,0],[62,17,62,41,0],[63,21,63,28,0],[65,17,65,36,0],[66,17,66,37,0],[67,13,67,14,0],[74,20,74,28,0],[76,13,76,14,0],[77,17,77,39,0],[78,21,78,28,0],[80,17,80,34,0],[82,17,82,35,0],[83,17,83,106,0],[84,13,84,14,0],[89,20,89,45,0],[91,13,91,14,0],[92,17,92,61,0],[96,17,96,53,0],[97,21,97,45,0],[99,21,99,45,0],[101,17,101,24,0],[101,26,101,45,0],[101,46,101,48,0],[101,49,101,54,0],[102,17,102,18,0],[103,21,103,43,0],[104,21,105,21,0],[105,21,105,22,0],[105,22,112,25,0],[112,25,112,50,0],[112,50,113,25,0],[113,25,113,26,0],[113,26,114,29,0],[114,29,114,50,0],[114,50,115,29,0],[115,29,115,36,0],[115,36,116,25,0],[116,25,116,26,0],[116,26,118,25,0],[118,25,118,42,0],[118,42,124,25,0],[124,25,124,51,0],[124,51,125,29,0],[125,29,125,50,0],[125,50,126,21,0],[126,21,126,22,0],[126,22,126,23,0],[127,17,127,18,0],[128,13,128,14,0],[131,9,131,32,0],[132,9,132,10,0],[133,13,133,39,0],[134,13,134,35,0],[136,13,136,36,0],[137,13,137,36,0],[139,13,228,72,0],[228,72,228,102,0],[228,102,237,70,0],[237,70,237,100,0],[237,100,266,15,0],[270,13,270,20,0],[271,9,271,10,0],[275,9,275,10,0],[276,13,276,76,0],[277,9,277,10,0],[282,42,282,78,0],[288,9,288,10,0],[291,13,291,37,0],[291,37,291,89,0],[291,89,291,91,0],[292,9,292,10,0],[295,9,295,10,0],[296,13,298,62,0],[299,13,299,33,0],[300,9,300,10,0],[303,9,303,10,0],[304,13,304,26,0],[304,27,304,40,0],[307,13,307,27,0],[309,13,309,54,0],[310,13,310,14,0],[311,17,311,53,0],[312,17,312,29,0],[315,13,315,54,0],[316,13,316,14,0],[317,17,317,53,0],[318,17,318,29,0],[321,13,321,38,0],[322,9,322,10,0],[325,9,325,10,0],[326,13,326,35,0],[329,13,329,36,0],[330,13,330,14,0],[331,17,331,39,0],[332,17,332,49,0],[333,17,333,34,0],[334,13,334,14,0],[336,13,338,58,0],[340,13,340,77,0],[341,13,341,80,0],[342,9,342,10,0],[345,9,345,10,0],[346,13,346,32,0],[349,17,349,56,0],[351,13,353,58,0],[354,9,354,10,0],[357,9,357,10,0],[358,13,358,41,0],[359,17,359,60,0],[360,9,360,10,0]]);
+    </script>
+  </body>
+</html>

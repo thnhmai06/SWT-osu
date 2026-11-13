@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/RankedPlay/DiscardScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Humanizer;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Game.Audio;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.MatchTypes.RankedPlay;
+using osu.Game.Online.RankedPlay;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components;
+using osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay
+{
+    public partial class DiscardScreen : RankedPlaySubScreen
+    {
+        // When the &#39;time running out&#39; warning sample starts to play (in remaining seconds)
+        private const int warning_time_threshold = 10;
+
+        public CardFlow CenterRow { get; private set; } = null!;
+
+        public override bool ShowStageOverlay =&gt; true;
+        public override LocalisableString StageHeading =&gt; &quot;Discard Phase&quot;;
+
+        private PlayerHandOfCards playerHand = null!;
+        private ShearedButton discardButton = null!;
+        private OsuTextFlowContainer explainer = null!;
+
+        [Resolved]
+        private RankedPlayMatchInfo matchInfo { get; set; } = null!;
+
+        private Sample? cardAddSample;
+        private Sample? cardDiscardSample;
+
+        private const int card_play_samples = 2;
+        private Sample?[]? cardPlaySamples;
+
+        /// &lt;summary&gt;
+        /// Whether the local user has discarded cards.
+        /// &lt;/summary&gt;
+        private bool hasDiscardedCards;
+
+        private Sample? timeRunningOutSample;
+        private SampleChannel? timeRunningOutSampleChannel;
+
+        private DateTimeOffset stageEndTime;
+        private TimeSpan stageDuration;
+
+        private ScheduledDelegate? waitingOpponentTextUpdate;
+
+        public DiscardScreen()
+        {
+            StageCaption = &quot;Replace cards from your hand&quot;;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            Children =
+            [
+                CenterRow = new CardFlow
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                },
+            ];
+
+            CenterColumn.Children =
+            [
+                discardButton = new ShearedButton
+                {
+                    Name = &quot;Discard Button&quot;,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                    Width = 150,
+                    Action = onDiscardButtonClicked,
+                    Enabled = { Value = true },
+                },
+                playerHand = new PlayerHandOfCards
+                {
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    RelativeSizeAxes = Axes.Both,
+                    Height = 0.5f,
+                    SelectionMode = HandSelectionMode.Multiple,
+                },
+                explainer = new OsuTextFlowContainer(s =&gt; s.Font = OsuFont.GetFont(size: 24))
+                {
+                    AutoSizeAxes = Axes.Y,
+                    RelativeSizeAxes = Axes.X,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.BottomCentre,
+                    TextAnchor = Anchor.TopCentre,
+                    Y = 250,
+                    ParagraphSpacing = 1,
+                    Alpha = 0,
+                }.With(d =&gt;
+                {
+                    d.AddParagraph(&quot;These are your cards for this match!&quot;);
+                    d.AddParagraph(&quot;When it’s your turn, you can play a card to go head-to-head against your opponent!&quot;);
+                })
+            ];
+
+            cardAddSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/card-add-1&quot;);
+            cardDiscardSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/card-discard-1&quot;);
+
+            cardPlaySamples = new Sample?[card_play_samples];
+            for (int i = 0; i &lt; card_play_samples; i++)
+                cardPlaySamples[i] = audio.Samples.Get($@&quot;Multiplayer/Matchmaking/Ranked/card-play-{1 + i}&quot;);
+
+            timeRunningOutSample = audio.Samples.Get(@&quot;Multiplayer/Matchmaking/Ranked/time-running-out&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            matchInfo.PlayerCardAdded += cardAdded;
+            matchInfo.PlayerCardRemoved += cardRemoved;
+
+            playerHand.SelectionChanged += onSelectionChanged;
+
+            Client.CountdownStarted += onCountdownStarted;
+            Client.CountdownStopped += onCountdownStopped;
+
+            if (Client.Room != null)
+            {
+                foreach (var countdown in Client.Room.ActiveCountdowns)
+                    onCountdownStarted(countdown);
+            }
+
+            onSelectionChanged();
+        }
+
+        private bool shouldPlayWarningSample
+            =&gt; matchInfo.Stage.Value == RankedPlayStage.CardDiscard
+               &amp;&amp; stageDuration &gt; TimeSpan.FromSeconds(warning_time_threshold)
+               &amp;&amp; stageEndTime - DateTimeOffset.Now &lt; TimeSpan.FromSeconds(warning_time_threshold)
+               &amp;&amp; !hasDiscardedCards;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (shouldPlayWarningSample)
+            {
+                timeRunningOutSampleChannel ??= timeRunningOutSample?.GetChannel();
+
+                if (timeRunningOutSampleChannel == null || timeRunningOutSampleChannel.Playing)
+                    return;
+
+                timeRunningOutSampleChannel.ManualFree = true;
+                timeRunningOutSampleChannel.Looping = true;
+                timeRunningOutSampleChannel.Play();
+            }
+            else
+                timeRunningOutSampleChannel?.Stop();
+        }
+
+        public override void OnEntering(RankedPlaySubScreen? previous)
+        {
+            base.OnEntering(previous);
+
+            double delay = 0;
+            const double stagger = 50;
+
+            foreach (var card in matchInfo.PlayerCards)
+            {
+                double currentDelay = delay;
+
+                playerHand.AddCard(card, c =&gt;
+                {
+                    c.Position = playerHand.BottomCardInsertPosition;
+                    c.DelayMovementOnEntering(currentDelay);
+                });
+
+                Scheduler.AddDelayed(() =&gt; SamplePlaybackHelper.PlayWithRandomPitch(cardAddSample), delay);
+
+                delay += stagger;
+            }
+        }
+
+        private void onCountdownStarted(MultiplayerCountdown countdown) =&gt; Scheduler.Add(() =&gt;
+        {
+            if (countdown is not RankedPlayStageCountdown)
+                return;
+
+            stageEndTime = DateTimeOffset.Now + countdown.TimeRemaining;
+            stageDuration = countdown.TimeRemaining;
+        });
+
+        private void onCountdownStopped(MultiplayerCountdown countdown) =&gt; Scheduler.Add(() =&gt;
+        {
+            if (countdown is not RankedPlayStageCountdown)
+                return;
+
+            stageEndTime = DateTimeOffset.Now;
+            stageDuration = TimeSpan.Zero;
+        });
+
+        private void onSelectionChanged()
+        {
+            if (playerHand.Selection.Any())
+                discardButton.Text = $&quot;Replace {&quot;card&quot;.ToQuantity(playerHand.Selection.Count())}&quot;;
+            else
+                discardButton.Text = &quot;Keep cards&quot;;
+        }
+
+        private void onDiscardButtonClicked()
+        {
+            discardButton.Hide();
+
+            Client.DiscardCards(playerHand.Selection.Select(it =&gt; it.Card).ToArray()).FireAndForget();
+            playerHand.SelectionMode = HandSelectionMode.Disabled;
+
+            hasDiscardedCards = true;
+
+            StageCaption = string.Empty;
+
+            // A bit awkward, but we&#39;re delaying this until we&#39;re mostly sure the opponent is still discarding.
+            // See the countdown reset logic for DiscardStage which gives 3 seconds for animation.
+            waitingOpponentTextUpdate = Scheduler.AddDelayed(() =&gt; StageCaption = &quot;Waiting for your opponent...&quot;, 3200);
+        }
+
+        private readonly List&lt;RankedPlayCardWithPlaylistItem&gt; discardedCards = new List&lt;RankedPlayCardWithPlaylistItem&gt;();
+
+        private void cardRemoved(RankedPlayCardWithPlaylistItem item) =&gt; discardedCards.Add(item);
+
+        private void playDiscardAnimation()
+        {
+            const double stagger = 100;
+            double delay = 0;
+
+            foreach (var item in discardedCards)
+            {
+                if (!playerHand.RemoveCard(item, out var card, out Quad drawQuad))
+                    return;
+
+                card.Anchor = Anchor.Centre;
+                card.Origin = Anchor.Centre;
+
+                card.SongPreviewEnabled.Value = false;
+
+                card.MatchScreenSpaceDrawQuad(drawQuad, CenterRow);
+
+                CenterRow.Add(card);
+
+                using (BeginDelayedSequence(1000 + delay))
+                {
+                    card.PopOutAndExpire();
+                }
+
+                Scheduler.AddDelayed(() =&gt;
+                {
+                    SamplePlaybackHelper.PlayWithRandomPitch(cardPlaySamples);
+                }, delay);
+
+                delay += stagger;
+            }
+
+            Scheduler.AddDelayed(() =&gt;
+            {
+                cardDiscardSample?.Play();
+            }, 1000);
+
+            discardedCards.Clear();
+            CenterRow.LayoutCards(stagger: stagger);
+        }
+
+        private double nextCardDrawTime;
+        private double earliestPresentationTime;
+
+        private void cardAdded(RankedPlayCardWithPlaylistItem card)
+        {
+            if (discardedCards.Count &gt; 0)
+            {
+                playDiscardAnimation();
+                nextCardDrawTime = Math.Max(nextCardDrawTime, Time.Current + 2000);
+            }
+
+            double delay = Math.Max(0, nextCardDrawTime - Time.Current);
+            nextCardDrawTime = Time.Current + delay + 100;
+
+            earliestPresentationTime = Time.Current + 3500;
+
+            Scheduler.AddDelayed(() =&gt;
+            {
+                playerHand.AddCard(card, d =&gt;
+                {
+                    // card should enter from centre-right of screen
+                    var cardEnterPosition = ToSpaceOfOtherDrawable(new Vector2(DrawWidth, DrawHeight * 0.5f), playerHand);
+                    d.SetupMovementForDrawnCard(cardEnterPosition);
+                });
+
+                SamplePlaybackHelper.PlayWithRandomPitch(cardAddSample);
+            }, delay);
+        }
+
+        public void PresentRemainingCards()
+        {
+            discardButton.Hide();
+
+            double presentationTime = Math.Max(earliestPresentationTime, Time.Current);
+            Scheduler.AddDelayed(presentRemainingCards, presentationTime - Time.Current);
+
+            waitingOpponentTextUpdate?.Cancel();
+            StageCaption = string.Empty;
+        }
+
+        private void presentRemainingCards()
+        {
+            int delay = 0;
+
+            foreach (var item in matchInfo.PlayerCards)
+            {
+                if (playerHand.RemoveCard(item, out var card, out Quad drawQuad))
+                {
+                    card.MatchScreenSpaceDrawQuad(drawQuad, CenterRow);
+
+                    CenterRow.Add(card);
+
+                    Scheduler.AddDelayed(() =&gt;
+                    {
+                        SamplePlaybackHelper.PlayWithRandomPitch(cardPlaySamples);
+                    }, delay);
+
+                    delay += 50;
+                }
+                else
+                {
+                    CenterRow.Add(new RankedPlayCard(item)
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                    });
+                }
+            }
+
+            CenterRow.LayoutCards(stagger: 50, duration: 600);
+
+            explainer
+                .Delay(100)
+                .MoveToOffset(new Vector2(0, 50))
+                .MoveToOffset(new Vector2(0, -50), 600, Easing.OutExpo)
+                .FadeIn(250);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            timeRunningOutSampleChannel?.Stop();
+            timeRunningOutSampleChannel?.Dispose();
+
+            matchInfo.PlayerCardAdded -= cardAdded;
+            matchInfo.PlayerCardRemoved -= cardRemoved;
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,37,34,41,0],[34,42,34,54,0],[34,59,34,64,0],[36,50,36,54,0],[37,59,37,74,0],[39,9,39,54,0],[40,9,40,53,0],[41,9,41,56,0],[44,49,44,53,0],[44,54,44,58,0],[44,63,44,68,0],[65,9,65,31,0],[66,9,66,10,0],[67,13,67,59,0],[68,9,68,10,0],[72,9,72,10,0],[73,13,81,15,0],[83,13,102,59,0],[102,59,102,93,0],[102,93,113,17,0],[113,17,113,18,0],[113,18,114,21,0],[114,21,114,76,0],[114,76,115,21,0],[115,21,115,122,0],[115,122,116,17,0],[116,17,116,18,0],[116,18,117,15,0],[119,13,119,93,0],[120,13,120,101,0],[122,13,122,62,0],[123,18,123,27,0],[123,29,123,50,0],[123,52,123,55,0],[124,17,124,110,0],[126,13,126,106,0],[127,9,127,10,0],[130,9,130,10,0],[131,13,131,33,0],[133,13,133,52,0],[134,13,134,56,0],[136,13,136,63,0],[138,13,138,59,0],[139,13,139,59,0],[141,13,141,37,0],[142,13,142,14,0],[143,17,143,24,0],[143,26,143,39,0],[143,40,143,42,0],[143,43,143,71,0],[144,21,144,51,0],[145,13,145,14,0],[147,13,147,34,0],[148,9,148,10,0],[151,16,154,37,0],[157,9,157,10,0],[158,13,158,27,0],[160,13,160,41,0],[161,13,161,14,0],[162,17,162,84,0],[164,17,164,96,0],[165,21,165,28,0],[167,17,167,63,0],[168,17,168,60,0],[169,17,169,52,0],[170,13,170,14,0],[172,17,172,53,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,177,39,0],[179,13,179,30,0],[182,13,182,20,0],[182,22,182,30,0],[182,31,182,33,0],[182,34,182,55,0],[183,13,183,14,0],[184,17,184,45,0],[186,17,187,17,0],[187,17,187,18,0],[187,18,188,21,0],[188,21,188,70,0],[188,70,189,21,0],[189,21,189,61,0],[189,61,190,17,0],[190,17,190,18,0],[190,18,190,20,0],[192,17,192,44,0],[192,44,192,99,0],[192,99,192,108,0],[194,17,194,34,0],[195,13,195,14,0],[196,9,196,10,0],[198,76,199,9,0],[199,9,199,10,0],[199,10,200,13,0],[200,13,200,59,0],[200,59,201,17,0],[201,17,201,24,0],[201,24,203,13,0],[203,13,203,73,0],[203,73,204,13,0],[204,13,204,53,0],[204,53,205,9,0],[205,9,205,10,0],[205,10,205,11,0],[207,76,208,9,0],[208,9,208,10,0],[208,10,209,13,0],[209,13,209,59,0],[209,59,210,17,0],[210,17,210,24,0],[210,24,212,13,0],[212,13,212,47,0],[212,47,213,13,0],[213,13,213,43,0],[213,43,214,9,0],[214,9,214,10,0],[214,10,214,11,0],[217,9,217,10,0],[218,13,218,44,0],[219,17,219,99,0],[221,17,221,51,0],[222,9,222,10,0],[225,9,225,10,0],[226,13,226,34,0],[228,13,228,67,0],[228,67,228,74,0],[228,74,228,103,0],[229,13,229,67,0],[231,13,231,38,0],[233,13,233,41,0],[237,13,237,68,0],[237,68,237,113,0],[237,113,237,121,0],[238,9,238,10,0],[240,9,240,123,0],[242,74,242,98,0],[245,9,245,10,0],[247,13,247,30,0],[249,13,249,20,0],[249,22,249,30,0],[249,31,249,33,0],[249,34,249,48,0],[250,13,250,14,0],[251,17,251,83,0],[252,21,252,28,0],[254,17,254,45,0],[255,17,255,45,0],[257,17,257,55,0],[259,17,259,68,0],[261,17,261,37,0],[263,17,263,59,0],[264,17,264,18,0],[265,21,265,44,0],[266,17,266,18,0],[268,17,269,17,0],[269,17,269,18,0],[269,18,270,21,0],[270,21,270,79,0],[270,79,271,17,0],[271,17,271,18,0],[271,18,271,27,0],[273,17,273,34,0],[274,13,274,14,0],[276,13,277,13,0],[277,13,277,14,0],[277,14,278,17,0],[278,17,278,43,0],[278,43,279,13,0],[279,13,279,14,0],[279,14,279,22,0],[281,13,281,36,0],[282,13,282,53,0],[283,9,283,10,0],[289,9,289,10,0],[290,13,290,42,0],[291,13,291,14,0],[292,17,292,40,0],[293,17,293,84,0],[294,13,294,14,0],[296,13,296,73,0],[297,13,297,59,0],[299,13,299,60,0],[301,13,302,13,0],[302,13,302,14,0],[302,14,303,17,0],[303,17,304,17,0],[304,17,304,18,0],[304,18,306,21,0],[306,21,306,123,0],[306,123,307,21,0],[307,21,307,68,0],[307,68,308,17,0],[308,17,308,18,0],[308,18,308,20,0],[308,20,310,17,0],[310,17,310,73,0],[310,73,311,13,0],[311,13,311,14,0],[311,14,311,23,0],[312,9,312,10,0],[315,9,315,10,0],[316,13,316,34,0],[318,13,318,88,0],[319,13,319,90,0],[321,13,321,49,0],[322,13,322,41,0],[323,9,323,10,0],[326,9,326,10,0],[327,13,327,27,0],[329,13,329,20,0],[329,22,329,30,0],[329,31,329,33,0],[329,34,329,55,0],[330,13,330,14,0],[331,17,331,82,0],[332,17,332,18,0],[333,21,333,72,0],[335,21,335,41,0],[337,21,338,21,0],[338,21,338,22,0],[338,22,339,25,0],[339,25,339,83,0],[339,83,340,21,0],[340,21,340,22,0],[340,22,340,31,0],[342,21,342,33,0],[343,17,343,18,0],[345,17,345,18,0],[346,21,350,24,0],[351,17,351,18,0],[352,13,352,14,0],[354,13,354,63,0],[356,13,360,30,0],[361,9,361,10,0],[364,9,364,10,0],[365,13,365,49,0],[366,13,366,52,0],[368,13,368,52,0],[369,13,369,56,0],[371,13,371,39,0],[372,9,372,10,0]]);
+    </script>
+  </body>
+</html>

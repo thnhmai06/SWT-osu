@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/IO/Archives/ZipArchiveReader.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using Microsoft.Toolkit.HighPerformance;
+using osu.Framework.Extensions;
+using osu.Framework.IO.Stores;
+using SharpCompress.Archives;
+using SharpCompress.Archives.Zip;
+using SharpCompress.Common;
+using SharpCompress.Readers;
+using SixLabors.ImageSharp.Memory;
+
+namespace osu.Game.IO.Archives
+{
+    public sealed class ZipArchiveReader : ArchiveReader
+    {
+        /// &lt;summary&gt;
+        /// Archives created by osu!stable still write out as Shift-JIS.
+        /// We want to force this fallback rather than leave it up to the library/system.
+        /// In the future we may want to change exports to set the zip UTF-8 flag and use that instead.
+        /// &lt;/summary&gt;
+        public static readonly ArchiveEncoding DEFAULT_ENCODING;
+
+        private readonly Stream archiveStream;
+        private readonly IWritableArchive archive;
+
+        /// &lt;summary&gt;
+        /// Specifies the maximum permitted size of files (in bytes) in the archive.
+        /// If a ZIP archive specifies a file entry which exceeds this size,
+        /// attempting to access this file via &lt;see cref=&quot;GetStream&quot;/&gt; will fail with &lt;see cref=&quot;InsufficientMemoryException&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public long MaximumEntrySize { get; set; } = 100 * 1024 * 1024; // bytes
+
+        static ZipArchiveReader()
+        {
+            // Required to support rare code pages.
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
+            DEFAULT_ENCODING = new ArchiveEncoding
+            {
+                Default = Encoding.GetEncoding(932),
+                Password = Encoding.GetEncoding(932),
+            };
+        }
+
+        public ZipArchiveReader(Stream archiveStream, string name = null)
+            : base(name)
+        {
+            this.archiveStream = archiveStream;
+
+            archive = ZipArchive.OpenArchive(archiveStream, new ReaderOptions
+            {
+                ArchiveEncoding = DEFAULT_ENCODING
+            });
+        }
+
+        public override Stream GetStream(string name)
+        {
+            IArchiveEntry entry = archive.Entries.SingleOrDefault(e =&gt; e.Key == name);
+            if (entry == null)
+                return null;
+
+            using (Stream s = entry.OpenEntryStream())
+            {
+                if (entry.Size &gt; MaximumEntrySize)
+                    throw new InsufficientMemoryException($@&quot;Size of file &quot;&quot;{name}&quot;&quot; exceeds allowable limit of {MaximumEntrySize} bytes&quot;);
+
+                if (entry.Size &gt; 0)
+                {
+                    var owner = MemoryAllocator.Default.Allocate&lt;byte&gt;((int)entry.Size);
+                    s.ReadExactly(owner.Memory.Span);
+                    return new MemoryOwnerMemoryStream(owner);
+                }
+
+                // due to a sharpcompress bug (https://github.com/adamhathcock/sharpcompress/issues/88),
+                // in rare instances the `ZipArchiveEntry` will not contain a correct `Size` but instead report 0.
+                // this would lead to the block above reading nothing, and the game basically seeing an archive full of empty files.
+                // since the bug is years old now, and this is a rather rare situation anyways (reported once in years),
+                // work around this locally by falling back to reading as many bytes as possible and using a standard non-pooled memory stream.
+                return new MemoryStream(s.ReadAllRemainingBytesToArray());
+            }
+        }
+
+        public override void Dispose()
+        {
+            archive.Dispose();
+            archiveStream.Dispose();
+        }
+
+        public override IEnumerable&lt;string&gt; Filenames =&gt; archive.Entries.Where(e =&gt; !e.IsDirectory).Select(e =&gt; e.Key).ExcludeSystemFileNames();
+
+        private class MemoryOwnerMemoryStream : Stream
+        {
+            private readonly IMemoryOwner&lt;byte&gt; owner;
+            private readonly Stream stream;
+
+            public MemoryOwnerMemoryStream(IMemoryOwner&lt;byte&gt; owner)
+            {
+                this.owner = owner;
+
+                stream = owner.Memory.AsStream();
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                owner?.Dispose();
+                base.Dispose(disposing);
+            }
+
+            public override void Flush() =&gt; stream.Flush();
+
+            public override int Read(byte[] buffer, int offset, int count) =&gt; stream.Read(buffer, offset, count);
+
+            public override long Seek(long offset, SeekOrigin origin) =&gt; stream.Seek(offset, origin);
+
+            public override void SetLength(long value) =&gt; stream.SetLength(value);
+
+            public override void Write(byte[] buffer, int offset, int count) =&gt; stream.Write(buffer, offset, count);
+
+            public override bool CanRead =&gt; stream.CanRead;
+
+            public override bool CanSeek =&gt; stream.CanSeek;
+
+            public override bool CanWrite =&gt; stream.CanWrite;
+
+            public override long Length =&gt; stream.Length;
+
+            public override long Position
+            {
+                get =&gt; stream.Position;
+                set =&gt; stream.Position = value;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,40,40,44,0],[40,45,40,49,0],[40,54,40,71,0],[43,9,43,10,0],[45,13,45,75,0],[47,13,51,15,0],[52,9,52,10,0],[55,15,55,25,0],[56,9,56,10,0],[57,13,57,48,0],[59,13,62,16,0],[63,9,63,10,0],[66,9,66,10,0],[67,13,67,72,0],[67,72,67,85,0],[67,85,67,87,0],[68,13,68,31,0],[69,17,69,29,0],[71,20,71,54,0],[72,13,72,14,0],[73,17,73,51,0],[74,21,74,140,0],[76,17,76,36,0],[77,17,77,18,0],[78,21,78,89,0],[79,21,79,54,0],[80,21,80,63,0],[88,17,88,75,0],[90,9,90,10,0],[93,9,93,10,0],[94,13,94,31,0],[95,13,95,37,0],[96,9,96,10,0],[98,58,98,85,0],[98,85,98,99,0],[98,99,98,113,0],[98,113,98,118,0],[98,118,98,144,0],[105,13,105,69,0],[106,13,106,14,0],[107,17,107,36,0],[109,17,109,50,0],[110,13,110,14,0],[113,13,113,14,0],[114,17,114,34,0],[115,17,115,41,0],[116,13,116,14,0],[118,45,118,59,0],[120,79,120,113,0],[122,74,122,101,0],[124,59,124,82,0],[126,81,126,116,0],[128,45,128,59,0],[130,45,130,59,0],[132,46,132,61,0],[134,44,134,57,0],[138,24,138,39,0],[139,24,139,47,0]]);
+    </script>
+  </body>
+</html>

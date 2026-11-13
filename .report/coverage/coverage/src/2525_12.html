@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/SkinEditor/ExternalEditOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Testing;
+using osu.Game.Database;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Screens.OnlinePlay.Match.Components;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.SkinEditor
+{
+    public partial class ExternalEditOverlay : OsuFocusedOverlayContainer
+    {
+        private const double transition_duration = 300;
+        private FillFlowContainer flow = null!;
+
+        [Cached]
+        private readonly OverlayColourProvider colourProvider = new OverlayColourProvider(OverlayColourScheme.Blue);
+
+        [Resolved]
+        private GameHost gameHost { get; set; } = null!;
+
+        [Resolved]
+        private SkinManager skinManager { get; set; } = null!;
+
+        private ExternalEditOperation&lt;SkinInfo&gt;? editOperation;
+        private TaskCompletionSource? taskCompletionSource;
+        private bool finishingEdit;
+
+        protected override bool DimMainContent =&gt; false;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            RelativeSizeAxes = Axes.Both;
+            InternalChild = new Container
+            {
+                RelativeSizeAxes = Axes.Both,
+                Masking = true,
+                Children = new Drawable[]
+                {
+                    // Since we&#39;re drawing this overlay on top of another overlay (SkinEditor), the dimming effect isn&#39;t applied. So we need to add a dimming effect manually.
+                    new Box
+                    {
+                        Colour = Color4.Black.Opacity(0.5f),
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    new Container
+                    {
+                        Masking = true,
+                        CornerRadius = 20,
+                        AutoSizeAxes = Axes.Both,
+                        AutoSizeDuration = 500,
+                        AutoSizeEasing = Easing.OutQuint,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Children = new Drawable[]
+                        {
+                            new Box
+                            {
+                                Colour = colourProvider.Background5,
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            flow = new FillFlowContainer
+                            {
+                                Margin = new MarginPadding(20),
+                                AutoSizeAxes = Axes.Both,
+                                Direction = FillDirection.Vertical,
+                                Anchor = Anchor.TopCentre,
+                                Origin = Anchor.TopCentre,
+                                Spacing = new Vector2(15),
+                            }
+                        }
+                    }
+                }
+            };
+
+            gameHost.ExitRequested += tryFinishOnExit;
+        }
+
+        public async Task&lt;Task&gt; Begin(SkinInfo skinInfo)
+        {
+            if (taskCompletionSource != null)
+                throw new InvalidOperationException(&quot;Cannot start multiple concurrent external edits!&quot;);
+
+            Show();
+            showSpinner(EditorStrings.ExternalEditExporting);
+            setGlobalSkinDisabled(true);
+
+            await Task.Delay(500).ConfigureAwait(true);
+
+            try
+            {
+                editOperation = await skinManager.BeginExternalEditing(skinInfo).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Failed to initialize external edit operation: {ex}&quot;, LoggingTarget.Database, LogLevel.Error);
+                setGlobalSkinDisabled(false);
+                Schedule(() =&gt; showSpinner(EditorStrings.ExportFailed));
+                Scheduler.AddDelayed(Hide, 1000);
+                return Task.FromException(ex);
+            }
+
+            Schedule(() =&gt;
+            {
+                flow.Children = new Drawable[]
+                {
+                    new OsuSpriteText
+                    {
+                        Text = SkinEditorStrings.SkinMountedExternally,
+                        Font = OsuFont.Default.With(size: 30),
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                    },
+                    new OsuTextFlowContainer
+                    {
+                        Padding = new MarginPadding(5),
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                        Width = 350,
+                        AutoSizeAxes = Axes.Y,
+                        Text = EditorStrings.ExternalEditMountedExplanation,
+                    },
+                    new PurpleRoundedButton
+                    {
+                        Text = EditorStrings.OpenFolder,
+                        Width = 350,
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                        Action = openDirectory,
+                        Enabled = { Value = false }
+                    },
+                    new DangerousRoundedButton
+                    {
+                        Text = EditorStrings.FinishEditingExternally,
+                        Width = 350,
+                        Anchor = Anchor.TopCentre,
+                        Origin = Anchor.TopCentre,
+                        Action = () =&gt; finish().FireAndForget(),
+                        Enabled = { Value = false }
+                    }
+                };
+            });
+
+            Scheduler.AddDelayed(() =&gt;
+            {
+                foreach (var b in flow.ChildrenOfType&lt;RoundedButton&gt;())
+                    b.Enabled.Value = true;
+                openDirectory();
+            }, 1000);
+            return (taskCompletionSource = new TaskCompletionSource()).Task;
+        }
+
+        private void openDirectory()
+        {
+            if (editOperation == null)
+                return;
+
+            gameHost.OpenFileExternally(editOperation.MountedPath.TrimDirectorySeparator() + Path.DirectorySeparatorChar);
+        }
+
+        private void tryFinishOnExit()
+        {
+            if (editOperation != null &amp;&amp; !finishingEdit)
+                finish().FireAndForget(onSuccess: () =&gt; Schedule(() =&gt; finishingEdit = false));
+        }
+
+        private async Task finish()
+        {
+            if (finishingEdit)
+                return;
+
+            finishingEdit = true;
+
+            Debug.Assert(taskCompletionSource != null);
+
+            showSpinner(EditorStrings.ExternalEditCleaningUp);
+            await Task.Delay(500).ConfigureAwait(true);
+
+            try
+            {
+                await editOperation!.Finish().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($&quot;Failed to finish external edit operation: {ex}&quot;, LoggingTarget.Database, LogLevel.Error);
+                showSpinner(EditorStrings.ImportFailed);
+                Scheduler.AddDelayed(Hide, 1000);
+                setGlobalSkinDisabled(false);
+                taskCompletionSource.SetException(ex);
+                taskCompletionSource = null;
+                return;
+            }
+
+            Schedule(() =&gt;
+            {
+                var oldSkin = skinManager.CurrentSkin!.Value;
+                var newSkinInfo = oldSkin.SkinInfo.PerformRead(s =&gt; s);
+
+                // Create a new skin instance to ensure the skin is reloaded
+                // If there&#39;s a better way to reload the skin, this should be replaced with it.
+                setGlobalSkinDisabled(false);
+                skinManager.CurrentSkin.Value = newSkinInfo.CreateInstance(skinManager);
+
+                oldSkin.Dispose();
+
+                Hide();
+            });
+            taskCompletionSource.SetResult();
+            taskCompletionSource = null;
+        }
+
+        private void setGlobalSkinDisabled(bool disabled)
+        {
+            skinManager.CurrentSkin.Disabled = disabled;
+            skinManager.CurrentSkinInfo.Disabled = disabled;
+        }
+
+        protected override void PopIn()
+        {
+            this.FadeIn(transition_duration, Easing.OutQuint);
+        }
+
+        protected override void PopOut()
+        {
+            this.FadeOut(transition_duration, Easing.OutQuint).Finally(_ =&gt;
+            {
+                // Set everything to a clean state
+                editOperation = null;
+                finishingEdit = false;
+                flow.Children = Array.Empty&lt;Drawable&gt;();
+            });
+        }
+
+        public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.Back:
+                case GlobalAction.Select:
+                    if (editOperation == null)
+                        return false;
+
+                    finish().FireAndForget();
+                    return true;
+            }
+
+            return base.OnPressed(e);
+        }
+
+        private void showSpinner(LocalisableString text)
+        {
+            foreach (var b in flow.ChildrenOfType&lt;RoundedButton&gt;())
+                b.Enabled.Value = false;
+
+            flow.Children = new Drawable[]
+            {
+                new OsuSpriteText
+                {
+                    Text = text,
+                    Font = OsuFont.Default.With(size: 30),
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                },
+                new LoadingSpinner
+                {
+                    Anchor = Anchor.TopCentre,
+                    Origin = Anchor.TopCentre,
+                    State = { Value = Visibility.Visible }
+                },
+            };
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            if (gameHost.IsNotNull())
+                gameHost.ExitRequested -= tryFinishOnExit;
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[39,9,39,48,0],[42,9,42,117,0],[45,37,45,41,0],[45,42,45,46,0],[45,51,45,56,0],[48,43,48,47,0],[48,48,48,52,0],[48,57,48,62,0],[54,51,54,56,0],[58,9,58,10,0],[59,13,59,42,0],[60,13,100,15,0],[102,13,102,55,0],[103,9,103,10,0],[106,9,106,10,0],[107,13,107,46,0],[108,17,108,105,0],[110,13,110,20,0],[111,13,111,62,0],[112,13,112,41,0],[114,13,114,56,0],[117,13,117,14,0],[118,17,118,104,0],[119,13,119,14,0],[120,13,120,33,0],[121,13,121,14,0],[122,17,122,123,0],[123,17,123,46,0],[124,17,124,32,0],[124,32,124,71,0],[124,71,124,73,0],[125,17,125,50,0],[126,17,126,47,0],[129,13,130,13,0],[130,13,130,14,0],[130,14,131,17,0],[131,17,164,40,0],[164,40,164,64,0],[164,64,167,19,0],[167,19,168,13,0],[168,13,168,14,0],[168,14,168,16,0],[170,13,171,13,0],[171,13,171,14,0],[171,14,172,17,0],[172,17,172,24,0],[172,24,172,26,0],[172,26,172,31,0],[172,31,172,32,0],[172,32,172,34,0],[172,34,172,35,0],[172,35,172,71,0],[172,71,173,21,0],[173,21,173,44,0],[173,44,174,17,0],[174,17,174,33,0],[174,33,175,13,0],[175,13,175,14,0],[175,14,175,22,0],[176,13,176,77,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,39,0],[182,17,182,24,0],[184,13,184,123,0],[185,9,185,10,0],[188,9,188,10,0],[189,13,189,57,0],[190,17,190,57,0],[190,57,190,72,0],[190,72,190,93,0],[190,93,190,94,0],[190,94,190,96,0],[191,9,191,10,0],[194,9,194,10,0],[195,13,195,31,0],[196,17,196,24,0],[198,13,198,34,0],[200,13,200,56,0],[202,13,202,63,0],[203,13,203,56,0],[206,13,206,14,0],[207,17,207,69,0],[208,13,208,14,0],[209,13,209,33,0],[210,13,210,14,0],[211,17,211,119,0],[212,17,212,57,0],[213,17,213,50,0],[214,17,214,46,0],[215,17,215,55,0],[216,17,216,45,0],[217,17,217,24,0],[220,13,221,13,0],[221,13,221,14,0],[221,14,222,17,0],[222,17,222,62,0],[222,62,223,17,0],[223,17,223,69,0],[223,69,223,70,0],[223,70,223,72,0],[223,72,227,17,0],[227,17,227,46,0],[227,46,228,17,0],[228,17,228,89,0],[228,89,230,17,0],[230,17,230,35,0],[230,35,232,17,0],[232,17,232,24,0],[232,24,233,13,0],[233,13,233,14,0],[233,14,233,16,0],[234,13,234,46,0],[235,13,235,41,0],[236,9,236,10,0],[239,9,239,10,0],[240,13,240,57,0],[241,13,241,61,0],[242,9,242,10,0],[245,9,245,10,0],[246,13,246,63,0],[247,9,247,10,0],[250,9,250,10,0],[251,13,252,13,0],[252,13,252,14,0],[252,14,254,17,0],[254,17,254,38,0],[254,38,255,17,0],[255,17,255,39,0],[255,39,256,17,0],[256,17,256,57,0],[256,57,257,13,0],[257,13,257,14,0],[257,14,257,16,0],[258,9,258,10,0],[261,9,261,10,0],[262,13,262,26,0],[263,17,263,30,0],[265,13,265,30,0],[269,21,269,47,0],[270,25,270,38,0],[272,21,272,46,0],[273,21,273,33,0],[276,13,276,38,0],[277,9,277,10,0],[280,9,280,10,0],[281,13,281,20,0],[281,22,281,27,0],[281,28,281,30,0],[281,31,281,67,0],[282,17,282,41,0],[284,13,299,15,0],[300,9,300,10,0],[303,9,303,10,0],[304,13,304,38,0],[305,17,305,59,0],[307,13,307,39,0],[308,9,308,10,0]]);
+    </script>
+  </body>
+</html>

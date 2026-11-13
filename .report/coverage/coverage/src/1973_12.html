@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Lounge/LoungeSubScreen.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Logging;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Game.Configuration;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input;
+using osu.Game.Online.API;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Rulesets;
+using osu.Game.Screens.OnlinePlay.Lounge.Components;
+using osu.Game.Users;
+using osuTK;
+using osuTK.Graphics;
+using osu.Game.Localisation;
+
+namespace osu.Game.Screens.OnlinePlay.Lounge
+{
+    [Cached]
+    [Cached(typeof(IOnlinePlayLounge))]
+    public abstract partial class LoungeSubScreen : OnlinePlaySubScreen, IOnlinePlayLounge
+    {
+        public override string Title =&gt; &quot;Lounge&quot;;
+
+        protected override BackgroundScreen CreateBackground() =&gt; new LoungeBackgroundScreen
+        {
+            SelectedRoom = { BindTarget = roomListing.SelectedRoom }
+        };
+
+        protected override UserActivity InitialActivity =&gt; new UserActivity.SearchingForLobby();
+
+        [Resolved]
+        private MusicController music { get; set; } = null!;
+
+        [Resolved(CanBeNull = true)]
+        private OngoingOperationTracker? ongoingOperationTracker { get; set; }
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved(CanBeNull = true)]
+        private IdleTracker? idleTracker { get; set; }
+
+        [Resolved]
+        protected OsuConfigManager Config { get; private set; } = null!;
+
+        private IDisposable? joiningRoomOperation;
+
+        private readonly Bindable&lt;LoungeFilterCriteria?&gt; filter = new Bindable&lt;LoungeFilterCriteria?&gt;();
+        private readonly Bindable&lt;bool&gt; hasListingResults = new Bindable&lt;bool&gt;();
+        private readonly IBindable&lt;bool&gt; operationInProgress = new Bindable&lt;bool&gt;();
+        private readonly IBindable&lt;bool&gt; isIdle = new BindableBool();
+        private RoomListing roomListing = null!;
+        private LoungeListingPoller listingPoller = null!;
+        private PopoverContainer popoverContainer = null!;
+        private LoadingLayer loadingLayer = null!;
+        private SearchTextBox searchTextBox = null!;
+
+        protected Dropdown&lt;RoomModeFilter&gt; StatusDropdown { get; private set; } = null!;
+
+        [BackgroundDependencyLoader(true)]
+        private void load()
+        {
+            Masking = true;
+
+            const float controls_area_height = 34f;
+
+            if (idleTracker != null)
+                isIdle.BindTo(idleTracker.IsIdle);
+
+            Color4 bg = Color4Extensions.FromHex(&quot;#070405&quot;);
+
+            InternalChildren = new Drawable[]
+            {
+                listingPoller = new LoungeListingPoller
+                {
+                    RoomsReceived = onListingReceived,
+                    Filter = { BindTarget = filter }
+                },
+                popoverContainer = new PopoverContainer
+                {
+                    Name = @&quot;Rooms area&quot;,
+                    RelativeSizeAxes = Axes.Both,
+                    Padding = new MarginPadding
+                    {
+                        Horizontal = WaveOverlayContainer.WIDTH_PADDING,
+                        Top = Header.HEIGHT + controls_area_height + 20,
+                    },
+                    Child = roomListing = new RoomListing
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Filter = { BindTarget = filter },
+                    }
+                },
+                loadingLayer = new LoadingLayer(true),
+                new Container
+                {
+                    Name = &quot;Header area&quot;,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Children = new Drawable[]
+                    {
+                        new Box
+                        {
+                            Colour = ColourInfo.GradientVertical(bg, bg.Opacity(0.75f)),
+                            RelativeSizeAxes = Axes.Both,
+                            Height = 0.8f,
+                        },
+                        new Box
+                        {
+                            Colour = ColourInfo.GradientVertical(bg.Opacity(0.75f), bg.Opacity(0)),
+                            RelativeSizeAxes = Axes.Both,
+                            RelativePositionAxes = Axes.Both,
+                            Y = 0.8f,
+                            // Intentionally taller than the header for a more gradual fade
+                            Height = 0.5f,
+                        },
+                        new FillFlowContainer
+                        {
+                            Name = @&quot;Header area flow&quot;,
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Padding = new MarginPadding { Horizontal = WaveOverlayContainer.WIDTH_PADDING },
+                            Direction = FillDirection.Vertical,
+                            Children = new Drawable[]
+                            {
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    Height = Header.HEIGHT,
+                                    Child = searchTextBox = new BasicSearchTextBox
+                                    {
+                                        Anchor = Anchor.CentreRight,
+                                        Origin = Anchor.CentreRight,
+                                        RelativeSizeAxes = Axes.X,
+                                        Width = 0.6f,
+                                    },
+                                },
+                                new GridContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    ColumnDimensions = new[]
+                                    {
+                                        new Dimension(GridSizeMode.AutoSize),
+                                        new Dimension(),
+                                    },
+                                    RowDimensions = new[]
+                                    {
+                                        new Dimension(GridSizeMode.AutoSize),
+                                    },
+                                    Content = new[]
+                                    {
+                                        new Drawable[]
+                                        {
+                                            new Container
+                                            {
+                                                AutoSizeAxes = Axes.X,
+                                                Margin = new MarginPadding { Right = 20 },
+                                                Children = new Drawable[]
+                                                {
+                                                    CreateNewRoomButton().With(d =&gt;
+                                                    {
+                                                        // Ballpark alignment with filter controls to right.
+                                                        // Done this way to ensure it still looks correct when UI scale causes multi-line flow.
+                                                        d.Y = -6;
+                                                        d.Size = new Vector2(180, 48 + 6);
+                                                        d.Action = () =&gt; Open();
+                                                    }),
+                                                }
+                                            },
+                                            new FillFlowContainer
+                                            {
+                                                RelativeSizeAxes = Axes.X,
+                                                AutoSizeAxes = Axes.Y,
+                                                Direction = FillDirection.Full,
+                                                Spacing = new Vector2(10, 8),
+                                                ChildrenEnumerable = CreateFilterControls().Select(f =&gt; f.With(d =&gt;
+                                                {
+                                                    d.Anchor = Anchor.TopRight;
+                                                    d.Origin = Anchor.TopRight;
+                                                }))
+                                            }
+                                        },
+                                    }
+                                },
+                            },
+                        },
+                    }
+                },
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            searchTextBox.Current.BindValueChanged(_ =&gt; updateFilterDebounced());
+            ruleset.BindValueChanged(_ =&gt; UpdateFilter());
+            isIdle.BindValueChanged(_ =&gt; updatePollingRate(this.IsCurrentScreen()), true);
+
+            if (ongoingOperationTracker != null)
+            {
+                operationInProgress.BindTo(ongoingOperationTracker.InProgress);
+                operationInProgress.BindValueChanged(_ =&gt; updateLoadingLayer());
+            }
+
+            hasListingResults.BindValueChanged(_ =&gt; updateLoadingLayer());
+
+            filter.BindValueChanged(_ =&gt;
+            {
+                roomListing.Rooms.Clear();
+                RefreshRooms();
+            });
+
+            updateLoadingLayer();
+            updateFilter();
+        }
+
+        private void onListingReceived(Room[] result)
+        {
+            Dictionary&lt;long, Room&gt; localRoomsById = roomListing.Rooms.ToDictionary(r =&gt; r.RoomID!.Value);
+            Dictionary&lt;long, Room&gt; resultRoomsById = result.ToDictionary(r =&gt; r.RoomID!.Value);
+
+            // Remove all local rooms no longer in the result set.
+            roomListing.Rooms.RemoveAll(r =&gt; !resultRoomsById.ContainsKey(r.RoomID!.Value));
+
+            // Add or update local rooms with the result set.
+            foreach (var r in result)
+            {
+                if (localRoomsById.TryGetValue(r.RoomID!.Value, out Room? existingRoom))
+                    existingRoom.CopyFrom(r);
+                else
+                    roomListing.Rooms.Add(r);
+            }
+
+            hasListingResults.Value = true;
+        }
+
+        #region Filtering
+
+        public void UpdateFilter() =&gt; Scheduler.AddOnce(updateFilter);
+
+        private ScheduledDelegate? scheduledFilterUpdate;
+
+        private void updateFilterDebounced()
+        {
+            scheduledFilterUpdate?.Cancel();
+            scheduledFilterUpdate = Scheduler.AddDelayed(UpdateFilter, 200);
+        }
+
+        private void updateFilter()
+        {
+            scheduledFilterUpdate?.Cancel();
+            filter.Value = CreateFilterCriteria();
+        }
+
+        protected virtual LoungeFilterCriteria CreateFilterCriteria() =&gt; new LoungeFilterCriteria
+        {
+            SearchString = searchTextBox.Current.Value,
+            Ruleset = ruleset.Value,
+            Mode = StatusDropdown.Current.Value,
+        };
+
+        protected virtual IEnumerable&lt;Drawable&gt; CreateFilterControls()
+        {
+            yield return new Container
+            {
+                Width = 160,
+                AutoSizeAxes = Axes.Y,
+                Child = StatusDropdown = new FormEnumDropdown&lt;RoomModeFilter&gt;
+                {
+                    Caption = LoungeSubScreenStrings.RoomFilterState,
+                }
+            };
+
+            StatusDropdown.Current.BindValueChanged(_ =&gt; UpdateFilter());
+        }
+
+        #endregion
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+            onReturning();
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            music.EnsurePlayingSomething();
+
+            onReturning();
+
+            // Poll for any newly-created rooms (including potentially the user&#39;s own).
+            listingPoller.PollImmediately();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            onLeaving();
+            return base.OnExiting(e);
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            onLeaving();
+            base.OnSuspending(e);
+        }
+
+        protected override void OnFocus(FocusEvent e)
+        {
+            searchTextBox.TakeFocus();
+        }
+
+        private void onReturning()
+        {
+            updatePollingRate(true);
+            searchTextBox.HoldFocus = true;
+        }
+
+        private void onLeaving()
+        {
+            updatePollingRate(false);
+            searchTextBox.HoldFocus = false;
+
+            // ensure any password prompt is dismissed.
+            popoverContainer.HidePopover();
+        }
+
+        public void Join(Room room, string? password, Action&lt;Room&gt;? onSuccess = null, Action&lt;string, Exception?&gt;? onFailure = null) =&gt; Schedule(() =&gt;
+        {
+            if (joiningRoomOperation != null)
+                return;
+
+            joiningRoomOperation = ongoingOperationTracker?.BeginOperation();
+
+            JoinInternal(room, password, r =&gt;
+            {
+                Open(room);
+                joiningRoomOperation?.Dispose();
+                joiningRoomOperation = null;
+                onSuccess?.Invoke(room);
+            }, (message, exception) =&gt;
+            {
+                joiningRoomOperation?.Dispose();
+                joiningRoomOperation = null;
+
+                if (onFailure != null)
+                    onFailure(message, exception);
+                else
+                    Logger.Error(exception, message);
+            });
+        });
+
+        protected abstract void JoinInternal(Room room, string? password, Action&lt;Room&gt; onSuccess, Action&lt;string, Exception?&gt; onFailure);
+
+        public void OpenCopy(Room room)
+        {
+            Debug.Assert(room.RoomID != null);
+
+            if (joiningRoomOperation != null)
+                return;
+
+            joiningRoomOperation = ongoingOperationTracker?.BeginOperation();
+
+            var req = new GetRoomRequest(room.RoomID.Value);
+
+            req.Success += r =&gt;
+            {
+                // ID must be unset as we use this as a marker for whether this is a client-side (not-yet-created) room or not.
+                r.RoomID = null;
+
+                // Null out dates because end date is not supported client-side and the settings overlay will populate a duration.
+                r.EndDate = null;
+                r.Duration = null;
+
+                Open(r);
+
+                joiningRoomOperation?.Dispose();
+                joiningRoomOperation = null;
+            };
+
+            req.Failure += exception =&gt;
+            {
+                Logger.Error(exception, &quot;Couldn&#39;t create a copy of this room.&quot;);
+                joiningRoomOperation?.Dispose();
+                joiningRoomOperation = null;
+            };
+
+            api.Queue(req);
+        }
+
+        public abstract void Close(Room room);
+
+        /// &lt;summary&gt;
+        /// Push a room as a new subscreen.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;room&quot;&gt;An optional template to use when creating the room.&lt;/param&gt;
+        public void Open(Room? room = null) =&gt; Schedule(() =&gt;
+        {
+            // Handles the case where a room is clicked 3 times in quick succession
+            if (!this.IsCurrentScreen())
+                return;
+
+            OpenNewRoom(room ?? CreateNewRoom());
+        });
+
+        protected virtual void OpenNewRoom(Room room) =&gt; this.Push(CreateRoomSubScreen(room));
+
+        public void RefreshRooms()
+        {
+            hasListingResults.Value = false;
+            listingPoller.PollImmediately();
+        }
+
+        private void updateLoadingLayer()
+        {
+            if (operationInProgress.Value || !hasListingResults.Value)
+                loadingLayer.Show();
+            else
+                loadingLayer.Hide();
+        }
+
+        private void updatePollingRate(bool isCurrentScreen)
+        {
+            if (!isCurrentScreen)
+                listingPoller.TimeBetweenPolls.Value = 0;
+            else
+                listingPoller.TimeBetweenPolls.Value = isIdle.Value ? 120000 : 15000;
+
+            Logger.Log($&quot;Polling adjusted (listing: {listingPoller.TimeBetweenPolls.Value})&quot;);
+        }
+
+        protected abstract OsuButton CreateNewRoomButton();
+
+        /// &lt;summary&gt;
+        /// Creates a new room.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The created &lt;see cref=&quot;Room&quot;/&gt;.&lt;/returns&gt;
+        protected abstract Room CreateNewRoom();
+
+        protected abstract OnlinePlaySubScreen CreateRoomSubScreen(Room room);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,41,42,49,0],[44,67,47,10,0],[49,60,49,96,0],[52,41,52,45,0],[52,46,52,50,0],[52,55,52,60,0],[55,68,55,72,0],[55,73,55,77,0],[58,50,58,54,0],[58,55,58,59,0],[58,64,58,69,0],[61,36,61,40,0],[61,41,61,45,0],[61,50,61,55,0],[64,44,64,48,0],[64,49,64,53,0],[67,45,67,49,0],[67,50,67,62,0],[67,67,67,72,0],[71,9,71,105,0],[72,9,72,82,0],[73,9,73,85,0],[74,9,74,70,0],[75,9,75,49,0],[76,9,76,59,0],[77,9,77,59,0],[78,9,78,51,0],[79,9,79,53,0],[81,61,81,65,0],[81,66,81,78,0],[81,83,81,88,0],[85,9,85,10,0],[86,13,86,28,0],[90,13,90,37,0],[91,17,91,51,0],[93,13,93,61,0],[95,13,185,53,0],[185,53,185,54,0],[185,54,188,57,0],[188,57,188,66,0],[188,66,189,57,0],[189,57,189,91,0],[189,91,190,57,0],[190,57,190,74,0],[190,74,190,80,0],[190,80,190,81,0],[190,81,191,53,0],[191,53,191,54,0],[191,54,200,105,0],[200,105,201,49,0],[201,49,201,50,0],[201,50,202,53,0],[202,53,202,80,0],[202,80,203,53,0],[203,53,203,80,0],[203,80,204,49,0],[204,49,204,50,0],[204,50,204,51,0],[204,51,213,15,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,33,0],[220,13,220,57,0],[220,57,220,80,0],[220,80,220,82,0],[221,13,221,43,0],[221,43,221,57,0],[221,57,221,59,0],[222,13,222,42,0],[222,42,222,83,0],[222,83,222,91,0],[224,13,224,49,0],[225,13,225,14,0],[226,17,226,80,0],[227,17,227,59,0],[227,59,227,79,0],[227,79,227,81,0],[228,13,228,14,0],[230,13,230,53,0],[230,53,230,73,0],[230,73,230,75,0],[232,13,233,13,0],[233,13,233,14,0],[233,14,234,17,0],[234,17,234,43,0],[234,43,235,17,0],[235,17,235,32,0],[235,32,236,13,0],[236,13,236,14,0],[236,14,236,16,0],[238,13,238,34,0],[239,13,239,28,0],[240,9,240,10,0],[243,9,243,10,0],[244,13,244,89,0],[244,89,244,104,0],[244,104,244,106,0],[245,13,245,79,0],[245,79,245,94,0],[245,94,245,96,0],[248,13,248,46,0],[248,46,248,91,0],[248,91,248,93,0],[251,13,251,20,0],[251,22,251,27,0],[251,28,251,30,0],[251,31,251,37,0],[252,13,252,14,0],[253,17,253,89,0],[254,21,254,46,0],[256,21,256,46,0],[257,13,257,14,0],[259,13,259,44,0],[260,9,260,10,0],[264,39,264,70,0],[269,9,269,10,0],[270,13,270,45,0],[271,13,271,77,0],[272,9,272,10,0],[275,9,275,10,0],[276,13,276,45,0],[277,13,277,51,0],[278,9,278,10,0],[280,74,285,10,0],[288,9,288,10,0],[289,13,297,15,0],[299,13,299,58,0],[299,58,299,72,0],[299,72,299,74,0],[300,9,300,10,0],[305,9,305,10,0],[306,13,306,32,0],[307,13,307,27,0],[308,9,308,10,0],[311,9,311,10,0],[312,13,312,32,0],[314,13,314,44,0],[316,13,316,27,0],[319,13,319,45,0],[320,9,320,10,0],[323,9,323,10,0],[324,13,324,25,0],[325,13,325,38,0],[326,9,326,10,0],[329,9,329,10,0],[330,13,330,25,0],[331,13,331,34,0],[332,9,332,10,0],[335,9,335,10,0],[336,13,336,39,0],[337,9,337,10,0],[340,9,340,10,0],[341,13,341,37,0],[342,13,342,44,0],[343,9,343,10,0],[346,9,346,10,0],[347,13,347,38,0],[348,13,348,45,0],[351,13,351,44,0],[352,9,352,10,0],[354,136,355,9,0],[355,9,355,10,0],[355,10,356,13,0],[356,13,356,46,0],[356,46,357,17,0],[357,17,357,24,0],[357,24,359,13,0],[359,13,359,78,0],[359,78,361,13,0],[361,13,362,13,0],[362,13,362,14,0],[362,14,363,17,0],[363,17,363,28,0],[363,28,364,17,0],[364,17,364,49,0],[364,49,365,17,0],[365,17,365,45,0],[365,45,366,17,0],[366,17,366,41,0],[366,41,367,13,0],[367,13,367,14,0],[367,14,368,13,0],[368,13,368,14,0],[368,14,369,17,0],[369,17,369,49,0],[369,49,370,17,0],[370,17,370,45,0],[370,45,372,17,0],[372,17,372,39,0],[372,39,373,21,0],[373,21,373,51,0],[373,51,375,21,0],[375,21,375,54,0],[375,54,376,13,0],[376,13,376,14,0],[376,14,376,16,0],[376,16,377,9,0],[377,9,377,10,0],[377,10,377,11,0],[382,9,382,10,0],[383,13,383,47,0],[385,13,385,46,0],[386,17,386,24,0],[388,13,388,78,0],[390,13,390,61,0],[392,13,393,13,0],[393,13,393,14,0],[393,14,395,17,0],[395,17,395,33,0],[395,33,398,17,0],[398,17,398,34,0],[398,34,399,17,0],[399,17,399,35,0],[399,35,401,17,0],[401,17,401,25,0],[401,25,403,17,0],[403,17,403,49,0],[403,49,404,17,0],[404,17,404,45,0],[404,45,405,13,0],[405,13,405,14,0],[405,14,405,15,0],[407,13,408,13,0],[408,13,408,14,0],[408,14,409,17,0],[409,17,409,81,0],[409,81,410,17,0],[410,17,410,49,0],[410,49,411,17,0],[411,17,411,45,0],[411,45,412,13,0],[412,13,412,14,0],[412,14,412,15,0],[414,13,414,28,0],[415,9,415,10,0],[423,48,424,9,0],[424,9,424,10,0],[424,10,426,13,0],[426,13,426,41,0],[426,41,427,17,0],[427,17,427,24,0],[427,24,429,13,0],[429,13,429,50,0],[429,50,430,9,0],[430,9,430,10,0],[430,10,430,11,0],[432,58,432,94,0],[435,9,435,10,0],[436,13,436,45,0],[437,13,437,45,0],[438,9,438,10,0],[441,9,441,10,0],[442,13,442,71,0],[443,17,443,37,0],[445,17,445,37,0],[446,9,446,10,0],[449,9,449,10,0],[450,13,450,34,0],[451,17,451,58,0],[453,17,453,86,0],[455,13,455,95,0],[456,9,456,10,0]]);
+    </script>
+  </body>
+</html>

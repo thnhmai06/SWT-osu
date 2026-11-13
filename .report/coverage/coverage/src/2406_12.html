@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/Checks/CheckVideoUsage.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Rulesets.Edit.Checks.Components;
+
+namespace osu.Game.Rulesets.Edit.Checks
+{
+    public class CheckVideoUsage : ICheck
+    {
+        public CheckMetadata Metadata =&gt; new CheckMetadata(CheckCategory.Resources, &quot;Inconsistent video usage&quot;, CheckScope.BeatmapSet);
+
+        public IEnumerable&lt;IssueTemplate&gt; PossibleTemplates =&gt; new IssueTemplate[]
+        {
+            new IssueTemplateDifferentVideo(this),
+            new IssueTemplateDifferentStartTime(this),
+            new IssueTemplateMissingVideo(this)
+        };
+
+        public IEnumerable&lt;Issue&gt; Run(BeatmapVerifierContext context)
+        {
+            var currentVideo = ResourcesCheckUtils.GetDifficultyVideo(context.CurrentDifficulty.Working);
+
+            // If current difficulty has no video but any other does -&gt; problem
+            if (currentVideo == null)
+            {
+                foreach (var otherDifficulty in context.OtherDifficulties)
+                {
+                    if (ResourcesCheckUtils.GetDifficultyVideo(otherDifficulty.Working) != null)
+                    {
+                        yield return new IssueTemplateMissingVideo(this).Create(context.CurrentDifficulty.Playable.BeatmapInfo.DifficultyName);
+
+                        break;
+                    }
+                }
+            }
+
+            // If current has a video, check for missing video on other difficulties and warn about different files vs current.
+            if (currentVideo != null)
+            {
+                string referencePath = currentVideo.Path;
+
+                foreach (var otherDifficulty in context.OtherDifficulties)
+                {
+                    var otherVideo = ResourcesCheckUtils.GetDifficultyVideo(otherDifficulty.Working);
+                    string difficultyName = otherDifficulty.Playable.BeatmapInfo.DifficultyName;
+
+                    // If other difficulty has no video -&gt; problem
+                    if (otherVideo == null)
+                    {
+                        yield return new IssueTemplateMissingVideo(this).Create(difficultyName);
+
+                        continue;
+                    }
+
+                    // Different video used (relative to current) -&gt; warning
+                    if (!string.Equals(otherVideo.Path, referencePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        yield return new IssueTemplateDifferentVideo(this).Create(difficultyName, referencePath, otherVideo.Path);
+                    }
+                }
+            }
+
+            // Pairwise check: for each video file used across all difficulties, ensure all start times match.
+            // Build a list of all difficulties with a video present (including current).
+            var allDifficultiesWithVideo = new List&lt;(string DifficultyName, string Path, double StartTime)&gt;();
+
+            if (currentVideo != null)
+                allDifficultiesWithVideo.Add((context.CurrentDifficulty.Playable.BeatmapInfo.DifficultyName, currentVideo.Path, currentVideo.StartTime));
+
+            foreach (var other in context.OtherDifficulties)
+            {
+                var video = ResourcesCheckUtils.GetDifficultyVideo(other.Working);
+
+                if (video != null)
+                {
+                    string name = other.Playable.BeatmapInfo.DifficultyName;
+                    allDifficultiesWithVideo.Add((name, video.Path, video.StartTime));
+                }
+            }
+
+            // Group by video path (case-insensitive) and compare start times pairwise within each group.
+            foreach (var groupedByVideoPath in allDifficultiesWithVideo.GroupBy(v =&gt; v.Path, StringComparer.OrdinalIgnoreCase))
+            {
+                var difficultiesWithSameVideo = groupedByVideoPath.ToList();
+
+                for (int i = 0; i &lt; difficultiesWithSameVideo.Count; i++)
+                {
+                    for (int j = i + 1; j &lt; difficultiesWithSameVideo.Count; j++)
+                    {
+                        if (!difficultiesWithSameVideo[i].StartTime.Equals(difficultiesWithSameVideo[j].StartTime))
+                        {
+                            yield return new IssueTemplateDifferentStartTime(this).Create(
+                                groupedByVideoPath.Key,
+                                difficultiesWithSameVideo[i].DifficultyName, difficultiesWithSameVideo[i].StartTime,
+                                difficultiesWithSameVideo[j].DifficultyName, difficultiesWithSameVideo[j].StartTime);
+                        }
+                    }
+                }
+            }
+        }
+
+        public class IssueTemplateDifferentVideo : IssueTemplate
+        {
+            public IssueTemplateDifferentVideo(ICheck check)
+                : base(check, IssueType.Warning, &quot;Video file differs from current difficulty in \&quot;{0}\&quot; (current: \&quot;{1}\&quot;, other: \&quot;{2}\&quot;). Ensure this makes sense.&quot;)
+            {
+            }
+
+            public Issue Create(string otherDifficulty, string currentPath, string otherPath)
+                =&gt; new Issue(this, otherDifficulty, currentPath, otherPath);
+        }
+
+        public class IssueTemplateDifferentStartTime : IssueTemplate
+        {
+            public IssueTemplateDifferentStartTime(ICheck check)
+                : base(check, IssueType.Problem, &quot;Video start time differs for \&quot;{0}\&quot; between \&quot;{1}\&quot; ({2:0} ms) and \&quot;{3}\&quot; ({4:0} ms).&quot;)
+            {
+            }
+
+            public Issue Create(string path, string difficultyA, double startA, string difficultyB, double startB)
+                =&gt; new Issue(this, path, difficultyA, startA, difficultyB, startB);
+        }
+
+        public class IssueTemplateMissingVideo : IssueTemplate
+        {
+            public IssueTemplateMissingVideo(ICheck check)
+                : base(check, IssueType.Problem, &quot;Video is missing in \&quot;{0}\&quot;.&quot;)
+            {
+            }
+
+            public Issue Create(string otherDifficulty) =&gt; new Issue(this, otherDifficulty);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[13,42,13,135,0],[15,64,20,10,0],[23,9,23,10,0],[24,13,24,106,0],[27,13,27,38,0],[28,13,28,14,0],[29,17,29,24,0],[29,26,29,45,0],[29,46,29,48,0],[29,49,29,74,0],[30,17,30,18,0],[31,21,31,97,0],[32,21,32,22,0],[33,25,33,144,0],[35,25,35,31,0],[37,17,37,18,0],[38,13,38,14,0],[41,13,41,38,0],[42,13,42,14,0],[43,17,43,58,0],[45,17,45,24,0],[45,26,45,45,0],[45,46,45,48,0],[45,49,45,74,0],[46,17,46,18,0],[47,21,47,102,0],[48,21,48,97,0],[51,21,51,44,0],[52,21,52,22,0],[53,25,53,97,0],[55,25,55,34,0],[59,21,59,108,0],[60,21,60,22,0],[61,25,61,131,0],[62,21,62,22,0],[63,17,63,18,0],[64,13,64,14,0],[68,13,68,111,0],[70,13,70,38,0],[71,17,71,154,0],[73,13,73,20,0],[73,22,73,31,0],[73,32,73,34,0],[73,35,73,60,0],[74,13,74,14,0],[75,17,75,83,0],[77,17,77,35,0],[78,17,78,18,0],[79,21,79,77,0],[80,21,80,87,0],[81,17,81,18,0],[82,13,82,14,0],[85,13,85,20,0],[85,22,85,44,0],[85,45,85,47,0],[85,48,85,86,0],[85,86,85,92,0],[85,92,85,127,0],[86,13,86,14,0],[87,17,87,77,0],[89,22,89,31,0],[89,33,89,68,0],[89,70,89,73,0],[90,17,90,18,0],[91,26,91,39,0],[91,41,91,76,0],[91,78,91,81,0],[92,21,92,22,0],[93,25,93,116,0],[94,25,94,26,0],[95,29,98,118,0],[99,25,99,26,0],[100,21,100,22,0],[101,17,101,18,0],[102,13,102,14,0],[103,9,103,10,0],[108,19,108,167,0],[109,13,109,14,0],[110,13,110,14,0],[113,20,113,76,0],[119,19,119,140,0],[120,13,120,14,0],[121,13,121,14,0],[124,20,124,83,0],[130,19,130,81,0],[131,13,131,14,0],[132,13,132,14,0],[134,60,134,92,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Notifications/Notification.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Primitives;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Overlays.Notifications
+{
+    public abstract partial class Notification : Container
+    {
+        /// &lt;summary&gt;
+        /// Notification was closed, either by user or otherwise.
+        /// Importantly, this event may be fired from a non-update thread.
+        /// &lt;/summary&gt;
+        public event Action? Closed;
+
+        public abstract LocalisableString Text { get; set; }
+
+        /// &lt;summary&gt;
+        /// Important notifications display for longer, and announce themselves at an OS level (ie flashing the taskbar).
+        /// This defaults to &lt;c&gt;true&lt;/c&gt;.
+        /// &lt;/summary&gt;
+        public bool IsImportant { get; init; } = true;
+
+        /// &lt;summary&gt;
+        /// Critical notifications show even during gameplay or other scenarios where notifications would usually be suppressed.
+        /// &lt;/summary&gt;
+        public bool IsCritical { get; init; }
+
+        /// &lt;summary&gt;
+        /// Transient notifications only show as a toast, and do not linger in notification history.
+        /// &lt;/summary&gt;
+        public bool Transient { get; init; }
+
+        /// &lt;summary&gt;
+        /// Run on user activating the notification. Return true to close.
+        /// &lt;/summary&gt;
+        public Func&lt;bool&gt;? Activated;
+
+        public Action? ForwardToOverlay { get; set; }
+
+        /// &lt;summary&gt;
+        /// Should we show at the top of our section on display?
+        /// &lt;/summary&gt;
+        public virtual bool DisplayOnTop =&gt; true;
+
+        public virtual string PopInSampleName =&gt; &quot;UI/notification-default&quot;;
+        public virtual string PopOutSampleName =&gt; &quot;UI/overlay-pop-out&quot;;
+
+        protected const float CORNER_RADIUS = 6;
+
+        protected NotificationLight Light;
+
+        protected Container IconContent;
+
+        public bool WasClosed { get; private set; }
+
+        private readonly FillFlowContainer content;
+
+        protected override Container&lt;Drawable&gt; Content =&gt; content;
+
+        public Container MainContent;
+
+        private readonly DragContainer dragContainer;
+
+        public virtual bool Read { get; set; }
+
+        protected virtual bool AllowFlingDismiss =&gt; true;
+
+        public new bool IsDragged =&gt; dragContainer.IsDragged;
+
+        protected virtual IconUsage CloseButtonIcon =&gt; FontAwesome.Solid.Check;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        public override bool PropagatePositionalInputSubTree =&gt; base.PropagatePositionalInputSubTree &amp;&amp; !WasClosed;
+
+        private bool isInToastTray;
+
+        /// &lt;summary&gt;
+        /// Whether this notification is in the &lt;see cref=&quot;NotificationOverlayToastTray&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public bool IsInToastTray
+        {
+            get =&gt; isInToastTray;
+            set
+            {
+                isInToastTray = value;
+
+                if (!isInToastTray)
+                {
+                    dragContainer.ResetPosition();
+                    if (!Read)
+                        Light.FadeIn(100);
+                }
+            }
+        }
+
+        private readonly Box initialFlash;
+
+        private Box background = null!;
+
+        protected Notification()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            InternalChildren = new Drawable[]
+            {
+                Light = new NotificationLight
+                {
+                    Alpha = 0,
+                    Margin = new MarginPadding { Right = 5 },
+                    Anchor = Anchor.CentreLeft,
+                    Origin = Anchor.CentreRight,
+                },
+                dragContainer = new DragContainer(this)
+                {
+                    // Use margin instead of FillFlow spacing to fix extra padding appearing when notification shrinks
+                    // in height.
+                    Padding = new MarginPadding { Vertical = 3f },
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                }.WithChild(MainContent = new Container
+                {
+                    CornerRadius = CORNER_RADIUS,
+                    Masking = true,
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    AutoSizeDuration = 400,
+                    AutoSizeEasing = Easing.OutQuint,
+                    Children = new Drawable[]
+                    {
+                        new GridContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            RowDimensions = new[]
+                            {
+                                new Dimension(GridSizeMode.AutoSize, minSize: 60)
+                            },
+                            ColumnDimensions = new[]
+                            {
+                                new Dimension(GridSizeMode.AutoSize),
+                                new Dimension(),
+                                new Dimension(GridSizeMode.AutoSize),
+                            },
+                            Content = new[]
+                            {
+                                new Drawable[]
+                                {
+                                    IconContent = new Container
+                                    {
+                                        Width = 40,
+                                        RelativeSizeAxes = Axes.Y,
+                                    },
+                                    new Container
+                                    {
+                                        RelativeSizeAxes = Axes.X,
+                                        AutoSizeAxes = Axes.Y,
+                                        Padding = new MarginPadding(10),
+                                        Children = new Drawable[]
+                                        {
+                                            content = new FillFlowContainer
+                                            {
+                                                Masking = true,
+                                                RelativeSizeAxes = Axes.X,
+                                                AutoSizeAxes = Axes.Y,
+                                                Direction = FillDirection.Vertical,
+                                                Spacing = new Vector2(15)
+                                            },
+                                        }
+                                    },
+                                    new CloseButton(CloseButtonIcon)
+                                    {
+                                        Action = () =&gt; Close(true),
+                                        Anchor = Anchor.TopRight,
+                                        Origin = Anchor.TopRight,
+                                    }
+                                }
+                            },
+                        },
+                        initialFlash = new Box
+                        {
+                            Colour = Color4.White.Opacity(0.8f),
+                            RelativeSizeAxes = Axes.Both,
+                            Blending = BlendingParameters.Additive,
+                        },
+                    }
+                })
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            MainContent.Add(background = new Box
+            {
+                RelativeSizeAxes = Axes.Both,
+                Colour = colourProvider.Background3,
+                Depth = float.MaxValue
+            });
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            background.FadeColour(colourProvider.Background2, 200, Easing.OutQuint);
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            background.FadeColour(colourProvider.Background3, 200, Easing.OutQuint);
+            base.OnHoverLost(e);
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            // right click doesn&#39;t trigger OnClick so we need to handle here until that changes.
+            if (e.Button != MouseButton.Left)
+            {
+                Close(true);
+                return true;
+            }
+
+            return base.OnMouseDown(e);
+        }
+
+        protected override bool OnClick(ClickEvent e)
+        {
+            // Clicking with anything but left button should dismiss but not perform the activation action.
+            if (e.Button == MouseButton.Left &amp;&amp; Activated?.Invoke() == false)
+                return true;
+
+            Close(false);
+            return true;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            this.FadeInFromZero(200);
+
+            MainContent.MoveToX(DrawSize.X);
+            MainContent.MoveToX(0, 500, Easing.OutQuint);
+
+            initialFlash.FadeOutFromOne(2000, Easing.OutQuart);
+        }
+
+        public virtual void Close(bool runFlingAnimation)
+        {
+            if (WasClosed) return;
+
+            WasClosed = true;
+
+            Closed?.Invoke();
+
+            Schedule(() =&gt;
+            {
+                if (runFlingAnimation &amp;&amp; dragContainer.FlingLeft())
+                    this.FadeOut(600, Easing.In);
+                else
+                    this.FadeOut(100);
+
+                Expire();
+            });
+        }
+
+        private partial class DragContainer : Container
+        {
+            private Vector2 velocity;
+            private Vector2 lastPosition;
+
+            private readonly Notification notification;
+
+            public DragContainer(Notification notification)
+            {
+                this.notification = notification;
+            }
+
+            public override RectangleF BoundingBox
+            {
+                get
+                {
+                    var childBounding = Children.First().BoundingBox;
+
+                    if (X &lt; 0) childBounding *= new Vector2(1, Math.Max(0, 1 + (X / 300)));
+                    if (Y &gt; 0) childBounding *= new Vector2(1, Math.Max(0, 1 - (Y / 200)));
+
+                    return childBounding;
+                }
+            }
+
+            protected override bool OnDragStart(DragStartEvent e) =&gt; notification.IsInToastTray;
+
+            protected override void OnDrag(DragEvent e)
+            {
+                if (!notification.IsInToastTray)
+                    return;
+
+                Vector2 change = e.MousePosition - e.MouseDownPosition;
+
+                // Diminish the drag distance as we go further to simulate &quot;rubber band&quot; feeling.
+                change *= change.Length &lt;= 0 ? 0 : MathF.Pow(change.Length, 0.8f) / change.Length;
+
+                // Only apply Y change if dragging to the left.
+                if (change.X &gt;= 0)
+                    change.Y = 0;
+                else
+                    change.Y *= (float)Interpolation.ApplyEasing(Easing.InOutQuart, Math.Min(1, -change.X / 200));
+
+                this.MoveTo(change);
+            }
+
+            protected override void OnDragEnd(DragEndEvent e)
+            {
+                if (notification.AllowFlingDismiss &amp;&amp; (Rotation &lt; -10 || velocity.X &lt; -0.3f))
+                    notification.Close(true);
+                else if (X &gt; 30 || velocity.X &gt; 0.3f)
+                    notification.ForwardToOverlay?.Invoke();
+                else
+                    ResetPosition();
+
+                base.OnDragEnd(e);
+            }
+
+            private bool flinging;
+
+            protected override void UpdateAfterChildren()
+            {
+                base.UpdateAfterChildren();
+
+                Rotation = Math.Min(0, X * 0.1f);
+
+                if (flinging)
+                {
+                    velocity.Y += (float)Clock.ElapsedFrameTime * 0.005f;
+                    Position += (float)Clock.ElapsedFrameTime * velocity;
+                }
+                else if (Clock.ElapsedFrameTime &gt; 0)
+                {
+                    Vector2 change = (Position - lastPosition) / (float)Clock.ElapsedFrameTime;
+
+                    if (velocity.X == 0)
+                        velocity = change;
+                    else
+                    {
+                        velocity = new Vector2(
+                            (float)Interpolation.DampContinuously(velocity.X, change.X, 40, Clock.ElapsedFrameTime),
+                            (float)Interpolation.DampContinuously(velocity.Y, change.Y, 40, Clock.ElapsedFrameTime)
+                        );
+                    }
+
+                    lastPosition = Position;
+                }
+            }
+
+            public bool FlingLeft()
+            {
+                if (!notification.IsInToastTray)
+                    return false;
+
+                if (flinging)
+                    return true;
+
+                if (velocity.X &gt; -0.3f)
+                    velocity.X = -0.3f - 0.5f * RNG.NextSingle();
+
+                flinging = true;
+                ClearTransforms();
+                return true;
+            }
+
+            public void ResetPosition()
+            {
+                this.MoveTo(Vector2.Zero, 800, Easing.OutElastic);
+                this.RotateTo(0, 800, Easing.OutElastic);
+            }
+        }
+
+        internal partial class CloseButton : OsuClickableContainer
+        {
+            private SpriteIcon icon = null!;
+            private Box background = null!;
+
+            private readonly IconUsage iconUsage;
+
+            [Resolved]
+            private OverlayColourProvider colourProvider { get; set; } = null!;
+
+            public CloseButton(IconUsage iconUsage)
+            {
+                this.iconUsage = iconUsage;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                RelativeSizeAxes = Axes.Y;
+                Width = 28;
+
+                Children = new Drawable[]
+                {
+                    background = new Box
+                    {
+                        Colour = OsuColour.Gray(0).Opacity(0.15f),
+                        Alpha = 0,
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    icon = new SpriteIcon
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Icon = iconUsage,
+                        Size = new Vector2(12),
+                        Colour = colourProvider.Foreground1,
+                    }
+                };
+            }
+
+            protected override bool OnHover(HoverEvent e)
+            {
+                background.FadeIn(200, Easing.OutQuint);
+                icon.FadeColour(colourProvider.Content1, 200, Easing.OutQuint);
+                return base.OnHover(e);
+            }
+
+            protected override void OnHoverLost(HoverLostEvent e)
+            {
+                background.FadeOut(200, Easing.OutQuint);
+                icon.FadeColour(colourProvider.Foreground1, 200, Easing.OutQuint);
+                base.OnHoverLost(e);
+            }
+        }
+
+        public partial class NotificationLight : Container
+        {
+            private bool pulsate;
+            private Container pulsateLayer = null!;
+
+            public bool Pulsate
+            {
+                get =&gt; pulsate;
+                set
+                {
+                    if (pulsate == value) return;
+
+                    pulsate = value;
+
+                    pulsateLayer.ClearTransforms();
+                    pulsateLayer.Alpha = 1;
+
+                    if (pulsate)
+                    {
+                        const float length = 1000;
+                        pulsateLayer.Loop(length / 2,
+                            p =&gt; p.FadeTo(0.4f, length, Easing.In).Then().FadeTo(1, length, Easing.Out)
+                        );
+                    }
+                }
+            }
+
+            public new SRGBColour Colour
+            {
+                set
+                {
+                    base.Colour = value;
+                    pulsateLayer.EdgeEffect = new EdgeEffectParameters
+                    {
+                        Colour = ((Color4)value).Opacity(0.18f),
+                        Type = EdgeEffectType.Glow,
+                        Radius = 14,
+                    };
+                }
+            }
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                Size = new Vector2(6, 15);
+
+                Children = new[]
+                {
+                    pulsateLayer = new CircularContainer
+                    {
+                        Anchor = Anchor.CentreLeft,
+                        Origin = Anchor.CentreLeft,
+                        Masking = true,
+                        RelativeSizeAxes = Axes.Both,
+                        Children = new[]
+                        {
+                            new Box
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                        }
+                    }
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[40,35,40,39,0],[40,40,40,45,0],[40,50,40,54,0],[45,34,45,38,0],[45,39,45,44,0],[50,33,50,37,0],[50,38,50,43,0],[57,43,57,47,0],[57,48,57,52,0],[62,45,62,49,0],[64,50,64,75,0],[65,51,65,71,0],[73,33,73,37,0],[73,38,73,50,0],[77,59,77,66,0],[83,36,83,40,0],[83,41,83,45,0],[85,53,85,57,0],[87,38,87,61,0],[89,56,89,79,0],[92,56,92,60,0],[92,61,92,65,0],[92,70,92,75,0],[94,65,94,115,0],[103,20,103,33,0],[105,13,105,14,0],[106,17,106,39,0],[108,17,108,36,0],[109,17,109,18,0],[110,21,110,51,0],[111,21,111,31,0],[112,25,112,43,0],[113,17,113,18,0],[114,13,114,14,0],[119,9,119,40,0],[121,9,121,33,0],[122,9,122,10,0],[123,13,123,39,0],[124,13,124,35,0],[126,13,194,56,0],[194,56,194,67,0],[194,67,209,15,0],[210,9,210,10,0],[214,9,214,10,0],[215,13,220,16,0],[221,9,221,10,0],[224,9,224,10,0],[225,13,225,85,0],[226,13,226,36,0],[227,9,227,10,0],[230,9,230,10,0],[231,13,231,85,0],[232,13,232,33,0],[233,9,233,10,0],[236,9,236,10,0],[238,13,238,46,0],[239,13,239,14,0],[240,17,240,29,0],[241,17,241,29,0],[244,13,244,40,0],[245,9,245,10,0],[248,9,248,10,0],[250,13,250,78,0],[251,17,251,29,0],[253,13,253,26,0],[254,13,254,25,0],[255,9,255,10,0],[258,9,258,10,0],[259,13,259,33,0],[261,13,261,38,0],[263,13,263,45,0],[264,13,264,58,0],[266,13,266,64,0],[267,9,267,10,0],[270,9,270,10,0],[271,13,271,27,0],[271,28,271,35,0],[273,13,273,30,0],[275,13,275,30,0],[277,13,278,13,0],[278,13,278,14,0],[278,14,279,17,0],[279,17,279,68,0],[279,68,280,21,0],[280,21,280,50,0],[280,50,282,21,0],[282,21,282,39,0],[282,39,284,17,0],[284,17,284,26,0],[284,26,285,13,0],[285,13,285,14,0],[285,14,285,16,0],[286,9,286,10,0],[295,13,295,60,0],[296,13,296,14,0],[297,17,297,50,0],[298,13,298,14,0],[303,17,303,18,0],[304,21,304,70,0],[306,21,306,31,0],[306,32,306,92,0],[307,21,307,31,0],[307,32,307,92,0],[309,21,309,42,0],[310,17,310,18,0],[313,70,313,96,0],[316,13,316,14,0],[317,17,317,49,0],[318,21,318,28,0],[320,17,320,72,0],[323,17,323,99,0],[326,17,326,35,0],[327,21,327,34,0],[329,21,329,115,0],[331,17,331,37,0],[332,13,332,14,0],[335,13,335,14,0],[336,17,336,94,0],[337,21,337,46,0],[338,22,338,54,0],[339,21,339,61,0],[341,21,341,37,0],[343,17,343,35,0],[344,13,344,14,0],[349,13,349,14,0],[350,17,350,44,0],[352,17,352,50,0],[354,17,354,30,0],[355,17,355,18,0],[356,21,356,74,0],[357,21,357,74,0],[358,17,358,18,0],[359,22,359,53,0],[360,17,360,18,0],[361,21,361,96,0],[363,21,363,41,0],[364,25,364,43,0],[366,21,366,22,0],[367,25,370,27,0],[371,21,371,22,0],[373,21,373,45,0],[374,17,374,18,0],[375,13,375,14,0],[378,13,378,14,0],[379,17,379,49,0],[380,21,380,34,0],[382,17,382,30,0],[383,21,383,33,0],[385,17,385,40,0],[386,21,386,66,0],[388,17,388,33,0],[389,17,389,35,0],[390,17,390,29,0],[391,13,391,14,0],[394,13,394,14,0],[395,17,395,67,0],[396,17,396,58,0],[397,13,397,14,0],[402,13,402,45,0],[403,13,403,44,0],[408,60,408,64,0],[408,65,408,69,0],[408,74,408,79,0],[410,13,410,52,0],[411,13,411,14,0],[412,17,412,44,0],[413,13,413,14,0],[417,13,417,14,0],[418,17,418,43,0],[419,17,419,28,0],[421,17,437,19,0],[438,13,438,14,0],[441,13,441,14,0],[442,17,442,57,0],[443,17,443,80,0],[444,17,444,40,0],[445,13,445,14,0],[448,13,448,14,0],[449,17,449,58,0],[450,17,450,83,0],[451,17,451,37,0],[452,13,452,14,0],[458,13,458,52,0],[462,24,462,31,0],[464,17,464,18,0],[465,21,465,42,0],[465,43,465,50,0],[467,21,467,37,0],[469,21,469,52,0],[470,21,470,44,0],[472,21,472,33,0],[473,21,473,22,0],[475,25,476,34,0],[476,34,476,104,0],[476,104,477,27,0],[478,21,478,22,0],[479,17,479,18,0],[485,17,485,18,0],[486,21,486,41,0],[487,21,492,23,0],[493,17,493,18,0],[498,13,498,14,0],[499,17,499,43,0],[501,17,517,19,0],[518,13,518,14,0]]);
+    </script>
+  </body>
+</html>

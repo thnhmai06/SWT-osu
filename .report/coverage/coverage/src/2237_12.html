@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Ruleset.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.EnumExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Bindings;
+using osu.Framework.IO.Stores;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.Legacy;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Localisation;
+using osu.Game.Overlays.Settings;
+using osu.Game.Rulesets.Configuration;
+using osu.Game.Rulesets.Difficulty;
+using osu.Game.Rulesets.Edit;
+using osu.Game.Rulesets.Filter;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Replays.Types;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Scoring;
+using osu.Game.Screens.Edit.Setup;
+using osu.Game.Screens.Ranking.Statistics;
+using osu.Game.Skinning;
+using osu.Game.Users;
+using osuTK;
+
+namespace osu.Game.Rulesets
+{
+    public abstract class Ruleset
+    {
+        public RulesetInfo RulesetInfo { get; }
+
+        private static readonly ConcurrentDictionary&lt;string, IMod[]&gt; mod_reference_cache = new ConcurrentDictionary&lt;string, IMod[]&gt;();
+
+        /// &lt;summary&gt;
+        /// Version history:
+        /// 2022.205.0   FramedReplayInputHandler.CollectPendingInputs renamed to FramedReplayHandler.CollectReplayInputs.
+        /// 2022.822.0   All strings return values have been converted to LocalisableString to allow for localisation support.
+        /// 2026.818.0   Support for ruleset-specific key bindings in editor:
+        ///              - `Ruleset.AvailableVariants` renamed to &lt;see cref=&quot;GameplayVariants&quot;/&gt;
+        ///              - Variant ID &lt;see cref=&quot;EDITOR_VARIANT&quot;/&gt; reserved for editor key bindings
+        ///              - Overriders of &lt;see cref=&quot;GetVariantName&quot;/&gt; should ensure to return an appropriate string for &lt;see cref=&quot;EDITOR_VARIANT&quot;/&gt;
+        ///              - &lt;see cref=&quot;HitObjectComposer{TObject,TAction}&quot;/&gt; gains a second generic parameter, representing the enumeration type with relevant actions
+        ///                (it is strongly encouraged to keep it the same as the type in &lt;see cref=&quot;RulesetInputManager{T}&quot;/&gt;,
+        ///                as the same ID space is used in realm for storing them)
+        /// &lt;/summary&gt;
+        public const string CURRENT_RULESET_API_VERSION = &quot;2026.818.0&quot;;
+
+        /// &lt;summary&gt;
+        /// Define the ruleset API version supported by this ruleset.
+        /// Ruleset implementations should be updated to support the latest version to ensure they can still be loaded.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Generally, all ruleset implementations should point this directly to &lt;see cref=&quot;CURRENT_RULESET_API_VERSION&quot;/&gt;.
+        /// This will ensure that each time you compile a new release, it will pull in the most recent version.
+        /// See https://github.com/ppy/osu/wiki/Breaking-Changes for full details on required ongoing changes.
+        /// &lt;/remarks&gt;
+        public virtual string RulesetAPIVersionSupported =&gt; string.Empty;
+
+        /// &lt;summary&gt;
+        /// A queryable source containing all available mods.
+        /// Call &lt;see cref=&quot;IMod.CreateInstance&quot;/&gt; for consumption purposes.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;IMod&gt; AllMods
+        {
+            get
+            {
+                // Is the case for many test usages.
+                if (string.IsNullOrEmpty(ShortName))
+                    return CreateAllMods();
+
+                if (!mod_reference_cache.TryGetValue(ShortName, out var mods))
+                    mod_reference_cache[ShortName] = mods = CreateAllMods().Cast&lt;IMod&gt;().ToArray();
+
+                return mods;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Returns fresh instances of all mods.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This comes with considerable allocation overhead. If only accessing for reference purposes (ie. not changing bindables / settings)
+        /// use &lt;see cref=&quot;AllMods&quot;/&gt; instead.
+        /// &lt;/remarks&gt;
+        public IEnumerable&lt;Mod&gt; CreateAllMods() =&gt; Enum.GetValues&lt;ModType&gt;()
+                                                       // Confine all mods of each mod type into a single IEnumerable&lt;Mod&gt;
+                                                       .SelectMany(GetModsFor)
+                                                       // Filter out all null mods
+                                                       // This is to handle old rulesets which were doing mods bad. Can be removed at some point we are sure nulls will not appear here.
+                                                       // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+                                                       .Where(mod =&gt; mod != null)
+                                                       // Resolve MultiMods as their .Mods property
+                                                       .SelectMany(mod =&gt; (mod as MultiMod)?.Mods ?? new[] { mod });
+
+        /// &lt;summary&gt;
+        /// Returns a fresh instance of the mod matching the specified acronym.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;acronym&quot;&gt;The acronym to query for .&lt;/param&gt;
+        public Mod? CreateModFromAcronym(string acronym)
+        {
+            return AllMods.FirstOrDefault(m =&gt; string.Equals(m.Acronym, acronym, StringComparison.OrdinalIgnoreCase))?.CreateInstance();
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a fresh instance of the mod matching the specified type.
+        /// &lt;/summary&gt;
+        public T? CreateMod&lt;T&gt;()
+            where T : Mod
+        {
+            return AllMods.FirstOrDefault(m =&gt; m is T)?.CreateInstance() as T;
+        }
+
+        /// &lt;summary&gt;
+        /// Creates an enumerable with mods that are supported by the ruleset for the supplied &lt;paramref name=&quot;type&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If there are no applicable mods from the given &lt;paramref name=&quot;type&quot;/&gt; in this ruleset,
+        /// then the proper behaviour is to return an empty enumerable.
+        /// &lt;see langword=&quot;null&quot;/&gt; mods should not be present in the returned enumerable.
+        /// &lt;/remarks&gt;
+        public abstract IEnumerable&lt;Mod&gt; GetModsFor(ModType type);
+
+        /// &lt;summary&gt;
+        /// Converts mods from legacy enum values. Do not override if you&#39;re not a legacy ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The legacy enum which will be converted.&lt;/param&gt;
+        /// &lt;returns&gt;An enumerable of constructed &lt;see cref=&quot;Mod&quot;/&gt;s.&lt;/returns&gt;
+        public virtual IEnumerable&lt;Mod&gt; ConvertFromLegacyMods(LegacyMods mods) =&gt; Array.Empty&lt;Mod&gt;();
+
+        /// &lt;summary&gt;
+        /// Converts mods to legacy enum values. Do not override if you&#39;re not a legacy ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods which will be converted.&lt;/param&gt;
+        /// &lt;returns&gt;A single bitwise enumerable value representing (to the best of our ability) the mods.&lt;/returns&gt;
+        public virtual LegacyMods ConvertToLegacyMods(Mod[] mods)
+        {
+            var value = LegacyMods.None;
+
+            foreach (var mod in mods)
+            {
+                switch (mod)
+                {
+                    case ModNoFail:
+                        value |= LegacyMods.NoFail;
+                        break;
+
+                    case ModEasy:
+                        value |= LegacyMods.Easy;
+                        break;
+
+                    case ModHidden:
+                        value |= LegacyMods.Hidden;
+                        break;
+
+                    case ModHardRock:
+                        value |= LegacyMods.HardRock;
+                        break;
+
+                    case ModPerfect:
+                        value |= LegacyMods.Perfect | LegacyMods.SuddenDeath;
+                        break;
+
+                    case ModSuddenDeath:
+                        value |= LegacyMods.SuddenDeath;
+                        break;
+
+                    case ModNightcore:
+                        value |= LegacyMods.Nightcore | LegacyMods.DoubleTime;
+                        break;
+
+                    case ModDoubleTime:
+                        value |= LegacyMods.DoubleTime;
+                        break;
+
+                    case ModRelax:
+                        value |= LegacyMods.Relax;
+                        break;
+
+                    case ModHalfTime:
+                        value |= LegacyMods.HalfTime;
+                        break;
+
+                    case ModFlashlight:
+                        value |= LegacyMods.Flashlight;
+                        break;
+
+                    case ModCinema:
+                        value |= LegacyMods.Cinema | LegacyMods.Autoplay;
+                        break;
+
+                    case ModAutoplay:
+                        value |= LegacyMods.Autoplay;
+                        break;
+
+                    case ModScoreV2:
+                        value |= LegacyMods.ScoreV2;
+                        break;
+                }
+            }
+
+            return value;
+        }
+
+        public ModAutoplay? GetAutoplayMod() =&gt; CreateMod&lt;ModAutoplay&gt;();
+
+        public ModTouchDevice? GetTouchDeviceMod() =&gt; CreateMod&lt;ModTouchDevice&gt;();
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;ScoreMultiplierCalculator&quot;/&gt; relevant to this ruleset.
+        /// &lt;/summary&gt;
+        public virtual ScoreMultiplierCalculator CreateScoreMultiplierCalculator(ScoreMultiplierContext context) =&gt; new ScoreMultiplierCalculator(context);
+
+        /// &lt;summary&gt;
+        /// Create a transformer which adds lookups specific to a ruleset to skin sources.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;skin&quot;&gt;The source skin.&lt;/param&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The current beatmap.&lt;/param&gt;
+        /// &lt;returns&gt;A skin with a transformer applied, or null if no transformation is provided by this ruleset.&lt;/returns&gt;
+        public virtual ISkin? CreateSkinTransformer(ISkin skin, IBeatmap beatmap) =&gt; null;
+
+        protected Ruleset()
+        {
+            RulesetInfo = new RulesetInfo
+            {
+                Name = Description,
+                ShortName = ShortName,
+                OnlineID = (this as ILegacyRuleset)?.LegacyID ?? -1,
+                InstantiationInfo = GetType().GetInvariantInstantiationInfo(),
+                Available = true,
+            };
+        }
+
+        /// &lt;summary&gt;
+        /// Attempt to create a hit renderer for a beatmap
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The beatmap to create the hit renderer for.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The &lt;see cref=&quot;Mod&quot;/&gt;s to apply.&lt;/param&gt;
+        /// &lt;exception cref=&quot;BeatmapInvalidForRulesetException&quot;&gt;Unable to successfully load the beatmap to be usable with this ruleset.&lt;/exception&gt;
+        public abstract DrawableRuleset CreateDrawableRulesetWith(IBeatmap beatmap, IReadOnlyList&lt;Mod&gt;? mods = null);
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;ScoreProcessor&quot;/&gt; for this &lt;see cref=&quot;Ruleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The score processor.&lt;/returns&gt;
+        public virtual ScoreProcessor CreateScoreProcessor() =&gt; new ScoreProcessor(this);
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;HealthProcessor&quot;/&gt; for this &lt;see cref=&quot;Ruleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The health processor.&lt;/returns&gt;
+        public virtual HealthProcessor CreateHealthProcessor(double drainStartTime) =&gt; new DrainingHealthProcessor(drainStartTime);
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;IBeatmapConverter&quot;/&gt; to convert a &lt;see cref=&quot;IBeatmap&quot;/&gt; to one that is applicable for this &lt;see cref=&quot;Ruleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; to be converted.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;IBeatmapConverter&quot;/&gt;.&lt;/returns&gt;
+        public abstract IBeatmapConverter CreateBeatmapConverter(IBeatmap beatmap);
+
+        /// &lt;summary&gt;
+        /// Optionally creates a &lt;see cref=&quot;IBeatmapProcessor&quot;/&gt; to alter a &lt;see cref=&quot;IBeatmap&quot;/&gt; after it has been converted.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; to be processed.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;IBeatmapProcessor&quot;/&gt;.&lt;/returns&gt;
+        public virtual IBeatmapProcessor? CreateBeatmapProcessor(IBeatmap beatmap) =&gt; null;
+
+        public abstract DifficultyCalculator CreateDifficultyCalculator(IWorkingBeatmap beatmap);
+
+        /// &lt;summary&gt;
+        /// Optionally creates a &lt;see cref=&quot;PerformanceCalculator&quot;/&gt; to generate performance data from the provided score.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;A performance calculator instance for the provided score.&lt;/returns&gt;
+        public virtual PerformanceCalculator? CreatePerformanceCalculator() =&gt; null;
+
+        public virtual HitObjectComposer? CreateHitObjectComposer() =&gt; null;
+
+        public virtual IBeatmapVerifier? CreateBeatmapVerifier() =&gt; null;
+
+        public virtual Drawable CreateIcon() =&gt; new SpriteIcon { Icon = FontAwesome.Solid.QuestionCircle };
+
+        public virtual IResourceStore&lt;byte[]&gt; CreateResourceStore() =&gt; new NamespacedResourceStore&lt;byte[]&gt;(new DllResourceStore(GetType().Assembly), @&quot;Resources&quot;);
+
+        public abstract string Description { get; }
+
+        public virtual RulesetSettingsSubsection? CreateSettings() =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;IRulesetConfigManager&quot;/&gt; for this &lt;see cref=&quot;Ruleset&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;settings&quot;&gt;The &lt;see cref=&quot;SettingsStore&quot;/&gt; to store the settings.&lt;/param&gt;
+        public virtual IRulesetConfigManager? CreateConfig(SettingsStore? settings) =&gt; null;
+
+        /// &lt;summary&gt;
+        /// A unique short name to reference this ruleset in online requests.
+        /// &lt;/summary&gt;
+        public abstract string ShortName { get; }
+
+        /// &lt;summary&gt;
+        /// The playing verb to be shown in the &lt;see cref=&quot;UserActivity.InGame&quot;/&gt; activities.
+        /// &lt;/summary&gt;
+        public virtual string PlayingVerb =&gt; &quot;Playing&quot;;
+
+        /// &lt;summary&gt;
+        /// A list of available gameplay variant IDs.
+        /// &lt;/summary&gt;
+        public virtual IEnumerable&lt;int&gt; GameplayVariants =&gt; new[] { 0 };
+
+        /// &lt;summary&gt;
+        /// A list of all available variants.
+        /// Includes special variants like &lt;see cref=&quot;EDITOR_VARIANT&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;int&gt; AllVariants =&gt; GameplayVariants.Append(EDITOR_VARIANT);
+
+        /// &lt;summary&gt;
+        /// A special variant used for supporting editor-specific customisable key bindings.
+        /// &lt;/summary&gt;
+        public const int EDITOR_VARIANT = int.MaxValue;
+
+        /// &lt;summary&gt;
+        /// Get a list of default keys for the specified variant.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;variant&quot;&gt;A variant.&lt;/param&gt;
+        /// &lt;returns&gt;A list of valid &lt;see cref=&quot;KeyBinding&quot;/&gt;s.&lt;/returns&gt;
+        public virtual IEnumerable&lt;KeyBinding&gt; GetDefaultKeyBindings(int variant = 0) =&gt; Array.Empty&lt;KeyBinding&gt;();
+
+        /// &lt;summary&gt;
+        /// Text that describes what variants in a ruleset are.
+        /// Override this to provide better copy than the generic &quot;Variant&quot; text which may not tell users much.
+        /// &lt;/summary&gt;
+        public virtual LocalisableString VariantDescription =&gt; &quot;Variant&quot;;
+
+        /// &lt;summary&gt;
+        /// Gets the name for a key binding variant. This is used for display in the settings overlay.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;variant&quot;&gt;The variant.&lt;/param&gt;
+        /// &lt;returns&gt;A descriptive name of the variant.&lt;/returns&gt;
+        public virtual LocalisableString GetVariantName(int variant) =&gt; string.Empty;
+
+        /// &lt;summary&gt;
+        /// Returns the ID of the variant that is applicable for the given &lt;paramref name=&quot;beatmapInfo&quot;/&gt;, given the current active &lt;paramref name=&quot;mods&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual int GetVariantForBeatmap(IBeatmapInfo beatmapInfo, IReadOnlyList&lt;Mod&gt;? mods = null) =&gt; 0;
+
+        /// &lt;summary&gt;
+        /// For rulesets which support legacy (osu-stable) replay conversion, this method will create an empty replay frame
+        /// for conversion use.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;An empty frame for the current ruleset, or null if unsupported.&lt;/returns&gt;
+        public virtual IConvertibleReplayFrame? CreateConvertibleReplayFrame() =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Creates the statistics for a &lt;see cref=&quot;ScoreInfo&quot;/&gt; to be displayed in the results screen.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;score&quot;&gt;The &lt;see cref=&quot;ScoreInfo&quot;/&gt; to create the statistics for. The score is guaranteed to have &lt;see cref=&quot;ScoreInfo.HitEvents&quot;/&gt; populated.&lt;/param&gt;
+        /// &lt;param name=&quot;playableBeatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt;, converted for this &lt;see cref=&quot;Ruleset&quot;/&gt; with all relevant &lt;see cref=&quot;Mod&quot;/&gt;s applied.&lt;/param&gt;
+        /// &lt;returns&gt;The &lt;see cref=&quot;StatisticItem&quot;/&gt;s to display.&lt;/returns&gt;
+        public virtual StatisticItem[] CreateStatisticsForScore(ScoreInfo score, IBeatmap playableBeatmap) =&gt; Array.Empty&lt;StatisticItem&gt;();
+
+        /// &lt;summary&gt;
+        /// Get all &lt;see cref=&quot;HitResult&quot;/&gt;s for this ruleset which are important enough to displayed to the end user.
+        /// Used for results display purposes, where it can&#39;t be determined if zero-count means the user has not achieved any or the type is not used by this ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;see cref=&quot;HitResult.Miss&quot;/&gt; is implicitly included. Special types like &lt;see cref=&quot;HitResult.IgnoreHit&quot;/&gt; are not returned by this method.
+        /// Values are returned as ordered by &lt;see cref=&quot;OrderAttribute&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;returns&gt;
+        /// All relevant &lt;see cref=&quot;HitResult&quot;/&gt;s along with a display-friendly name.
+        /// &lt;/returns&gt;
+        public IEnumerable&lt;(HitResult result, LocalisableString displayName)&gt; GetHitResultsForDisplay()
+        {
+            var validResults = GetValidHitResults();
+
+            // enumerate over ordered list to guarantee return order is stable.
+            foreach (var result in EnumExtensions.GetValuesInOrder&lt;HitResult&gt;())
+            {
+                switch (result)
+                {
+                    // hard blocked types, should never be displayed even if the ruleset tells us to.
+                    case HitResult.None:
+                    case HitResult.IgnoreHit:
+                    case HitResult.IgnoreMiss:
+                    case HitResult.ComboBreak:
+                    // display is handled as a completion count with corresponding &quot;hit&quot; type.
+                    case HitResult.LargeTickMiss:
+                    case HitResult.SmallTickMiss:
+                        continue;
+                }
+
+                if (result == HitResult.Miss || validResults.Contains(result))
+                    yield return (result, GetDisplayNameForHitResult(result));
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Get all valid &lt;see cref=&quot;HitResult&quot;/&gt;s for this ruleset.
+        /// Used for strict validation purposes. The ruleset should return ALL applicable &lt;see cref=&quot;HitResult&quot;/&gt; types here
+        /// (except &lt;see cref=&quot;HitResult.None&quot;/&gt; and obsolete types).
+        /// &lt;/summary&gt;
+        public virtual IEnumerable&lt;HitResult&gt; GetValidHitResults() =&gt; EnumExtensions.GetValuesInOrder&lt;HitResult&gt;();
+
+        /// &lt;summary&gt;
+        /// Get a display friendly name for the specified result type.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The result type to get the name for.&lt;/param&gt;
+        /// &lt;returns&gt;The display name.&lt;/returns&gt;
+        public virtual LocalisableString GetDisplayNameForHitResult(HitResult result) =&gt; result.GetLocalisableDescription();
+
+        /// &lt;summary&gt;
+        /// Applies changes to difficulty attributes for presenting to a user a rough estimate of how mods affect difficulty.
+        /// Importantly, this should NOT BE USED FOR ANY CALCULATIONS.
+        ///
+        /// It is also not always correct, and arguably is never correct depending on your frame of mind.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmapInfo&quot;&gt;The &lt;see cref=&quot;IBeatmapInfo&quot;/&gt; for which to display the adjusted difficulty.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The active mods.&lt;/param&gt;
+        /// &lt;returns&gt;The adjusted difficulty attributes.&lt;/returns&gt;
+        public virtual BeatmapDifficulty GetAdjustedDisplayDifficulty(IBeatmapInfo beatmapInfo, IReadOnlyCollection&lt;Mod&gt; mods)
+        {
+            BeatmapDifficulty adjustedDifficulty = new BeatmapDifficulty(beatmapInfo.Difficulty);
+
+            foreach (var mod in mods.OfType&lt;IApplicableToDifficulty&gt;())
+                mod.ApplyToDifficulty(adjustedDifficulty);
+
+            return adjustedDifficulty;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns a list of &lt;see cref=&quot;RulesetBeatmapAttribute&quot;/&gt;s to be displayed wherever it is wanted to display a given beatmap&#39;s difficulty information.
+        /// The returned data includes both material changes to difficulty from &lt;see cref=&quot;IApplicableToDifficulty&quot;/&gt; mods,
+        /// as well as &quot;effective&quot; adjustments coming from &lt;see cref=&quot;GetAdjustedDisplayDifficulty&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual IEnumerable&lt;RulesetBeatmapAttribute&gt; GetBeatmapAttributesForDisplay(IBeatmapInfo beatmapInfo, IReadOnlyCollection&lt;Mod&gt; mods)
+        {
+            var originalDifficulty = beatmapInfo.Difficulty;
+            var adjustedDifficulty = GetAdjustedDisplayDifficulty(beatmapInfo, mods);
+
+            yield return new RulesetBeatmapAttribute(SongSelectStrings.CircleSize, @&quot;CS&quot;, originalDifficulty.CircleSize, adjustedDifficulty.CircleSize, 10);
+            yield return new RulesetBeatmapAttribute(SongSelectStrings.ApproachRate, @&quot;AR&quot;, originalDifficulty.ApproachRate, adjustedDifficulty.ApproachRate, 10);
+            yield return new RulesetBeatmapAttribute(SongSelectStrings.Accuracy, @&quot;OD&quot;, originalDifficulty.OverallDifficulty, adjustedDifficulty.OverallDifficulty, 10);
+            yield return new RulesetBeatmapAttribute(SongSelectStrings.HPDrain, @&quot;HP&quot;, originalDifficulty.DrainRate, adjustedDifficulty.DrainRate, 10);
+        }
+
+        /// &lt;summary&gt;
+        /// Overload of &lt;see cref=&quot;GetAdjustedDisplayDifficulty&quot;/&gt; for display on Ranked Cards
+        /// &lt;/summary&gt;
+        public virtual IEnumerable&lt;RulesetBeatmapAttribute&gt; GetBeatmapAttributesForRankedPlayCard(IBeatmapInfo beatmapInfo, IReadOnlyCollection&lt;Mod&gt; mods) =&gt;
+            GetBeatmapAttributesForDisplay(beatmapInfo, mods);
+
+        /// &lt;summary&gt;
+        /// Creates ruleset-specific beatmap filter criteria to be used on the song select screen.
+        /// &lt;/summary&gt;
+        public virtual IRulesetFilterCriteria? CreateRulesetFilterCriteria() =&gt; null;
+
+        /// &lt;summary&gt;
+        /// Can be overridden to add ruleset-specific sections to the editor beatmap setup screen.
+        /// &lt;/summary&gt;
+        public virtual IEnumerable&lt;Drawable&gt; CreateEditorSetupSections() =&gt;
+        [
+            new MetadataSection(),
+            new DifficultySection(),
+            new FillFlowContainer
+            {
+                AutoSizeAxes = Axes.Y,
+                Direction = FillDirection.Vertical,
+                Spacing = new Vector2(25),
+                Children = new Drawable[]
+                {
+                    new ResourcesSection
+                    {
+                        RelativeSizeAxes = Axes.X,
+                    },
+                    new ColoursSection
+                    {
+                        RelativeSizeAxes = Axes.X,
+                    }
+                }
+            },
+            new DesignSection(),
+        ];
+
+        /// &lt;summary&gt;
+        /// Can be overridden to avoid showing scroll speed changes in the editor.
+        /// &lt;/summary&gt;
+        public virtual bool EditorShowScrollSpeed =&gt; true;
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[42,42,42,46,1],[44,9,44,135,1],[69,61,69,73,0],[78,13,78,14,1],[80,17,80,53,1],[81,21,81,44,0],[83,17,83,79,1],[84,21,84,100,1],[86,17,86,29,1],[87,13,87,14,1],[97,52,103,70,1],[103,70,103,81,1],[103,81,105,75,1],[105,75,105,115,1],[105,115,105,116,1],[112,9,112,10,1],[113,13,113,48,1],[113,48,113,117,1],[113,117,113,137,1],[114,9,114,10,1],[121,9,121,10,1],[122,13,122,48,1],[122,48,122,54,1],[122,54,122,79,1],[123,9,123,10,1],[140,83,140,101,0],[148,9,148,10,1],[149,13,149,41,1],[151,13,151,20,1],[151,22,151,29,1],[151,30,151,32,1],[151,33,151,37,1],[152,13,152,14,1],[153,17,153,29,1],[156,25,156,52,0],[157,25,157,31,0],[160,25,160,50,0],[161,25,161,31,0],[164,25,164,52,1],[165,25,165,31,1],[168,25,168,54,0],[169,25,169,31,0],[172,25,172,78,0],[173,25,173,31,0],[176,25,176,57,0],[177,25,177,31,0],[180,25,180,79,0],[181,25,181,31,0],[184,25,184,56,0],[185,25,185,31,0],[188,25,188,51,0],[189,25,189,31,0],[192,25,192,54,0],[193,25,193,31,0],[196,25,196,56,0],[197,25,197,31,0],[200,25,200,74,0],[201,25,201,31,0],[204,25,204,54,0],[205,25,205,31,0],[208,25,208,53,0],[209,25,209,31,0],[211,13,211,14,1],[213,13,213,26,1],[214,9,214,10,1],[216,49,216,73,0],[218,55,218,82,0],[223,117,223,155,0],[231,86,231,90,0],[233,9,233,28,1],[234,9,234,10,1],[235,13,242,15,1],[243,9,243,10,1],[257,65,257,89,0],[263,88,263,131,0],[277,87,277,91,1],[285,80,285,84,0],[287,72,287,76,0],[289,69,289,73,0],[291,49,291,107,0],[293,72,293,163,0],[297,71,297,75,0],[303,88,303,92,0],[313,46,313,55,0],[318,61,318,72,0],[324,48,324,87,0],[336,90,336,115,0],[342,64,342,73,0],[349,73,349,85,1],[354,111,354,112,0],[361,83,361,87,0],[369,111,369,139,0],[383,9,383,10,1],[384,13,384,53,1],[387,13,387,20,1],[387,22,387,32,1],[387,33,387,35,1],[387,36,387,80,1],[388,13,388,14,1],[389,17,389,32,1],[399,25,399,34,1],[402,17,402,79,1],[403,21,403,79,1],[404,13,404,14,1],[405,9,405,10,1],[412,71,412,115,0],[419,90,419,124,1],[431,9,431,10,1],[432,13,432,98,1],[434,13,434,20,1],[434,22,434,29,1],[434,30,434,32,1],[434,33,434,71,1],[435,17,435,59,1],[437,13,437,39,1],[438,9,438,10,1],[446,9,446,10,0],[447,13,447,61,0],[448,13,448,86,0],[450,13,450,157,0],[451,13,451,163,0],[452,13,452,169,0],[453,13,453,152,0],[454,9,454,10,0],[460,13,460,62,0],[465,81,465,85,0],[471,9,492,10,0],[497,54,497,58,0]]);
+    </script>
+  </body>
+</html>

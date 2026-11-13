@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/IPC/WebSocketServer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Linq;
+using System.Net;
+using System.Net.WebSockets;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Logging;
+
+namespace osu.Game.IPC
+{
+    /// &lt;summary&gt;
+    /// Implements a WebSocket server to be used for external integrations such as streaming overlays.
+    /// The server can only listen on &lt;c&gt;localhost&lt;/c&gt;, on the port given in the constructor.
+    /// Only UTF-8 string-based messages are supported. Binary messages are not supported.
+    /// String-based messages must not exceed &lt;see cref=&quot;WebSocketChannel.max_message_size&quot;/&gt; bytes.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;
+    /// This implementation uses &lt;see cref=&quot;HttpListener&quot;/&gt; internally.
+    /// This is a frozen .NET API as per https://github.com/dotnet/runtime/issues/63941#issuecomment-1205259894.
+    /// The reason of using this API instead of ASP.NET directly via frameworks like SignalR are as follows:
+    /// &lt;list type=&quot;bullet&quot;&gt;
+    /// &lt;item&gt;
+    /// This is intended to be a &lt;b&gt;simple&lt;/b&gt; server.
+    /// There are no reliability guarantees, no delivery guarantees, no authorisation.
+    /// The operation of this server is &lt;b&gt;best-effort&lt;/b&gt;.
+    /// Due to this, ASP.NET is surplus to requirements.
+    /// &lt;/item&gt;
+    /// &lt;item&gt;Including ASP.NET wholesale would have a negative impact on binary size.&lt;/item&gt;
+    /// &lt;item&gt;
+    /// Using ASP.NET could expose end users&#39; PCs to having things enabled that shouldn&#39;t be enabled via little-known configuration toggles.
+    /// One pertinent example is the &lt;c&gt;ASPNETCORE_URLS&lt;/c&gt; environment variable which silently changes which endpoints an ASP.NET service listens on.
+    /// &lt;/item&gt;
+    /// &lt;item&gt;
+    /// ASP.NET does not generally fit into the paradigm of being &lt;i&gt;part&lt;/i&gt; of an application.
+    /// The way ASP.NET apps are structured, is that they generally &lt;i&gt;take over&lt;/i&gt; the functioning of an application.
+    /// Therefore, there is not necessarily a given that ASP.NET bundled inside the client will fully stop functioning even when explicitly asked.
+    /// &lt;/item&gt;
+    /// &lt;/list&gt;
+    /// &lt;/remarks&gt;
+    public sealed class WebSocketServer : IDisposable
+    {
+        /// &lt;summary&gt;
+        /// Whether the server is currently running and listening for connection requests.
+        /// &lt;/summary&gt;
+        public bool IsRunning =&gt; handleRequestTask != null &amp;&amp; !runningTokenSource.IsCancellationRequested;
+
+        /// &lt;summary&gt;
+        /// Invoked when a client is connected.
+        /// The argument is the assigned ID of the client.
+        /// &lt;/summary&gt;
+        public event Action&lt;int&gt;? ClientConnected;
+
+        /// &lt;summary&gt;
+        /// Invoked when a message is received.
+        /// The first argument is the ID of the sender; the second is the content of the received message.
+        /// &lt;/summary&gt;
+        public event Action&lt;int, string&gt;? MessageReceived;
+
+        private readonly Lock syncRoot = new Lock();
+
+        private readonly string prefix;
+        private readonly Logger logger;
+
+        private HttpListener? listener;
+        private readonly ManualResetEventSlim contextResetEvent = new ManualResetEventSlim();
+        private Task? handleRequestTask;
+
+        private int channelCounter;
+        private readonly ConcurrentDictionary&lt;int, WebSocketChannel&gt; channels = new ConcurrentDictionary&lt;int, WebSocketChannel&gt;();
+
+        private readonly CancellationTokenSource runningTokenSource = new CancellationTokenSource();
+        private bool isDisposed;
+
+        public WebSocketServer(int port)
+        {
+            // Restricting to only providing a port is intentional for several reasons:
+            // - Use of HTTP (no efforts are taken to make HTTPS work).
+            // - Attack surface reduction (doesn&#39;t accidentally listen on all interfaces, potentially getting hit by something external).
+            // Some users with setups that use a second &quot;streaming PC&quot; or similar will complain. They can set up proxies at their own peril.
+            prefix = $@&quot;http://localhost:{port}/&quot;;
+
+            logger = Logger.GetLogger(@&quot;websocket&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Starts the server.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;Use this to cancel start-up.&lt;/param&gt;
+        public Task StartAsync(CancellationToken cancellationToken = default) =&gt; Task.Run(() =&gt;
+        {
+            lock (syncRoot)
+            {
+                if (listener != null)
+                    throw new InvalidOperationException($@&quot;Cannot call {nameof(StartAsync)} multiple times.&quot;);
+
+                listener = new HttpListener();
+                listener.Prefixes.Add(prefix);
+                listener.Start();
+                handleRequestTask = Task.Run(handleRequests, cancellationToken);
+                logger.Add($@&quot;Listening on {prefix}.&quot;);
+            }
+        }, cancellationToken);
+
+        private async Task handleRequests()
+        {
+            Debug.Assert(listener != null);
+
+            while (!runningTokenSource.IsCancellationRequested)
+            {
+                HttpListenerContext? context = null;
+
+                // `listener.GetContextAsync()` exists but is unusable here without ugly hacks.
+                // as per source inspection, it is a thin wrapper over `{Begin,End}GetContext()`.
+                // the problem with that is that the method is *hard-blocking* and *does not accept cancellation*.
+                // therefore, if it&#39;s called in a processing loop like this
+                // that we are expecting to be able to cut short at any moment&#39;s notice to shut things down,
+                // it&#39;s not going to yield and will keep waiting forever.
+                // a `listener.Stop()` from another thread does cut the call short, but also ends up in an unclean termination.
+                // what &quot;unclean termination&quot; means here depends on the OS we&#39;re running on
+                // (different exceptions are observed on macOS and Windows, at least).
+                // therefore use the old asynchronous paradigm with manual signalling when the context is available.
+                contextResetEvent.Reset();
+                listener.BeginGetContext(iar =&gt;
+                {
+                    try
+                    {
+                        context = ((HttpListener)iar.AsyncState!).EndGetContext(iar);
+                        contextResetEvent.Set();
+                    }
+                    catch (HttpListenerException ex) when (ex.ErrorCode == 995)
+                    {
+                        // occurs on Windows when the listener is stopped.
+                    }
+                }, listener);
+                WaitHandle.WaitAny([contextResetEvent.WaitHandle, runningTokenSource.Token.WaitHandle]);
+
+                // either we have a context to use, or the cancellation fired.
+                // if it&#39;s the latter, terminate processing loop.
+                if (runningTokenSource.IsCancellationRequested)
+                    return;
+
+                Debug.Assert(context != null);
+
+                var request = context.Request;
+                var response = context.Response;
+
+                if (!request.IsWebSocketRequest)
+                {
+                    logger.Add($@&quot;Received non-websocket request from {request.RemoteEndPoint}. Requesting upgrade.&quot;);
+                    response.StatusCode = (int)HttpStatusCode.UpgradeRequired;
+                    response.Headers.Add(HttpRequestHeader.Upgrade, @&quot;websocket&quot;);
+                    response.Close();
+                    continue;
+                }
+
+                HttpListenerWebSocketContext wsContext;
+
+                try
+                {
+                    wsContext = await context.AcceptWebSocketAsync(null).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    logger.Add($@&quot;Failed to accept websocket connection from {request.RemoteEndPoint}.&quot;, LogLevel.Error, ex);
+                    continue;
+                }
+
+                int channelId = Interlocked.Increment(ref channelCounter);
+                var wsChannel = new WebSocketChannel(wsContext.WebSocket);
+                channels[channelId] = wsChannel;
+                wsChannel.MessageReceived += msg =&gt; MessageReceived?.Invoke(channelId, msg);
+                wsChannel.ClosedPrematurely += () =&gt; onChannelClosed(channelId);
+                wsChannel.Start(runningTokenSource.Token);
+                logger.Add($@&quot;Accepted websocket connection from {request.RemoteEndPoint} as client #{channelId}.&quot;);
+                ClientConnected?.Invoke(channelId);
+            }
+        }
+
+        private void onChannelClosed(int channelId)
+        {
+            if (channels.TryRemove(channelId, out var channel))
+                channel.Dispose();
+            logger.Add($@&quot;Connection with client #{channelId} closed.&quot;);
+        }
+
+        /// &lt;summary&gt;
+        /// Sends &lt;paramref name=&quot;message&quot;/&gt; to the specific client with the given &lt;paramref name=&quot;clientId&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;ArgumentException&quot;&gt;&lt;paramref name=&quot;clientId&quot;/&gt; is not known.&lt;/exception&gt;
+        public async Task SendAsync(int clientId, string message)
+        {
+            if (!channels.TryGetValue(clientId, out var channel))
+                throw new ArgumentException($@&quot;Client {clientId} is not known.&quot;);
+
+            logger.Add($@&quot;Sending to client {clientId}: {message}&quot;);
+            await channel.SendAsync(message).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Sends &lt;paramref name=&quot;message&quot;/&gt; to all connected clients.
+        /// &lt;/summary&gt;
+        public Task BroadcastAsync(string message)
+        {
+            logger.Add($@&quot;Broadcasting to all clients: {message}&quot;);
+            return Task.WhenAll(channels.Values.Select(ch =&gt; ch.SendAsync(message)).ToArray());
+        }
+
+        /// &lt;summary&gt;
+        /// Stops the server.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;stoppingToken&quot;&gt;Cancel this to transition from a graceful shutdown to a forced shutdown.&lt;/param&gt;
+        public Task StopAsync(CancellationToken stoppingToken = default) =&gt; Task.Run(async () =&gt;
+        {
+            if (isDisposed)
+                return;
+
+            logger.Add(@&quot;Stopping websocket server...&quot;);
+
+            // of note, ordering here is important - the token is supposed to be cancelled *before* the listener is stopped.
+            // see `readWriteTask()` and the treatment of early cancellation for answer why.
+            await runningTokenSource.CancelAsync().ConfigureAwait(false);
+
+            if (handleRequestTask != null)
+            {
+                try
+                {
+                    await handleRequestTask.WaitAsync(stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // has to be caught manually because outer task isn&#39;t accepting `stoppingToken`.
+                }
+            }
+
+            try
+            {
+                listener?.Stop();
+            }
+            catch (ObjectDisposedException)
+            {
+                // observed to intermittently fire on unices in unclear circumstances. tragic, but also irrelevant at this point. the point is to stop.
+            }
+
+            try
+            {
+                await Task.WhenAll(channels.Values.Select(ch =&gt; ch.StopAsync(stoppingToken)).ToArray()).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // has to be caught manually because outer task isn&#39;t accepting `stoppingToken`.
+            }
+
+            logger.Add(@&quot;Websocket server stopped.&quot;);
+        }, CancellationToken.None); // we always want this task to start running. passing `stoppingToken` here would mean potentially never even scheduling it for execution.
+
+        public void Dispose()
+        {
+            if (isDisposed)
+                return;
+
+            isDisposed = true;
+
+            // no clue why this isn&#39;t accessible without casting.
+            // sidebar: `Stop()` unregisters addresses on Windows, but `Abort()` doesn&#39;t!
+            // this `Dispose()` implementation calls the former.
+            (listener as IDisposable)?.Dispose();
+
+            foreach (var channel in channels.Values)
+                channel.Dispose();
+
+            runningTokenSource.Dispose();
+            contextResetEvent.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,34,50,106,0],[64,9,64,53,0],[70,9,70,94,0],[74,9,74,131,0],[76,9,76,101,0],[79,9,79,41,0],[80,9,80,10,0],[85,13,85,51,0],[87,13,87,53,0],[88,9,88,10,0],[94,82,95,9,0],[95,9,95,10,0],[95,10,97,13,0],[97,13,97,14,0],[97,14,98,17,0],[98,17,98,38,0],[98,38,99,21,0],[99,21,99,111,0],[99,111,101,17,0],[101,17,101,47,0],[101,47,102,17,0],[102,17,102,47,0],[102,47,103,17,0],[103,17,103,34,0],[103,34,104,17,0],[104,17,104,81,0],[104,81,105,17,0],[105,17,105,56,0],[105,56,106,13,0],[106,13,106,14,0],[106,14,107,9,0],[107,9,107,10,0],[107,10,107,30,0],[110,9,110,10,0],[111,13,111,44,0],[113,13,113,64,0],[114,13,114,14,0],[115,17,115,53,0],[127,17,127,43,0],[128,17,129,17,0],[129,17,129,18,0],[129,18,131,21,0],[131,21,131,22,0],[131,22,132,25,0],[132,25,132,86,0],[132,86,133,25,0],[133,25,133,49,0],[133,49,134,21,0],[134,21,134,22,0],[134,22,135,54,0],[135,54,135,80,0],[135,80,136,21,0],[136,21,136,22,0],[136,22,138,21,0],[138,21,138,22,0],[138,22,139,17,0],[139,17,139,18,0],[139,18,139,30,0],[140,17,140,105,0],[144,17,144,64,0],[145,21,145,28,0],[147,17,147,47,0],[149,17,149,47,0],[150,17,150,49,0],[152,17,152,49,0],[153,17,153,18,0],[154,21,154,119,0],[155,21,155,79,0],[156,21,156,83,0],[157,21,157,38,0],[158,21,158,30,0],[164,17,164,18,0],[165,21,165,96,0],[166,17,166,18,0],[167,17,167,37,0],[168,17,168,18,0],[169,21,169,126,0],[170,21,170,30,0],[173,17,173,75,0],[174,17,174,75,0],[175,17,175,49,0],[176,17,176,53,0],[176,53,176,92,0],[176,92,176,93,0],[177,17,177,54,0],[177,54,177,80,0],[177,80,177,81,0],[178,17,178,59,0],[179,17,179,117,0],[180,17,180,52,0],[181,13,181,14,0],[182,9,182,10,0],[185,9,185,10,0],[186,13,186,64,0],[187,17,187,35,0],[188,13,188,73,0],[189,9,189,10,0],[196,9,196,10,0],[197,13,197,66,0],[198,17,198,82,0],[200,13,200,69,0],[201,13,201,68,0],[202,9,202,10,0],[208,9,208,10,0],[209,13,209,68,0],[210,13,210,62,0],[210,62,210,83,0],[210,83,210,96,0],[211,9,211,10,0],[217,77,218,9,0],[218,9,218,10,0],[218,10,219,13,0],[219,13,219,28,0],[219,28,220,17,0],[220,17,220,24,0],[220,24,222,13,0],[222,13,222,57,0],[222,57,226,13,0],[226,13,226,74,0],[226,74,228,13,0],[228,13,228,43,0],[228,43,229,13,0],[229,13,229,14,0],[229,14,231,17,0],[231,17,231,18,0],[231,18,232,21,0],[232,21,232,92,0],[232,92,233,17,0],[233,17,233,18,0],[233,18,234,17,0],[234,17,234,51,0],[234,51,235,17,0],[235,17,235,18,0],[235,18,237,17,0],[237,17,237,18,0],[237,18,238,13,0],[238,13,238,14,0],[238,14,241,13,0],[241,13,241,14,0],[241,14,242,17,0],[242,17,242,34,0],[242,34,243,13,0],[243,13,243,14,0],[243,14,244,13,0],[244,13,244,44,0],[244,44,245,13,0],[245,13,245,14,0],[245,14,247,13,0],[247,13,247,14,0],[247,14,250,13,0],[250,13,250,14,0],[250,14,251,17,0],[251,17,251,65,0],[251,65,251,92,0],[251,92,251,127,0],[251,127,252,13,0],[252,13,252,14,0],[252,14,253,13,0],[253,13,253,47,0],[253,47,254,13,0],[254,13,254,14,0],[254,14,256,13,0],[256,13,256,14,0],[256,14,258,13,0],[258,13,258,54,0],[258,54,259,9,0],[259,9,259,10,0],[259,10,259,35,0],[262,9,262,10,0],[263,13,263,28,0],[264,17,264,24,0],[266,13,266,31,0],[271,13,271,50,0],[273,13,273,20,0],[273,22,273,33,0],[273,34,273,36,0],[273,37,273,52,0],[274,17,274,35,0],[276,13,276,42,0],[277,13,277,41,0],[278,9,278,10,0]]);
+    </script>
+  </body>
+</html>

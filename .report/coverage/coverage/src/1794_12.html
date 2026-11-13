@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/OnlinePlayBeatmapAvailabilityTracker.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Online;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Rooms;
+
+namespace osu.Game.Screens.OnlinePlay
+{
+    /// &lt;summary&gt;
+    /// Represent a checksum-verifying beatmap availability tracker usable for online play screens.
+    ///
+    /// This differs from a regular download tracking composite as this accounts for the
+    /// databased beatmap set&#39;s checksum, to disallow from playing with an altered version of the beatmap.
+    /// &lt;/summary&gt;
+    public abstract partial class OnlinePlayBeatmapAvailabilityTracker : CompositeComponent
+    {
+        /// &lt;summary&gt;
+        /// The current availability of &lt;see cref=&quot;PlaylistItem&quot;/&gt;&#39;s beatmap.
+        /// &lt;/summary&gt;
+        public virtual IBindable&lt;BeatmapAvailability&gt; Availability =&gt; availability; // Virtual for mocking in some tests.
+
+        /// &lt;summary&gt;
+        /// The playlist item to track the availability of.
+        /// &lt;/summary&gt;
+        protected readonly Bindable&lt;PlaylistItem?&gt; PlaylistItem = new Bindable&lt;PlaylistItem?&gt;();
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        [Resolved]
+        private BeatmapLookupCache beatmapLookupCache { get; set; } = null!;
+
+        private readonly Bindable&lt;BeatmapAvailability&gt; availability = new Bindable&lt;BeatmapAvailability&gt;(BeatmapAvailability.NotDownloaded());
+
+        private ScheduledDelegate? progressUpdate;
+        private BeatmapDownloadTracker? downloadTracker;
+        private IDisposable? realmSubscription;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            PlaylistItem.BindValueChanged(item =&gt;
+            {
+                // the underlying playlist is regularly cleared for maintenance purposes (things which probably need to be fixed eventually).
+                // to avoid exposing a state change when there may actually be none, ignore all nulls for now.
+                if (item.NewValue == null)
+                    return;
+
+                // Initially set to unknown until we have attained a good state.
+                // This has the wanted side effect of forcing a state change when the current playlist
+                // item changes at the server but our local availability doesn&#39;t necessarily change
+                // (ie. we have both the previous and next item LocallyAvailable).
+                //
+                // Note that even without this, the server will trigger a state change and things will work.
+                // This is just for safety.
+                availability.Value = BeatmapAvailability.Unknown();
+
+                cancelTracking();
+
+                beatmapLookupCache.GetBeatmapAsync(item.NewValue.Beatmap.OnlineID).ContinueWith(task =&gt; Schedule(() =&gt;
+                {
+                    var beatmap = task.GetResultSafely();
+
+                    if (beatmap != null &amp;&amp; PlaylistItem.Value?.Beatmap.OnlineID == beatmap.OnlineID)
+                        startTracking(beatmap);
+                }), TaskContinuationOptions.OnlyOnRanToCompletion);
+            }, true);
+        }
+
+        private void cancelTracking()
+        {
+            downloadTracker?.RemoveAndDisposeImmediately();
+            realmSubscription?.Dispose();
+        }
+
+        private void startTracking(APIBeatmap beatmap)
+        {
+            Debug.Assert(beatmap.BeatmapSet != null);
+
+            downloadTracker = new BeatmapDownloadTracker(beatmap.BeatmapSet);
+            downloadTracker.State.BindValueChanged(_ =&gt; Scheduler.AddOnce(updateAvailability), true);
+            downloadTracker.Progress.BindValueChanged(_ =&gt;
+            {
+                if (downloadTracker.State.Value != DownloadState.Downloading)
+                    return;
+
+                // incoming progress changes are going to be at a very high rate.
+                // we don&#39;t want to flood the network with this, so rate limit how often we send progress updates.
+                if (progressUpdate?.Completed != false)
+                    progressUpdate = Scheduler.AddDelayed(updateAvailability, progressUpdate == null ? 0 : 500);
+            }, true);
+
+            AddInternal(downloadTracker);
+
+            // handles changes to hash that didn&#39;t occur from the import process (ie. a user editing the beatmap in the editor, somehow).
+            realmSubscription = realm.RegisterForNotifications(_ =&gt; queryBeatmap(), (_, changes) =&gt;
+            {
+                if (changes == null)
+                    return;
+
+                Scheduler.AddOnce(updateAvailability);
+            });
+
+            void updateAvailability()
+            {
+                switch (downloadTracker.State.Value)
+                {
+                    case DownloadState.Unknown:
+                        availability.Value = BeatmapAvailability.Unknown();
+                        break;
+
+                    case DownloadState.NotDownloaded:
+                        availability.Value = BeatmapAvailability.NotDownloaded();
+                        break;
+
+                    case DownloadState.Downloading:
+                        availability.Value = BeatmapAvailability.Downloading((float)downloadTracker.Progress.Value);
+                        break;
+
+                    case DownloadState.Importing:
+                        availability.Value = BeatmapAvailability.Importing();
+                        break;
+
+                    case DownloadState.LocallyAvailable:
+                        bool available = queryBeatmap().Any();
+
+                        availability.Value = available ? BeatmapAvailability.LocallyAvailable() : BeatmapAvailability.NotDownloaded();
+
+                        // only display a message to the user if a download seems to have just completed.
+                        if (!available &amp;&amp; downloadTracker.Progress.Value == 1)
+                            Logger.Log(&quot;The imported beatmap set does not match the online version.&quot;, LoggingTarget.Runtime, LogLevel.Important);
+
+                        break;
+
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+
+            IQueryable&lt;BeatmapInfo&gt; queryBeatmap() =&gt;
+                realm.Realm.All&lt;BeatmapInfo&gt;()
+                     .ForOnlineId(beatmap.OnlineID);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            realmSubscription?.Dispose();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,71,34,83,0],[39,9,39,97,0],[42,37,42,41,0],[42,42,42,46,0],[42,51,42,56,0],[45,57,45,61,0],[45,62,45,66,0],[45,71,45,76,0],[47,9,47,142,0],[54,9,54,10,0],[55,13,55,33,0],[57,13,58,13,0],[58,13,58,14,0],[58,14,61,17,0],[61,17,61,43,0],[61,43,62,21,0],[62,21,62,28,0],[62,28,71,17,0],[71,17,71,68,0],[71,68,73,17,0],[73,17,73,34,0],[73,34,75,17,0],[75,17,75,105,0],[75,105,76,17,0],[76,17,76,18,0],[76,18,77,21,0],[77,21,77,58,0],[77,58,79,21,0],[79,21,79,101,0],[79,101,80,25,0],[80,25,80,48,0],[80,48,81,17,0],[81,17,81,18,0],[81,18,81,19,0],[81,19,81,68,0],[81,68,82,13,0],[82,13,82,14,0],[82,14,82,22,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,60,0],[88,13,88,42,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,54,0],[95,13,95,78,0],[96,13,96,57,0],[96,57,96,94,0],[96,94,96,102,0],[97,13,98,13,0],[98,13,98,14,0],[98,14,99,17,0],[99,17,99,78,0],[99,78,100,21,0],[100,21,100,28,0],[100,28,104,17,0],[104,17,104,56,0],[104,56,105,21,0],[105,21,105,113,0],[105,113,106,13,0],[106,13,106,14,0],[106,14,106,22,0],[108,13,108,42,0],[111,13,111,69,0],[111,69,111,83,0],[111,83,112,13,0],[112,13,112,14,0],[112,14,113,17,0],[113,17,113,37,0],[113,37,114,21,0],[114,21,114,28,0],[114,28,116,17,0],[116,17,116,55,0],[116,55,117,13,0],[117,13,117,14,0],[117,14,117,16,0],[120,13,120,14,0],[121,17,121,53,0],[124,25,124,76,0],[125,25,125,31,0],[128,25,128,82,0],[129,25,129,31,0],[132,25,132,117,0],[133,25,133,31,0],[136,25,136,78,0],[137,25,137,31,0],[140,25,140,63,0],[142,25,142,135,0],[145,25,145,79,0],[146,29,146,146,0],[148,25,148,31,0],[151,25,151,65,0],[153,13,153,14,0],[156,17,157,52,0],[158,9,158,10,0],[161,9,161,10,0],[162,13,162,39,0],[164,13,164,42,0],[165,9,165,10,0]]);
+    </script>
+  </body>
+</html>

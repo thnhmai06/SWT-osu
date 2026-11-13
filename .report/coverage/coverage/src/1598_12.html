@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/SoloSongSelect.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Notifications;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Play;
+using osu.Game.Users;
+using osu.Game.Utils;
+using WebCommonStrings = osu.Game.Resources.Localisation.Web.CommonStrings;
+
+namespace osu.Game.Screens.Select
+{
+    public partial class SoloSongSelect : SongSelect
+    {
+        protected override UserActivity InitialActivity =&gt; new UserActivity.ChoosingBeatmap();
+
+        private PlayerLoader? playerLoader;
+        private IReadOnlyList&lt;Mod&gt;? modsAtGameplayStart;
+
+        [Resolved]
+        private BeatmapSetOverlay? beatmapOverlay { get; set; }
+
+        [Resolved]
+        private BeatmapManager beatmaps { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private INotificationOverlay? notifications { get; set; }
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private OsuGame? game { get; set; }
+
+        private Sample? sampleConfirmSelection { get; set; }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            sampleConfirmSelection = audio.Samples.Get(@&quot;SongSelect/confirm-selection&quot;);
+
+            AddInternal(new SongSelectTouchInputDetector());
+        }
+
+        public override IEnumerable&lt;OsuMenuItem&gt; GetForwardActions(BeatmapInfo beatmap)
+        {
+            yield return new OsuMenuItem(ButtonSystemStrings.Play.ToSentence(), MenuItemType.Highlighted, () =&gt; SelectAndRun(beatmap, OnStart)) { Icon = FontAwesome.Solid.Check };
+            yield return new OsuMenuItem(ButtonSystemStrings.Edit.ToSentence(), MenuItemType.Standard, () =&gt; Edit(beatmap)) { Icon = FontAwesome.Solid.PencilAlt };
+
+            yield return new OsuMenuItemSpacer();
+
+            if (beatmap.OnlineID &gt; 0)
+            {
+                yield return new OsuMenuItem(CommonStrings.Details, MenuItemType.Standard, () =&gt; beatmapOverlay?.FetchAndShowBeatmap(beatmap.OnlineID));
+
+                if (beatmap.GetOnlineURL(api, Ruleset.Value) is string url)
+                    yield return new OsuMenuItem(CommonStrings.CopyLink, MenuItemType.Standard, () =&gt; game?.CopyToClipboard(url));
+
+                yield return new OsuMenuItemSpacer();
+            }
+
+            foreach (var i in CreateCollectionMenuActions(beatmap))
+                yield return i;
+
+            if (beatmap.LastPlayed == null)
+                yield return new OsuMenuItem(SongSelectStrings.MarkAsPlayed, MenuItemType.Standard, () =&gt; beatmaps.MarkPlayed(beatmap)) { Icon = FontAwesome.Solid.TimesCircle };
+            else
+                yield return new OsuMenuItem(SongSelectStrings.RemoveFromPlayed, MenuItemType.Standard, () =&gt; beatmaps.MarkNotPlayed(beatmap)) { Icon = FontAwesome.Solid.TimesCircle };
+
+            yield return new OsuMenuItem(SongSelectStrings.ClearAllLocalScores, MenuItemType.Destructive, () =&gt; dialogOverlay?.Push(new BeatmapClearScoresDialog(beatmap)))
+            {
+                Icon = FontAwesome.Solid.Eraser
+            };
+
+            if (beatmaps.CanHide(beatmap))
+                yield return new OsuMenuItem(WebCommonStrings.ButtonsHide.ToSentence(), MenuItemType.Standard, () =&gt; beatmaps.Hide(beatmap));
+        }
+
+        protected override void OnStart()
+        {
+            if (playerLoader != null) return;
+
+            modsAtGameplayStart = Mods.Value.Select(m =&gt; m.DeepClone()).ToArray();
+
+            // Ctrl+Enter should start map with autoplay enabled.
+            if (GetContainingInputManager()?.CurrentState?.Keyboard.ControlPressed == true)
+            {
+                var autoInstance = getAutoplayMod();
+
+                if (autoInstance == null)
+                {
+                    notifications?.Post(new SimpleNotification
+                    {
+                        Text = NotificationsStrings.NoAutoplayMod
+                    });
+                    return;
+                }
+
+                var mods = Mods.Value.Append(autoInstance).ToArray();
+
+                if (!ModUtils.CheckCompatibleSet(mods, out var invalid))
+                    mods = mods.Except(invalid).Append(autoInstance).ToArray();
+
+                Mods.Value = mods;
+            }
+
+            sampleConfirmSelection?.Play();
+
+            this.Push(playerLoader = new PlayerLoader(createPlayer));
+
+            Player createPlayer()
+            {
+                Player player;
+
+                var replayGeneratingMod = Mods.Value.OfType&lt;ICreateReplayData&gt;().FirstOrDefault();
+
+                if (replayGeneratingMod != null)
+                {
+                    player = new ReplayPlayer(replayGeneratingMod.CreateScoreFromReplayData);
+                }
+                else
+                {
+                    player = new SoloPlayer();
+                }
+
+                return player;
+            }
+        }
+
+        public void Edit(BeatmapInfo beatmap)
+        {
+            if (!this.IsCurrentScreen())
+                return;
+
+            SelectAndRun(beatmap, () =&gt; this.Push(new EditorLoader()));
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+            revertMods();
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            if (base.OnExiting(e))
+                return true;
+
+            revertMods();
+            return false;
+        }
+
+        private ModAutoplay? getAutoplayMod() =&gt; Ruleset.Value.CreateInstance().GetAutoplayMod();
+
+        private void revertMods()
+        {
+            if (playerLoader == null) return;
+
+            Mods.Value = modsAtGameplayStart;
+            playerLoader = null;
+        }
+
+        private partial class PlayerLoader : Play.PlayerLoader
+        {
+            public override bool ShowFooter =&gt; !QuickRestart;
+
+            public PlayerLoader(Func&lt;Player&gt; createPlayer)
+                : base(createPlayer)
+            {
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[30,60,30,94,0],[36,53,36,57,0],[36,58,36,62,0],[39,43,39,47,0],[39,48,39,52,0],[39,57,39,62,0],[42,36,42,40,0],[42,41,42,45,0],[42,50,42,55,0],[45,55,45,59,0],[45,60,45,64,0],[48,49,48,53,0],[48,54,48,58,0],[51,33,51,37,0],[51,38,51,42,0],[53,50,53,54,0],[53,55,53,59,0],[57,9,57,10,0],[58,13,58,89,0],[60,13,60,61,0],[61,9,61,10,0],[64,9,64,10,0],[65,13,65,113,0],[65,113,65,143,0],[65,143,65,180,0],[66,13,66,110,0],[66,110,66,123,0],[66,123,66,164,0],[68,13,68,50,0],[70,13,70,38,0],[71,13,71,14,0],[72,17,72,98,0],[72,98,72,151,0],[72,151,72,153,0],[74,17,74,76,0],[75,21,75,103,0],[75,103,75,129,0],[75,129,75,131,0],[77,17,77,54,0],[78,13,78,14,0],[80,13,80,20,0],[80,22,80,27,0],[80,28,80,30,0],[80,31,80,67,0],[81,17,81,32,0],[83,13,83,44,0],[84,17,84,107,0],[84,107,84,135,0],[84,135,84,178,0],[86,17,86,111,0],[86,111,86,142,0],[86,142,86,185,0],[88,13,88,113,0],[88,113,88,171,0],[88,171,91,15,0],[93,13,93,43,0],[94,17,94,118,0],[94,118,94,140,0],[94,140,94,142,0],[95,9,95,10,0],[98,9,98,10,0],[99,13,99,38,0],[99,39,99,46,0],[101,13,101,58,0],[101,58,101,71,0],[101,71,101,83,0],[104,13,104,92,0],[105,13,105,14,0],[106,17,106,53,0],[108,17,108,42,0],[109,17,109,18,0],[110,21,113,24,0],[114,21,114,28,0],[117,17,117,70,0],[119,17,119,73,0],[120,21,120,80,0],[122,17,122,35,0],[123,13,123,14,0],[125,13,125,44,0],[127,13,127,70,0],[130,13,130,14,0],[133,17,133,99,0],[135,17,135,49,0],[136,17,136,18,0],[137,21,137,94,0],[138,17,138,18,0],[140,17,140,18,0],[141,21,141,47,0],[142,17,142,18,0],[144,17,144,31,0],[145,13,145,14,0],[146,9,146,10,0],[149,9,149,10,0],[150,13,150,41,0],[151,17,151,24,0],[153,13,153,41,0],[153,41,153,70,0],[153,70,153,72,0],[154,9,154,10,0],[157,9,157,10,0],[158,13,158,32,0],[159,13,159,26,0],[160,9,160,10,0],[163,9,163,10,0],[164,13,164,35,0],[165,17,165,29,0],[167,13,167,26,0],[168,13,168,26,0],[169,9,169,10,0],[171,50,171,97,0],[174,9,174,10,0],[175,13,175,38,0],[175,39,175,46,0],[177,13,177,46,0],[178,13,178,33,0],[179,9,179,10,0],[183,48,183,61,0],[186,19,186,37,0],[187,13,187,14,0],[188,13,188,14,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Scoring/JudgementProcessor.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Game.Beatmaps;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Replays;
+
+namespace osu.Game.Rulesets.Scoring
+{
+    public abstract partial class JudgementProcessor : Component
+    {
+        /// &lt;summary&gt;
+        /// Invoked when a new judgement has occurred. This occurs after the judgement has been processed by this &lt;see cref=&quot;JudgementProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public event Action&lt;JudgementResult&gt;? NewJudgement;
+
+        /// &lt;summary&gt;
+        /// Invoked when a judgement is reverted, usually due to rewinding gameplay.
+        /// &lt;/summary&gt;
+        public event Action&lt;JudgementResult&gt;? JudgementReverted;
+
+        /// &lt;summary&gt;
+        /// The maximum number of hits that can be judged.
+        /// &lt;/summary&gt;
+        protected int MaxHits { get; private set; }
+
+        /// &lt;summary&gt;
+        /// Whether &lt;see cref=&quot;SimulateAutoplay&quot;/&gt; is currently running.
+        /// &lt;/summary&gt;
+        protected bool IsSimulating { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The total number of judged &lt;see cref=&quot;HitObject&quot;/&gt;s at the current point in time.
+        /// &lt;/summary&gt;
+        public int JudgedHits { get; private set; }
+
+        private JudgementResult? lastAppliedResult;
+
+        private readonly BindableBool hasCompleted = new BindableBool();
+
+        /// &lt;summary&gt;
+        /// Whether all &lt;see cref=&quot;Judgement&quot;/&gt;s have been processed.
+        /// &lt;/summary&gt;
+        public IBindable&lt;bool&gt; HasCompleted =&gt; hasCompleted;
+
+        /// &lt;summary&gt;
+        /// Applies a &lt;see cref=&quot;IBeatmap&quot;/&gt; to this &lt;see cref=&quot;ScoreProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; to read properties from.&lt;/param&gt;
+        public virtual void ApplyBeatmap(IBeatmap beatmap)
+        {
+            Reset(false);
+            SimulateAutoplay(beatmap);
+            Reset(true);
+        }
+
+        /// &lt;summary&gt;
+        /// Applies the score change of a &lt;see cref=&quot;JudgementResult&quot;/&gt; to this &lt;see cref=&quot;ScoreProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The &lt;see cref=&quot;JudgementResult&quot;/&gt; to apply.&lt;/param&gt;
+        public void ApplyResult(JudgementResult result)
+        {
+#pragma warning disable CS0618
+            if (result.Type == HitResult.LegacyComboIncrease)
+                throw new ArgumentException(@$&quot;A {nameof(HitResult.LegacyComboIncrease)} hit result cannot be applied.&quot;);
+#pragma warning restore CS0618
+
+            JudgedHits++;
+            lastAppliedResult = result;
+
+            ApplyResultInternal(result);
+
+            NewJudgement?.Invoke(result);
+        }
+
+        /// &lt;summary&gt;
+        /// Reverts the score change of a &lt;see cref=&quot;JudgementResult&quot;/&gt; that was applied to this &lt;see cref=&quot;ScoreProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The judgement scoring result.&lt;/param&gt;
+        public void RevertResult(JudgementResult result)
+        {
+            JudgedHits--;
+
+            RevertResultInternal(result);
+
+            JudgementReverted?.Invoke(result);
+        }
+
+        /// &lt;summary&gt;
+        /// Applies the score change of a &lt;see cref=&quot;JudgementResult&quot;/&gt; to this &lt;see cref=&quot;ScoreProcessor&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Any changes applied via this method can be reverted via &lt;see cref=&quot;RevertResultInternal&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The &lt;see cref=&quot;JudgementResult&quot;/&gt; to apply.&lt;/param&gt;
+        protected abstract void ApplyResultInternal(JudgementResult result);
+
+        /// &lt;summary&gt;
+        /// Reverts the score change of a &lt;see cref=&quot;JudgementResult&quot;/&gt; that was applied to this &lt;see cref=&quot;ScoreProcessor&quot;/&gt; via &lt;see cref=&quot;ApplyResultInternal&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;result&quot;&gt;The judgement scoring result.&lt;/param&gt;
+        protected abstract void RevertResultInternal(JudgementResult result);
+
+        /// &lt;summary&gt;
+        /// Resets this &lt;see cref=&quot;JudgementProcessor&quot;/&gt; to a default state.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;storeResults&quot;&gt;Whether to store the current state of the &lt;see cref=&quot;JudgementProcessor&quot;/&gt; for future use.&lt;/param&gt;
+        protected virtual void Reset(bool storeResults)
+        {
+            if (storeResults)
+                MaxHits = JudgedHits;
+
+            JudgedHits = 0;
+        }
+
+        /// &lt;summary&gt;
+        /// Reset all statistics based on header information contained within a replay frame.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If the provided replay frame does not have any header information, this will be a noop.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;frame&quot;&gt;The replay frame to read header statistics from.&lt;/param&gt;
+        public virtual void ResetFromReplayFrame(ReplayFrame frame)
+        {
+            if (frame.Header == null)
+                return;
+
+            JudgedHits = 0;
+
+            foreach ((_, int count) in frame.Header.Statistics)
+                JudgedHits += count;
+        }
+
+        /// &lt;summary&gt;
+        /// Simulates an autoplay of the &lt;see cref=&quot;IBeatmap&quot;/&gt; to determine scoring values.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;This provided temporarily. DO NOT USE.&lt;/remarks&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The &lt;see cref=&quot;IBeatmap&quot;/&gt; to simulate.&lt;/param&gt;
+        protected void SimulateAutoplay(IBeatmap beatmap)
+        {
+            IsSimulating = true;
+
+            foreach (var obj in EnumerateHitObjects(beatmap))
+            {
+                var judgement = obj.Judgement;
+
+                var result = CreateResult(obj, judgement);
+                if (result == null)
+                    throw new InvalidOperationException($&quot;{GetType().ReadableName()} must provide a {nameof(JudgementResult)} through {nameof(CreateResult)}.&quot;);
+
+                result.Type = GetSimulatedHitResult(judgement);
+                ApplyResult(result);
+            }
+
+            IsSimulating = false;
+        }
+
+        /// &lt;summary&gt;
+        /// Enumerates all &lt;see cref=&quot;HitObject&quot;/&gt;s in the given &lt;paramref name=&quot;beatmap&quot;/&gt; in the order in which they are to be judged.
+        /// Used in &lt;see cref=&quot;SimulateAutoplay&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// In Score V2, the score awarded for each object includes a component based on the combo value after the judgement of that object.
+        /// This means that the score is dependent on the order of evaluation of judgements.
+        /// This method is provided so that rulesets can specify custom ordering that is correct for them and matches processing order during actual gameplay.
+        /// &lt;/remarks&gt;
+        protected virtual IEnumerable&lt;HitObject&gt; EnumerateHitObjects(IBeatmap beatmap)
+            =&gt; enumerateRecursively(beatmap.HitObjects);
+
+        private IEnumerable&lt;HitObject&gt; enumerateRecursively(IEnumerable&lt;HitObject&gt; hitObjects)
+        {
+            foreach (var hitObject in hitObjects)
+            {
+                foreach (var nested in enumerateRecursively(hitObject.NestedHitObjects))
+                    yield return nested;
+
+                yield return hitObject;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;JudgementResult&quot;/&gt; that represents the scoring result for a &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt; which was judged.&lt;/param&gt;
+        /// &lt;param name=&quot;judgement&quot;&gt;The &lt;see cref=&quot;Judgement&quot;/&gt; that provides the scoring information.&lt;/param&gt;
+        protected virtual JudgementResult CreateResult(HitObject hitObject, Judgement judgement) =&gt; new JudgementResult(hitObject, judgement);
+
+        /// &lt;summary&gt;
+        /// Gets a simulated &lt;see cref=&quot;HitResult&quot;/&gt; for a judgement. Used during &lt;see cref=&quot;SimulateAutoplay&quot;/&gt; to simulate a &quot;perfect&quot; play.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;judgement&quot;&gt;The judgement to simulate a &lt;see cref=&quot;HitResult&quot;/&gt; for.&lt;/param&gt;
+        /// &lt;returns&gt;The simulated &lt;see cref=&quot;HitResult&quot;/&gt; for the judgement.&lt;/returns&gt;
+        protected virtual HitResult GetSimulatedHitResult(Judgement judgement) =&gt; judgement.MaxResult;
+
+        protected override void Update()
+        {
+            base.Update();
+
+            hasCompleted.Value =
+                JudgedHits == MaxHits
+                &amp;&amp; (JudgedHits == 0
+                    // Last applied result is guaranteed to be non-null when JudgedHits &gt; 0.
+                    || lastAppliedResult.AsNonNull().TimeAbsolute &lt; Clock.CurrentTime);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[32,33,32,37,1],[32,38,32,50,1],[37,39,37,43,1],[37,44,37,56,1],[42,33,42,37,1],[42,38,42,50,1],[46,9,46,73,1],[51,48,51,60,0],[58,9,58,10,1],[59,13,59,26,1],[60,13,60,39,1],[61,13,61,25,1],[62,9,62,10,1],[69,9,69,10,1],[71,13,71,62,1],[72,17,72,122,0],[75,13,75,26,1],[76,13,76,40,1],[78,13,78,41,1],[80,13,80,42,1],[81,9,81,10,1],[88,9,88,10,1],[89,13,89,26,1],[91,13,91,42,1],[93,13,93,47,1],[94,9,94,10,1],[116,9,116,10,1],[117,13,117,30,1],[118,17,118,38,1],[120,13,120,28,1],[121,9,121,10,1],[131,9,131,10,1],[132,13,132,38,1],[133,17,133,24,1],[135,13,135,28,1],[137,13,137,20,1],[137,22,137,36,1],[137,37,137,39,1],[137,40,137,63,1],[138,17,138,37,1],[139,9,139,10,1],[147,9,147,10,1],[148,13,148,33,1],[150,13,150,20,1],[150,22,150,29,1],[150,30,150,32,1],[150,33,150,61,1],[151,13,151,14,1],[152,17,152,47,1],[154,17,154,59,1],[155,17,155,36,1],[156,21,156,161,0],[158,17,158,64,1],[159,17,159,37,1],[160,13,160,14,1],[162,13,162,34,1],[163,9,163,10,1],[175,16,175,56,1],[178,9,178,10,1],[179,13,179,20,1],[179,22,179,35,1],[179,36,179,38,1],[179,39,179,49,1],[180,13,180,14,1],[181,17,181,24,1],[181,26,181,36,0],[181,37,181,39,1],[181,40,181,88,1],[182,21,182,41,0],[184,17,184,40,1],[185,13,185,14,1],[186,9,186,10,1],[193,101,193,142,1],[200,83,200,102,1],[203,9,203,10,0],[204,13,204,27,0],[206,13,210,88,0],[211,9,211,10,0]]);
+    </script>
+  </body>
+</html>

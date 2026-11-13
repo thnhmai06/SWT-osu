@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Rulesets.Mania/Skinning/Legacy/LegacyBodyPiece.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Animations;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.Textures;
+using osu.Framework.Testing;
+using osu.Game.Rulesets.Mania.Objects.Drawables;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Skinning;
+using osuTK;
+
+namespace osu.Game.Rulesets.Mania.Skinning.Legacy
+{
+    public partial class LegacyBodyPiece : LegacyManiaColumnElement
+    {
+        private DrawableHoldNote holdNote = null!;
+
+        private readonly IBindable&lt;ScrollingDirection&gt; direction = new Bindable&lt;ScrollingDirection&gt;();
+        private readonly IBindable&lt;bool&gt; isHitting = new Bindable&lt;bool&gt;();
+        private readonly IBindable&lt;double?&gt; missingStartTime = new Bindable&lt;double?&gt;();
+
+        private Drawable? bodySprite;
+        private Drawable? lightContainer;
+        private Drawable? light;
+        private LegacyManiaSkinConfiguration.LegacyNoteBodyStyle? bodyStyle;
+
+        public LegacyBodyPiece()
+        {
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(ISkinSource skin, IScrollingInfo scrollingInfo, DrawableHitObject drawableObject)
+        {
+            holdNote = (DrawableHoldNote)drawableObject;
+
+            string imageName = GetColumnSkinConfig&lt;string&gt;(skin, LegacyManiaSkinConfigurationLookups.HoldNoteBodyImage)?.Value
+                               ?? $&quot;mania-note{FallbackColumnIndex}L&quot;;
+
+            string lightImage = GetColumnSkinConfig&lt;string&gt;(skin, LegacyManiaSkinConfigurationLookups.HoldNoteLightImage)?.Value
+                                ?? &quot;lightingL&quot;;
+
+            float lightScale = GetColumnSkinConfig&lt;float&gt;(skin, LegacyManiaSkinConfigurationLookups.HoldNoteLightScale)?.Value
+                               ?? 1;
+
+            // Create a temporary animation to retrieve the number of frames, in an effort to calculate the intended frame length.
+            // This animation is discarded and re-queried with the appropriate frame length afterwards.
+            var tmp = skin.GetAnimation(lightImage, true, false);
+            double frameLength = 0;
+            if (tmp is IFramedAnimation tmpAnimation &amp;&amp; tmpAnimation.FrameCount &gt; 0)
+                frameLength = Math.Max(1000 / 60.0, 170.0 / tmpAnimation.FrameCount);
+
+            light = skin.GetAnimation(lightImage, true, true, frameLength: frameLength)?.With(d =&gt;
+            {
+                d.Origin = Anchor.Centre;
+                d.Blending = BlendingParameters.Additive;
+                d.Scale = new Vector2(lightScale);
+            });
+
+            if (light != null)
+            {
+                lightContainer = new HitTargetInsetContainer
+                {
+                    Alpha = 0,
+                    Child = light
+                };
+            }
+
+            bodyStyle = skin.GetConfig&lt;ManiaSkinConfigurationLookup, LegacyManiaSkinConfiguration.LegacyNoteBodyStyle&gt;(new ManiaSkinConfigurationLookup(LegacyManiaSkinConfigurationLookups.NoteBodyStyle))?.Value;
+
+            var wrapMode = bodyStyle == LegacyManiaSkinConfiguration.LegacyNoteBodyStyle.Stretch ? WrapMode.ClampToEdge : WrapMode.Repeat;
+
+            direction.BindTo(scrollingInfo.Direction);
+            isHitting.BindTo(holdNote.IsHolding);
+            missingStartTime.BindTo(holdNote.MissingStartTime);
+
+            bodySprite = skin.GetAnimation(imageName, wrapMode, wrapMode, true, true, frameLength: 30)?.With(d =&gt;
+            {
+                if (d is TextureAnimation animation)
+                    animation.IsPlaying = false;
+
+                d.Anchor = Anchor.TopCentre;
+                d.RelativeSizeAxes = Axes.Both;
+                d.Size = Vector2.One;
+                // Todo: Wrap?
+            });
+
+            if (bodySprite != null)
+                InternalChild = bodySprite;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            direction.BindValueChanged(onDirectionChanged, true);
+            isHitting.BindValueChanged(onIsHittingChanged, true);
+            missingStartTime.BindValueChanged(onMissingStartTimeChanged, true);
+
+            holdNote.ApplyCustomUpdateState += onApplyCustomUpdateState;
+        }
+
+        private void onIsHittingChanged(ValueChangedEvent&lt;bool&gt; isHitting)
+        {
+            if (bodySprite is TextureAnimation bodyAnimation)
+                bodyAnimation.IsPlaying = isHitting.NewValue;
+
+            if (lightContainer == null)
+                return;
+
+            if (isHitting.NewValue)
+            {
+                // Clear the fade out and, more importantly, the removal.
+                lightContainer.ClearTransforms();
+
+                // Only add the container if the removal has taken place.
+                if (lightContainer.Parent == null)
+                    Column.TopLevelContainer.Add(lightContainer);
+
+                // The light must be seeked only after being loaded, otherwise a nullref occurs (https://github.com/ppy/osu-framework/issues/3847).
+                if (light is TextureAnimation lightAnimation)
+                    lightAnimation.GotoFrame(0);
+
+                lightContainer.FadeIn(80);
+            }
+            else
+            {
+                lightContainer.FadeOut(120)
+                              .OnComplete(d =&gt; Column.TopLevelContainer.Remove(d, false));
+            }
+        }
+
+        private void onDirectionChanged(ValueChangedEvent&lt;ScrollingDirection&gt; direction)
+        {
+            if (direction.NewValue == ScrollingDirection.Up)
+            {
+                if (bodySprite != null)
+                {
+                    bodySprite.Origin = Anchor.TopCentre;
+                    bodySprite.Anchor = Anchor.BottomCentre; // needs to be flipped due to scale flip in Update.
+                }
+
+                light?.Anchor = Anchor.TopCentre;
+            }
+            else
+            {
+                if (bodySprite != null)
+                {
+                    bodySprite.Origin = Anchor.TopCentre;
+                    bodySprite.Anchor = Anchor.TopCentre;
+                }
+
+                light?.Anchor = Anchor.BottomCentre;
+            }
+        }
+
+        private void onMissingStartTimeChanged(ValueChangedEvent&lt;double?&gt; startTime)
+            =&gt; applyMissingDim();
+
+        private void onApplyCustomUpdateState(DrawableHitObject obj, ArmedState state)
+            =&gt; applyMissingDim();
+
+        private void applyMissingDim()
+        {
+            if (missingStartTime.Value == null)
+                return;
+
+            using (BeginAbsoluteSequence(missingStartTime.Value.Value))
+                this.FadeColour(Colour4.DarkGray, 60);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!isHitting.Value)
+                (bodySprite as TextureAnimation)?.GotoFrame(0);
+
+            int scaleDirection = (direction.Value == ScrollingDirection.Down ? 1 : -1);
+
+            // here we go...
+            switch (bodyStyle)
+            {
+                case LegacyManiaSkinConfiguration.LegacyNoteBodyStyle.Stretch:
+                    // this is how lazer works by default. nothing required.
+                    bodySprite?.Scale = new Vector2(1, scaleDirection);
+                    break;
+
+                default:
+                    // this is where things get a bit messed up.
+                    // honestly there&#39;s three modes to handle here but they seem really pointless?
+                    // let&#39;s wait to see if anyone actually uses them in skins.
+                    if (bodySprite != null)
+                    {
+                        var sprite = bodySprite as Sprite ?? bodySprite.ChildrenOfType&lt;Sprite&gt;().Single();
+
+                        bodySprite.FillMode = FillMode.Stretch;
+                        // i dunno this looks about right??
+                        // the guard against zero draw height is intended for zero-length hold notes. yes, such cases have been spotted in the wild.
+                        if (sprite.DrawHeight &gt; 0)
+                            bodySprite.Scale = new Vector2(1, scaleDirection * MathF.Max(1, 32800 / sprite.DrawHeight));
+                    }
+
+                    break;
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (holdNote.IsNotNull())
+                holdNote.ApplyCustomUpdateState -= onApplyCustomUpdateState;
+
+            lightContainer?.Expire();
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,9,24,51,0],[26,9,26,103,0],[27,9,27,75,0],[28,9,28,88,0],[35,9,35,33,0],[36,9,36,10,0],[37,13,37,42,0],[38,9,38,10,0],[42,9,42,10,0],[43,13,43,57,0],[45,13,46,71,0],[48,13,49,48,0],[51,13,52,37,0],[56,13,56,66,0],[57,13,57,36,0],[58,13,58,85,0],[59,17,59,86,0],[61,13,62,13,0],[62,13,62,14,0],[62,14,63,17,0],[63,17,63,42,0],[63,42,64,17,0],[64,17,64,58,0],[64,58,65,17,0],[65,17,65,51,0],[65,51,66,13,0],[66,13,66,14,0],[66,14,66,16,0],[68,13,68,31,0],[69,13,69,14,0],[70,17,74,19,0],[75,13,75,14,0],[77,13,77,212,0],[79,13,79,139,0],[81,13,81,55,0],[82,13,82,50,0],[83,13,83,64,0],[85,13,86,13,0],[86,13,86,14,0],[86,14,87,17,0],[87,17,87,53,0],[87,53,88,21,0],[88,21,88,49,0],[88,49,90,17,0],[90,17,90,45,0],[90,45,91,17,0],[91,17,91,48,0],[91,48,92,17,0],[92,17,92,38,0],[92,38,94,13,0],[94,13,94,14,0],[94,14,94,16,0],[96,13,96,36,0],[97,17,97,44,0],[98,9,98,10,0],[101,9,101,10,0],[102,13,102,33,0],[104,13,104,66,0],[105,13,105,66,0],[106,13,106,80,0],[108,13,108,73,0],[109,9,109,10,0],[112,9,112,10,0],[113,13,113,62,0],[114,17,114,62,0],[116,13,116,40,0],[117,17,117,24,0],[119,13,119,36,0],[120,13,120,14,0],[122,17,122,50,0],[125,17,125,51,0],[126,21,126,66,0],[129,17,129,62,0],[130,21,130,49,0],[132,17,132,43,0],[133,13,133,14,0],[135,13,135,14,0],[136,17,137,48,0],[137,48,137,89,0],[137,89,137,91,0],[138,13,138,14,0],[139,9,139,10,0],[142,9,142,10,0],[143,13,143,61,0],[144,13,144,14,0],[145,17,145,40,0],[146,17,146,18,0],[147,21,147,58,0],[148,21,148,61,0],[149,17,149,18,0],[151,17,151,50,0],[152,13,152,14,0],[154,13,154,14,0],[155,17,155,40,0],[156,17,156,18,0],[157,21,157,58,0],[158,21,158,58,0],[159,17,159,18,0],[161,17,161,53,0],[162,13,162,14,0],[163,9,163,10,0],[166,16,166,33,0],[169,16,169,33,0],[172,9,172,10,0],[173,13,173,48,0],[174,17,174,24,0],[176,13,176,72,0],[177,17,177,55,0],[178,9,178,10,0],[181,9,181,10,0],[182,13,182,27,0],[184,13,184,34,0],[185,17,185,64,0],[187,13,187,88,0],[190,13,190,31,0],[194,21,194,72,0],[195,21,195,27,0],[201,21,201,44,0],[202,21,202,22,0],[203,25,203,107,0],[205,25,205,64,0],[208,25,208,51,0],[209,29,209,121,0],[210,21,210,22,0],[212,21,212,27,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,39,0],[220,13,220,38,0],[221,17,221,77,0],[223,13,223,38,0],[224,9,224,10,0]]);
+    </script>
+  </body>
+</html>

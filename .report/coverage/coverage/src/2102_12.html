@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Edit/Timing/TapButton.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Beatmaps.ControlPoints;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Input.Bindings;
+using osu.Game.Overlays;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Edit.Timing
+{
+    internal partial class TapButton : CircularContainer, IKeyBindingHandler&lt;GlobalAction&gt;
+    {
+        public const float SIZE = 140;
+
+        public readonly BindableBool IsHandlingTapping = new BindableBool();
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        [Resolved]
+        private Bindable&lt;ControlPointGroup&gt;? selectedGroup { get; set; }
+
+        [Resolved]
+        private IBeatSyncProvider? beatSyncSource { get; set; }
+
+        private Circle hoverLayer = null!;
+
+        private CircularContainer innerCircle = null!;
+        private Box innerCircleHighlight = null!;
+
+        private int currentLight;
+
+        private Container scaleContainer = null!;
+        private Container lights = null!;
+        private Container lightsGlow = null!;
+        private OsuSpriteText bpmText = null!;
+        private Container textContainer = null!;
+
+        private bool grabbedMouseDown;
+
+        private ScheduledDelegate? resetDelegate;
+
+        private const int light_count = 8;
+
+        private const int initial_taps_to_ignore = 4;
+
+        private const int max_taps_to_consider = 128;
+
+        private const double transition_length = 500;
+
+        private const float angular_light_gap = 0.007f;
+
+        private readonly List&lt;double&gt; tapTimings = new List&lt;double&gt;();
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Size = new Vector2(SIZE);
+
+            const float ring_width = 22;
+            const float light_padding = 3;
+
+            InternalChild = scaleContainer = new Container
+            {
+                Anchor = Anchor.Centre,
+                Origin = Anchor.Centre,
+                RelativeSizeAxes = Axes.Both,
+                Children = new Drawable[]
+                {
+                    new Circle
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = colourProvider.Background4
+                    },
+                    lights = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    new CircularContainer
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Name = @&quot;outer masking&quot;,
+                        Masking = true,
+                        BorderThickness = light_padding,
+                        BorderColour = colourProvider.Background4,
+                        Children = new Drawable[]
+                        {
+                            new Box
+                            {
+                                Colour = Color4.Black,
+                                RelativeSizeAxes = Axes.Both,
+                                Alpha = 0,
+                                AlwaysPresent = true,
+                            },
+                        }
+                    },
+                    new Circle
+                    {
+                        Name = @&quot;inner masking&quot;,
+                        Size = new Vector2(SIZE - ring_width * 2 + light_padding * 2),
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Colour = colourProvider.Background4,
+                    },
+                    lightsGlow = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                    },
+                    innerCircle = new CircularContainer
+                    {
+                        Size = new Vector2(SIZE - ring_width * 2),
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Masking = true,
+                        Children = new Drawable[]
+                        {
+                            new Box
+                            {
+                                Colour = colourProvider.Background2,
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            innerCircleHighlight = new Box
+                            {
+                                Colour = colourProvider.Colour3,
+                                Blending = BlendingParameters.Additive,
+                                RelativeSizeAxes = Axes.Both,
+                                Alpha = 0,
+                            },
+                            textContainer = new Container
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = colourProvider.Background1,
+                                Children = new Drawable[]
+                                {
+                                    new OsuSpriteText
+                                    {
+                                        Font = OsuFont.Torus.With(size: 34, weight: FontWeight.SemiBold),
+                                        Anchor = Anchor.Centre,
+                                        Origin = Anchor.BottomCentre,
+                                        Y = 5,
+                                        Text = &quot;Tap&quot;,
+                                    },
+                                    bpmText = new OsuSpriteText
+                                    {
+                                        Font = OsuFont.Torus.With(size: 23, weight: FontWeight.Regular),
+                                        Anchor = Anchor.Centre,
+                                        Origin = Anchor.TopCentre,
+                                        Y = -1,
+                                    },
+                                }
+                            },
+                            hoverLayer = new Circle
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Colour = colourProvider.Background1.Opacity(0.3f),
+                                Blending = BlendingParameters.Additive,
+                                Alpha = 0,
+                            },
+                        }
+                    },
+                }
+            };
+
+            for (int i = 0; i &lt; light_count; i++)
+            {
+                var light = new Light
+                {
+                    Rotation = (i + 1) * (360f / light_count) + 360 * angular_light_gap / 2,
+                };
+
+                lights.Add(light);
+                lightsGlow.Add(light.Glow.CreateProxy());
+            }
+
+            reset();
+        }
+
+        public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) =&gt;
+            hoverLayer.ReceivePositionalInputAt(screenSpacePos);
+
+        private ColourInfo textColour
+        {
+            get
+            {
+                if (grabbedMouseDown)
+                    return colourProvider.Background4;
+
+                if (IsHovered)
+                    return colourProvider.Content2;
+
+                return colourProvider.Background1;
+            }
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            hoverLayer.FadeIn(transition_length, Easing.OutQuint);
+            textContainer.FadeColour(textColour, transition_length, Easing.OutQuint);
+            return true;
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            hoverLayer.FadeOut(transition_length, Easing.OutQuint);
+            textContainer.FadeColour(textColour, transition_length, Easing.OutQuint);
+            base.OnHoverLost(e);
+        }
+
+        protected override bool OnMouseDown(MouseDownEvent e)
+        {
+            const double in_duration = 100;
+
+            grabbedMouseDown = true;
+            IsHandlingTapping.Value = true;
+
+            resetDelegate?.Cancel();
+
+            handleTap();
+
+            textContainer.FadeColour(textColour, in_duration, Easing.OutQuint);
+
+            scaleContainer.ScaleTo(0.99f, in_duration, Easing.OutQuint);
+            innerCircle.ScaleTo(0.96f, in_duration, Easing.OutQuint);
+
+            innerCircleHighlight
+                .FadeIn(50, Easing.OutQuint)
+                .FlashColour(Color4.White, 1000, Easing.OutQuint);
+
+            lights[currentLight % light_count].Hide();
+            lights[(currentLight + light_count / 2) % light_count].Hide();
+
+            currentLight++;
+
+            lights[currentLight % light_count].Show();
+            lights[(currentLight + light_count / 2) % light_count].Show();
+
+            return true;
+        }
+
+        protected override void OnMouseUp(MouseUpEvent e)
+        {
+            const double out_duration = 800;
+
+            grabbedMouseDown = false;
+
+            textContainer.FadeColour(textColour, out_duration, Easing.OutQuint);
+
+            scaleContainer.ScaleTo(1, out_duration, Easing.OutQuint);
+            innerCircle.ScaleTo(1, out_duration, Easing.OutQuint);
+
+            innerCircleHighlight.FadeOut(out_duration, Easing.OutQuint);
+
+            resetDelegate = Scheduler.AddDelayed(reset, 1000);
+
+            base.OnMouseUp(e);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Action == GlobalAction.EditorTapForBPM &amp;&amp; !e.Repeat)
+            {
+                // Direct through mouse handling to achieve animation
+                OnMouseDown(new MouseDownEvent(e.CurrentState, MouseButton.Left));
+                return true;
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Action == GlobalAction.EditorTapForBPM)
+                OnMouseUp(new MouseUpEvent(e.CurrentState, MouseButton.Left));
+        }
+
+        private void handleTap()
+        {
+            if (selectedGroup?.Value == null)
+                return;
+
+            tapTimings.Add(Clock.CurrentTime);
+
+            if (tapTimings.Count &gt; initial_taps_to_ignore + max_taps_to_consider)
+                tapTimings.RemoveAt(0);
+
+            if (tapTimings.Count &lt; initial_taps_to_ignore * 2)
+            {
+                bpmText.Text = new string(&#39;.&#39;, tapTimings.Count);
+                return;
+            }
+
+            double averageBeatLength = (tapTimings.Last() - tapTimings.Skip(initial_taps_to_ignore).First()) / (tapTimings.Count - initial_taps_to_ignore - 1);
+            double clockRate = beatSyncSource?.Clock.Rate ?? 1;
+
+            double bpm = Math.Round(60000 / averageBeatLength / clockRate);
+
+            bpmText.Text = $&quot;{bpm} BPM&quot;;
+
+            var timingPoint = selectedGroup?.Value.ControlPoints.OfType&lt;TimingControlPoint&gt;().FirstOrDefault();
+
+            // Intentionally use the rounded BPM here.
+            timingPoint?.BeatLength = 60000 / bpm;
+        }
+
+        private void reset()
+        {
+            bpmText.FadeOut(transition_length, Easing.OutQuint);
+
+            using (BeginDelayedSequence(tapTimings.Count &gt; 0 ? transition_length : 0))
+            {
+                Schedule(() =&gt; bpmText.Text = &quot;the beat!&quot;);
+                bpmText.FadeIn(800, Easing.OutQuint);
+            }
+
+            foreach (var light in lights)
+                light.Hide();
+
+            tapTimings.Clear();
+            currentLight = 0;
+            IsHandlingTapping.Value = false;
+        }
+
+        private partial class Light : CompositeDrawable
+        {
+            public Drawable Glow { get; private set; } = null!;
+
+            private Container fillContent = null!;
+
+            [Resolved]
+            private OverlayColourProvider colourProvider { get; set; } = null!;
+
+            [BackgroundDependencyLoader]
+            private void load()
+            {
+                RelativeSizeAxes = Axes.Both;
+                Anchor = Anchor.Centre;
+                Origin = Anchor.Centre;
+
+                Size = new Vector2(0.98f); // Avoid bleed into masking edge.
+
+                InternalChildren = new Drawable[]
+                {
+                    new CircularProgress
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Progress = 1f / light_count - angular_light_gap,
+                        Colour = colourProvider.Background2,
+                    },
+                    fillContent = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Alpha = 0,
+                        Colour = colourProvider.Colour1,
+                        Children = new[]
+                        {
+                            new CircularProgress
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Progress = 1f / light_count - angular_light_gap,
+                                Blending = BlendingParameters.Additive
+                            },
+                            // Please do not try and make sense of this.
+                            // Getting the visual effect I was going for relies on what I can only imagine is broken implementation
+                            // of `PadExtent`. If that&#39;s ever fixed in the future this will likely need to be adjusted.
+                            Glow = new CircularProgress
+                            {
+                                RelativeSizeAxes = Axes.Both,
+                                Progress = 1f / light_count - 0.01f,
+                                Blending = BlendingParameters.Additive
+                            }.WithEffect(new GlowEffect
+                            {
+                                Colour = colourProvider.Colour1.Opacity(0.4f),
+                                BlurSigma = new Vector2(9f),
+                                Strength = 10,
+                                PadExtent = true
+                            }),
+                        }
+                    },
+                };
+            }
+
+            public override void Show()
+            {
+                fillContent
+                    .FadeIn(50, Easing.OutQuint)
+                    .FlashColour(Color4.White, 1000, Easing.OutQuint);
+            }
+
+            public override void Hide()
+            {
+                fillContent
+                    .FadeOut(300, Easing.OutQuint);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[35,9,35,77,0],[38,56,38,60,0],[38,61,38,65,0],[38,70,38,75,0],[41,62,41,66,0],[41,67,41,71,0],[44,53,44,57,0],[44,58,44,62,0],[46,9,46,43,0],[48,9,48,55,0],[49,9,49,50,0],[53,9,53,50,0],[54,9,54,42,0],[55,9,55,46,0],[56,9,56,47,0],[57,9,57,49,0],[73,9,73,71,0],[77,9,77,10,0],[78,13,78,38,0],[83,13,182,15,0],[184,18,184,27,0],[184,29,184,44,0],[184,46,184,49,0],[185,13,185,14,0],[186,17,189,19,0],[191,17,191,35,0],[192,17,192,58,0],[193,13,193,14,0],[195,13,195,21,0],[196,9,196,10,0],[199,13,199,64,0],[204,13,204,14,0],[205,17,205,38,0],[206,21,206,55,0],[208,17,208,31,0],[209,21,209,52,0],[211,17,211,51,0],[212,13,212,14,0],[216,9,216,10,0],[217,13,217,67,0],[218,13,218,86,0],[219,13,219,25,0],[220,9,220,10,0],[223,9,223,10,0],[224,13,224,68,0],[225,13,225,86,0],[226,13,226,33,0],[227,9,227,10,0],[230,9,230,10,0],[233,13,233,37,0],[234,13,234,44,0],[236,13,236,37,0],[238,13,238,25,0],[240,13,240,80,0],[242,13,242,73,0],[243,13,243,70,0],[245,13,247,67,0],[249,13,249,55,0],[250,13,250,75,0],[252,13,252,28,0],[254,13,254,55,0],[255,13,255,75,0],[257,13,257,25,0],[258,9,258,10,0],[261,9,261,10,0],[264,13,264,38,0],[266,13,266,81,0],[268,13,268,70,0],[269,13,269,67,0],[271,13,271,73,0],[273,13,273,63,0],[275,13,275,31,0],[276,9,276,10,0],[279,9,279,10,0],[280,13,280,71,0],[281,13,281,14,0],[283,17,283,83,0],[284,17,284,29,0],[287,13,287,26,0],[288,9,288,10,0],[291,9,291,10,0],[292,13,292,58,0],[293,17,293,79,0],[294,9,294,10,0],[297,9,297,10,0],[298,13,298,46,0],[299,17,299,24,0],[301,13,301,47,0],[303,13,303,82,0],[304,17,304,40,0],[306,13,306,63,0],[307,13,307,14,0],[308,17,308,66,0],[309,17,309,24,0],[312,13,312,160,0],[313,13,313,64,0],[315,13,315,76,0],[317,13,317,41,0],[319,13,319,112,0],[322,13,322,51,0],[323,9,323,10,0],[326,9,326,10,0],[327,13,327,65,0],[329,13,329,87,0],[330,13,330,14,0],[331,17,331,32,0],[331,32,331,58,0],[331,58,331,60,0],[332,17,332,54,0],[333,13,333,14,0],[335,13,335,20,0],[335,22,335,31,0],[335,32,335,34,0],[335,35,335,41,0],[336,17,336,30,0],[338,13,338,32,0],[339,13,339,30,0],[340,13,340,45,0],[341,9,341,10,0],[345,36,345,40,0],[345,41,345,53,0],[345,58,345,63,0],[347,13,347,51,0],[350,60,350,64,0],[350,65,350,69,0],[350,74,350,79,0],[354,13,354,14,0],[355,17,355,46,0],[356,17,356,40,0],[357,17,357,40,0],[359,17,359,43,0],[361,17,399,19,0],[400,13,400,14,0],[403,13,403,14,0],[404,17,406,71,0],[407,13,407,14,0],[410,13,410,14,0],[411,17,412,52,0],[413,13,413,14,0]]);
+    </script>
+  </body>
+</html>

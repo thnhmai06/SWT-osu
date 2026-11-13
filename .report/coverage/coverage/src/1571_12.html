@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/FilterControl.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Threading;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Configuration;
+using osu.Game.Database;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Graphics.UserInterfaceV2;
+using osu.Game.Input.Bindings;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.Select.Filter;
+using osuTK;
+using osuTK.Input;
+
+namespace osu.Game.Screens.Select
+{
+    public sealed partial class FilterControl : OverlayContainer
+    {
+        // taken from draw visualiser. used for carousel alignment purposes.
+        public const float HEIGHT_FROM_SCREEN_TOP = 141 - corner_radius;
+
+        private const float corner_radius = 10;
+
+        public IBindable&lt;BeatmapSetInfo?&gt; ScopedBeatmapSet { get; } = new Bindable&lt;BeatmapSetInfo?&gt;();
+
+        private SongSelectSearchTextBox searchTextBox = null!;
+        private ShearedToggleButton showConvertedBeatmapsButton = null!;
+        private DifficultyRangeSlider difficultyRangeSlider = null!;
+        private ShearedDropdown&lt;SortMode&gt; sortDropdown = null!;
+        private ShearedDropdown&lt;GroupModeDropdownItem&gt; groupDropdown = null!;
+        private readonly Bindable&lt;string&gt; configCollectionFilter = new Bindable&lt;string&gt;();
+
+        /// &lt;summary&gt;
+        /// An optional method which can force certain criteria adjustments.
+        /// &lt;/summary&gt;
+        public Action&lt;FilterCriteria&gt;? ApplyRequiredCriteria { get; set; }
+
+        [Resolved]
+        private ISongSelect? songSelect { get; set; }
+
+        [Resolved]
+        private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+        [Resolved]
+        private IBindable&lt;IReadOnlyList&lt;Mod&gt;&gt; mods { get; set; } = null!;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        [Resolved]
+        private RealmAccess realm { get; set; } = null!;
+
+        private IBindable&lt;APIUser&gt; localUser = null!;
+        private readonly IBindableList&lt;int&gt; localUserFavouriteBeatmapSets = new BindableList&lt;int&gt;();
+
+        public LocalisableString StatusText
+        {
+            get =&gt; searchTextBox.StatusText;
+            set =&gt; searchTextBox.StatusText = value;
+        }
+
+        public event Action&lt;FilterCriteria&gt;? CriteriaChanged;
+
+        private FilterCriteria currentCriteria = null!;
+
+        private IDisposable? collectionsSubscription;
+
+        [BackgroundDependencyLoader]
+        private void load(IAPIProvider api)
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            Shear = OsuGame.SHEAR;
+            Margin = new MarginPadding { Top = -corner_radius, Right = -40 };
+
+            InternalChildren = new Drawable[]
+            {
+                new Container
+                {
+                    RelativeSizeAxes = Axes.Both,
+                    CornerRadius = corner_radius,
+                    Masking = true,
+                    Child = new WedgeBackground
+                    {
+                        Anchor = Anchor.TopRight,
+                        Scale = new Vector2(-1, 1),
+                    }
+                },
+                new ReverseChildIDFillFlowContainer&lt;Drawable&gt;
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Direction = FillDirection.Vertical,
+                    Padding = new MarginPadding { Top = corner_radius + 5, Bottom = 2, Right = 40f, Left = 2f },
+                    Children = new Drawable[]
+                    {
+                        new ReverseChildIDFillFlowContainer&lt;Drawable&gt;
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(0f, 5f),
+                            Children = new Drawable[]
+                            {
+                                new Container
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Shear = -OsuGame.SHEAR,
+                                    Child = searchTextBox = new SongSelectSearchTextBox
+                                    {
+                                        RelativeSizeAxes = Axes.X,
+                                        HoldFocus = true,
+                                        ScopedBeatmapSet = { BindTarget = ScopedBeatmapSet },
+                                    },
+                                },
+                                new GridContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    AutoSizeAxes = Axes.Y,
+                                    Shear = -OsuGame.SHEAR,
+                                    RowDimensions = new[] { new Dimension(GridSizeMode.AutoSize) },
+                                    ColumnDimensions = new[]
+                                    {
+                                        new Dimension(),
+                                        new Dimension(GridSizeMode.Absolute), // can probably be removed?
+                                        new Dimension(GridSizeMode.AutoSize),
+                                    },
+                                    Content = new[]
+                                    {
+                                        new[]
+                                        {
+                                            difficultyRangeSlider = new DifficultyRangeSlider
+                                            {
+                                                RelativeSizeAxes = Axes.X,
+                                                MinRange = 0.1f,
+                                            },
+                                            Empty(),
+                                            showConvertedBeatmapsButton = new ShearedToggleButton
+                                            {
+                                                Anchor = Anchor.Centre,
+                                                Origin = Anchor.Centre,
+                                                AutoSizeAxes = Axes.X,
+                                                Text = UserInterfaceStrings.ShowConverts,
+                                                Height = 30f,
+                                            },
+                                        },
+                                    }
+                                },
+                                new GridContainer
+                                {
+                                    RelativeSizeAxes = Axes.X,
+                                    Height = 30,
+                                    Shear = -OsuGame.SHEAR,
+                                    RowDimensions = new[] { new Dimension(GridSizeMode.AutoSize) },
+                                    ColumnDimensions = new[]
+                                    {
+                                        new Dimension(maxSize: 180),
+                                        new Dimension(GridSizeMode.Absolute, 5),
+                                        new Dimension(maxSize: 180),
+                                        new Dimension(GridSizeMode.Absolute, 5),
+                                        new Dimension(),
+                                        new Dimension(GridSizeMode.AutoSize),
+                                    },
+                                    Content = new[]
+                                    {
+                                        new[]
+                                        {
+                                            sortDropdown = new ShearedDropdown&lt;SortMode&gt;(SongSelectStrings.Sort)
+                                            {
+                                                RelativeSizeAxes = Axes.X,
+                                                Items = Enum.GetValues&lt;SortMode&gt;(),
+                                            },
+                                            Empty(),
+                                            groupDropdown = new GroupModeDropdown(SongSelectStrings.Group)
+                                            {
+                                                RelativeSizeAxes = Axes.X,
+                                            },
+                                            Empty(),
+                                            new CollectionDropdown
+                                            {
+                                                RelativeSizeAxes = Axes.X,
+                                            },
+                                        }
+                                    }
+                                },
+                            },
+                        },
+                        new ScopedBeatmapSetDisplay
+                        {
+                            ScopedBeatmapSet = { BindTarget = ScopedBeatmapSet },
+                        }
+                    },
+                },
+            };
+
+            localUser = api.LocalUser.GetBoundCopy();
+            localUserFavouriteBeatmapSets.BindTo(api.LocalUserState.FavouriteBeatmapSets);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            difficultyRangeSlider.LowerBound = config.GetBindable&lt;double&gt;(OsuSetting.DisplayStarsMinimum);
+            difficultyRangeSlider.UpperBound = config.GetBindable&lt;double&gt;(OsuSetting.DisplayStarsMaximum);
+            config.BindWith(OsuSetting.ShowConvertedBeatmaps, showConvertedBeatmapsButton.Active);
+            config.BindWith(OsuSetting.SongSelectSortingMode, sortDropdown.Current);
+            config.BindWith(OsuSetting.SongSelectCollectionFilter, configCollectionFilter);
+
+            ruleset.BindValueChanged(_ =&gt; updateCriteria());
+            mods.BindValueChanged(m =&gt;
+            {
+                // The following is a note carried from old song select and may not be a valid reason anymore:
+                // // Mods are updated once by the mod select overlay when song select is entered,
+                // // regardless of if there are any mods or any changes have taken place.
+                // // Updating the criteria here so early triggers a re-ordering of panels on song select, via... some mechanism.
+                // // Todo: Investigate/fix and potentially remove this.
+                // TODO: this might be simply removable with the new song select &amp; carousel code.
+                if (m.NewValue.SequenceEqual(m.OldValue))
+                    return;
+
+                var rulesetCriteria = currentCriteria.RulesetCriteria;
+                if (rulesetCriteria?.FilterMayChangeFromMods(currentCriteria, m) == true)
+                    updateCriteria();
+            });
+
+            searchTextBox.Current.BindValueChanged(_ =&gt; updateCriteria());
+
+            ScheduledDelegate? sliderDebounce = null;
+
+            // For slider dragging (where input events can arrive very often), even creating criteria can have
+            // overhead, especially when a collection is selected (see ToImmutableHashSet() call).
+            void debouncedUpdateCriteria()
+            {
+                sliderDebounce?.Cancel();
+                sliderDebounce = Scheduler.AddDelayed(() =&gt; updateCriteria(), 50);
+            }
+
+            difficultyRangeSlider.LowerBound.BindValueChanged(_ =&gt; debouncedUpdateCriteria());
+            difficultyRangeSlider.UpperBound.BindValueChanged(_ =&gt; debouncedUpdateCriteria());
+
+            showConvertedBeatmapsButton.Active.BindValueChanged(_ =&gt; updateCriteria());
+            sortDropdown.Current.BindValueChanged(_ =&gt; updateCriteria());
+            groupDropdown.Current.BindValueChanged(_ =&gt; updateCriteria());
+            configCollectionFilter.BindValueChanged(_ =&gt; updateCriteria());
+            collectionsSubscription = realm.RegisterForNotifications(r =&gt; r.All&lt;BeatmapCollection&gt;(), (_, changeSet) =&gt;
+            {
+                if (changeSet != null &amp;&amp; groupDropdown.Current.Value.Value == GroupMode.Collections)
+                    updateCriteria();
+            });
+
+            localUser.BindValueChanged(_ =&gt; updateCriteria());
+            localUserFavouriteBeatmapSets.BindCollectionChanged((_, _) =&gt; updateCriteria());
+            ScopedBeatmapSet.BindValueChanged(_ =&gt; updateCriteria(clearScopedSet: false));
+
+            updateCriteria();
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+            collectionsSubscription?.Dispose();
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a &lt;see cref=&quot;FilterCriteria&quot;/&gt; based on the current state of the controls.
+        /// &lt;/summary&gt;
+        public FilterCriteria CreateCriteria()
+        {
+            string query = searchTextBox.Current.Value;
+            bool isValidUser = localUser.Value.Id &gt; 1;
+
+            IEnumerable&lt;string&gt;? collectionBeatmapMD5Hashes = null;
+
+            if (Guid.TryParse(configCollectionFilter.Value, out var collectionId))
+                collectionBeatmapMD5Hashes = realm.Run(r =&gt; r.Find&lt;BeatmapCollection&gt;(collectionId)?.BeatmapMD5Hashes.ToImmutableHashSet());
+
+            var criteria = new FilterCriteria
+            {
+                SelectedBeatmapSet = ScopedBeatmapSet.Value,
+                Sort = sortDropdown.Current.Value,
+                Group = groupDropdown.Current.Value?.Value ?? GroupMode.None,
+                AllowConvertedBeatmaps = showConvertedBeatmapsButton.Active.Value,
+                Ruleset = ruleset.Value,
+                Mods = mods.Value,
+                CollectionBeatmapMD5Hashes = collectionBeatmapMD5Hashes,
+                LocalUserId = isValidUser ? localUser.Value.Id : null,
+                LocalUserUsername = isValidUser ? localUser.Value.Username : null,
+            };
+
+            if (!difficultyRangeSlider.LowerBound.IsDefault)
+                criteria.UserStarDifficulty.Min = difficultyRangeSlider.LowerBound.Value;
+
+            if (!difficultyRangeSlider.UpperBound.IsDefault)
+                criteria.UserStarDifficulty.Max = difficultyRangeSlider.UpperBound.Value;
+
+            criteria.RulesetCriteria = ruleset.Value.CreateInstance().CreateRulesetFilterCriteria();
+
+            FilterQueryParser.ApplyQueries(criteria, query);
+
+            ApplyRequiredCriteria?.Invoke(criteria);
+
+            return criteria;
+        }
+
+        private void updateCriteria(bool clearScopedSet = true)
+        {
+            if (clearScopedSet &amp;&amp; ScopedBeatmapSet.Value != null)
+            {
+                songSelect?.UnscopeBeatmapSet();
+                // because `ScopedBeatmapSet` has a value change callback bound to it that calls `updateCriteria()` again,
+                // we can just do nothing other than clear it to avoid extra work and duplicated `CriteriaChanged` invocations
+                return;
+            }
+
+            currentCriteria = CreateCriteria();
+            CriteriaChanged?.Invoke(currentCriteria);
+        }
+
+        /// &lt;summary&gt;
+        /// Set the query to the search text box.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;query&quot;&gt;The string to search.&lt;/param&gt;
+        public void Search(string query)
+        {
+            searchTextBox.Current.Value = query;
+        }
+
+        /// &lt;summary&gt;
+        /// Set the query to the search text box.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;query&quot;&gt;The string to search.&lt;/param&gt;
+        public void AddToSearch(string query)
+        {
+            string existingQuery = searchTextBox.Current.Value;
+
+            if (existingQuery.Contains(query))
+                return;
+
+            searchTextBox.Current.Value = string.IsNullOrWhiteSpace(existingQuery)
+                ? query
+                : string.Join(&#39; &#39;, existingQuery.Trim(), query);
+        }
+
+        protected override void PopIn()
+        {
+            this.MoveToX(0, SongSelect.ENTER_DURATION, Easing.OutQuint)
+                .FadeIn(SongSelect.ENTER_DURATION / 3, Easing.In);
+        }
+
+        protected override void PopOut()
+        {
+            this.MoveToX(150, SongSelect.ENTER_DURATION, Easing.OutQuint)
+                .FadeOut(SongSelect.ENTER_DURATION / 3, Easing.In);
+        }
+
+        internal partial class SongSelectSearchTextBox : ShearedFilterTextBox
+        {
+            public IBindable&lt;BeatmapSetInfo?&gt; ScopedBeatmapSet { get; } = new Bindable&lt;BeatmapSetInfo?&gt;();
+
+            protected override InnerSearchTextBox CreateInnerTextBox() =&gt; new InnerTextBox
+            {
+                ScopedBeatmapSet = { BindTarget = ScopedBeatmapSet },
+            };
+
+            private partial class InnerTextBox : InnerFilterTextBox
+            {
+                public IBindable&lt;BeatmapSetInfo?&gt; ScopedBeatmapSet { get; } = new Bindable&lt;BeatmapSetInfo?&gt;();
+
+                public override bool HandleLeftRightArrows =&gt; false;
+
+                public override bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+                {
+                    if (e.Action == GlobalAction.Back &amp;&amp; ScopedBeatmapSet.Value != null)
+                        return false;
+
+                    return base.OnPressed(e);
+                }
+
+                public override bool OnPressed(KeyBindingPressEvent&lt;PlatformAction&gt; e)
+                {
+                    // Conflicts with default group navigation keys (shift-left shift-right).
+                    if (e.Action == PlatformAction.SelectBackwardChar || e.Action == PlatformAction.SelectForwardChar)
+                        return false;
+
+                    // the &quot;cut&quot; platform key binding (shift-delete) conflicts with the beatmap deletion action.
+                    if (e.Action == PlatformAction.Cut &amp;&amp; e.ShiftPressed &amp;&amp; e.CurrentState.Keyboard.Keys.IsPressed(Key.Delete))
+                        return false;
+
+                    return base.OnPressed(e);
+                }
+            }
+        }
+
+        private partial class GroupModeDropdown : ShearedDropdown&lt;GroupModeDropdownItem&gt;
+        {
+            [Resolved]
+            private IBindable&lt;RulesetInfo&gt; ruleset { get; set; } = null!;
+
+            private Bindable&lt;GroupMode&gt; configGroupMode { get; } = new Bindable&lt;GroupMode&gt;();
+
+            public GroupModeDropdown(LocalisableString label)
+                : base(label)
+            {
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuConfigManager config)
+            {
+                config.BindWith(OsuSetting.SongSelectGroupMode, configGroupMode);
+            }
+
+            protected override void LoadAsyncComplete()
+            {
+                // Bindings set up intentionally in `LoadAsyncComplete()` rather than `LoadComplete()` as normal
+                // to avoid double-filter on entering song select with the &quot;variant&quot; group mode engaged.
+                ruleset.BindValueChanged(_ =&gt;
+                {
+                    updateAvailableItems();
+                    updateCurrentFromConfig();
+                }, true);
+                configGroupMode.BindValueChanged(_ =&gt; updateCurrentFromConfig());
+                Current.BindValueChanged(currentChanged);
+
+                // Ordering important - base call must run *after* the above bindings
+                // because the bindings set up `Items`, and the base call is responsible for calling `GenerateItemText()`.
+                base.LoadAsyncComplete();
+            }
+
+            private void updateAvailableItems()
+            {
+                var rulesetInstance = ruleset.Value.CreateInstance();
+                var items = new List&lt;GroupModeDropdownItem&gt;();
+
+                foreach (var item in Enum.GetValues&lt;GroupMode&gt;())
+                {
+                    switch (item)
+                    {
+                        default:
+                            items.Add(new GroupModeDropdownItem(item, item.GetLocalisableDescription()));
+                            break;
+
+                        case GroupMode.Variant:
+                            if (rulesetInstance.GameplayVariants.Count() &lt;= 1)
+                                break;
+
+                            items.Add(new GroupModeDropdownItem(GroupMode.Variant, rulesetInstance.VariantDescription));
+                            break;
+                    }
+                }
+
+                Items = items.ToArray();
+            }
+
+            private bool synchronisingBindables;
+
+            private void updateCurrentFromConfig()
+            {
+                if (synchronisingBindables)
+                    return;
+
+                synchronisingBindables = true;
+                // Only rulesets that actually have variants expose and support the &quot;variant&quot; grouping mode.
+                // If it&#39;s missing, default to no grouping.
+                Current.Value = Items.SingleOrDefault(i =&gt; i.Value == configGroupMode.Value) ?? Items.Single(i =&gt; i.Value == GroupMode.None);
+                synchronisingBindables = false;
+            }
+
+            private void currentChanged(ValueChangedEvent&lt;GroupModeDropdownItem&gt; current)
+            {
+                if (synchronisingBindables)
+                    return;
+
+                // Only rulesets that actually have variants expose and support the &quot;variant&quot; grouping mode.
+                // If it&#39;s missing, code above will revert to no grouping, which also incurs a `Current` change.
+                // However, for better user experience, don&#39;t write the new value out to config in this scenario
+                // so that the variant grouping is re-engaged on switching to a ruleset that has variant support
+                // (this also persists across game restarts).
+                if (current.OldValue.Value == GroupMode.Variant &amp;&amp; Items.All(i =&gt; i.Value != GroupMode.Variant))
+                    return;
+
+                synchronisingBindables = true;
+                configGroupMode.Value = current.NewValue.Value;
+                synchronisingBindables = false;
+            }
+
+            protected override LocalisableString GenerateItemText(GroupModeDropdownItem item) =&gt; item.Text;
+        }
+
+        private record GroupModeDropdownItem(GroupMode Value, LocalisableString Text);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[43,62,43,66,0],[43,71,43,102,0],[45,9,45,63,0],[46,9,46,73,0],[47,9,47,69,0],[48,9,48,64,0],[49,9,49,78,0],[50,9,50,91,0],[55,64,55,68,0],[55,69,55,73,0],[58,43,58,47,0],[58,48,58,52,0],[61,50,61,54,0],[61,55,61,59,0],[61,64,61,69,0],[64,54,64,58,0],[64,59,64,63,0],[64,68,64,73,0],[67,43,67,47,0],[67,48,67,52,0],[67,57,67,62,0],[70,37,70,41,0],[70,42,70,46,0],[70,51,70,56,0],[72,9,72,54,0],[73,9,73,101,0],[77,20,77,44,0],[78,20,78,52,0],[83,9,83,56,0],[89,9,89,10,0],[90,13,90,39,0],[91,13,91,35,0],[93,13,93,35,0],[94,13,94,78,0],[96,13,215,15,0],[217,13,217,54,0],[218,13,218,91,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,33,0],[225,13,225,107,0],[226,13,226,107,0],[227,13,227,99,0],[228,13,228,85,0],[229,13,229,92,0],[231,13,231,43,0],[231,43,231,59,0],[231,59,231,61,0],[232,13,233,13,0],[233,13,233,14,0],[233,14,240,17,0],[240,17,240,58,0],[240,58,241,21,0],[241,21,241,28,0],[241,28,243,17,0],[243,17,243,71,0],[243,71,244,17,0],[244,17,244,90,0],[244,90,245,21,0],[245,21,245,38,0],[245,38,246,13,0],[246,13,246,14,0],[246,14,246,16,0],[248,13,248,57,0],[248,57,248,73,0],[248,73,248,75,0],[250,13,250,54,0],[255,13,255,14,0],[256,17,256,42,0],[257,17,257,61,0],[257,61,257,77,0],[257,77,257,83,0],[258,13,258,14,0],[260,13,260,68,0],[260,68,260,93,0],[260,93,260,95,0],[261,13,261,68,0],[261,68,261,93,0],[261,93,261,95,0],[263,13,263,70,0],[263,70,263,86,0],[263,86,263,88,0],[264,13,264,56,0],[264,56,264,72,0],[264,72,264,74,0],[265,13,265,57,0],[265,57,265,73,0],[265,73,265,75,0],[266,13,266,58,0],[266,58,266,74,0],[266,74,266,76,0],[267,13,267,75,0],[267,75,267,101,0],[267,101,268,13,0],[268,13,268,14,0],[268,14,269,17,0],[269,17,269,101,0],[269,101,270,21,0],[270,21,270,38,0],[270,38,271,13,0],[271,13,271,14,0],[271,14,271,16,0],[273,13,273,45,0],[273,45,273,61,0],[273,61,273,63,0],[274,13,274,75,0],[274,75,274,91,0],[274,91,274,93,0],[275,13,275,52,0],[275,52,275,89,0],[275,89,275,91,0],[277,13,277,30,0],[278,9,278,10,0],[281,9,281,10,0],[282,13,282,39,0],[283,13,283,48,0],[284,9,284,10,0],[290,9,290,10,0],[291,13,291,56,0],[292,13,292,55,0],[294,13,294,68,0],[296,13,296,83,0],[297,17,297,61,0],[297,61,297,139,0],[297,139,297,141,0],[299,13,310,15,0],[312,13,312,61,0],[313,17,313,90,0],[315,13,315,61,0],[316,17,316,90,0],[318,13,318,101,0],[320,13,320,61,0],[322,13,322,53,0],[324,13,324,29,0],[325,9,325,10,0],[328,9,328,10,0],[329,13,329,66,0],[330,13,330,14,0],[331,17,331,49,0],[334,17,334,24,0],[337,13,337,48,0],[338,13,338,54,0],[339,9,339,10,0],[346,9,346,10,0],[347,13,347,49,0],[348,9,348,10,0],[355,9,355,10,0],[356,13,356,64,0],[358,13,358,47,0],[359,17,359,24,0],[361,13,363,65,0],[364,9,364,10,0],[367,9,367,10,0],[368,13,369,67,0],[370,9,370,10,0],[373,9,373,10,0],[374,13,375,68,0],[376,9,376,10,0],[380,66,380,70,0],[380,75,380,106,0],[382,75,385,14,0],[389,70,389,74,0],[389,79,389,110,0],[391,63,391,68,0],[394,17,394,18,0],[395,21,395,89,0],[396,25,396,38,0],[398,21,398,46,0],[399,17,399,18,0],[402,17,402,18,0],[404,21,404,119,0],[405,25,405,38,0],[408,21,408,128,0],[409,25,409,38,0],[411,21,411,46,0],[412,17,412,18,0],[419,54,419,58,0],[419,59,419,63,0],[419,68,419,73,0],[421,59,421,63,0],[421,68,421,93,0],[424,19,424,30,0],[425,13,425,14,0],[426,13,426,14,0],[430,13,430,14,0],[431,17,431,82,0],[432,13,432,14,0],[435,13,435,14,0],[438,17,439,17,0],[439,17,439,18,0],[439,18,440,21,0],[440,21,440,44,0],[440,44,441,21,0],[441,21,441,47,0],[441,47,442,17,0],[442,17,442,18,0],[442,18,442,26,0],[443,17,443,55,0],[443,55,443,80,0],[443,80,443,82,0],[444,17,444,58,0],[448,17,448,42,0],[449,13,449,14,0],[452,13,452,14,0],[453,17,453,70,0],[454,17,454,63,0],[456,17,456,24,0],[456,26,456,34,0],[456,35,456,37,0],[456,38,456,65,0],[457,17,457,18,0],[458,21,458,34,0],[461,29,461,106,0],[462,29,462,35,0],[465,29,465,79,0],[466,33,466,39,0],[468,29,468,121,0],[469,29,469,35,0],[471,17,471,18,0],[473,17,473,41,0],[474,13,474,14,0],[479,13,479,14,0],[480,17,480,44,0],[481,21,481,28,0],[483,17,483,47,0],[486,17,486,60,0],[486,60,486,92,0],[486,92,486,115,0],[486,115,486,140,0],[486,140,486,142,0],[487,17,487,48,0],[488,13,488,14,0],[491,13,491,14,0],[492,17,492,44,0],[493,21,493,28,0],[500,17,500,83,0],[500,83,500,111,0],[500,111,500,113,0],[501,21,501,28,0],[503,17,503,47,0],[504,17,504,64,0],[505,17,505,48,0],[506,13,506,14,0],[508,98,508,107,0]]);
+    </script>
+  </body>
+</html>

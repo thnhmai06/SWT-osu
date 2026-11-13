@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/PersistentEndpointClientConnector.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Logging;
+using osu.Framework.Utils;
+using osu.Game.Online.API;
+
+namespace osu.Game.Online
+{
+    public abstract class PersistentEndpointClientConnector : IDisposable
+    {
+        /// &lt;summary&gt;
+        /// Whether the managed connection is currently connected. When &lt;c&gt;true&lt;/c&gt; use &lt;see cref=&quot;CurrentConnection&quot;/&gt; to access the connection.
+        /// &lt;/summary&gt;
+        public IBindable&lt;bool&gt; IsConnected =&gt; isConnected;
+
+        /// &lt;summary&gt;
+        /// The current connection opened by this connector.
+        /// &lt;/summary&gt;
+        public PersistentEndpointClient? CurrentConnection { get; private set; }
+
+        protected readonly IAPIProvider API;
+
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+        private readonly Bindable&lt;bool&gt; isConnected = new Bindable&lt;bool&gt;();
+        private readonly SemaphoreSlim connectionLock = new SemaphoreSlim(1);
+        private CancellationTokenSource connectCancelSource = new CancellationTokenSource();
+        private bool started;
+
+        /// &lt;summary&gt;
+        /// How much to delay before attempting to connect again, in milliseconds.
+        /// Subject to exponential back-off.
+        /// &lt;/summary&gt;
+        private int retryDelay = 3000;
+
+        /// &lt;summary&gt;
+        /// Constructs a new &lt;see cref=&quot;PersistentEndpointClientConnector&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;api&quot;&gt; An API provider used to react to connection state changes.&lt;/param&gt;
+        protected PersistentEndpointClientConnector(IAPIProvider api)
+        {
+            API = api;
+            apiState.BindTo(api.State);
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to connect and begins processing messages from the remote endpoint.
+        /// &lt;/summary&gt;
+        public void Start()
+        {
+            if (started)
+                return;
+
+            apiState.BindValueChanged(_ =&gt; Task.Run(connectIfPossible), true);
+            started = true;
+        }
+
+        public Task Reconnect()
+        {
+            Logger.Log($&quot;{ClientName} reconnecting...&quot;, LoggingTarget.Network);
+            return Task.Run(connectIfPossible);
+        }
+
+        private async Task connectIfPossible()
+        {
+            switch (apiState.Value)
+            {
+                case APIState.Failing:
+                case APIState.Offline:
+                    await disconnect(true).ConfigureAwait(true);
+                    break;
+
+                case APIState.Online:
+                case APIState.RequiresSecondFactorAuth:
+                    await connect().ConfigureAwait(true);
+                    break;
+            }
+        }
+
+        private async Task connect()
+        {
+            cancelExistingConnect();
+            // reset retry delay to default.
+            retryDelay = 3000;
+
+            if (!await connectionLock.WaitAsync(10000).ConfigureAwait(false))
+                throw new TimeoutException(&quot;Could not obtain a lock to connect. A previous attempt is likely stuck.&quot;);
+
+            try
+            {
+                while (apiState.Value == APIState.RequiresSecondFactorAuth || apiState.Value == APIState.Online)
+                {
+                    // ensure any previous connection was disposed.
+                    // this will also create a new cancellation token source.
+                    await disconnect(false).ConfigureAwait(false);
+
+                    // this token will be valid for the scope of this connection.
+                    // if cancelled, we can be sure that a disconnect or reconnect is handled elsewhere.
+                    var cancellationToken = connectCancelSource.Token;
+
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    Logger.Log($&quot;{ClientName} connecting...&quot;, LoggingTarget.Network);
+
+                    try
+                    {
+                        // importantly, rebuild the connection each attempt to get an updated access token.
+                        CurrentConnection = await BuildConnectionAsync(cancellationToken).ConfigureAwait(false);
+                        CurrentConnection.Closed += ex =&gt; onConnectionClosed(ex, cancellationToken);
+
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        await CurrentConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
+
+                        Logger.Log($&quot;{ClientName} connected!&quot;, LoggingTarget.Network);
+                        isConnected.Value = true;
+                        return;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        //connection process was cancelled.
+                        throw;
+                    }
+                    catch (Exception e)
+                    {
+                        await handleErrorAndDelay(e, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+            finally
+            {
+                connectionLock.Release();
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Handles an exception and delays an async flow.
+        /// &lt;/summary&gt;
+        private async Task handleErrorAndDelay(Exception exception, CancellationToken cancellationToken)
+        {
+            // random stagger factor to avoid mass incidental synchronisation
+            // compare: https://github.com/peppy/osu-stable-reference/blob/013c3010a9d495e3471a9c59518de17006f9ad89/osu!/Online/BanchoClient.cs#L331
+            int thisDelay = (int)(retryDelay * RNG.NextDouble(0.75, 1.25));
+            // exponential backoff with upper limit
+            // compare: https://github.com/peppy/osu-stable-reference/blob/013c3010a9d495e3471a9c59518de17006f9ad89/osu!/Online/BanchoClient.cs#L539
+            retryDelay = Math.Min(120000, (int)(retryDelay * 1.5));
+
+            Logger.Log($&quot;{ClientName} connect attempt failed. Next attempt in {thisDelay / 1000:N0} seconds.\n{exception}&quot;, LoggingTarget.Network);
+            await Task.Delay(thisDelay, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;PersistentEndpointClient&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;cancellationToken&quot;&gt;A cancellation token to stop the process.&lt;/param&gt;
+        protected abstract Task&lt;PersistentEndpointClient&gt; BuildConnectionAsync(CancellationToken cancellationToken);
+
+        private async Task onConnectionClosed(Exception? ex, CancellationToken cancellationToken)
+        {
+            bool hasBeenCancelled = cancellationToken.IsCancellationRequested;
+
+            await disconnect(true).ConfigureAwait(false);
+
+            if (ex != null)
+                await handleErrorAndDelay(ex, CancellationToken.None).ConfigureAwait(false);
+            else
+                Logger.Log($&quot;{ClientName} disconnected&quot;, LoggingTarget.Network);
+
+            // make sure a disconnect wasn&#39;t triggered (and this is still the active connection).
+            if (!hasBeenCancelled)
+                await Task.Run(connect, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        protected Task Disconnect() =&gt; disconnect(true);
+
+        private async Task disconnect(bool takeLock)
+        {
+            cancelExistingConnect();
+
+            if (takeLock)
+            {
+                if (!await connectionLock.WaitAsync(10000).ConfigureAwait(false))
+                    throw new TimeoutException(&quot;Could not obtain a lock to disconnect. A previous attempt is likely stuck.&quot;);
+            }
+
+            try
+            {
+                if (CurrentConnection != null)
+                    await CurrentConnection.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                isConnected.Value = false;
+                CurrentConnection = null;
+
+                if (takeLock)
+                    connectionLock.Release();
+            }
+        }
+
+        private void cancelExistingConnect()
+        {
+            connectCancelSource.Cancel();
+            connectCancelSource = new CancellationTokenSource();
+        }
+
+        protected virtual string ClientName =&gt; GetType().ReadableName();
+
+        public override string ToString() =&gt; $&quot;{ClientName} ({(IsConnected.Value ? &quot;connected&quot; : &quot;not connected&quot;)})&quot;;
+
+        private bool isDisposed;
+
+        protected virtual void Dispose(bool isDisposing)
+        {
+            if (isDisposed)
+                return;
+
+            apiState.UnbindAll();
+            cancelExistingConnect();
+
+            isDisposed = true;
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,47,20,58,0],[25,62,25,66,0],[25,67,25,79,0],[29,9,29,82,0],[30,9,30,76,0],[31,9,31,78,0],[32,9,32,93,0],[39,9,39,39,0],[45,9,45,70,0],[46,9,46,10,0],[47,13,47,23,0],[48,13,48,40,0],[49,9,49,10,0],[55,9,55,10,0],[56,13,56,25,0],[57,17,57,24,0],[59,13,59,44,0],[59,44,59,71,0],[59,71,59,79,0],[60,13,60,28,0],[61,9,61,10,0],[64,9,64,10,0],[65,13,65,80,0],[66,13,66,48,0],[67,9,67,10,0],[70,9,70,10,0],[71,13,71,36,0],[75,21,75,65,0],[76,21,76,27,0],[80,21,80,58,0],[81,21,81,27,0],[83,9,83,10,0],[86,9,86,10,0],[87,13,87,37,0],[89,13,89,31,0],[91,13,91,78,0],[92,17,92,119,0],[95,13,95,14,0],[96,17,96,113,0],[97,17,97,18,0],[100,21,100,67,0],[104,21,104,71,0],[106,21,106,70,0],[108,21,108,86,0],[111,21,111,22,0],[113,25,113,113,0],[114,25,114,59,0],[114,59,114,100,0],[114,100,114,101,0],[116,25,116,74,0],[118,25,118,103,0],[120,25,120,87,0],[121,25,121,50,0],[122,25,122,32,0],[124,21,124,55,0],[125,21,125,22,0],[127,25,127,31,0],[129,21,129,40,0],[130,21,130,22,0],[131,25,131,95,0],[132,21,132,22,0],[133,17,133,18,0],[134,13,134,14,0],[136,13,136,14,0],[137,17,137,42,0],[138,13,138,14,0],[139,9,139,10,0],[145,9,145,10,0],[148,13,148,76,0],[151,13,151,68,0],[153,13,153,148,0],[154,13,154,82,0],[155,9,155,10,0],[164,9,164,10,0],[165,13,165,79,0],[167,13,167,58,0],[169,13,169,28,0],[170,17,170,93,0],[172,17,172,81,0],[175,13,175,35,0],[176,17,176,87,0],[177,9,177,10,0],[179,40,179,56,0],[182,9,182,10,0],[183,13,183,37,0],[185,13,185,26,0],[186,13,186,14,0],[187,17,187,82,0],[188,21,188,126,0],[189,13,189,14,0],[192,13,192,14,0],[193,17,193,47,0],[194,21,194,82,0],[195,13,195,14,0],[197,13,197,14,0],[198,17,198,43,0],[199,17,199,42,0],[201,17,201,30,0],[202,21,202,46,0],[203,13,203,14,0],[204,9,204,10,0],[207,9,207,10,0],[208,13,208,42,0],[209,13,209,65,0],[210,9,210,10,0],[212,48,212,72,0],[214,46,214,117,0],[219,9,219,10,0],[220,13,220,28,0],[221,17,221,24,0],[223,13,223,34,0],[224,13,224,37,0],[226,13,226,31,0],[227,9,227,10,0],[230,9,230,10,0],[231,13,231,27,0],[232,13,232,39,0],[233,9,233,10,0]]);
+    </script>
+  </body>
+</html>

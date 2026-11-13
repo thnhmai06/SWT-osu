@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/BeatmapCarouselFilterGrouping.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Graphics.Carousel;
+using osu.Game.Localisation;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Scoring;
+using osu.Game.Screens.Select.Filter;
+using osu.Game.Utils;
+
+namespace osu.Game.Screens.Select
+{
+    public class BeatmapCarouselFilterGrouping : ICarouselFilter
+    {
+        public bool BeatmapSetsGroupedTogether { get; private set; }
+
+        /// &lt;summary&gt;
+        /// The total number of beatmap difficulties displayed post filter.
+        /// &lt;/summary&gt;
+        public int BeatmapItemsCount { get; private set; }
+
+        public IDictionary&lt;object, (CarouselItem item, int index)&gt; ItemMap =&gt; itemMap;
+
+        /// &lt;summary&gt;
+        /// Beatmap sets contain difficulties as related panels. This dictionary holds the relationships between set-difficulties to allow expanding them on selection.
+        /// &lt;/summary&gt;
+        public IDictionary&lt;GroupedBeatmapSet, HashSet&lt;CarouselItem&gt;&gt; SetItems =&gt; setMap;
+
+        /// &lt;summary&gt;
+        /// Groups contain children which are group-selectable. This dictionary holds the relationships between groups-panels to allow expanding them on selection.
+        /// &lt;/summary&gt;
+        public IDictionary&lt;GroupDefinition, HashSet&lt;CarouselItem&gt;&gt; GroupItems =&gt; groupMap;
+
+        private Dictionary&lt;object, (CarouselItem, int)&gt; itemMap = new Dictionary&lt;object, (CarouselItem, int)&gt;();
+        private Dictionary&lt;GroupedBeatmapSet, HashSet&lt;CarouselItem&gt;&gt; setMap = new Dictionary&lt;GroupedBeatmapSet, HashSet&lt;CarouselItem&gt;&gt;();
+        private Dictionary&lt;GroupDefinition, HashSet&lt;CarouselItem&gt;&gt; groupMap = new Dictionary&lt;GroupDefinition, HashSet&lt;CarouselItem&gt;&gt;();
+
+        public required Func&lt;FilterCriteria&gt; GetCriteria { get; init; }
+        public required Func&lt;List&lt;BeatmapCollection&gt;&gt; GetCollections { get; init; }
+        public required Func&lt;FilterCriteria, IReadOnlyDictionary&lt;Guid, ScoreRank&gt;&gt; GetLocalUserTopRanks { get; init; }
+        public required Func&lt;HashSet&lt;int&gt;&gt; GetFavouriteBeatmapSets { get; init; }
+
+        public async Task&lt;List&lt;CarouselItem&gt;&gt; Run(IEnumerable&lt;CarouselItem&gt; items, CancellationToken cancellationToken)
+        {
+            return await Task.Run(() =&gt;
+            {
+                // preallocate space for the new mappings using last known estimates
+                var newItemMap = new Dictionary&lt;object, (CarouselItem, int)&gt;(itemMap.Count);
+                var newSetMap = new Dictionary&lt;GroupedBeatmapSet, HashSet&lt;CarouselItem&gt;&gt;(setMap.Count);
+                var newGroupMap = new Dictionary&lt;GroupDefinition, HashSet&lt;CarouselItem&gt;&gt;(groupMap.Count);
+
+                var criteria = GetCriteria();
+                var newItems = new List&lt;CarouselItem&gt;();
+
+                BeatmapSetsGroupedTogether = ShouldGroupBeatmapsTogether(criteria);
+
+                var groups = getGroups((List&lt;CarouselItem&gt;)items, criteria);
+                int displayedBeatmapsCount = 0;
+
+                foreach (var (group, itemsInGroup) in groups)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    CarouselItem? groupItem = null;
+                    HashSet&lt;CarouselItem&gt;? currentGroupItems = null;
+                    HashSet&lt;CarouselItem&gt;? currentSetItems = null;
+                    BeatmapInfo? lastBeatmap = null;
+
+                    if (group != null)
+                    {
+                        newGroupMap[group] = currentGroupItems = new HashSet&lt;CarouselItem&gt;();
+
+                        addItem(groupItem = new CarouselItem(group)
+                        {
+                            DrawHeight = PanelGroup.HEIGHT,
+                            DepthLayer = -2,
+                        });
+                    }
+
+                    foreach (var item in itemsInGroup)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var beatmap = (BeatmapInfo)item.Model;
+
+                        bool newBeatmapSet = lastBeatmap?.BeatmapSet!.ID != beatmap.BeatmapSet!.ID;
+                        var groupedBeatmapSet = new GroupedBeatmapSet(group, beatmap.BeatmapSet!);
+
+                        if (newBeatmapSet)
+                        {
+                            if (!newSetMap.TryGetValue(groupedBeatmapSet, out currentSetItems))
+                                newSetMap[groupedBeatmapSet] = currentSetItems = new HashSet&lt;CarouselItem&gt;();
+                        }
+
+                        if (BeatmapSetsGroupedTogether)
+                        {
+                            if (newBeatmapSet)
+                            {
+                                if (groupItem != null)
+                                    groupItem.NestedItemCount++;
+
+                                addItem(new CarouselItem(groupedBeatmapSet)
+                                {
+                                    DrawHeight = PanelBeatmapSet.HEIGHT,
+                                    DepthLayer = -1
+                                });
+                            }
+                        }
+                        else
+                        {
+                            if (groupItem != null)
+                                groupItem.NestedItemCount++;
+                        }
+
+                        addItem(new CarouselItem(new GroupedBeatmap(group, beatmap))
+                        {
+                            DrawHeight = BeatmapSetsGroupedTogether ? PanelBeatmap.HEIGHT : PanelBeatmapStandalone.HEIGHT,
+                        });
+                        lastBeatmap = beatmap;
+                        displayedBeatmapsCount++;
+                    }
+
+                    void addItem(CarouselItem i)
+                    {
+                        newItems.Add(i);
+
+                        newItemMap[i.Model] = (i, newItems.Count - 1);
+                        currentGroupItems?.Add(i);
+                        currentSetItems?.Add(i);
+
+                        i.IsVisible = i.Model is GroupDefinition || (group == null &amp;&amp; (i.Model is GroupedBeatmapSet || !BeatmapSetsGroupedTogether));
+                    }
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                Interlocked.Exchange(ref itemMap, newItemMap);
+                Interlocked.Exchange(ref setMap, newSetMap);
+                Interlocked.Exchange(ref groupMap, newGroupMap);
+                BeatmapItemsCount = displayedBeatmapsCount;
+                return newItems;
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        public static bool ShouldGroupBeatmapsTogether(FilterCriteria criteria)
+        {
+            // In certain cases, we intentionally split out difficulties
+            // where it&#39;s more relevant or convenient to view them as individual items.
+            if (criteria.Sort == SortMode.Difficulty || criteria.Group == GroupMode.Difficulty)
+                return false;
+            if (criteria.Sort == SortMode.LastPlayed &amp;&amp; criteria.Group == GroupMode.LastPlayed)
+                return false;
+            if (criteria.Group == GroupMode.RankAchieved)
+                return false;
+
+            // In the majority case we group sets together for display.
+            return true;
+        }
+
+        private List&lt;GroupMapping&gt; getGroups(List&lt;CarouselItem&gt; items, FilterCriteria criteria)
+        {
+            switch (criteria.Group)
+            {
+                case GroupMode.None:
+                    return new List&lt;GroupMapping&gt; { new GroupMapping(null, items) };
+
+                case GroupMode.Artist:
+                    return getGroupsBy(b =&gt; defineGroupAlphabetically(b.BeatmapSet!.Metadata.Artist), items);
+
+                case GroupMode.Author:
+                    return getGroupsBy(b =&gt; defineGroupAlphabetically(b.BeatmapSet!.Metadata.Author.Username), items);
+
+                case GroupMode.Title:
+                    return getGroupsBy(b =&gt; defineGroupAlphabetically(b.BeatmapSet!.Metadata.Title), items);
+
+                case GroupMode.DateAdded:
+                    return getGroupsBy(b =&gt; defineGroupByDate(b.BeatmapSet!.DateAdded), items);
+
+                case GroupMode.DateRanked:
+                    return getGroupsBy(b =&gt; defineGroupByRankedDate(b.BeatmapSet!.DateRanked), items);
+
+                case GroupMode.LastPlayed:
+                    return getGroupsBy(b =&gt;
+                    {
+                        var date = b.LastPlayed;
+
+                        if (date == null)
+                            return new GroupDefinition(int.MaxValue, BeatmapCarouselFilterGroupingStrings.NeverPlayed).Yield();
+
+                        return defineGroupByDate(date.Value);
+                    }, items);
+
+                case GroupMode.RankedStatus:
+                    return getGroupsBy(b =&gt; defineGroupByStatus(b.BeatmapSet!.Status), items);
+
+                case GroupMode.BPM:
+                    return getGroupsBy(b =&gt; defineGroupByBPM(FormatUtils.RoundBPM(b.BPM)), items);
+
+                case GroupMode.Difficulty:
+                    return getGroupsBy(b =&gt; defineGroupByStars(b.StarRating), items);
+
+                case GroupMode.Length:
+                    return getGroupsBy(b =&gt; defineGroupByLength(b.Length), items);
+
+                case GroupMode.Source:
+                    return getGroupsBy(b =&gt; defineGroupBySource(b.BeatmapSet!.Metadata.Source), items);
+
+                case GroupMode.Collections:
+                {
+                    var collections = GetCollections();
+                    return defineGroupsByCollection(items, collections);
+                }
+
+                case GroupMode.MyMaps:
+                    return getGroupsBy(b =&gt; defineGroupByOwnMaps(b, criteria.LocalUserId, criteria.LocalUserUsername), items);
+
+                case GroupMode.RankAchieved:
+                {
+                    var topRankMapping = GetLocalUserTopRanks(criteria);
+                    return getGroupsBy(b =&gt; defineGroupByRankAchieved(b, topRankMapping), items);
+                }
+
+                case GroupMode.Favourites:
+                {
+                    var favouriteBeatmapSets = GetFavouriteBeatmapSets();
+                    return getGroupsBy(b =&gt; defineGroupByFavourites(b, favouriteBeatmapSets), items);
+                }
+
+                case GroupMode.Variant:
+                {
+                    var rulesetInstance = criteria.Ruleset?.CreateInstance();
+
+                    if (rulesetInstance == null || rulesetInstance.GameplayVariants.Count() &lt;= 1)
+                        goto case GroupMode.None;
+
+                    return getGroupsBy(b =&gt; defineGroupByVariant(rulesetInstance, b, criteria.Mods), items);
+                }
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        private List&lt;GroupMapping&gt; getGroupsBy(Func&lt;BeatmapInfo, IEnumerable&lt;GroupDefinition&gt;&gt; defineGroups, List&lt;CarouselItem&gt; items)
+        {
+            var groups = new Dictionary&lt;GroupDefinition, GroupMapping&gt;();
+
+            foreach (var item in items)
+            {
+                foreach (var groupDefinition in defineGroups((BeatmapInfo)item.Model))
+                {
+                    if (!groups.TryGetValue(groupDefinition, out var group))
+                        group = groups[groupDefinition] = new GroupMapping(groupDefinition, []);
+
+                    group.ItemsInGroup.Add(item);
+                }
+            }
+
+            return groups.Values
+                         .OrderBy(g =&gt; g.Group!.Order)
+                         .ThenBy(g =&gt; g.Group!.Title.ToString())
+                         .ToList();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupAlphabetically(string name)
+        {
+            char firstChar = name.FirstOrDefault();
+
+            if (char.IsAsciiDigit(firstChar))
+                return new GroupDefinition(int.MinValue, &quot;0-9&quot;).Yield();
+
+            if (char.IsAsciiLetter(firstChar))
+                return new GroupDefinition(char.ToUpperInvariant(firstChar) - &#39;A&#39;, char.ToUpperInvariant(firstChar).ToString()).Yield();
+
+            return new GroupDefinition(int.MaxValue, BeatmapCarouselFilterGroupingStrings.OtherSymbols).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByDate(DateTimeOffset date)
+        {
+            var now = DateTimeOffset.Now;
+            var elapsed = now - date;
+
+            if (elapsed.TotalDays &lt; 1)
+                return new GroupDefinition(0, BeatmapCarouselFilterGroupingStrings.Today).Yield();
+
+            if (elapsed.TotalDays &lt; 2)
+                return new GroupDefinition(1, BeatmapCarouselFilterGroupingStrings.Yesterday).Yield();
+
+            if (elapsed.TotalDays &lt; 7)
+                return new GroupDefinition(2, BeatmapCarouselFilterGroupingStrings.LastWeek).Yield();
+
+            if (elapsed.TotalDays &lt; 30)
+                return new GroupDefinition(3, BeatmapCarouselFilterGroupingStrings.LastMonth).Yield();
+
+            for (int i = 60; i &lt;= 150; i += 30)
+            {
+                if (elapsed.TotalDays &lt; i)
+                    return new GroupDefinition(i, BeatmapCarouselFilterGroupingStrings.MonthsAgo(i / 30 - 1)).Yield();
+            }
+
+            return new GroupDefinition(151, BeatmapCarouselFilterGroupingStrings.OverMonthsAgo(5)).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByRankedDate(DateTimeOffset? date)
+        {
+            if (date == null)
+                return new GroupDefinition(0, BeatmapCarouselFilterGroupingStrings.Unranked).Yield();
+
+            return new GroupDefinition(-date.Value.Year, $&quot;{date.Value.Year}&quot;).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByStatus(BeatmapOnlineStatus status)
+        {
+            switch (status)
+            {
+                case BeatmapOnlineStatus.Ranked:
+                case BeatmapOnlineStatus.Approved:
+                    return new RankedStatusGroupDefinition(0, BeatmapOnlineStatus.Ranked).Yield();
+
+                case BeatmapOnlineStatus.Qualified:
+                    return new RankedStatusGroupDefinition(1, status).Yield();
+
+                case BeatmapOnlineStatus.WIP:
+                    return new RankedStatusGroupDefinition(2, status).Yield();
+
+                case BeatmapOnlineStatus.Pending:
+                    return new RankedStatusGroupDefinition(3, status).Yield();
+
+                case BeatmapOnlineStatus.Graveyard:
+                    return new RankedStatusGroupDefinition(4, status).Yield();
+
+                case BeatmapOnlineStatus.LocallyModified:
+                    return new RankedStatusGroupDefinition(5, status).Yield();
+
+                case BeatmapOnlineStatus.None:
+                    return new RankedStatusGroupDefinition(6, status).Yield();
+
+                case BeatmapOnlineStatus.Loved:
+                    return new RankedStatusGroupDefinition(7, status).Yield();
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(status), status, null);
+            }
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByBPM(double bpm)
+        {
+            if (bpm &lt; 60)
+                return new GroupDefinition(60, BeatmapCarouselFilterGroupingStrings.UnderBPM(60)).Yield();
+
+            for (int i = 70; i &lt;= 300; i += 10)
+            {
+                if (bpm &lt; i)
+                    return new GroupDefinition(i, BeatmapCarouselFilterGroupingStrings.RangeBPM(i - 10, i)).Yield();
+            }
+
+            return new GroupDefinition(301, BeatmapCarouselFilterGroupingStrings.OverBPM(300)).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByStars(double stars)
+        {
+            // truncation is intentional - compare `FormatUtils.FormatStarRating()`
+            int starInt = (int)stars;
+            var starDifficulty = new StarDifficulty(starInt, 0);
+
+            if (starInt == 0)
+                return new StarDifficultyGroupDefinition(0, BeatmapCarouselFilterGroupingStrings.BelowStars(1), starDifficulty).Yield();
+
+            if (starInt &lt; 15)
+                return new StarDifficultyGroupDefinition(starInt, BeatmapCarouselFilterGroupingStrings.Stars(starInt), starDifficulty).Yield();
+
+            return new StarDifficultyGroupDefinition(15, BeatmapCarouselFilterGroupingStrings.OverStars(15), new StarDifficulty(15, 0)).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByLength(double length)
+        {
+            for (int i = 1; i &lt; 6; i++)
+            {
+                if (length &lt;= i * 60_000)
+                    return new GroupDefinition(i, BeatmapCarouselFilterGroupingStrings.MinutesOrLess(i)).Yield();
+            }
+
+            if (length &lt;= 10 * 60_000)
+                return new GroupDefinition(10, BeatmapCarouselFilterGroupingStrings.MinutesOrLess(10)).Yield();
+
+            return new GroupDefinition(11, BeatmapCarouselFilterGroupingStrings.OverMinutes(10)).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupBySource(string source)
+        {
+            if (string.IsNullOrEmpty(source))
+                return new GroupDefinition(1, BeatmapCarouselFilterGroupingStrings.Unsourced).Yield();
+
+            return new GroupDefinition(0, source).Yield();
+        }
+
+        private List&lt;GroupMapping&gt; defineGroupsByCollection(List&lt;CarouselItem&gt; carouselItems, List&lt;BeatmapCollection&gt; allCollections)
+        {
+            Dictionary&lt;GroupDefinition, GroupMapping&gt; groupMappings = new Dictionary&lt;GroupDefinition, GroupMapping&gt;();
+            // this is a pre-built mapping of MD5s to a list of collections in which this MD5 is found in.
+            // the reason to pre-build this is that `BeatmapCollection.BeatmapMD5Hashes` is a list and therefore a naive implementation would be slow,
+            // particularly in edge cases where most beatmaps are in more than one collection.
+            Dictionary&lt;string, List&lt;GroupDefinition&gt;&gt; md5ToCollectionsMap = new Dictionary&lt;string, List&lt;GroupDefinition&gt;&gt;();
+
+            for (int i = 0; i &lt; allCollections.Count; i++)
+            {
+                var collection = allCollections[i];
+                // NOTE: the ordering of the incoming collection list is significant and needs to be preserved.
+                // the fallback to ordering by name cannot be relied on.
+                // see xmldoc of `BeatmapCarousel.GetAllCollections()`.
+                var groupDefinition = new GroupDefinition(i, collection.Name);
+                groupMappings[groupDefinition] = new GroupMapping(groupDefinition, []);
+
+                foreach (string md5 in collection.BeatmapMD5Hashes)
+                {
+                    if (!md5ToCollectionsMap.TryGetValue(md5, out var collections))
+                        md5ToCollectionsMap[md5] = collections = new List&lt;GroupDefinition&gt;();
+
+                    collections.Add(groupDefinition);
+                }
+            }
+
+            var notInCollection = new GroupDefinition(int.MaxValue, BeatmapCarouselFilterGroupingStrings.NotInCollection);
+            groupMappings[notInCollection] = new GroupMapping(notInCollection, []);
+
+            foreach (var item in carouselItems)
+            {
+                var beatmap = (BeatmapInfo)item.Model;
+
+                if (string.IsNullOrEmpty(beatmap.MD5Hash))
+                    continue;
+
+                // as a side note, even reading the `MD5Hash` off a realm model is slow if done enough times,
+                // so it definitely helps that thanks to the mapping it needs to only be retrieved once
+                if (md5ToCollectionsMap.TryGetValue(beatmap.MD5Hash, out var collections))
+                {
+                    foreach (var collection in collections)
+                        groupMappings[collection].ItemsInGroup.Add(item);
+                }
+                else
+                    groupMappings[notInCollection].ItemsInGroup.Add(item);
+            }
+
+            return groupMappings.Values
+                                // safety against potentially empty eagerly-initialised groups
+                                // (could happen if user has a collection with MD5s of maps that aren&#39;t locally available)
+                                .Where(mapping =&gt; mapping.ItemsInGroup.Count &gt; 0)
+                                .OrderBy(mapping =&gt; mapping.Group!.Order)
+                                .ToList();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByOwnMaps(BeatmapInfo beatmap, int? localUserId, string? localUserUsername)
+        {
+            var author = beatmap.BeatmapSet!.Metadata.Author;
+
+            if (author.OnlineID == localUserId || (author.OnlineID &lt;= 1 &amp;&amp; author.Username == localUserUsername))
+                return new GroupDefinition(0, BeatmapCarouselFilterGroupingStrings.MyMaps).Yield();
+
+            // discard beatmaps not owned by the user.
+            return [];
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByRankAchieved(BeatmapInfo beatmap, IReadOnlyDictionary&lt;Guid, ScoreRank&gt; topRankMapping)
+        {
+            if (topRankMapping.TryGetValue(beatmap.ID, out var rank))
+                return new RankDisplayGroupDefinition(rank).Yield();
+
+            return new GroupDefinition(int.MaxValue, BeatmapCarouselFilterGroupingStrings.Unplayed).Yield();
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByFavourites(BeatmapInfo beatmap, HashSet&lt;int&gt; favouriteBeatmapSets)
+        {
+            if (beatmap.BeatmapSet?.OnlineID &gt; 0 &amp;&amp; favouriteBeatmapSets.Contains(beatmap.BeatmapSet.OnlineID))
+                return new GroupDefinition(0, BeatmapCarouselFilterGroupingStrings.Favourites).Yield();
+
+            return [];
+        }
+
+        private IEnumerable&lt;GroupDefinition&gt; defineGroupByVariant(Ruleset rulesetInstance, BeatmapInfo beatmap, IReadOnlyList&lt;Mod&gt;? mods = null)
+        {
+            int variant = rulesetInstance.GetVariantForBeatmap(beatmap, mods);
+            var name = rulesetInstance.GetVariantName(variant);
+            return new GroupDefinition(variant, name).Yield();
+        }
+
+        private record GroupMapping(GroupDefinition? Group, List&lt;CarouselItem&gt; ItemsInGroup);
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[24,50,24,54,1],[24,55,24,67,1],[29,40,29,44,1],[29,45,29,57,1],[31,79,31,86,1],[36,82,36,88,1],[41,82,41,90,1],[43,9,43,113,1],[44,9,44,138,1],[45,9,45,136,1],[47,60,47,64,1],[47,65,47,70,1],[48,72,48,76,1],[48,77,48,82,1],[49,107,49,111,1],[49,112,49,117,1],[50,70,50,74,1],[50,75,50,80,1],[53,9,53,10,1],[54,13,55,13,1],[55,13,55,14,1],[55,14,57,17,1],[57,17,57,93,1],[57,93,58,17,1],[58,17,58,104,1],[58,104,59,17,1],[59,17,59,106,1],[59,106,61,17,1],[61,17,61,46,1],[61,46,62,17,1],[62,17,62,57,1],[62,57,64,17,1],[64,17,64,84,1],[64,84,66,17,1],[66,17,66,77,1],[66,77,67,17,1],[67,17,67,48,1],[67,48,69,17,1],[69,17,69,24,1],[69,24,69,26,1],[69,26,69,51,1],[69,51,69,52,1],[69,52,69,54,1],[69,54,69,55,1],[69,55,69,61,1],[69,61,70,17,1],[70,17,70,18,1],[70,18,71,21,1],[71,21,71,70,1],[71,70,73,21,1],[73,21,73,52,1],[73,52,74,21,1],[74,21,74,69,1],[74,69,75,21,1],[75,21,75,67,1],[75,67,76,21,1],[76,21,76,53,1],[76,53,78,21,1],[78,21,78,39,1],[78,39,79,21,1],[79,21,79,22,1],[79,22,80,25,1],[80,25,80,94,1],[80,94,82,25,1],[82,25,86,28,1],[86,28,87,21,1],[87,21,87,22,1],[87,22,89,21,1],[89,21,89,28,1],[89,28,89,30,1],[89,30,89,38,1],[89,38,89,39,1],[89,39,89,41,1],[89,41,89,42,1],[89,42,89,54,1],[89,54,90,21,1],[90,21,90,22,1],[90,22,91,25,1],[91,25,91,74,1],[91,74,93,25,1],[93,25,93,63,1],[93,63,95,25,1],[95,25,95,100,1],[95,100,96,25,1],[96,25,96,99,1],[96,99,98,25,1],[98,25,98,43,1],[98,43,99,25,1],[99,25,99,26,1],[99,26,100,29,1],[100,29,100,96,1],[100,96,101,33,1],[101,33,101,110,1],[101,110,102,25,1],[102,25,102,26,1],[102,26,104,25,1],[104,25,104,56,1],[104,56,105,25,1],[105,25,105,26,1],[105,26,106,29,1],[106,29,106,47,1],[106,47,107,29,1],[107,29,107,30,1],[107,30,108,33,1],[108,33,108,55,1],[108,55,109,37,1],[109,37,109,65,1],[109,65,111,33,1],[111,33,115,36,1],[115,36,116,29,1],[116,29,116,30,1],[116,30,117,25,1],[117,25,117,26,1],[117,26,119,25,1],[119,25,119,26,1],[119,26,120,29,1],[120,29,120,51,1],[120,51,121,33,1],[121,33,121,61,1],[121,61,122,25,1],[122,25,122,26,1],[122,26,124,25,1],[124,25,127,28,1],[127,28,128,25,1],[128,25,128,47,1],[128,47,129,25,1],[129,25,129,50,1],[129,50,130,21,1],[130,21,130,22,1],[130,22,133,21,1],[133,21,133,22,1],[133,22,134,25,1],[134,25,134,41,1],[134,41,136,25,1],[136,25,136,71,1],[136,71,137,25,1],[137,25,137,51,1],[137,51,138,25,1],[138,25,138,49,1],[138,49,140,25,1],[140,25,140,150,1],[140,150,141,21,1],[141,21,141,22,1],[141,22,142,17,1],[142,17,142,18,1],[142,18,144,17,1],[144,17,144,66,1],[144,66,146,17,1],[146,17,146,63,1],[146,63,147,17,1],[147,17,147,61,1],[147,61,148,17,1],[148,17,148,65,1],[148,65,149,17,1],[149,17,149,60,1],[149,60,150,17,1],[150,17,150,33,1],[150,33,151,13,1],[151,13,151,14,1],[151,14,151,57,1],[152,9,152,10,1],[155,9,155,10,1],[158,13,158,96,1],[159,17,159,30,1],[160,13,160,96,1],[161,17,161,30,1],[162,13,162,58,1],[163,17,163,30,1],[166,13,166,25,1],[167,9,167,10,1],[170,9,170,10,1],[171,13,171,36,1],[174,21,174,85,1],[177,21,177,45,1],[177,45,177,101,1],[177,101,177,110,1],[180,21,180,45,1],[180,45,180,110,1],[180,110,180,119,1],[183,21,183,45,1],[183,45,183,100,1],[183,100,183,109,1],[186,21,186,45,1],[186,45,186,87,1],[186,87,186,96,1],[189,21,189,45,1],[189,45,189,94,1],[189,94,189,103,1],[192,21,193,21,1],[193,21,193,22,1],[193,22,194,25,1],[194,25,194,49,1],[194,49,196,25,1],[196,25,196,42,1],[196,42,197,29,1],[197,29,197,128,1],[197,128,199,25,1],[199,25,199,62,1],[199,62,200,21,1],[200,21,200,22,1],[200,22,200,31,1],[203,21,203,45,1],[203,45,203,86,1],[203,86,203,95,1],[206,21,206,45,1],[206,45,206,90,1],[206,90,206,99,1],[209,21,209,45,1],[209,45,209,77,1],[209,77,209,86,1],[212,21,212,45,1],[212,45,212,74,1],[212,74,212,83,1],[215,21,215,45,1],[215,45,215,95,1],[215,95,215,104,1],[218,17,218,18,1],[219,21,219,56,1],[220,21,220,73,1],[224,21,224,45,1],[224,45,224,118,1],[224,118,224,127,1],[227,17,227,18,1],[228,21,228,73,1],[229,21,229,45,1],[229,45,229,89,1],[229,89,229,98,1],[233,17,233,18,1],[234,21,234,74,1],[235,21,235,45,1],[235,45,235,93,1],[235,93,235,102,1],[239,17,239,18,1],[240,21,240,78,1],[242,21,242,98,1],[243,25,243,50,1],[245,21,245,45,0],[245,45,245,100,0],[245,100,245,109,0],[249,21,249,61,1],[251,9,251,10,1],[254,9,254,10,1],[255,13,255,74,1],[257,13,257,20,1],[257,22,257,30,1],[257,31,257,33,1],[257,34,257,39,1],[258,13,258,14,1],[259,17,259,24,1],[259,26,259,45,1],[259,46,259,48,1],[259,49,259,86,1],[260,17,260,18,1],[261,21,261,77,1],[262,25,262,97,1],[264,21,264,50,1],[265,17,265,18,1],[266,13,266,14,1],[268,13,269,40,1],[269,40,269,54,1],[269,54,270,39,1],[270,39,270,64,1],[270,64,271,36,1],[272,9,272,10,1],[275,9,275,10,1],[276,13,276,52,1],[278,13,278,46,1],[279,17,279,73,1],[281,13,281,47,1],[282,17,282,137,1],[284,13,284,113,1],[285,9,285,10,1],[288,9,288,10,1],[289,13,289,42,1],[290,13,290,38,1],[292,13,292,39,1],[293,17,293,99,1],[295,13,295,39,1],[296,17,296,103,1],[298,13,298,39,1],[299,17,299,102,1],[301,13,301,40,1],[302,17,302,103,1],[304,18,304,28,1],[304,30,304,38,1],[304,40,304,47,1],[305,13,305,14,1],[306,17,306,43,1],[307,21,307,119,1],[308,13,308,14,1],[310,13,310,108,1],[311,9,311,10,1],[314,9,314,10,1],[315,13,315,30,1],[316,17,316,102,1],[318,13,318,88,1],[319,9,319,10,1],[322,9,322,10,1],[323,13,323,28,1],[327,21,327,99,1],[330,21,330,79,1],[333,21,333,79,1],[336,21,336,79,1],[339,21,339,79,1],[342,21,342,79,1],[345,21,345,79,1],[348,21,348,79,1],[351,21,351,89,1],[353,9,353,10,1],[356,9,356,10,1],[357,13,357,26,1],[358,17,358,107,1],[360,18,360,28,1],[360,30,360,38,1],[360,40,360,47,1],[361,13,361,14,1],[362,17,362,29,1],[363,21,363,117,1],[364,13,364,14,1],[366,13,366,104,1],[367,9,367,10,1],[370,9,370,10,1],[372,13,372,38,1],[373,13,373,65,1],[375,13,375,30,1],[376,17,376,137,1],[378,13,378,30,1],[379,17,379,144,1],[381,13,381,145,1],[382,9,382,10,1],[385,9,385,10,1],[386,18,386,27,1],[386,29,386,34,1],[386,36,386,39,1],[387,13,387,14,1],[388,17,388,42,1],[389,21,389,114,1],[390,13,390,14,1],[392,13,392,39,1],[393,17,393,112,1],[395,13,395,106,1],[396,9,396,10,1],[399,9,399,10,1],[400,13,400,46,1],[401,17,401,103,1],[403,13,403,59,1],[404,9,404,10,1],[407,9,407,10,1],[408,13,408,119,1],[412,13,412,125,1],[414,18,414,27,1],[414,29,414,53,1],[414,55,414,58,1],[415,13,415,14,1],[416,17,416,52,1],[420,17,420,79,1],[421,17,421,88,1],[423,17,423,24,1],[423,26,423,36,1],[423,37,423,39,1],[423,40,423,67,1],[424,17,424,18,1],[425,21,425,84,1],[426,25,426,94,1],[428,21,428,54,1],[429,17,429,18,1],[430,13,430,14,1],[432,13,432,123,1],[433,13,433,84,1],[435,13,435,20,1],[435,22,435,30,1],[435,31,435,33,1],[435,34,435,47,1],[436,13,436,14,1],[437,17,437,55,1],[439,17,439,59,1],[440,21,440,30,1],[444,17,444,91,1],[445,17,445,18,1],[446,21,446,28,1],[446,30,446,44,1],[446,45,446,47,1],[446,48,446,59,1],[447,25,447,74,1],[448,17,448,18,1],[450,21,450,75,1],[451,13,451,14,1],[453,13,456,51,1],[456,51,456,81,1],[456,81,457,53,1],[457,53,457,73,1],[457,73,458,43,1],[459,9,459,10,1],[462,9,462,10,1],[463,13,463,62,1],[465,13,465,114,1],[466,17,466,100,1],[469,13,469,23,1],[470,9,470,10,1],[473,9,473,10,1],[474,13,474,70,1],[475,17,475,69,1],[477,13,477,109,1],[478,9,478,10,1],[481,9,481,10,1],[482,13,482,112,1],[483,17,483,104,1],[485,13,485,23,1],[486,9,486,10,1],[489,9,489,10,0],[490,13,490,79,0],[491,13,491,64,0],[492,13,492,63,0],[493,9,493,10,0]]);
+    </script>
+  </body>
+</html>

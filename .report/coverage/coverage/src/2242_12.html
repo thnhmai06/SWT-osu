@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/RulesetStore.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using osu.Framework;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+
+namespace osu.Game.Rulesets
+{
+    public abstract class RulesetStore : IDisposable, IRulesetStore
+    {
+        private const string ruleset_library_prefix = @&quot;osu.Game.Rulesets&quot;;
+
+        protected readonly Dictionary&lt;Assembly, Type&gt; LoadedAssemblies = new Dictionary&lt;Assembly, Type&gt;();
+        protected readonly HashSet&lt;Assembly&gt; UserRulesetAssemblies = new HashSet&lt;Assembly&gt;();
+        protected readonly Storage? RulesetStorage;
+
+        /// &lt;summary&gt;
+        /// All available rulesets.
+        /// &lt;/summary&gt;
+        public abstract IEnumerable&lt;RulesetInfo&gt; AvailableRulesets { get; }
+
+        protected RulesetStore(Storage? storage = null)
+        {
+            // On android in release configuration assemblies are loaded from the apk directly into memory.
+            // We cannot read assemblies from cwd, so should check loaded assemblies instead.
+            loadFromAppDomain();
+
+            // This null check prevents Android from attempting to load the rulesets from disk,
+            // as the underlying path &quot;AppContext.BaseDirectory&quot;, despite being non-nullable, it returns null on android.
+            // See https://github.com/xamarin/xamarin-android/issues/3489.
+            if (RuntimeInfo.StartupDirectory.IsNotNull())
+                loadFromDisk();
+
+            // the event handler contains code for resolving dependency on the game assembly for rulesets located outside the base game directory.
+            // It needs to be attached to the assembly lookup event before the actual call to loadUserRulesets() else rulesets located out of the base game directory will fail
+            // to load as unable to locate the game core assembly.
+            AppDomain.CurrentDomain.AssemblyResolve += resolveRulesetDependencyAssembly;
+
+            RulesetStorage = storage?.GetStorageForDirectory(@&quot;rulesets&quot;);
+            if (RulesetStorage != null)
+                loadUserRulesets(RulesetStorage);
+        }
+
+        /// &lt;summary&gt;
+        /// Retrieve a ruleset using a known ID.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;id&quot;&gt;The ruleset&#39;s internal ID.&lt;/param&gt;
+        /// &lt;returns&gt;A ruleset, if available, else null.&lt;/returns&gt;
+        public RulesetInfo? GetRuleset(int id) =&gt; AvailableRulesets.FirstOrDefault(r =&gt; r.OnlineID == id);
+
+        /// &lt;summary&gt;
+        /// Retrieve a ruleset using a known short name.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;shortName&quot;&gt;The ruleset&#39;s short name.&lt;/param&gt;
+        /// &lt;returns&gt;A ruleset, if available, else null.&lt;/returns&gt;
+        public RulesetInfo? GetRuleset(string shortName) =&gt; AvailableRulesets.FirstOrDefault(r =&gt; r.ShortName == shortName);
+
+        private Assembly? resolveRulesetDependencyAssembly(object? sender, ResolveEventArgs args)
+        {
+            var asm = new AssemblyName(args.Name);
+
+            // the requesting assembly may be located out of the executable&#39;s base directory, thus requiring manual resolving of its dependencies.
+            // this attempts resolving the ruleset dependencies on game core and framework assemblies by returning assemblies with the same assembly name
+            // already loaded in the AppDomain.
+            var domainAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                                          // Given name is always going to be equally-or-more qualified than the assembly name.
+                                          .Where(a =&gt;
+                                          {
+                                              string? name = a.GetName().Name;
+                                              if (name == null)
+                                                  return false;
+
+                                              return args.Name.Contains(name, StringComparison.Ordinal);
+                                          }).MaxBy(a =&gt; a.GetName().Version);
+
+            if (domainAssembly != null)
+                return domainAssembly;
+
+            return LoadedAssemblies.Keys.FirstOrDefault(a =&gt; a.FullName == asm.FullName);
+        }
+
+        private void loadFromAppDomain()
+        {
+            foreach (var ruleset in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string? rulesetName = ruleset.GetName().Name;
+
+                if (rulesetName == null)
+                    continue;
+
+                if (!rulesetName.StartsWith(ruleset_library_prefix, StringComparison.InvariantCultureIgnoreCase) || rulesetName.Contains(@&quot;Tests&quot;))
+                    continue;
+
+                addRuleset(ruleset);
+            }
+        }
+
+        private void loadUserRulesets(Storage rulesetStorage)
+        {
+            var rulesets = rulesetStorage.GetFiles(@&quot;.&quot;, @$&quot;{ruleset_library_prefix}.*.dll&quot;);
+
+            foreach (string? ruleset in rulesets.Where(f =&gt; !f.Contains(@&quot;Tests&quot;)))
+            {
+                var assembly = loadRulesetFromFile(rulesetStorage.GetFullPath(ruleset));
+                if (assembly != null)
+                    UserRulesetAssemblies.Add(assembly);
+            }
+        }
+
+        private void loadFromDisk()
+        {
+            try
+            {
+                string[] files = Directory.GetFiles(RuntimeInfo.StartupDirectory, @$&quot;{ruleset_library_prefix}.*.dll&quot;);
+
+                foreach (string file in files.Where(f =&gt; !Path.GetFileName(f).Contains(&quot;Tests&quot;)))
+                    loadRulesetFromFile(file);
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, $&quot;Could not load rulesets from directory {RuntimeInfo.StartupDirectory}&quot;);
+            }
+        }
+
+        private Assembly? loadRulesetFromFile(string file)
+        {
+            string filename = Path.GetFileNameWithoutExtension(file);
+
+            if (LoadedAssemblies.Values.Any(t =&gt; Path.GetFileNameWithoutExtension(t.Assembly.Location) == filename))
+                return null;
+
+            try
+            {
+                var assembly = Assembly.LoadFrom(file);
+                addRuleset(assembly);
+                return assembly;
+            }
+            catch (Exception e)
+            {
+                logRulesetFailure(filename, e);
+            }
+
+            return null;
+        }
+
+        private void addRuleset(Assembly assembly)
+        {
+            if (LoadedAssemblies.ContainsKey(assembly))
+                return;
+
+            // the same assembly may be loaded twice in the same AppDomain (currently a thing in certain Rider versions https://youtrack.jetbrains.com/issue/RIDER-48799).
+            // as a failsafe, also compare by FullName.
+            if (LoadedAssemblies.Any(a =&gt; a.Key.FullName == assembly.FullName))
+                return;
+
+            try
+            {
+                LoadedAssemblies[assembly] = assembly.GetTypes().First(t =&gt; t.IsPublic &amp;&amp; t.IsSubclassOf(typeof(Ruleset)));
+            }
+            catch (Exception e)
+            {
+                logRulesetFailure(assembly.GetName().Name!.Split(&#39;.&#39;).Last(), e);
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected void Dispose(bool disposing)
+        {
+            AppDomain.CurrentDomain.AssemblyResolve -= resolveRulesetDependencyAssembly;
+        }
+
+        public static void LogRulesetFailure(RulesetInfo ruleset, Exception e) =&gt; logRulesetFailure(ruleset.Name, e);
+
+        private static void logRulesetFailure(string name, Exception exception)
+        {
+            Logger.Log($&quot;An issue with ruleset \&quot;{name}\&quot; occurred. Please check for an update from the developer.&quot;, level: LogLevel.Error);
+            Logger.Log(exception.ToString());
+        }
+
+        #region Implementation of IRulesetStore
+
+        IRulesetInfo? IRulesetStore.GetRuleset(int id) =&gt; GetRuleset(id);
+        IRulesetInfo? IRulesetStore.GetRuleset(string shortName) =&gt; GetRuleset(shortName);
+        IEnumerable&lt;IRulesetInfo&gt; IRulesetStore.AvailableRulesets =&gt; AvailableRulesets;
+
+        #endregion
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[20,9,20,107,1],[21,9,21,94,1],[29,9,29,56,1],[30,9,30,10,1],[33,13,33,33,1],[38,13,38,58,1],[39,17,39,32,1],[44,13,44,89,1],[46,13,46,75,1],[47,13,47,40,1],[48,17,48,50,0],[49,9,49,10,1],[56,51,56,89,1],[56,89,56,105,1],[56,105,56,106,1],[63,61,63,99,0],[63,99,63,123,0],[63,123,63,124,0],[66,9,66,10,1],[67,13,67,51,1],[72,13,75,43,1],[75,43,75,44,1],[75,44,76,47,1],[76,47,76,79,1],[76,79,77,47,1],[77,47,77,64,1],[77,64,78,51,1],[78,51,78,64,0],[78,64,80,47,1],[80,47,80,105,1],[80,105,81,43,1],[81,43,81,44,1],[81,44,81,57,1],[81,57,81,76,1],[81,76,81,78,1],[83,13,83,40,1],[84,17,84,39,1],[86,13,86,62,0],[86,62,86,88,0],[86,88,86,90,0],[87,9,87,10,1],[90,9,90,10,1],[91,13,91,20,1],[91,22,91,33,1],[91,34,91,36,1],[91,37,91,76,1],[92,13,92,14,1],[93,17,93,62,1],[95,17,95,41,1],[96,21,96,30,0],[98,17,98,148,1],[99,21,99,30,1],[101,17,101,37,1],[102,13,102,14,1],[103,9,103,10,1],[106,9,106,10,0],[107,13,107,94,0],[109,13,109,20,0],[109,22,109,37,0],[109,38,109,40,0],[109,41,109,61,0],[109,61,109,82,0],[109,82,109,83,0],[110,13,110,14,0],[111,17,111,89,0],[112,17,112,38,0],[113,21,113,57,0],[114,13,114,14,0],[115,9,115,10,0],[118,9,118,10,1],[120,13,120,14,1],[121,17,121,119,1],[123,17,123,24,1],[123,26,123,37,1],[123,38,123,40,1],[123,41,123,58,1],[123,58,123,96,1],[123,96,123,97,1],[124,21,124,47,1],[125,13,125,14,1],[126,13,126,32,0],[127,13,127,14,0],[128,17,128,107,0],[129,13,129,14,0],[130,9,130,10,1],[133,9,133,10,1],[134,13,134,70,1],[136,13,136,50,1],[136,50,136,115,1],[136,115,136,117,1],[137,17,137,29,1],[140,13,140,14,0],[141,17,141,56,0],[142,17,142,38,0],[143,17,143,33,0],[145,13,145,32,0],[146,13,146,14,0],[147,17,147,48,0],[148,13,148,14,0],[150,13,150,25,0],[151,9,151,10,1],[154,9,154,10,1],[155,13,155,56,1],[156,17,156,24,0],[160,13,160,43,1],[160,43,160,78,1],[160,78,160,80,1],[161,17,161,24,0],[164,13,164,14,1],[165,17,165,77,1],[165,77,165,122,1],[165,122,165,124,1],[166,13,166,14,1],[167,13,167,32,0],[168,13,168,14,0],[169,17,169,82,0],[170,13,170,14,0],[171,9,171,10,1],[174,9,174,10,0],[175,13,175,27,0],[176,13,176,39,0],[177,9,177,10,0],[180,9,180,10,0],[181,13,181,89,0],[182,9,182,10,0],[184,83,184,117,0],[187,9,187,10,0],[188,13,188,141,0],[189,13,189,46,0],[190,9,190,10,0],[194,59,194,73,0],[195,69,195,90,0],[196,70,196,87,0]]);
+    </script>
+  </body>
+</html>

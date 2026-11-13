@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Play/FailAnimationContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using ManagedBass.Fx;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Track;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Audio.Effects;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.UI;
+using osu.Game.Skinning;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Play
+{
+    /// &lt;summary&gt;
+    /// Manage the animation to be applied when a player fails. Applies the animation to children.
+    /// Single use and automatically disposed after use.
+    /// &lt;/summary&gt;
+    public partial class FailAnimationContainer : Container
+    {
+        public Action? OnComplete;
+
+        private readonly DrawableRuleset drawableRuleset;
+        private readonly BindableDouble trackFreq = new BindableDouble(1);
+        private readonly BindableDouble volumeAdjustment = new BindableDouble(0.5);
+
+        private Container filters = null!;
+
+        private Box redFlashLayer = null!;
+
+        private Track track = null!;
+
+        private AudioFilter failLowPassFilter = null!;
+        private AudioFilter failHighPassFilter = null!;
+
+        private const float duration = 2500;
+
+        private SkinnableSound failSample = null!;
+
+        [Resolved]
+        private OsuConfigManager config { get; set; } = null!;
+
+        protected override Container&lt;Drawable&gt; Content { get; } = new Container
+        {
+            Anchor = Anchor.Centre,
+            Origin = Anchor.Centre,
+            RelativeSizeAxes = Axes.Both,
+        };
+
+        /// &lt;summary&gt;
+        /// The player screen background, used to adjust appearance on failing.
+        /// &lt;/summary&gt;
+        public BackgroundScreen? Background { private get; set; }
+
+        public FailAnimationContainer(DrawableRuleset drawableRuleset)
+        {
+            this.drawableRuleset = drawableRuleset;
+
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio, IBindable&lt;WorkingBeatmap&gt; beatmap)
+        {
+            track = beatmap.Value.Track;
+            AddInternal(failSample = new SkinnableSound(new SampleInfo(&quot;Gameplay/failsound&quot;)));
+
+            AddRangeInternal(new Drawable[]
+            {
+                filters = new Container
+                {
+                    Children = new Drawable[]
+                    {
+                        failLowPassFilter = new AudioFilter(audio.TrackMixer),
+                        failHighPassFilter = new AudioFilter(audio.TrackMixer, BQFType.HighPass),
+                    },
+                },
+                Content,
+                redFlashLayer = new Box
+                {
+                    Colour = Color4.Red.Opacity(0.6f),
+                    RelativeSizeAxes = Axes.Both,
+                    Blending = BlendingParameters.Additive,
+                    Depth = float.MinValue,
+                    Alpha = 0
+                },
+            });
+        }
+
+        private bool started;
+        private bool filtersRemoved;
+
+        /// &lt;summary&gt;
+        /// Start the fail animation playing.
+        /// &lt;/summary&gt;
+        /// &lt;exception cref=&quot;InvalidOperationException&quot;&gt;Thrown if started more than once.&lt;/exception&gt;
+        public void Start()
+        {
+            if (started) throw new InvalidOperationException(&quot;Animation cannot be started more than once.&quot;);
+            if (filtersRemoved) throw new InvalidOperationException(&quot;Animation cannot be started after filters have been removed.&quot;);
+
+            started = true;
+
+            this.TransformBindableTo(trackFreq, 0, duration).OnComplete(_ =&gt;
+            {
+                // Don&#39;t reset frequency as the pause screen may appear post transform, causing a second frequency sweep.
+                removeFilters(false);
+                OnComplete?.Invoke();
+            });
+
+            failHighPassFilter.CutoffTo(300);
+            failLowPassFilter.CutoffTo(300, duration, Easing.OutCubic);
+            failSample.Play();
+
+            track.AddAdjustment(AdjustableProperty.Frequency, trackFreq);
+            track.AddAdjustment(AdjustableProperty.Volume, volumeAdjustment);
+
+            applyToPlayfield(drawableRuleset.Playfield);
+            drawableRuleset.Playfield.HitObjectContainer.FadeOut(duration / 2);
+
+            if (config.Get&lt;bool&gt;(OsuSetting.FadePlayfieldWhenHealthLow))
+                redFlashLayer.FadeOutFromOne(1000);
+
+            Content.Masking = true;
+
+            Content.Add(new Box
+            {
+                Colour = Color4.Black,
+                RelativeSizeAxes = Axes.Both,
+                Depth = float.MaxValue
+            });
+
+            Content.ScaleTo(0.85f, duration, Easing.OutQuart);
+            Content.RotateTo(1, duration, Easing.OutQuart);
+            Content.FadeColour(Color4.Gray, duration);
+
+            // Will be restored by `ApplyToBackground` logic in `SongSelect`.
+            Background?.FadeColour(OsuColour.Gray(0.3f), 60);
+        }
+
+        /// &lt;summary&gt;
+        /// Stops any and all persistent effects added by the ongoing fail animation.
+        /// &lt;/summary&gt;
+        public void Stop()
+        {
+            failSample.Stop();
+            removeFilters();
+        }
+
+        private void removeFilters(bool resetTrackFrequency = true)
+        {
+            filtersRemoved = true;
+
+            if (!started)
+                return;
+
+            if (resetTrackFrequency)
+                track.RemoveAdjustment(AdjustableProperty.Frequency, trackFreq);
+
+            track.RemoveAdjustment(AdjustableProperty.Volume, volumeAdjustment);
+
+            if (filters.Parent == null)
+                return;
+
+            RemoveInternal(filters, true);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!started)
+                return;
+
+            applyToPlayfield(drawableRuleset.Playfield);
+        }
+
+        private readonly List&lt;DrawableHitObject&gt; appliedObjects = new List&lt;DrawableHitObject&gt;();
+
+        private void applyToPlayfield(Playfield playfield)
+        {
+            double failTime = playfield.Time.Current;
+
+            foreach (var nested in playfield.NestedPlayfields)
+                applyToPlayfield(nested);
+
+            foreach (var entry in playfield.HitObjectContainer.AliveEntries)
+            {
+                var obj = entry.Value;
+
+                if (appliedObjects.Contains(obj))
+                    continue;
+
+                float rotation = RNG.NextSingle(-90, 90);
+                Vector2 originalPosition = obj.Position;
+                Vector2 originalScale = obj.Scale;
+
+                dropOffScreen(obj, failTime, rotation, originalScale, originalPosition);
+
+                // need to reapply the fail drop after judgement state changes
+                obj.ApplyCustomUpdateState += (_, _) =&gt; dropOffScreen(obj, failTime, rotation, originalScale, originalPosition);
+
+                appliedObjects.Add(obj);
+            }
+        }
+
+        private void dropOffScreen(DrawableHitObject obj, double failTime, float randomRotation, Vector2 originalScale, Vector2 originalPosition)
+        {
+            using (obj.BeginAbsoluteSequence(failTime))
+            {
+                obj.RotateTo(randomRotation, duration);
+                obj.ScaleTo(originalScale * 0.5f, duration);
+                obj.MoveTo(originalPosition + new Vector2(0, 400), duration);
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[38,9,38,75,0],[39,9,39,84,0],[41,9,41,43,0],[43,9,43,43,0],[45,9,45,37,0],[47,9,47,55,0],[48,9,48,56,0],[52,9,52,51,0],[55,43,55,47,0],[55,48,55,52,0],[55,57,55,62,0],[57,58,57,62,0],[57,67,62,10,0],[67,47,67,59,0],[67,60,67,64,0],[69,9,69,71,0],[70,9,70,10,0],[71,13,71,52,0],[73,13,73,42,0],[74,9,74,10,0],[78,9,78,10,0],[79,13,79,41,0],[80,13,80,96,0],[82,13,101,16,0],[102,9,102,10,0],[112,9,112,10,0],[113,13,113,25,0],[113,26,113,109,0],[114,13,114,32,0],[114,33,114,133,0],[116,13,116,28,0],[118,13,119,13,0],[119,13,119,14,0],[119,14,121,17,0],[121,17,121,38,0],[121,38,122,17,0],[122,17,122,38,0],[122,38,123,13,0],[123,13,123,14,0],[123,14,123,16,0],[125,13,125,46,0],[126,13,126,72,0],[127,13,127,31,0],[129,13,129,74,0],[130,13,130,78,0],[132,13,132,57,0],[133,13,133,80,0],[135,13,135,73,0],[136,17,136,52,0],[138,13,138,36,0],[140,13,145,16,0],[147,13,147,63,0],[148,13,148,60,0],[149,13,149,55,0],[152,13,152,62,0],[153,9,153,10,0],[159,9,159,10,0],[160,13,160,31,0],[161,13,161,29,0],[162,9,162,10,0],[165,9,165,10,0],[166,13,166,35,0],[168,13,168,26,0],[169,17,169,24,0],[171,13,171,37,0],[172,17,172,81,0],[174,13,174,81,0],[176,13,176,40,0],[177,17,177,24,0],[179,13,179,43,0],[180,9,180,10,0],[183,9,183,10,0],[184,13,184,27,0],[186,13,186,26,0],[187,17,187,24,0],[189,13,189,57,0],[190,9,190,10,0],[192,9,192,97,0],[195,9,195,10,0],[196,13,196,54,0],[198,13,198,20,0],[198,22,198,32,0],[198,33,198,35,0],[198,36,198,62,0],[199,17,199,42,0],[201,13,201,20,0],[201,22,201,31,0],[201,32,201,34,0],[201,35,201,76,0],[202,13,202,14,0],[203,17,203,39,0],[205,17,205,50,0],[206,21,206,30,0],[208,17,208,58,0],[209,17,209,57,0],[210,17,210,51,0],[212,17,212,89,0],[215,17,215,57,0],[215,57,215,128,0],[215,128,215,129,0],[217,17,217,41,0],[218,13,218,14,0],[219,9,219,10,0],[222,9,222,10,0],[223,13,223,56,0],[224,13,224,14,0],[225,17,225,56,0],[226,17,226,61,0],[227,17,227,78,0],[228,13,228,14,0],[229,9,229,10,0]]);
+    </script>
+  </body>
+</html>

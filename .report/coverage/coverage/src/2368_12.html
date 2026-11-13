@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/HitObjectComposer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.IEnumerableExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Logging;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input.Bindings;
+using osu.Game.Overlays;
+using osu.Game.Rulesets.Configuration;
+using osu.Game.Rulesets.Edit.Tools;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Drawables;
+using osu.Game.Rulesets.UI;
+using osu.Game.Rulesets.UI.Scrolling;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Components.RadioButtons;
+using osu.Game.Screens.Edit.Components.TernaryButtons;
+using osu.Game.Screens.Edit.Compose;
+using osu.Game.Screens.Edit.Compose.Components;
+using osuTK;
+
+namespace osu.Game.Rulesets.Edit
+{
+    /// &lt;summary&gt;
+    /// Top level container for editor compose mode.
+    /// Responsible for providing snapping and generally gluing components together.
+    /// &lt;/summary&gt;
+    /// &lt;typeparam name=&quot;TObject&quot;&gt;The base type of supported objects.&lt;/typeparam&gt;
+    /// &lt;typeparam name=&quot;TAction&quot;&gt;The enumeration type used for ruleset-specific editor key bindings.&lt;/typeparam&gt;
+    public abstract partial class HitObjectComposer&lt;TObject, TAction&gt; : HitObjectComposer, IPlacementHandler
+        where TObject : HitObject
+        where TAction : struct, Enum
+    {
+        /// &lt;summary&gt;
+        /// Whether the playfield should be centered horizontally. Should be disabled for playfields which span the full horizontal width.
+        /// &lt;/summary&gt;
+        protected virtual bool ApplyHorizontalCentering =&gt; true;
+
+        protected IRulesetConfigManager? Config { get; private set; }
+
+        // Provides `Playfield`
+        private DependencyContainer dependencies = null!;
+
+        [Resolved]
+        protected EditorClock EditorClock { get; private set; } = null!;
+
+        [Resolved]
+        protected EditorBeatmap EditorBeatmap { get; private set; } = null!;
+
+        [Resolved]
+        protected IBeatSnapProvider BeatSnapProvider { get; private set; } = null!;
+
+        [Resolved]
+        private OverlayColourProvider colourProvider { get; set; } = null!;
+
+        public override ComposeBlueprintContainer BlueprintContainer =&gt; blueprintContainer;
+        private ComposeBlueprintContainer blueprintContainer = null!;
+
+        protected ExpandingToolboxContainer LeftToolbox { get; private set; } = null!;
+
+        protected ExpandingToolboxContainer RightToolbox { get; private set; } = null!;
+
+        private DrawableEditorRulesetWrapper&lt;TObject&gt; drawableRulesetWrapper = null!;
+
+        protected readonly Container LayerBelowRuleset = new Container { RelativeSizeAxes = Axes.Both };
+
+        protected InputManager InputManager { get; private set; } = null!;
+
+        private Box leftToolboxBackground = null!;
+        private Box rightToolboxBackground = null!;
+
+        private EditorRadioButtonCollection toolboxCollection = null!;
+        private FillFlowContainer togglesCollection = null!;
+        private FillFlowContainer&lt;SampleBankTernaryButton&gt; sampleBankTogglesCollection = null!;
+
+        private IBindable&lt;bool&gt; hasTiming = null!;
+        private Bindable&lt;bool&gt; autoSeekOnPlacement = null!;
+        private readonly Bindable&lt;bool&gt; composerFocusMode = new Bindable&lt;bool&gt;();
+
+        private EditorRadioButton? lastTool;
+
+        protected DrawableRuleset&lt;TObject&gt; DrawableRuleset { get; private set; } = null!;
+
+        protected HitObjectComposer(Ruleset ruleset)
+            : base(ruleset)
+        {
+        }
+
+        protected override IReadOnlyDependencyContainer CreateChildDependencies(IReadOnlyDependencyContainer parent) =&gt;
+            dependencies = new DependencyContainer(base.CreateChildDependencies(parent));
+
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuConfigManager config, Editor? editor, ReadableKeyCombinationProvider keyCombinationProvider)
+        {
+            autoSeekOnPlacement = config.GetBindable&lt;bool&gt;(OsuSetting.EditorAutoSeekOnPlacement);
+
+            if (editor != null)
+                composerFocusMode.BindTo(editor.ComposerFocusMode);
+
+            Config = Dependencies.Get&lt;IRulesetConfigCache&gt;().GetConfigFor(Ruleset);
+
+            try
+            {
+                DrawableRuleset = CreateDrawableRuleset(Ruleset, EditorBeatmap.PlayableBeatmap, Ruleset.GetAutoplayMod()?.Yield().ToArray() ?? []);
+                drawableRulesetWrapper = new DrawableEditorRulesetWrapper&lt;TObject&gt;(DrawableRuleset)
+                {
+                    Clock = EditorClock,
+                    ProcessCustomClock = false
+                };
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e, &quot;Could not load beatmap successfully!&quot;);
+                return;
+            }
+
+            if (DrawableRuleset is IDrawableScrollingRuleset scrollingRuleset)
+                dependencies.CacheAs(scrollingRuleset.ScrollingInfo);
+
+            dependencies.CacheAs(Playfield);
+
+            createSelectionStateBindables();
+
+            InternalChild = new DatabasedKeyBindingContainer&lt;TAction&gt;(Ruleset.RulesetInfo, Ruleset.EDITOR_VARIANT, matchingMode: KeyCombinationMatchingMode.Modifiers)
+            {
+                Children = new[]
+                {
+                    PlayfieldContentContainer = new Container
+                    {
+                        Name = &quot;Playfield content&quot;,
+                        RelativeSizeAxes = Axes.Y,
+                        Children = new Drawable[]
+                        {
+                            // layers below playfield
+                            drawableRulesetWrapper.CreatePlayfieldAdjustmentContainer().WithChild(LayerBelowRuleset),
+                            drawableRulesetWrapper,
+                            // layers above playfield
+                            drawableRulesetWrapper.CreatePlayfieldAdjustmentContainer()
+                                                  .WithChild(blueprintContainer = CreateBlueprintContainer())
+                        }
+                    },
+                    new Container
+                    {
+                        RelativeSizeAxes = Axes.Y,
+                        AutoSizeAxes = Axes.X,
+                        Children = new Drawable[]
+                        {
+                            leftToolboxBackground = new Box
+                            {
+                                Colour = colourProvider.Background5,
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            LeftToolbox = new ExpandingToolboxContainer(TOOLBOX_CONTRACTED_SIZE_LEFT, 200)
+                            {
+                                Children = new Drawable[]
+                                {
+                                    new EditorToolboxGroup(&quot;tools&quot;)
+                                    {
+                                        Child = toolboxCollection = new EditorRadioButtonCollection { RelativeSizeAxes = Axes.X }
+                                    },
+                                    new EditorToolboxGroup(&quot;toggles&quot;)
+                                    {
+                                        Child = togglesCollection = new FillFlowContainer
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            AutoSizeAxes = Axes.Y,
+                                            Direction = FillDirection.Vertical,
+                                            Spacing = new Vector2(0, 5),
+                                        },
+                                    },
+                                    new EditorToolboxGroup(&quot;bank&quot;)
+                                    {
+                                        Child = new FillFlowContainer
+                                        {
+                                            RelativeSizeAxes = Axes.X,
+                                            AutoSizeAxes = Axes.Y,
+                                            Direction = FillDirection.Vertical,
+                                            Spacing = new Vector2(0, 5),
+                                            Children = new Drawable[]
+                                            {
+                                                new Container
+                                                {
+                                                    RelativeSizeAxes = Axes.X,
+                                                    AutoSizeAxes = Axes.Y,
+                                                    Children = new Drawable[]
+                                                    {
+                                                        new ExpandableSpriteText
+                                                        {
+                                                            Text = &quot;Normal&quot;,
+                                                            AlwaysPresent = true,
+                                                            AllowMultiline = false,
+                                                            RelativePositionAxes = Axes.X,
+                                                            X = 0.25f,
+                                                            Origin = Anchor.TopCentre,
+                                                            Anchor = Anchor.TopLeft,
+                                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: 17),
+                                                        },
+                                                        new ExpandableSpriteText
+                                                        {
+                                                            Text = &quot;Addition&quot;,
+                                                            AlwaysPresent = true,
+                                                            AllowMultiline = false,
+                                                            RelativePositionAxes = Axes.X,
+                                                            X = 0.75f,
+                                                            Origin = Anchor.TopCentre,
+                                                            Anchor = Anchor.TopLeft,
+                                                            Font = OsuFont.GetFont(weight: FontWeight.Regular, size: 17),
+                                                        },
+                                                    }
+                                                },
+                                                sampleBankTogglesCollection = new FillFlowContainer&lt;SampleBankTernaryButton&gt;
+                                                {
+                                                    RelativeSizeAxes = Axes.X,
+                                                    AutoSizeAxes = Axes.Y,
+                                                    Direction = FillDirection.Vertical,
+                                                    Spacing = new Vector2(0, 5),
+                                                },
+                                            }
+                                        }
+                                    },
+                                }
+                            },
+                        }
+                    },
+                    new Container
+                    {
+                        Anchor = Anchor.TopRight,
+                        Origin = Anchor.TopRight,
+                        RelativeSizeAxes = Axes.Y,
+                        AutoSizeAxes = Axes.X,
+                        Children = new Drawable[]
+                        {
+                            rightToolboxBackground = new Box
+                            {
+                                Colour = colourProvider.Background5,
+                                RelativeSizeAxes = Axes.Both,
+                            },
+                            RightToolbox = new ExpandingToolboxContainer(TOOLBOX_CONTRACTED_SIZE_RIGHT, 250)
+                            {
+                                Child = new EditorToolboxGroup(&quot;inspector&quot;)
+                                {
+                                    Child = CreateHitObjectInspector()
+                                },
+                            }
+                        }
+                    },
+                }
+            };
+
+            toolboxCollection.AddButton(new HitObjectCompositionToolButton&lt;GlobalAction&gt;(new SelectTool(), toolSelected)
+            {
+                Hotkey = new Hotkey(GlobalAction.EditorSelectTool)
+            });
+
+            foreach (var compositionTool in CompositionTools)
+            {
+                toolboxCollection.AddButton(new HitObjectCompositionToolButton&lt;TAction&gt;(compositionTool, toolSelected)
+                {
+                    Hotkey = compositionTool.Action != null
+                        ? HotkeyForAction(compositionTool.Action.Value)
+                        : null,
+                });
+            }
+
+            togglesCollection.AddRange(CreateTernaryButtons().ToArray());
+
+            sampleBankTogglesCollection.AddRange(createSampleBankTernaryButtons());
+
+            SetSelectTool();
+
+            EditorBeatmap.SelectedHitObjects.CollectionChanged += selectionChanged;
+
+            // bring in updates from selection changes
+            EditorBeatmap.HitObjectUpdated += hitObjectUpdated;
+        }
+
+        /// &lt;summary&gt;
+        /// Houses all content relevant to the playfield.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Generally implementations should not be adding to this directly.
+        /// Use &lt;see cref=&quot;LayerBelowRuleset&quot;/&gt; or &lt;see cref=&quot;BlueprintContainer&quot;/&gt; instead.
+        /// &lt;/remarks&gt;
+        protected Container PlayfieldContentContainer { get; private set; } = null!;
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            InputManager = GetContainingInputManager()!;
+
+            hasTiming = EditorBeatmap.HasTiming.GetBoundCopy();
+            hasTiming.BindValueChanged(timing =&gt;
+            {
+                // it&#39;s important this is performed before the similar code in EditorRadioButton disables the button.
+                if (!timing.NewValue)
+                    SetSelectTool();
+            });
+
+            EditorBeatmap.HasTiming.BindValueChanged(hasTiming =&gt;
+            {
+                foreach (var item in toolboxCollection.Items)
+                {
+                    item.Selected.Disabled = !hasTiming.NewValue;
+                }
+            }, true);
+
+            composerFocusMode.BindValueChanged(_ =&gt;
+            {
+                // Transforms should be kept in sync with other usages of composer focus mode.
+                if (!composerFocusMode.Value)
+                {
+                    leftToolboxBackground.FadeIn(750, Easing.OutQuint);
+                    rightToolboxBackground.FadeIn(750, Easing.OutQuint);
+                }
+                else
+                {
+                    leftToolboxBackground.Delay(600).FadeTo(0.5f, 4000, Easing.OutQuint);
+                    rightToolboxBackground.Delay(600).FadeTo(0.5f, 4000, Easing.OutQuint);
+                }
+            }, true);
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (ApplyHorizontalCentering)
+            {
+                PlayfieldContentContainer.Anchor = Anchor.Centre;
+                PlayfieldContentContainer.Origin = Anchor.Centre;
+
+                // Ensure that the playfield is always centered but also doesn&#39;t get cut off by toolboxes.
+                PlayfieldContentContainer.Width = Math.Max(1024, DrawWidth) - TOOLBOX_CONTRACTED_SIZE_RIGHT * 2;
+                PlayfieldContentContainer.X = 0;
+            }
+            else
+            {
+                PlayfieldContentContainer.Anchor = Anchor.CentreLeft;
+                PlayfieldContentContainer.Origin = Anchor.CentreLeft;
+
+                PlayfieldContentContainer.Width = Math.Max(1024, DrawWidth);
+                PlayfieldContentContainer.X = LeftToolbox.DrawWidth;
+            }
+
+            composerFocusMode.Value = PlayfieldContentContainer.Contains(InputManager.CurrentState.Mouse.Position)
+                                      &amp;&amp; !LeftToolbox.Contains(InputManager.CurrentState.Mouse.Position)
+                                      &amp;&amp; !RightToolbox.Contains(InputManager.CurrentState.Mouse.Position);
+        }
+
+        public override Playfield Playfield =&gt; drawableRulesetWrapper.Playfield;
+
+        public override IEnumerable&lt;DrawableHitObject&gt; HitObjects =&gt; drawableRulesetWrapper.Playfield.AllHitObjects;
+
+        public override bool CursorInPlacementArea =&gt; drawableRulesetWrapper.Playfield.ReceivePositionalInputAt(InputManager.CurrentState.Mouse.Position);
+
+        /// &lt;summary&gt;
+        /// Defines all available composition tools, listed on the left side of the editor screen as button controls.
+        /// This should usually define one tool for each &lt;see cref=&quot;HitObject&quot;/&gt; type used in the target ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// A &quot;select&quot; tool is automatically added as the first tool.
+        /// &lt;/remarks&gt;
+        protected abstract IReadOnlyList&lt;CompositionTool&lt;TAction&gt;&gt; CompositionTools { get; }
+
+        /// &lt;summary&gt;
+        /// Construct a relevant blueprint container. This will manage hitobject selection/placement input handling and display logic.
+        /// &lt;/summary&gt;
+        protected abstract ComposeBlueprintContainer CreateBlueprintContainer();
+
+        protected virtual Drawable CreateHitObjectInspector() =&gt; new HitObjectInspector();
+
+        /// &lt;summary&gt;
+        /// Construct a drawable ruleset for the provided ruleset.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// Can be overridden to add editor-specific logical changes to a &lt;see cref=&quot;Ruleset&quot;/&gt;&#39;s standard &lt;see cref=&quot;DrawableRuleset{TObject}&quot;/&gt;.
+        /// For example, hit animations or judgement logic may be changed to give a better editor user experience.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;ruleset&quot;&gt;The ruleset used to construct its drawable counterpart.&lt;/param&gt;
+        /// &lt;param name=&quot;beatmap&quot;&gt;The loaded beatmap.&lt;/param&gt;
+        /// &lt;param name=&quot;mods&quot;&gt;The mods to be applied.&lt;/param&gt;
+        /// &lt;returns&gt;An editor-relevant &lt;see cref=&quot;DrawableRuleset{TObject}&quot;/&gt;.&lt;/returns&gt;
+        protected virtual DrawableRuleset&lt;TObject&gt; CreateDrawableRuleset(Ruleset ruleset, IBeatmap beatmap, IReadOnlyList&lt;Mod&gt; mods)
+            =&gt; (DrawableRuleset&lt;TObject&gt;)ruleset.CreateDrawableRulesetWith(beatmap, mods);
+
+        #region Tool selection logic
+
+        private void selectionChanged(object? sender, NotifyCollectionChangedEventArgs changedArgs)
+        {
+            if (EditorBeatmap.SelectedHitObjects.Any())
+            {
+                // ensure in selection mode if a selection is made.
+                SetSelectTool();
+                Scheduler.AddOnce(UpdateTernaryStates);
+            }
+            else
+                // Reset the ternary states when the selection is cleared.
+                Scheduler.AddOnce(resetTernaryStates);
+        }
+
+        private void hitObjectUpdated(HitObject _)
+        {
+            // bring in updates from selection changes
+            Scheduler.AddOnce(UpdateTernaryStates);
+        }
+
+        public void SetSelectTool() =&gt; toolboxCollection.Items.First().Select();
+
+        public void SetLastTool() =&gt; (lastTool ?? toolboxCollection.Items.First()).Select();
+
+        private void toolSelected(CompositionTool tool)
+        {
+            lastTool = toolboxCollection.Items.OfType&lt;HitObjectCompositionToolButton&gt;().FirstOrDefault(i =&gt; i.Tool == BlueprintContainer.CurrentTool);
+
+            BlueprintContainer.CurrentTool = tool;
+
+            if (!(tool is SelectTool))
+                EditorBeatmap.SelectedHitObjects.Clear();
+        }
+
+        #endregion
+
+        #region IPlacementHandler
+
+        public void ShowPlacement(HitObject hitObject)
+        {
+            EditorBeatmap.PlacementObject.Value = hitObject;
+        }
+
+        public void HidePlacement()
+        {
+            EditorBeatmap.PlacementObject.Value = null;
+        }
+
+        public void CommitPlacement(HitObject hitObject)
+        {
+            EditorBeatmap.PlacementObject.Value = null;
+
+            EditorBeatmap.BeginChange();
+
+            foreach (var h in EditorBeatmap.HitObjects.Where(ho =&gt; blueprintContainer.CurrentHitObjectPlacement?.ReplacesExistingObject(ho) == true).ToArray())
+                EditorBeatmap.Remove(h);
+            EditorBeatmap.Add(hitObject);
+            EditorBeatmap.EndChange();
+
+            if (autoSeekOnPlacement.Value &amp;&amp; EditorClock.CurrentTime &lt; hitObject.StartTime)
+                EditorClock.SeekSmoothlyTo(hitObject.StartTime);
+        }
+
+        public void Delete(HitObject hitObject) =&gt; EditorBeatmap.Remove(hitObject);
+
+        #endregion
+
+        #region IPositionSnapProvider
+
+        /// &lt;summary&gt;
+        /// Retrieve the relevant &lt;see cref=&quot;Playfield&quot;/&gt; at a specified screen-space position.
+        /// In cases where a ruleset doesn&#39;t require custom logic (due to nested playfields, for example)
+        /// this will return the ruleset&#39;s main playfield.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;screenSpacePosition&quot;&gt;The screen-space position to query.&lt;/param&gt;
+        /// &lt;returns&gt;The most relevant &lt;see cref=&quot;Playfield&quot;/&gt;.&lt;/returns&gt;
+        protected virtual Playfield PlayfieldAtScreenSpacePosition(Vector2 screenSpacePosition) =&gt; drawableRulesetWrapper.Playfield;
+
+        #endregion
+
+        protected override void Dispose(bool isDisposing)
+        {
+            if (EditorBeatmap.IsNotNull())
+            {
+                EditorBeatmap.HitObjectUpdated -= hitObjectUpdated;
+                EditorBeatmap.SelectedHitObjects.CollectionChanged -= selectionChanged;
+            }
+
+            base.Dispose(isDisposing);
+        }
+
+        public Hotkey HotkeyForAction(TAction action)
+        {
+            return new Hotkey(Ruleset.ShortName, Ruleset.EDITOR_VARIANT, (int)Convert.ChangeType(action, typeof(int)));
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// A non-generic definition of a HitObject composer class.
+    /// Generally used to access certain methods without requiring a generic type for &lt;see cref=&quot;HitObjectComposer{TObject,TAction}&quot; /&gt;.
+    /// &lt;/summary&gt;
+    [Cached]
+    public abstract partial class HitObjectComposer : CompositeDrawable
+    {
+        public const float TOOLBOX_CONTRACTED_SIZE_LEFT = 60;
+        public const float TOOLBOX_CONTRACTED_SIZE_RIGHT = 120;
+
+        public readonly Ruleset Ruleset;
+
+        protected HitObjectComposer(Ruleset ruleset)
+        {
+            Ruleset = ruleset;
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        /// &lt;summary&gt;
+        /// The target ruleset&#39;s playfield.
+        /// &lt;/summary&gt;
+        public abstract Playfield Playfield { get; }
+
+        public abstract ComposeBlueprintContainer BlueprintContainer { get; }
+
+        /// &lt;summary&gt;
+        /// All &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s in currently loaded beatmap.
+        /// &lt;/summary&gt;
+        public abstract IEnumerable&lt;DrawableHitObject&gt; HitObjects { get; }
+
+        /// &lt;summary&gt;
+        /// Whether the user&#39;s cursor is currently in an area of the &lt;see cref=&quot;HitObjectComposer&quot;/&gt; that is valid for placement.
+        /// &lt;/summary&gt;
+        public abstract bool CursorInPlacementArea { get; }
+
+        /// &lt;summary&gt;
+        /// Returns a string representing the current selection.
+        /// The inverse method to &lt;see cref=&quot;SelectFromTimestamp&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public virtual string ConvertSelectionToString() =&gt; string.Empty;
+
+        /// &lt;summary&gt;
+        /// Selects objects based on the supplied &lt;paramref name=&quot;timestamp&quot;/&gt; and &lt;paramref name=&quot;objectDescription&quot;/&gt;.
+        /// The inverse method to &lt;see cref=&quot;ConvertSelectionToString&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;timestamp&quot;&gt;The time instant to seek to, in milliseconds.&lt;/param&gt;
+        /// &lt;param name=&quot;objectDescription&quot;&gt;The ruleset-specific description of objects to select at the given timestamp.&lt;/param&gt;
+        public virtual void SelectFromTimestamp(double timestamp, string objectDescription) { }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[53,60,53,64,0],[55,51,55,55,0],[55,56,55,68,0],[58,9,58,58,0],[61,45,61,49,0],[61,50,61,62,0],[61,67,61,72,0],[64,49,64,53,0],[64,54,64,66,0],[64,71,64,76,0],[67,56,67,60,0],[67,61,67,73,0],[67,78,67,83,0],[70,56,70,60,0],[70,61,70,65,0],[70,70,70,75,0],[72,73,72,91,0],[73,9,73,70,0],[75,59,75,63,0],[75,64,75,76,0],[75,81,75,86,0],[77,60,77,64,0],[77,65,77,77,0],[77,82,77,87,0],[79,9,79,86,0],[81,9,81,105,0],[83,47,83,51,0],[83,52,83,64,0],[83,69,83,74,0],[85,9,85,51,0],[86,9,86,52,0],[88,9,88,71,0],[89,9,89,61,0],[90,9,90,96,0],[92,9,92,51,0],[93,9,93,60,0],[94,9,94,82,0],[98,62,98,66,0],[98,67,98,79,0],[98,84,98,89,0],[101,15,101,28,0],[102,9,102,10,0],[103,9,103,10,0],[106,13,106,89,0],[110,9,110,10,0],[111,13,111,98,0],[113,13,113,32,0],[114,17,114,68,0],[116,13,116,84,0],[119,13,119,14,0],[120,17,120,148,0],[121,17,125,19,0],[126,13,126,14,0],[127,13,127,32,0],[128,13,128,14,0],[129,17,129,73,0],[130,17,130,24,0],[133,13,133,79,0],[134,17,134,70,0],[136,13,136,45,0],[138,13,138,45,0],[140,13,264,15,0],[266,13,269,16,0],[271,13,271,20,0],[271,22,271,41,0],[271,42,271,44,0],[271,45,271,61,0],[272,13,272,14,0],[273,17,278,20,0],[279,13,279,14,0],[281,13,281,74,0],[283,13,283,84,0],[285,13,285,29,0],[287,13,287,84,0],[290,13,290,64,0],[291,9,291,10,0],[300,57,300,61,0],[300,62,300,74,0],[300,79,300,84,0],[303,9,303,10,0],[304,13,304,33,0],[306,13,306,57,0],[308,13,308,64,0],[309,13,310,13,0],[310,13,310,14,0],[310,14,312,17,0],[312,17,312,38,0],[312,38,313,21,0],[313,21,313,37,0],[313,37,314,13,0],[314,13,314,14,0],[314,14,314,16,0],[316,13,317,13,0],[317,13,317,14,0],[317,14,318,17,0],[318,17,318,24,0],[318,24,318,26,0],[318,26,318,34,0],[318,34,318,35,0],[318,35,318,37,0],[318,37,318,38,0],[318,38,318,61,0],[318,61,319,17,0],[319,17,319,18,0],[319,18,320,21,0],[320,21,320,66,0],[320,66,321,17,0],[321,17,321,18,0],[321,18,322,13,0],[322,13,322,14,0],[322,14,322,22,0],[324,13,325,13,0],[325,13,325,14,0],[325,14,327,17,0],[327,17,327,46,0],[327,46,328,17,0],[328,17,328,18,0],[328,18,329,21,0],[329,21,329,72,0],[329,72,330,21,0],[330,21,330,73,0],[330,73,331,17,0],[331,17,331,18,0],[331,18,333,17,0],[333,17,333,18,0],[333,18,334,21,0],[334,21,334,90,0],[334,90,335,21,0],[335,21,335,91,0],[335,91,336,17,0],[336,17,336,18,0],[336,18,337,13,0],[337,13,337,14,0],[337,14,337,22,0],[338,9,338,10,0],[341,9,341,10,0],[342,13,342,27,0],[344,13,344,42,0],[345,13,345,14,0],[346,17,346,66,0],[347,17,347,66,0],[350,17,350,113,0],[351,17,351,49,0],[352,13,352,14,0],[354,13,354,14,0],[355,17,355,70,0],[356,17,356,70,0],[358,17,358,77,0],[359,17,359,69,0],[360,13,360,14,0],[362,13,364,107,0],[365,9,365,10,0],[367,48,367,80,0],[369,70,369,116,0],[371,55,371,154,0],[387,66,387,90,0],[401,16,401,90,0],[406,9,406,10,0],[407,13,407,56,0],[408,13,408,14,0],[410,17,410,33,0],[411,17,411,56,0],[412,13,412,14,0],[415,17,415,55,0],[416,9,416,10,0],[419,9,419,10,0],[421,13,421,52,0],[422,9,422,10,0],[424,40,424,80,0],[426,38,426,92,0],[429,9,429,10,0],[430,13,430,109,0],[430,109,430,149,0],[430,149,430,151,0],[432,13,432,51,0],[434,13,434,39,0],[435,17,435,58,0],[436,9,436,10,0],[443,9,443,10,0],[444,13,444,61,0],[445,9,445,10,0],[448,9,448,10,0],[449,13,449,56,0],[450,9,450,10,0],[453,9,453,10,0],[454,13,454,56,0],[456,13,456,41,0],[458,13,458,20,0],[458,22,458,27,0],[458,28,458,30,0],[458,31,458,68,0],[458,68,458,148,0],[458,148,458,159,0],[459,17,459,41,0],[460,13,460,42,0],[461,13,461,39,0],[463,13,463,92,0],[464,17,464,65,0],[465,9,465,10,0],[467,52,467,83,0],[480,100,480,132,0],[485,9,485,10,0],[486,13,486,43,0],[487,13,487,14,0],[488,17,488,68,0],[489,17,489,88,0],[490,13,490,14,0],[492,13,492,39,0],[493,9,493,10,0],[496,9,496,10,0],[497,13,497,120,0],[498,9,498,10,0],[513,9,513,53,0],[514,9,514,10,0],[515,13,515,31,0],[516,13,516,42,0],[517,9,517,10,0],[540,61,540,73,0],[548,93,548,94,0],[548,95,548,96,0]]);
+    </script>
+  </body>
+</html>

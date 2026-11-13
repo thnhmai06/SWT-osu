@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Matchmaking/Match/PlayerPanel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using Humanizer;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Cursor;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.Screens;
+using osu.Framework.Utils;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.Sprites;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Online.Chat;
+using osu.Game.Online.Matchmaking.Events;
+using osu.Game.Online.Metadata;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.MatchTypes.Matchmaking;
+using osu.Game.Online.Rooms;
+using osu.Game.Overlays;
+using osu.Game.Resources.Localisation.Web;
+using osu.Game.Screens.OnlinePlay.Matchmaking.Match.Results;
+using osu.Game.Screens.Play;
+using osu.Game.Users;
+using osuTK;
+
+namespace osu.Game.Screens.OnlinePlay.Matchmaking.Match
+{
+    /// &lt;summary&gt;
+    /// A panel used throughout matchmaking to represent a user, including local information like their
+    /// rank and high level statistics in the matchmaking system.
+    /// &lt;/summary&gt;
+    public partial class PlayerPanel : OsuClickableContainer, IHasContextMenu
+    {
+        private static readonly Vector2 size_horizontal = new Vector2(300, 100);
+        private static readonly Vector2 size_vertical = new Vector2(150, 200);
+        private static readonly Vector2 avatar_size = new Vector2(80);
+
+        public readonly MultiplayerRoomUser RoomUser;
+
+        /// &lt;summary&gt;
+        /// Perform an action in addition to showing the user&#39;s profile.
+        /// This should be used to perform auxiliary tasks and not as a primary action for clicking a user panel (to maintain a consistent UX).
+        /// &lt;/summary&gt;
+        public new Action? Action;
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private UserProfileOverlay? profileOverlay { get; set; }
+
+        [Resolved]
+        private ChannelManager? channelManager { get; set; }
+
+        [Resolved]
+        private ChatOverlay? chatOverlay { get; set; }
+
+        [Resolved]
+        private IDialogOverlay? dialogOverlay { get; set; }
+
+        [Resolved]
+        private OverlayColourProvider? colourProvider { get; set; }
+
+        [Resolved]
+        private IPerformFromScreenRunner? performer { get; set; }
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient? multiplayerClient { get; set; }
+
+        [Resolved]
+        private MetadataClient? metadataClient { get; set; }
+
+        public readonly APIUser User;
+        private readonly Action viewProfile;
+
+        private OsuSpriteText rankText = null!;
+        private OsuSpriteText scoreText = null!;
+
+        private Drawable avatarPositionTarget = null!;
+        private Drawable avatarJumpTarget = null!;
+        private Drawable avatar = null!;
+        private OsuSpriteText username = null!;
+
+        private Container mainContent = null!;
+
+        private Box solidBackgroundLayer = null!;
+        private Drawable background = null!;
+
+        private OsuSpriteText quitText = null!;
+        private BufferedContainer backgroundQuitTarget = null!;
+        private BufferedContainer avatarQuitTarget = null!;
+
+        private Box downloadProgressBar = null!;
+
+        private PlayerPanelDisplayMode displayMode = PlayerPanelDisplayMode.Horizontal;
+        private bool hasQuit;
+
+        private enum InteractionSampleType
+        {
+            PlayerJump,
+            PlayerReJump,
+            OtherPlayerJump,
+        }
+
+        private Dictionary&lt;InteractionSampleType, Sample?&gt; interactionSamples = new Dictionary&lt;InteractionSampleType, Sample?&gt;();
+        private readonly Dictionary&lt;InteractionSampleType, SampleChannel?&gt; interactionSampleChannels = new Dictionary&lt;InteractionSampleType, SampleChannel?&gt;();
+        private double samplePitch;
+        private double? lastSamplePlayback;
+
+        public PlayerPanel(MultiplayerRoomUser user)
+            : base(HoverSampleSet.Button)
+        {
+            ArgumentNullException.ThrowIfNull(user.User);
+
+            User = user.User;
+            RoomUser = user;
+
+            base.Action = viewProfile = () =&gt;
+            {
+                Action?.Invoke();
+                profileOverlay?.ShowUser(User);
+            };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            Content.Masking = true;
+            Content.CornerRadius = 10;
+            Content.CornerExponent = 10;
+            Content.Anchor = Anchor.Centre;
+            Content.Origin = Anchor.Centre;
+
+            Child = backgroundQuitTarget = new BufferedContainer
+            {
+                FrameBufferScale = new Vector2(1.5f),
+                RelativeSizeAxes = Axes.Both,
+                Children = new[]
+                {
+                    solidBackgroundLayer = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = colourProvider?.Background5 ?? colours.Gray1
+                    },
+                    background = new UserCoverBackground
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Colour = colours.Gray7,
+                        User = User
+                    },
+                    new Container
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        RelativeSizeAxes = Axes.Both,
+                        Children = new Drawable[]
+                        {
+                            mainContent = new Container
+                            {
+                                Anchor = Anchor.Centre,
+                                Origin = Anchor.Centre,
+                                RelativeSizeAxes = Axes.Both,
+                                Children = new[]
+                                {
+                                    quitText = new OsuSpriteText
+                                    {
+                                        Anchor = Anchor.Centre,
+                                        Origin = Anchor.Centre,
+                                        Text = &quot;QUIT&quot;,
+                                        Font = OsuFont.Default.With(weight: &quot;Bold&quot;, size: 70),
+                                        Rotation = -22.5f,
+                                        Colour = OsuColour.Gray(0.3f),
+                                        Blending = BlendingParameters.Additive
+                                    },
+                                    avatarPositionTarget = new Container
+                                    {
+                                        Origin = Anchor.Centre,
+                                        Size = avatar_size,
+                                        Child = avatarJumpTarget = new Container
+                                        {
+                                            Anchor = Anchor.BottomCentre,
+                                            Origin = Anchor.BottomCentre,
+                                            RelativeSizeAxes = Axes.Both,
+                                            Child = avatar = new Container
+                                            {
+                                                Anchor = Anchor.Centre,
+                                                Origin = Anchor.Centre,
+                                                RelativeSizeAxes = Axes.Both,
+                                                // Needs to be re-buffered as the avatar is proxied outside of the parent buffered container.
+                                                Child = avatarQuitTarget = new BufferedContainer
+                                                {
+                                                    FrameBufferScale = new Vector2(1.5f),
+                                                    RelativeSizeAxes = Axes.Both,
+                                                    Child = new MatchmakingAvatar(User, isOwnUser: User.Id == api.LocalUser.Value.Id)
+                                                    {
+                                                        Anchor = Anchor.Centre,
+                                                        Origin = Anchor.Centre,
+                                                        RelativeSizeAxes = Axes.Both,
+                                                        Size = Vector2.One
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    },
+                                    rankText = new OsuSpriteText
+                                    {
+                                        Alpha = 0,
+                                        Anchor = Anchor.BottomRight,
+                                        Origin = Anchor.BottomCentre,
+                                        Blending = BlendingParameters.Additive,
+                                        Margin = new MarginPadding(4),
+                                        Text = &quot;-&quot;,
+                                        Font = OsuFont.Style.Title.With(size: 55),
+                                    },
+                                    username = new TruncatingSpriteText
+                                    {
+                                        Alpha = 0,
+                                        Anchor = Anchor.BottomCentre,
+                                        Origin = Anchor.BottomCentre,
+                                        Text = User.Username,
+                                        Font = OsuFont.Style.Heading1,
+                                        MaxWidth = 120
+                                    },
+                                    scoreText = new OsuSpriteText
+                                    {
+                                        Alpha = 0,
+                                        Margin = new MarginPadding(10),
+                                        Anchor = Anchor.BottomCentre,
+                                        Origin = Anchor.BottomCentre,
+                                        Font = OsuFont.Style.Heading2,
+                                        Text = &quot;0 pts&quot;
+                                    }
+                                }
+                            },
+                            downloadProgressBar = new Box
+                            {
+                                Anchor = Anchor.BottomLeft,
+                                Origin = Anchor.BottomLeft,
+                                RelativeSizeAxes = Axes.X,
+                                Size = new Vector2(0, 4),
+                                Colour = colourProvider?.Content2 ?? colours.Gray3
+                            }
+                        }
+                    }
+                }
+            };
+
+            // Allow avatar to exist outside of masking for when it jumps around and stuff.
+            AddInternal(avatar.CreateProxy());
+
+            interactionSamples = new Dictionary&lt;InteractionSampleType, Sample?&gt;
+            {
+                { InteractionSampleType.PlayerJump, audio.Samples.Get(@&quot;Multiplayer/Matchmaking/player-jump&quot;) },
+                { InteractionSampleType.PlayerReJump, audio.Samples.Get(@&quot;Multiplayer/Matchmaking/player-rejump&quot;) },
+                { InteractionSampleType.OtherPlayerJump, audio.Samples.Get(@&quot;Multiplayer/Matchmaking/player-jump-other&quot;) }
+            };
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            updateLayout(true);
+
+            client.MatchRoomStateChanged += onRoomStateChanged;
+            client.MatchEvent += onMatchEvent;
+            client.BeatmapAvailabilityChanged += onBeatmapAvailabilityChanged;
+
+            onRoomStateChanged(client.Room!.MatchState);
+
+            avatar.ScaleTo(0)
+                  .ScaleTo(1, 500, Easing.OutElasticHalf)
+                  .FadeIn(200);
+
+            // pick a random pitch to be used by the player for duration of this session
+            samplePitch = 0.75f + RNG.NextDouble(0f, 0.75f);
+        }
+
+        public PlayerPanelDisplayMode DisplayMode
+        {
+            get =&gt; displayMode;
+            set
+            {
+                displayMode = value;
+                if (IsLoaded)
+                    updateLayout(false);
+            }
+        }
+
+        public bool HasQuit
+        {
+            get =&gt; hasQuit;
+            set
+            {
+                hasQuit = value;
+                if (IsLoaded)
+                    updateLayout(false);
+            }
+        }
+
+        private bool horizontal =&gt; displayMode == PlayerPanelDisplayMode.Horizontal;
+
+        private Vector2 avatarPosition
+        {
+            get
+            {
+                switch (displayMode)
+                {
+                    case PlayerPanelDisplayMode.AvatarOnly:
+                        return avatar_size / 2;
+
+                    case PlayerPanelDisplayMode.Horizontal:
+                        return new Vector2(50);
+
+                    case PlayerPanelDisplayMode.Vertical:
+                        return new Vector2(75, 50);
+
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+        }
+
+        private void updateLayout(bool instant)
+        {
+            double duration = instant ? 0 : 1000;
+
+            avatarPositionTarget.MoveTo(avatarPosition, duration, Easing.OutPow10);
+
+            switch (displayMode)
+            {
+                case PlayerPanelDisplayMode.AvatarOnly:
+                    rankText.Hide();
+                    scoreText.Hide();
+                    username.Hide();
+
+                    background.FadeOut(200, Easing.OutQuint);
+                    solidBackgroundLayer.FadeOut(200, Easing.OutQuint);
+
+                    this.ResizeTo(avatar_size, duration, Easing.OutPow10);
+                    break;
+
+                case PlayerPanelDisplayMode.Horizontal:
+                case PlayerPanelDisplayMode.Vertical:
+                    background.FadeIn(200);
+                    solidBackgroundLayer.FadeIn(200);
+
+                    using (BeginDelayedSequence(100))
+                    {
+                        username.FadeIn(600);
+
+                        using (BeginDelayedSequence(100))
+                        {
+                            scoreText.FadeIn(600);
+
+                            using (BeginDelayedSequence(100))
+                            {
+                                rankText.FadeTo(1, 600);
+                            }
+                        }
+                    }
+
+                    this.ResizeTo(horizontal ? size_horizontal : size_vertical, duration, Easing.OutPow10);
+
+                    rankText.MoveTo(horizontal ? new Vector2(-40, -20) : new Vector2(-70, 0), duration, Easing.OutPow10);
+                    username.MoveTo(horizontal ? new Vector2(0, -46) : new Vector2(0, -86), duration, Easing.OutPow10);
+                    scoreText.MoveTo(horizontal ? new Vector2(0, -16) : new Vector2(0, -56), duration, Easing.OutPow10);
+                    quitText.MoveTo(horizontal ? new Vector2(40, 0) : new Vector2(0, 40), duration, Easing.OutPow10);
+                    break;
+
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+
+            // quit text doesn&#39;t fit on avataronly mode.
+            if (HasQuit &amp;&amp; displayMode != PlayerPanelDisplayMode.AvatarOnly)
+                quitText.FadeIn(duration, Easing.OutPow10);
+            else
+                quitText.FadeOut(duration, Easing.OutPow10);
+
+            if (HasQuit)
+            {
+                backgroundQuitTarget.GrayscaleTo(1, duration, Easing.OutPow10);
+                avatarQuitTarget.GrayscaleTo(1, duration, Easing.OutPow10);
+            }
+            else
+            {
+                backgroundQuitTarget.GrayscaleTo(0, duration, Easing.OutPow10);
+                avatarQuitTarget.GrayscaleTo(0, duration, Easing.OutPow10);
+            }
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            // Not sure why this is required but it is.
+            avatarQuitTarget.Alpha = Alpha;
+        }
+
+        protected override bool OnHover(HoverEvent e)
+        {
+            Content.ScaleTo(1.03f, 2000, Easing.OutPow10);
+            mainContent.ScaleTo(1.03f, 2000, Easing.OutPow10);
+            return base.OnHover(e);
+        }
+
+        protected override void OnHoverLost(HoverLostEvent e)
+        {
+            Content.ScaleTo(1f, 750, Easing.OutPow10);
+            mainContent.ScaleTo(1, 750, Easing.OutPow10);
+
+            mainContent.MoveTo(Vector2.Zero, 1250, Easing.OutPow10);
+            avatarPositionTarget.MoveTo(avatarPosition, 1250, Easing.OutPow10);
+            base.OnHoverLost(e);
+        }
+
+        protected override bool OnMouseMove(MouseMoveEvent e)
+        {
+            var offset = (avatarPositionTarget.ToLocalSpace(e.ScreenSpaceMousePosition) - avatarPositionTarget.DrawSize / 2) * 0.02f;
+
+            mainContent.MoveTo(offset * 0.5f, 2000, Easing.OutPow10);
+            avatarPositionTarget.MoveTo(avatarPosition + offset, 2000, Easing.OutPow10);
+            return base.OnMouseMove(e);
+        }
+
+        private void onRoomStateChanged(MatchRoomState? state) =&gt; Scheduler.Add(() =&gt;
+        {
+            if (state is not MatchmakingRoomState matchmakingState)
+                return;
+
+            if (!matchmakingState.Users.UserDictionary.TryGetValue(User.Id, out MatchmakingUser? userScore))
+                return;
+
+            if (userScore.Placement == null)
+                return;
+
+            rankText.Text = userScore.Placement.Value.Ordinalize(CultureInfo.CurrentCulture);
+            rankText.FadeColour(SubScreenResults.ColourForPlacement(userScore.Placement.Value));
+            scoreText.Text = $&quot;{userScore.Points} pts&quot;;
+        });
+
+        private int consecutiveJumps;
+
+        private void onMatchEvent(MatchServerEvent e)
+        {
+            switch (e)
+            {
+                case MatchmakingAvatarActionEvent action:
+                    if (action.UserId != RoomUser.UserID)
+                        break;
+
+                    switch (action.Action)
+                    {
+                        case MatchmakingAvatarAction.Jump:
+                            var movement = avatarJumpTarget.Delay(0);
+                            var scale = avatarJumpTarget.Delay(0);
+
+                            // only increase height if the user jumps again while in a &quot;jumped&quot; state.
+                            // this avoids building up large jumps from very quick spam, and adds a timing game.
+                            bool isConsecutive = avatarJumpTarget.Y &lt; 0;
+
+                            if (isConsecutive)
+                            {
+                                consecutiveJumps++;
+
+                                if (avatarJumpTarget.Y &gt; 0)
+                                    movement = movement.MoveToY(0);
+
+                                movement = movement.MoveToY(5, 100, Easing.Out);
+                                scale = scale.ScaleTo(new Vector2(1, 0.95f), 100, Easing.Out);
+                            }
+                            else
+                            {
+                                consecutiveJumps = 0;
+                            }
+
+                            float multiplier = 1 + 0.3f * Math.Min(10, consecutiveJumps);
+
+                            movement.Then().MoveToY(-10 * multiplier, 200, Easing.Out)
+                                    .Then().MoveToY(0, 200, Easing.In);
+
+                            scale.Then().ScaleTo(new Vector2(1, 1.05f), 200, Easing.Out)
+                                 .Then().ScaleTo(new Vector2(1, 0.95f), 200, Easing.In)
+                                 .Then().ScaleTo(Vector2.One, 800, Easing.OutElastic);
+
+                            // only play jump sample if panel is visible
+                            if (Alpha &gt; 0)
+                                playJumpSample(isConsecutive);
+
+                            break;
+                    }
+
+                    break;
+            }
+        }
+
+        private void onBeatmapAvailabilityChanged(MultiplayerRoomUser user, BeatmapAvailability availability) =&gt; Scheduler.Add(() =&gt;
+        {
+            if (!user.Equals(RoomUser))
+                return;
+
+            if (availability.State == DownloadState.Downloading)
+                downloadProgressBar.FadeIn(200, Easing.OutPow10);
+            else
+                downloadProgressBar.FadeOut(200, Easing.OutPow10);
+
+            downloadProgressBar.ResizeWidthTo(availability.DownloadProgress ?? 0, 200, Easing.OutPow10);
+        });
+
+        private void playJumpSample(bool rejumping)
+        {
+            bool isLocalUser = User.OnlineID == client.LocalUser?.UserID;
+
+            if (isLocalUser)
+                playInteractionSample(rejumping ? InteractionSampleType.PlayerReJump : InteractionSampleType.PlayerJump);
+            else
+                playInteractionSample(InteractionSampleType.OtherPlayerJump);
+        }
+
+        private void playInteractionSample(InteractionSampleType sampleType)
+        {
+            bool enoughTimePassedSinceLastPlayback = lastSamplePlayback == null || Time.Current - lastSamplePlayback.Value &gt;= OsuGameBase.SAMPLE_DEBOUNCE_TIME;
+            if (!enoughTimePassedSinceLastPlayback)
+                return;
+
+            Sample? targetSample = interactionSamples[sampleType];
+            SampleChannel? targetChannel = interactionSampleChannels.GetValueOrDefault(sampleType);
+
+            targetChannel?.Stop();
+            targetChannel = targetSample?.GetChannel();
+
+            if (targetChannel == null)
+                return;
+
+            float horizontalPos = BoundingBox.Centre.X / Parent!.ToLocalSpace(Parent!.ScreenSpaceDrawQuad).Width;
+            // rescale balance from 0..1 to -1..1
+            float balance = -1f + horizontalPos * 2f;
+
+            targetChannel.Frequency.Value = samplePitch;
+            targetChannel.Balance.Value = balance * OsuGameBase.SFX_STEREO_STRENGTH;
+            targetChannel.Play();
+
+            interactionSampleChannels[sampleType] = targetChannel;
+
+            lastSamplePlayback = Time.Current;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (client.IsNotNull())
+            {
+                client.MatchRoomStateChanged -= onRoomStateChanged;
+                client.MatchEvent -= onMatchEvent;
+                client.BeatmapAvailabilityChanged -= onBeatmapAvailabilityChanged;
+            }
+        }
+
+        public MenuItem[] ContextMenuItems
+        {
+            get
+            {
+                List&lt;MenuItem&gt; items = new List&lt;MenuItem&gt;
+                {
+                    new OsuMenuItem(ContextMenuStrings.ViewProfile, MenuItemType.Highlighted, viewProfile)
+                };
+
+                if (User.Equals(api.LocalUser.Value))
+                    return items.ToArray();
+
+                items.Add(new OsuMenuItem(UsersStrings.CardSendMessage, MenuItemType.Standard, () =&gt;
+                {
+                    channelManager?.OpenPrivateChannel(User);
+                    chatOverlay?.Show();
+                }));
+
+                items.Add(!isUserBlocked()
+                    ? new OsuMenuItem(UsersStrings.BlocksButtonBlock, MenuItemType.Destructive, () =&gt; dialogOverlay?.Push(ConfirmBlockActionDialog.Block(User)))
+                    : new OsuMenuItem(UsersStrings.BlocksButtonUnblock, MenuItemType.Standard, () =&gt; dialogOverlay?.Push(ConfirmBlockActionDialog.Unblock(User))));
+
+                if (isUserOnline())
+                {
+                    items.Add(new OsuMenuItem(ContextMenuStrings.SpectatePlayer, MenuItemType.Standard, () =&gt;
+                    {
+                        if (isUserOnline())
+                            performer?.PerformFromScreen(s =&gt; s.Push(new SoloSpectatorScreen(User)));
+                    }));
+
+                    if (canInviteUser())
+                    {
+                        items.Add(new OsuMenuItem(ContextMenuStrings.InvitePlayer, MenuItemType.Standard, () =&gt;
+                        {
+                            if (canInviteUser())
+                                multiplayerClient!.InvitePlayer(User.Id);
+                        }));
+                    }
+                }
+
+                return items.ToArray();
+
+                bool isUserOnline() =&gt; metadataClient?.GetPresence(User.OnlineID) != null;
+                bool canInviteUser() =&gt; isUserOnline() &amp;&amp; multiplayerClient?.Room?.Users.All(u =&gt; u.UserID != User.Id) == true;
+                bool isUserBlocked() =&gt; api.LocalUserState.Blocks.Any(b =&gt; b.TargetID == User.OnlineID);
+            }
+        }
+    }
+
+    public enum PlayerPanelDisplayMode
+    {
+        AvatarOnly,
+        Horizontal,
+        Vertical
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[50,9,50,81,0],[51,9,51,79,0],[52,9,52,71,0],[63,44,63,48,0],[63,49,63,53,0],[63,58,63,63,0],[66,36,66,40,0],[66,41,66,45,0],[66,50,66,55,0],[69,54,69,58,0],[69,59,69,63,0],[72,50,72,54,0],[72,55,72,59,0],[75,44,75,48,0],[75,49,75,53,0],[78,49,78,53,0],[78,54,78,58,0],[81,57,81,61,0],[81,62,81,66,0],[84,55,84,59,0],[84,60,84,64,0],[87,37,87,41,0],[87,42,87,46,0],[87,51,87,56,0],[90,56,90,60,0],[90,61,90,65,0],[93,50,93,54,0],[93,55,93,59,0],[98,9,98,48,0],[99,9,99,49,0],[101,9,101,55,0],[102,9,102,51,0],[103,9,103,41,0],[104,9,104,48,0],[106,9,106,47,0],[108,9,108,50,0],[109,9,109,45,0],[111,9,111,48,0],[112,9,112,64,0],[113,9,113,60,0],[115,9,115,49,0],[117,9,117,88,0],[127,9,127,130,0],[128,9,128,160,0],[133,15,133,42,0],[134,9,134,10,0],[135,13,135,58,0],[137,13,137,30,0],[138,13,138,29,0],[140,13,141,13,0],[141,13,141,14,0],[141,14,142,17,0],[142,17,142,34,0],[142,34,143,17,0],[143,17,143,48,0],[143,48,144,13,0],[144,13,144,14,0],[144,14,144,15,0],[145,9,145,10,0],[149,9,149,10,0],[150,13,150,36,0],[151,13,151,39,0],[152,13,152,41,0],[153,13,153,44,0],[154,13,154,44,0],[156,13,270,15,0],[273,13,273,47,0],[275,13,280,15,0],[281,9,281,10,0],[284,9,284,10,0],[285,13,285,33,0],[287,13,287,32,0],[289,13,289,64,0],[290,13,290,47,0],[291,13,291,79,0],[293,13,293,57,0],[295,13,297,32,0],[300,13,300,61,0],[301,9,301,10,0],[305,20,305,31,0],[307,13,307,14,0],[308,17,308,37,0],[309,17,309,30,0],[310,21,310,41,0],[311,13,311,14,0],[316,20,316,27,0],[318,13,318,14,0],[319,17,319,33,0],[320,17,320,30,0],[321,21,321,41,0],[322,13,322,14,0],[325,36,325,84,0],[330,13,330,14,0],[331,17,331,37,0],[334,25,334,48,0],[337,25,337,48,0],[340,25,340,52,0],[343,25,343,65,0],[345,13,345,14,0],[349,9,349,10,0],[350,13,350,50,0],[352,13,352,84,0],[354,13,354,33,0],[357,21,357,37,0],[358,21,358,38,0],[359,21,359,37,0],[361,21,361,62,0],[362,21,362,72,0],[364,21,364,75,0],[365,21,365,27,0],[369,21,369,44,0],[370,21,370,54,0],[372,21,372,54,0],[373,21,373,22,0],[374,25,374,46,0],[376,25,376,58,0],[377,25,377,26,0],[378,29,378,51,0],[380,29,380,62,0],[381,29,381,30,0],[382,33,382,57,0],[383,29,383,30,0],[384,25,384,26,0],[385,21,385,22,0],[387,21,387,108,0],[389,21,389,122,0],[390,21,390,120,0],[391,21,391,121,0],[392,21,392,118,0],[393,21,393,27,0],[396,21,396,61,0],[400,13,400,77,0],[401,17,401,60,0],[403,17,403,61,0],[405,13,405,25,0],[406,13,406,14,0],[407,17,407,80,0],[408,17,408,76,0],[409,13,409,14,0],[411,13,411,14,0],[412,17,412,80,0],[413,17,413,76,0],[414,13,414,14,0],[415,9,415,10,0],[418,9,418,10,0],[419,13,419,27,0],[422,13,422,44,0],[423,9,423,10,0],[426,9,426,10,0],[427,13,427,59,0],[428,13,428,63,0],[429,13,429,36,0],[430,9,430,10,0],[433,9,433,10,0],[434,13,434,55,0],[435,13,435,58,0],[437,13,437,69,0],[438,13,438,80,0],[439,13,439,33,0],[440,9,440,10,0],[443,9,443,10,0],[444,13,444,134,0],[446,13,446,70,0],[447,13,447,89,0],[448,13,448,40,0],[449,9,449,10,0],[451,67,452,9,0],[452,9,452,10,0],[452,10,453,13,0],[453,13,453,68,0],[453,68,454,17,0],[454,17,454,24,0],[454,24,456,13,0],[456,13,456,109,0],[456,109,457,17,0],[457,17,457,24,0],[457,24,459,13,0],[459,13,459,45,0],[459,45,460,17,0],[460,17,460,24,0],[460,24,462,13,0],[462,13,462,94,0],[462,94,463,13,0],[463,13,463,97,0],[463,97,464,13,0],[464,13,464,56,0],[464,56,465,9,0],[465,9,465,10,0],[465,10,465,11,0],[470,9,470,10,0],[471,13,471,23,0],[474,21,474,58,0],[475,25,475,31,0],[477,21,477,43,0],[480,29,480,70,0],[481,29,481,67,0],[485,29,485,73,0],[487,29,487,47,0],[488,29,488,30,0],[489,33,489,52,0],[491,33,491,60,0],[492,37,492,68,0],[494,33,494,81,0],[495,33,495,95,0],[496,29,496,30,0],[498,29,498,30,0],[499,33,499,54,0],[500,29,500,30,0],[502,29,502,90,0],[504,29,505,72,0],[507,29,509,87,0],[512,29,512,43,0],[513,33,513,63,0],[515,29,515,35,0],[518,21,518,27,0],[520,9,520,10,0],[522,114,523,9,0],[523,9,523,10,0],[523,10,524,13,0],[524,13,524,40,0],[524,40,525,17,0],[525,17,525,24,0],[525,24,527,13,0],[527,13,527,65,0],[527,65,528,17,0],[528,17,528,66,0],[528,66,530,17,0],[530,17,530,67,0],[530,67,532,13,0],[532,13,532,105,0],[532,105,533,9,0],[533,9,533,10,0],[533,10,533,11,0],[536,9,536,10,0],[537,13,537,74,0],[539,13,539,29,0],[540,17,540,122,0],[542,17,542,78,0],[543,9,543,10,0],[546,9,546,10,0],[547,13,547,160,0],[548,13,548,52,0],[549,17,549,24,0],[551,13,551,67,0],[552,13,552,100,0],[554,13,554,35,0],[555,13,555,56,0],[557,13,557,39,0],[558,17,558,24,0],[560,13,560,114,0],[562,13,562,54,0],[564,13,564,57,0],[565,13,565,85,0],[566,13,566,34,0],[568,13,568,67,0],[570,13,570,47,0],[571,9,571,10,0],[574,9,574,10,0],[575,13,575,39,0],[577,13,577,36,0],[578,13,578,14,0],[579,17,579,68,0],[580,17,580,51,0],[581,17,581,83,0],[582,13,582,14,0],[583,9,583,10,0],[588,13,588,14,0],[589,17,592,19,0],[594,17,594,54,0],[595,21,595,44,0],[597,17,598,17,0],[598,17,598,18,0],[598,18,599,21,0],[599,21,599,62,0],[599,62,600,21,0],[600,21,600,41,0],[600,41,601,17,0],[601,17,601,18,0],[601,18,601,21,0],[603,17,604,103,0],[604,103,604,160,0],[604,160,605,102,0],[605,102,605,161,0],[605,161,605,164,0],[607,17,607,36,0],[608,17,608,18,0],[609,21,610,21,0],[610,21,610,22,0],[610,22,611,25,0],[611,25,611,44,0],[611,44,612,29,0],[612,29,612,63,0],[612,63,612,100,0],[612,100,612,102,0],[612,102,613,21,0],[613,21,613,22,0],[613,22,613,25,0],[615,21,615,41,0],[616,21,616,22,0],[617,25,618,25,0],[618,25,618,26,0],[618,26,619,29,0],[619,29,619,49,0],[619,49,620,33,0],[620,33,620,74,0],[620,74,621,25,0],[621,25,621,26,0],[621,26,621,29,0],[622,21,622,22,0],[623,17,623,18,0],[625,17,625,40,0],[627,40,627,90,0],[628,41,628,99,0],[628,99,628,118,0],[628,118,628,127,0],[629,41,629,76,0],[629,76,629,103,0],[629,103,629,104,0],[630,13,630,14,0]]);
+    </script>
+  </body>
+</html>

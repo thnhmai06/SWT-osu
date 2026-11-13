@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Tests/Visual/EditorTestScene.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.IO.Stores;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Testing;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.Online.API;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Dialog;
+using osu.Game.Rulesets;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Menu;
+using osu.Game.Skinning;
+using osu.Game.Storyboards;
+
+namespace osu.Game.Tests.Visual
+{
+    public abstract partial class EditorTestScene : ScreenTestScene
+    {
+        private TestEditorLoader editorLoader;
+
+        protected TestEditor Editor =&gt; editorLoader.Editor;
+
+        protected EditorBeatmap EditorBeatmap =&gt; Editor.ChildrenOfType&lt;EditorBeatmap&gt;().Single();
+        protected EditorClock EditorClock =&gt; Editor.ChildrenOfType&lt;EditorClock&gt;().Single();
+
+        /// &lt;summary&gt;
+        /// Whether any saves performed by the editor should be isolate (and not persist) to the underlying &lt;see cref=&quot;BeatmapManager&quot;/&gt;.
+        /// &lt;/summary&gt;
+        protected virtual bool IsolateSavingFromDatabase =&gt; true;
+
+        // required for screen transitions to work properly
+        // (see comment in EditorLoader.LogoArriving).
+        [Cached]
+        private OsuLogo logo = new OsuLogo
+        {
+            Alpha = 0
+        };
+
+        private TestBeatmapManager testBeatmapManager;
+
+        [BackgroundDependencyLoader]
+        private void load(GameHost host, AudioManager audio, RulesetStore rulesets)
+        {
+            Add(logo);
+
+            if (IsolateSavingFromDatabase)
+                Dependencies.CacheAs&lt;BeatmapManager&gt;(testBeatmapManager = new TestBeatmapManager(LocalStorage, Realm, rulesets, null, audio, Resources, host, Beatmap.Default));
+        }
+
+        public override void SetUpSteps()
+        {
+            base.SetUpSteps();
+
+            AddStep(&quot;load editor&quot;, LoadEditor);
+            AddUntilStep(&quot;wait for editor to load&quot;, () =&gt; Editor?.ReadyForUse == true);
+            AddUntilStep(&quot;wait for beatmap updated&quot;, () =&gt; !Beatmap.IsDefault);
+        }
+
+        protected virtual void LoadEditor()
+        {
+            Beatmap.Value = CreateWorkingBeatmap(Ruleset.Value);
+
+            testBeatmapManager?.TestBeatmap = Beatmap.Value;
+
+            LoadScreen(editorLoader = new TestEditorLoader());
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the ruleset for providing a corresponding beatmap to load the editor on.
+        /// &lt;/summary&gt;
+        [NotNull]
+        protected abstract Ruleset CreateEditorRuleset();
+
+        protected sealed override Ruleset CreateRuleset() =&gt; CreateEditorRuleset();
+
+        protected partial class TestEditorLoader : EditorLoader
+        {
+            public TestEditor Editor { get; private set; }
+
+            protected sealed override Editor CreateEditor() =&gt; Editor = CreateTestEditor(this);
+
+            protected virtual TestEditor CreateTestEditor(EditorLoader loader) =&gt; new TestEditor(loader);
+        }
+
+        protected partial class TestEditor : Editor
+        {
+            [Resolved(canBeNull: true)]
+            [CanBeNull]
+            private IDialogOverlay dialogOverlay { get; set; }
+
+            public new void Undo() =&gt; base.Undo();
+
+            public new void Redo() =&gt; base.Redo();
+
+            public new void SetPreviewPointToCurrentTime() =&gt; base.SetPreviewPointToCurrentTime();
+
+            public new void SnapAllHitObjectsToCurrentDivisor() =&gt; base.SnapAllHitObjectsToCurrentDivisor();
+
+            public new bool Save() =&gt; base.Save();
+
+            public new void Cut() =&gt; base.Cut();
+
+            public new void Copy() =&gt; base.Copy();
+
+            public new void Paste() =&gt; base.Paste();
+
+            public new void Clone() =&gt; base.Clone();
+
+            public new void SwitchToDifficulty(BeatmapInfo beatmapInfo) =&gt; base.SwitchToDifficulty(beatmapInfo);
+
+            public new bool HasUnsavedChanges =&gt; base.HasUnsavedChanges;
+
+            public override bool OnExiting(ScreenExitEvent e)
+            {
+                // For testing purposes allow the screen to exit without saving on second attempt.
+                if (!ExitConfirmed &amp;&amp; dialogOverlay?.CurrentDialog is PromptForSaveDialog saveDialog)
+                {
+                    saveDialog.PerformAction&lt;PopupDialogDangerousButton&gt;();
+                    return true;
+                }
+
+                return base.OnExiting(e);
+            }
+
+            public TestEditor(EditorLoader loader = null)
+                : base(loader)
+            {
+            }
+        }
+
+        private class TestBeatmapManager : BeatmapManager
+        {
+            public WorkingBeatmap TestBeatmap;
+
+            public TestBeatmapManager(Storage storage, RealmAccess realm, RulesetStore rulesets, IAPIProvider api, [NotNull] AudioManager audioManager, IResourceStore&lt;byte[]&gt; resources, GameHost host, WorkingBeatmap defaultBeatmap)
+                : base(storage, realm, api, audioManager, resources, host, defaultBeatmap)
+            {
+            }
+
+            protected override WorkingBeatmapCache CreateWorkingBeatmapCache(AudioManager audioManager, IResourceStore&lt;byte[]&gt; resources, IResourceStore&lt;byte[]&gt; storage, WorkingBeatmap defaultBeatmap, GameHost host)
+            {
+                return new TestWorkingBeatmapCache(this, audioManager, resources, storage, defaultBeatmap, host);
+            }
+
+            public override WorkingBeatmap CreateNewDifficulty(BeatmapSetInfo targetBeatmapSet, WorkingBeatmap referenceWorkingBeatmap, RulesetInfo rulesetInfo)
+            {
+                // don&#39;t actually care about properly creating a difficulty for this context.
+                return TestBeatmap;
+            }
+
+            public override WorkingBeatmap CopyExistingDifficulty(BeatmapSetInfo targetBeatmapSet, WorkingBeatmap referenceWorkingBeatmap)
+            {
+                // don&#39;t actually care about properly creating a difficulty for this context.
+                return TestBeatmap;
+            }
+
+            private class TestWorkingBeatmapCache : WorkingBeatmapCache
+            {
+                private readonly TestBeatmapManager testBeatmapManager;
+
+                public TestWorkingBeatmapCache(TestBeatmapManager testBeatmapManager, AudioManager audioManager, IResourceStore&lt;byte[]&gt; resourceStore, IResourceStore&lt;byte[]&gt; storage, WorkingBeatmap defaultBeatmap, GameHost gameHost)
+                    : base(testBeatmapManager.BeatmapTrackStore, audioManager, resourceStore, storage, defaultBeatmap, gameHost)
+                {
+                    this.testBeatmapManager = testBeatmapManager;
+                }
+
+                public override WorkingBeatmap GetWorkingBeatmap(BeatmapInfo beatmapInfo)
+                    =&gt; testBeatmapManager.TestBeatmap;
+            }
+
+            public override void Save(BeatmapInfo info, IBeatmap beatmapContent, ISkin beatmapSkin = null, Storyboard storyboard = null)
+            {
+                // don&#39;t actually care about saving for this context.
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[31,40,31,59,0],[33,50,33,97,0],[34,46,34,91,0],[39,61,39,65,0],[44,9,47,11,0],[53,9,53,10,0],[54,13,54,23,0],[56,13,56,43,0],[57,17,57,177,0],[58,9,58,10,0],[61,9,61,10,0],[62,13,62,31,0],[64,13,64,48,0],[65,13,65,59,0],[65,59,65,86,0],[65,86,65,88,0],[66,13,66,60,0],[66,60,66,78,0],[66,78,66,80,0],[67,9,67,10,0],[70,9,70,10,0],[71,13,71,65,0],[73,13,73,61,0],[75,13,75,63,0],[76,9,76,10,0],[84,62,84,83,0],[88,40,88,44,0],[88,45,88,57,0],[90,64,90,95,0],[92,83,92,105,0],[99,52,99,56,0],[99,57,99,61,0],[101,39,101,50,0],[103,39,103,50,0],[105,63,105,98,0],[107,68,107,108,0],[109,39,109,50,0],[111,38,111,48,0],[113,39,113,50,0],[115,40,115,52,0],[117,40,117,52,0],[119,76,119,112,0],[121,50,121,72,0],[124,13,124,14,0],[126,17,126,102,0],[127,17,127,18,0],[128,21,128,76,0],[129,21,129,33,0],[132,17,132,42,0],[133,13,133,14,0],[136,19,136,31,0],[137,13,137,14,0],[138,13,138,14,0],[146,19,146,91,0],[147,13,147,14,0],[148,13,148,14,0],[151,13,151,14,0],[152,17,152,114,0],[153,13,153,14,0],[156,13,156,14,0],[158,17,158,36,0],[159,13,159,14,0],[162,13,162,14,0],[164,17,164,36,0],[165,13,165,14,0],[172,23,172,129,0],[173,17,173,18,0],[174,21,174,66,0],[175,17,175,18,0],[178,24,178,54,0],[182,13,182,14,0],[184,13,184,14,0]]);
+    </script>
+  </body>
+</html>

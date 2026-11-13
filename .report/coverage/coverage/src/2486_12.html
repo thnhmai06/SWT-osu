@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/WikiOverlay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using System.Threading;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Game.Extensions;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.Wiki;
+
+namespace osu.Game.Overlays
+{
+    public partial class WikiOverlay : OnlineOverlay&lt;WikiHeader&gt;
+    {
+        public const string INDEX_PATH = @&quot;Main_page&quot;;
+
+        public string CurrentPath =&gt; path.Value;
+
+        private readonly Bindable&lt;string&gt; path = new Bindable&lt;string&gt;(INDEX_PATH);
+        private readonly Bindable&lt;APIWikiPage?&gt; wikiData = new Bindable&lt;APIWikiPage?&gt;();
+        private readonly IBindable&lt;Language&gt; language = new Bindable&lt;Language&gt;();
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [Resolved]
+        private OsuGameBase game { get; set; } = null!;
+
+        private GetWikiRequest? request;
+        private CancellationTokenSource? cancellationToken;
+        private WikiArticlePage? articlePage;
+
+        private bool displayUpdateRequired = true;
+
+        public WikiOverlay()
+            : base(OverlayColourScheme.Orange, false)
+        {
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            path.BindValueChanged(onPathChanged);
+            wikiData.BindTo(Header.WikiPageData);
+
+            language.BindTo(game.CurrentLanguage);
+            language.BindValueChanged(onLangChanged);
+        }
+
+        public void ShowPage(string pagePath = INDEX_PATH)
+        {
+            path.Value = pagePath.Trim(&#39;/&#39;);
+            Show();
+        }
+
+        protected override WikiHeader CreateHeader() =&gt; new WikiHeader
+        {
+            ShowIndexPage = () =&gt; ShowPage(),
+            ShowParentPage = showParentPage,
+        };
+
+        protected override void PopIn()
+        {
+            base.PopIn();
+
+            if (displayUpdateRequired)
+            {
+                path.TriggerChange();
+                displayUpdateRequired = false;
+            }
+        }
+
+        protected override void PopOutComplete()
+        {
+            base.PopOutComplete();
+            displayUpdateRequired = true;
+        }
+
+        protected void LoadDisplay(Drawable display)
+        {
+            ScrollFlow.ScrollToStart();
+            LoadComponentAsync(display, loaded =&gt;
+            {
+                Child = loaded;
+                Loading.Hide();
+            }, (cancellationToken = new CancellationTokenSource()).Token);
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            if (articlePage != null)
+            {
+                articlePage.SidebarContainer.Height = DrawHeight;
+                articlePage.SidebarContainer.Y = (float)Math.Clamp(ScrollFlow.Current - Header.DrawHeight, 0, Math.Max(ScrollFlow.ScrollContent.DrawHeight - DrawHeight - Header.DrawHeight, 0));
+            }
+        }
+
+        private void loadPage(string path, Language lang)
+        {
+            cancellationToken?.Cancel();
+            request?.Cancel();
+
+            // Language code + path, or just path1 + path2 in case
+            string[] values = path.Split(&#39;/&#39;, 2);
+
+            if (values.Length &gt; 1 &amp;&amp; LanguageExtensions.TryParseCultureCode(values[0], out var parsedLang))
+                request = new GetWikiRequest(values[1], parsedLang);
+            else
+                request = new GetWikiRequest(path, lang);
+
+            Loading.Show();
+
+            request.Success += response =&gt; Schedule(() =&gt; onSuccess(response));
+            request.Failure += ex =&gt;
+            {
+                if (ex is not OperationCanceledException)
+                    Schedule(onFail, request.Path);
+            };
+
+            api.PerformAsync(request);
+        }
+
+        private void onPathChanged(ValueChangedEvent&lt;string&gt; e)
+        {
+            // the path could change as a result of redirecting to a newer location of the same page.
+            // we already have the correct wiki data, so we can safely return here.
+            if (e.NewValue == wikiData.Value?.Path)
+                return;
+
+            if (e.NewValue == &quot;error&quot;)
+                return;
+
+            loadPage(e.NewValue, language.Value);
+        }
+
+        private void onLangChanged(ValueChangedEvent&lt;Language&gt; e)
+        {
+            // Path unmodified, just reload the page with new language value.
+            loadPage(path.Value, e.NewValue);
+        }
+
+        private void onSuccess(APIWikiPage response)
+        {
+            wikiData.Value = response;
+            path.Value = response.Path;
+
+            if (response.Layout.Equals(INDEX_PATH, StringComparison.OrdinalIgnoreCase))
+            {
+                LoadDisplay(new WikiMainPage
+                {
+                    Markdown = response.Markdown,
+                    Padding = new MarginPadding
+                    {
+                        Vertical = 20,
+                        Horizontal = HORIZONTAL_PADDING,
+                    },
+                });
+            }
+            else
+            {
+                LoadDisplay(articlePage = new WikiArticlePage($@&quot;{api.Endpoints.WebsiteUrl}/wiki/{path.Value}/&quot;, response.Markdown));
+            }
+        }
+
+        private void onFail(string originalPath)
+        {
+            wikiData.Value = null;
+            path.Value = &quot;error&quot;;
+
+            LoadDisplay(articlePage = new WikiArticlePage($@&quot;{api.Endpoints.WebsiteUrl}/wiki/&quot;,
+                $&quot;Something went wrong when trying to fetch page \&quot;{originalPath}\&quot;.\n\n[Return to the main page]({INDEX_PATH}).&quot;));
+        }
+
+        private void showParentPage()
+        {
+            string parentPath = string.Join(&quot;/&quot;, path.Value.Split(&#39;/&#39;).SkipLast(1));
+            ShowPage(parentPath);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            cancellationToken?.Cancel();
+            request?.Cancel();
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[23,38,23,48,0],[25,9,25,83,0],[26,9,26,89,0],[27,9,27,82,0],[30,36,30,40,0],[30,41,30,45,0],[30,50,30,55,0],[33,36,33,40,0],[33,41,33,45,0],[33,50,33,55,0],[39,9,39,51,0],[42,15,42,54,0],[43,9,43,10,0],[44,9,44,10,0],[47,9,47,10,0],[48,13,48,33,0],[50,13,50,50,0],[51,13,51,50,0],[53,13,53,51,0],[54,13,54,54,0],[55,9,55,10,0],[58,9,58,10,0],[59,13,59,45,0],[60,13,60,20,0],[61,9,61,10,0],[63,57,65,35,0],[65,35,65,45,0],[65,45,67,10,0],[70,9,70,10,0],[71,13,71,26,0],[73,13,73,39,0],[74,13,74,14,0],[75,17,75,38,0],[76,17,76,47,0],[77,13,77,14,0],[78,9,78,10,0],[81,9,81,10,0],[82,13,82,35,0],[83,13,83,42,0],[84,9,84,10,0],[87,9,87,10,0],[88,13,88,40,0],[89,13,90,13,0],[90,13,90,14,0],[90,14,91,17,0],[91,17,91,32,0],[91,32,92,17,0],[92,17,92,32,0],[92,32,93,13,0],[93,13,93,14,0],[93,14,93,75,0],[94,9,94,10,0],[97,9,97,10,0],[98,13,98,40,0],[100,13,100,37,0],[101,13,101,14,0],[102,17,102,66,0],[103,17,103,194,0],[104,13,104,14,0],[105,9,105,10,0],[108,9,108,10,0],[109,13,109,41,0],[110,13,110,31,0],[113,13,113,50,0],[115,13,115,108,0],[116,17,116,69,0],[118,17,118,58,0],[120,13,120,28,0],[122,13,122,44,0],[122,44,122,59,0],[122,59,122,78,0],[122,78,122,79,0],[122,79,122,80,0],[123,13,124,13,0],[124,13,124,14,0],[124,14,125,17,0],[125,17,125,58,0],[125,58,126,21,0],[126,21,126,52,0],[126,52,127,13,0],[127,13,127,14,0],[127,14,127,15,0],[129,13,129,39,0],[130,9,130,10,0],[133,9,133,10,0],[136,13,136,52,0],[137,17,137,24,0],[139,13,139,39,0],[140,17,140,24,0],[142,13,142,50,0],[143,9,143,10,0],[146,9,146,10,0],[148,13,148,46,0],[149,9,149,10,0],[152,9,152,10,0],[153,13,153,39,0],[154,13,154,40,0],[156,13,156,88,0],[157,13,157,14,0],[158,17,166,20,0],[167,13,167,14,0],[169,13,169,14,0],[170,17,170,134,0],[171,13,171,14,0],[172,9,172,10,0],[175,9,175,10,0],[176,13,176,35,0],[177,13,177,34,0],[179,13,180,133,0],[181,9,181,10,0],[184,9,184,10,0],[185,13,185,85,0],[186,13,186,34,0],[187,9,187,10,0],[190,9,190,10,0],[191,13,191,41,0],[192,13,192,31,0],[193,13,193,39,0],[194,9,194,10,0]]);
+    </script>
+  </body>
+</html>

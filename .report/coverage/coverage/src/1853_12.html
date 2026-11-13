@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/Participants/TeamDisplay.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Graphics.UserInterface;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Online.Multiplayer;
+using osu.Game.Online.Multiplayer.MatchTypes.TeamVersus;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer.Participants
+{
+    internal partial class TeamDisplay : CompositeDrawable, IHasCurrentValue&lt;Slot&gt;
+    {
+        public Bindable&lt;Slot&gt; Current
+        {
+            get =&gt; current.Current;
+            set =&gt; current.Current = value;
+        }
+
+        private readonly BindableWithCurrent&lt;Slot&gt; current = new BindableWithCurrent&lt;Slot&gt;(Slot.FromUser(new MultiplayerRoomUser(-1)));
+
+        [Resolved]
+        private OsuColour colours { get; set; } = null!;
+
+        [Resolved]
+        private MultiplayerClient client { get; set; } = null!;
+
+        private OsuClickableContainer clickableContent = null!;
+        private Drawable box = null!;
+        private SpriteIcon lockIcon = null!;
+        private Sample? sampleTeamSwap;
+
+        public TeamDisplay()
+        {
+            RelativeSizeAxes = Axes.Y;
+            AutoSizeAxes = Axes.X;
+            Margin = new MarginPadding { Horizontal = 3 };
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            InternalChild = clickableContent = new OsuClickableContainer
+            {
+                Width = 15,
+                Alpha = 0,
+                Scale = new Vector2(0, 1),
+                RelativeSizeAxes = Axes.Y,
+                Children = new[]
+                {
+                    box = new Container
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        CornerRadius = 5,
+                        Masking = true,
+                        Scale = new Vector2(0, 1),
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Child = new Box
+                        {
+                            Colour = Color4.White,
+                            RelativeSizeAxes = Axes.Both,
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                        }
+                    },
+                    lockIcon = new SpriteIcon
+                    {
+                        Anchor = Anchor.Centre,
+                        Origin = Anchor.Centre,
+                        Size = new Vector2(12),
+                        Icon = FontAwesome.Solid.Lock,
+                        Colour = Colour4.Black,
+                        Alpha = 0,
+                    }
+                }
+            };
+
+            sampleTeamSwap = audio.Samples.Get(@&quot;Multiplayer/team-swap&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            client.RoomUpdated += onRoomUpdated;
+            current.BindValueChanged(_ =&gt; updateState(false), true);
+        }
+
+        private void changeTeam()
+        {
+            client.SendMatchRequest(new ChangeTeamRequest
+            {
+                TeamID = ((client.LocalUser?.MatchState as TeamVersusUserState)?.TeamID + 1) % 2 ?? 0,
+            }).FireAndForget();
+        }
+
+        public int? DisplayedTeam { get; private set; }
+
+        private void onRoomUpdated() =&gt; Scheduler.AddOnce(() =&gt; updateState(true));
+
+        private void updateState(bool playSamples)
+        {
+            // we don&#39;t have a way of knowing when an individual user&#39;s state has updated, so just handle on RoomUpdated for now.
+
+            var slot = current.Value;
+            var userRoomState = slot.IsEmpty ? null : client.Room?.Users.FirstOrDefault(u =&gt; u.Equals(slot.User))?.MatchState;
+
+            bool roomLocked = (client.Room?.MatchState as TeamVersusRoomState)?.Locked == true;
+
+            if (!slot.IsEmpty &amp;&amp; client.LocalUser?.Equals(slot.User) == true &amp;&amp; !roomLocked)
+            {
+                clickableContent.Action = changeTeam;
+                clickableContent.TooltipText = &quot;Change team&quot;;
+            }
+            else
+            {
+                clickableContent.Action = null;
+                clickableContent.TooltipText = default;
+            }
+
+            const double duration = 400;
+
+            lockIcon.FadeTo(roomLocked ? 0.4f : 0, duration, Easing.OutQuint);
+
+            int? newTeam = (userRoomState as TeamVersusUserState)?.TeamID;
+
+            if (newTeam == DisplayedTeam)
+                return;
+
+            // only play the sample if an already valid team changes to another valid team.
+            // this avoids playing a sound for each user if the match type is changed to/from a team mode.
+            if (playSamples &amp;&amp; newTeam != null &amp;&amp; DisplayedTeam != null)
+                sampleTeamSwap?.Play();
+
+            DisplayedTeam = newTeam;
+
+            if (DisplayedTeam != null)
+            {
+                box.FadeColour(getColourForTeam(DisplayedTeam.Value), duration, Easing.OutQuint);
+                box.ScaleTo(new Vector2(box.Scale.X &lt; 0 ? 1 : -1, 1), duration, Easing.OutQuint);
+
+                clickableContent.ScaleTo(Vector2.One, duration, Easing.OutQuint);
+                clickableContent.FadeIn(duration);
+            }
+            else
+            {
+                clickableContent.ScaleTo(new Vector2(0, 1), duration, Easing.OutQuint);
+                clickableContent.FadeOut(duration);
+            }
+        }
+
+        private ColourInfo getColourForTeam(int id)
+        {
+            switch (id)
+            {
+                default:
+                    return colours.Red;
+
+                case 1:
+                    return colours.Blue;
+            }
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (client.IsNotNull())
+                client.RoomUpdated -= onRoomUpdated;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,20,29,35,0],[30,20,30,43,0],[33,9,33,136,0],[36,37,36,41,0],[36,42,36,46,0],[36,51,36,56,0],[39,44,39,48,0],[39,49,39,53,0],[39,58,39,63,0],[41,9,41,64,0],[42,9,42,38,0],[43,9,43,45,0],[46,9,46,29,0],[47,9,47,10,0],[48,13,48,39,0],[49,13,49,35,0],[50,13,50,59,0],[51,9,51,10,0],[55,9,55,10,0],[56,13,90,15,0],[92,13,92,74,0],[93,9,93,10,0],[96,9,96,10,0],[97,13,97,33,0],[99,13,99,49,0],[100,13,100,43,0],[100,43,100,61,0],[100,61,100,69,0],[101,9,101,10,0],[104,9,104,10,0],[105,13,108,32,0],[109,9,109,10,0],[111,37,111,41,0],[111,42,111,54,0],[113,41,113,65,0],[113,65,113,82,0],[113,82,113,83,0],[116,9,116,10,0],[119,13,119,38,0],[120,13,120,94,0],[120,94,120,113,0],[120,113,120,127,0],[122,13,122,96,0],[124,13,124,93,0],[125,13,125,14,0],[126,17,126,54,0],[127,17,127,62,0],[128,13,128,14,0],[130,13,130,14,0],[131,17,131,48,0],[132,17,132,56,0],[133,13,133,14,0],[137,13,137,79,0],[139,13,139,75,0],[141,13,141,42,0],[142,17,142,24,0],[146,13,146,73,0],[147,17,147,40,0],[149,13,149,37,0],[151,13,151,39,0],[152,13,152,14,0],[153,17,153,98,0],[154,17,154,98,0],[156,17,156,82,0],[157,17,157,51,0],[158,13,158,14,0],[160,13,160,14,0],[161,17,161,88,0],[162,17,162,52,0],[163,13,163,14,0],[164,9,164,10,0],[167,9,167,10,0],[168,13,168,24,0],[171,21,171,40,0],[174,21,174,41,0],[176,9,176,10,0],[179,9,179,10,0],[180,13,180,39,0],[182,13,182,36,0],[183,17,183,53,0],[184,9,184,10,0]]);
+    </script>
+  </body>
+</html>

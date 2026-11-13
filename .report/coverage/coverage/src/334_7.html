@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game.Tournament/Screens/Drawings/Components/ScrollingTeamContainer.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Colour;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Threading;
+using osu.Game.Graphics;
+using osu.Game.Tournament.Components;
+using osu.Game.Tournament.Models;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Tournament.Screens.Drawings.Components
+{
+    public partial class ScrollingTeamContainer : Container
+    {
+        public event Action? OnScrollStarted;
+        public event Action&lt;TournamentTeam&gt;? OnSelected;
+
+        private readonly List&lt;TournamentTeam&gt; availableTeams = new List&lt;TournamentTeam&gt;();
+
+        private readonly Container tracker;
+
+#pragma warning disable 649
+        // set via reflection.
+        private float speed;
+#pragma warning restore 649
+
+        private int expiredCount;
+
+        private float offset;
+        private float timeOffset;
+        private float leftPos =&gt; offset + timeOffset + expiredCount * ScrollingTeam.WIDTH;
+
+        private double lastTime;
+
+        private ScheduledDelegate? delayedStateChangeDelegate;
+
+        public ScrollingTeamContainer()
+        {
+            AutoSizeAxes = Axes.Y;
+
+            Children = new Drawable[]
+            {
+                tracker = new Container
+                {
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+
+                    AutoSizeAxes = Axes.Both,
+                    Colour = OsuColour.Gray(0.33f),
+
+                    Masking = true,
+                    CornerRadius = 10f,
+                    Alpha = 0,
+
+                    Children = new[]
+                    {
+                        new Box
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.BottomCentre,
+                            Size = new Vector2(2, 55),
+
+                            Colour = ColourInfo.GradientVertical(Color4.Transparent, Color4.White)
+                        },
+                        new Box
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.TopCentre,
+                            Size = new Vector2(2, 55),
+
+                            Colour = ColourInfo.GradientVertical(Color4.White, Color4.Transparent)
+                        }
+                    }
+                }
+            };
+        }
+
+        private ScrollState scrollState;
+
+        private void setScrollState(ScrollState newState)
+        {
+            if (scrollState == newState)
+                return;
+
+            delayedStateChangeDelegate?.Cancel();
+
+            switch (scrollState = newState)
+            {
+                case ScrollState.Scrolling:
+                    resetSelected();
+
+                    OnScrollStarted?.Invoke();
+
+                    speedTo(1000f, 200);
+                    tracker.FadeOut(100);
+                    break;
+
+                case ScrollState.Stopping:
+                    speedTo(0f, 2000);
+                    tracker.FadeIn(200);
+
+                    delayedStateChangeDelegate = Scheduler.AddDelayed(() =&gt; setScrollState(ScrollState.Stopped), 2300);
+                    break;
+
+                case ScrollState.Stopped:
+                    // Find closest to center
+                    if (!Children.Any())
+                        break;
+
+                    ScrollingTeam? closest = null;
+
+                    foreach (var c in Children)
+                    {
+                        if (!(c is ScrollingTeam stc))
+                            continue;
+
+                        if (closest == null)
+                        {
+                            closest = stc;
+                            continue;
+                        }
+
+                        float o = Math.Abs(c.Position.X + c.DrawWidth / 2f - DrawWidth / 2f);
+                        float lastOffset = Math.Abs(closest.Position.X + closest.DrawWidth / 2f - DrawWidth / 2f);
+
+                        if (o &lt; lastOffset)
+                            closest = stc;
+                    }
+
+                    Debug.Assert(closest != null);
+
+                    offset += DrawWidth / 2f - (closest.Position.X + closest.DrawWidth / 2f);
+
+                    ScrollingTeam st = closest;
+
+                    availableTeams.RemoveAll(at =&gt; at == st.Team);
+
+                    st.Selected = true;
+                    OnSelected?.Invoke(st.Team.AsNonNull());
+
+                    delayedStateChangeDelegate = Scheduler.AddDelayed(() =&gt; setScrollState(ScrollState.Idle), 10000);
+                    break;
+
+                case ScrollState.Idle:
+                    resetSelected();
+
+                    OnScrollStarted?.Invoke();
+
+                    speedTo(40f, 200);
+                    tracker.FadeOut(100);
+                    break;
+            }
+        }
+
+        public void AddTeam(TournamentTeam team)
+        {
+            if (availableTeams.Contains(team))
+                return;
+
+            availableTeams.Add(team);
+
+            RemoveAll(c =&gt; c is ScrollingTeam, true);
+            setScrollState(ScrollState.Idle);
+        }
+
+        public void AddTeams(IEnumerable&lt;TournamentTeam&gt;? teams)
+        {
+            if (teams == null)
+                return;
+
+            foreach (TournamentTeam t in teams)
+                AddTeam(t);
+        }
+
+        public void ClearTeams()
+        {
+            availableTeams.Clear();
+            RemoveAll(c =&gt; c is ScrollingTeam, true);
+            setScrollState(ScrollState.Idle);
+        }
+
+        public void RemoveTeam(TournamentTeam team)
+        {
+            availableTeams.Remove(team);
+
+            foreach (var c in Children)
+            {
+                if (c is ScrollingTeam st)
+                {
+                    if (st.Team == team)
+                    {
+                        st.FadeOut(200);
+                        st.Expire();
+                    }
+                }
+            }
+        }
+
+        public void StartScrolling()
+        {
+            if (availableTeams.Count == 0)
+                return;
+
+            setScrollState(ScrollState.Scrolling);
+        }
+
+        public void StopScrolling()
+        {
+            if (availableTeams.Count == 0)
+                return;
+
+            switch (scrollState)
+            {
+                case ScrollState.Stopped:
+                case ScrollState.Idle:
+                    return;
+            }
+
+            setScrollState(ScrollState.Stopping);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            setScrollState(ScrollState.Idle);
+        }
+
+        protected override void UpdateAfterChildren()
+        {
+            timeOffset -= (float)(Time.Current - lastTime) / 1000 * speed;
+            lastTime = Time.Current;
+
+            if (availableTeams.Count &gt; 0)
+            {
+                // Fill more than required to account for transformation + scrolling speed
+                while (Children.Count(c =&gt; c is ScrollingTeam) &lt; DrawWidth * 2 / ScrollingTeam.WIDTH)
+                    addFlags();
+            }
+
+            float pos = leftPos;
+
+            foreach (var c in Children)
+            {
+                if (!(c is ScrollingTeam))
+                    continue;
+
+                if (c.Position.X + c.DrawWidth &lt; 0)
+                {
+                    c.ClearTransforms();
+                    c.Expire();
+                    expiredCount++;
+                }
+                else
+                {
+                    c.MoveToX(pos, 100);
+                    c.FadeTo(1.0f - Math.Abs(pos - DrawWidth / 2f) / (DrawWidth / 2.5f), 100);
+                }
+
+                pos += ScrollingTeam.WIDTH;
+            }
+        }
+
+        private void addFlags()
+        {
+            foreach (TournamentTeam t in availableTeams)
+            {
+                Add(new ScrollingTeam(t)
+                {
+                    X = leftPos + DrawWidth
+                });
+            }
+        }
+
+        private void resetSelected()
+        {
+            foreach (var c in Children)
+            {
+                if (c is ScrollingTeam st)
+                {
+                    if (st.Selected)
+                    {
+                        st.Selected = false;
+                        RemoveTeam(st.Team);
+                    }
+                }
+            }
+        }
+
+        private void speedTo(float value, double duration = 0, Easing easing = Easing.None) =&gt;
+            this.TransformTo(nameof(speed), value, duration, easing);
+
+        protected enum ScrollState
+        {
+            None,
+            Idle,
+            Stopping,
+            Stopped,
+            Scrolling
+        }
+
+        public partial class ScrollingTeam : DrawableTournamentTeam
+        {
+            public new TournamentTeam Team =&gt; base.Team.AsNonNull();
+
+            public const float WIDTH = 58;
+            public const float HEIGHT = 44;
+
+            private readonly Box outline;
+
+            private bool selected;
+
+            public bool Selected
+            {
+                get =&gt; selected;
+
+                set
+                {
+                    selected = value;
+
+                    if (selected)
+                        outline.FadeIn(100);
+                    else
+                        outline.FadeOut(100);
+                }
+            }
+
+            public ScrollingTeam(TournamentTeam team)
+                : base(team)
+            {
+                Anchor = Anchor.CentreLeft;
+                Origin = Anchor.CentreLeft;
+
+                Size = new Vector2(WIDTH, HEIGHT);
+                Masking = true;
+                CornerRadius = 8f;
+
+                Alpha = 0;
+
+                Flag.Anchor = Anchor.Centre;
+                Flag.Origin = Anchor.Centre;
+                Flag.Scale = new Vector2(0.7f);
+
+                InternalChildren = new Drawable[]
+                {
+                    outline = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Colour = OsuColour.Gray(0.33f),
+                        Alpha = 0
+                    },
+                    Flag
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,9,27,91,0],[40,34,40,90,0],[46,9,46,40,0],[47,9,47,10,0],[48,13,48,35,0],[50,13,84,15,0],[85,9,85,10,0],[90,9,90,10,0],[91,13,91,41,0],[92,17,92,24,0],[94,13,94,50,0],[99,21,99,37,0],[101,21,101,47,0],[103,21,103,41,0],[104,21,104,42,0],[105,21,105,27,0],[108,21,108,39,0],[109,21,109,41,0],[111,21,111,77,0],[111,77,111,112,0],[111,112,111,120,0],[112,21,112,27,0],[116,21,116,41,0],[117,25,117,31,0],[119,21,119,51,0],[121,21,121,28,0],[121,30,121,35,0],[121,36,121,38,0],[121,39,121,47,0],[122,21,122,22,0],[123,25,123,55,0],[124,29,124,38,0],[126,25,126,45,0],[127,25,127,26,0],[128,29,128,43,0],[129,29,129,38,0],[132,25,132,94,0],[133,25,133,115,0],[135,25,135,44,0],[136,29,136,43,0],[137,21,137,22,0],[139,21,139,51,0],[141,21,141,94,0],[143,21,143,48,0],[145,21,145,52,0],[145,52,145,65,0],[145,65,145,67,0],[147,21,147,40,0],[148,21,148,61,0],[150,21,150,77,0],[150,77,150,109,0],[150,109,150,118,0],[151,21,151,27,0],[154,21,154,37,0],[156,21,156,47,0],[158,21,158,39,0],[159,21,159,42,0],[160,21,160,27,0],[162,9,162,10,0],[165,9,165,10,0],[166,13,166,47,0],[167,17,167,24,0],[169,13,169,38,0],[171,13,171,28,0],[171,28,171,46,0],[171,46,171,54,0],[172,13,172,46,0],[173,9,173,10,0],[176,9,176,10,0],[177,13,177,31,0],[178,17,178,24,0],[180,13,180,20,0],[180,22,180,38,0],[180,39,180,41,0],[180,42,180,47,0],[181,17,181,28,0],[182,9,182,10,0],[185,9,185,10,0],[186,13,186,36,0],[187,13,187,28,0],[187,28,187,46,0],[187,46,187,54,0],[188,13,188,46,0],[189,9,189,10,0],[192,9,192,10,0],[193,13,193,41,0],[195,13,195,20,0],[195,22,195,27,0],[195,28,195,30,0],[195,31,195,39,0],[196,13,196,14,0],[197,17,197,43,0],[198,17,198,18,0],[199,21,199,41,0],[200,21,200,22,0],[201,25,201,41,0],[202,25,202,37,0],[203,21,203,22,0],[204,17,204,18,0],[205,13,205,14,0],[206,9,206,10,0],[209,9,209,10,0],[210,13,210,43,0],[211,17,211,24,0],[213,13,213,51,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,43,0],[219,17,219,24,0],[221,13,221,33,0],[225,21,225,28,0],[228,13,228,50,0],[229,9,229,10,0],[232,9,232,10,0],[233,13,233,33,0],[234,13,234,46,0],[235,9,235,10,0],[238,9,238,10,0],[239,13,239,75,0],[240,13,240,37,0],[242,13,242,42,0],[243,13,243,14,0],[245,17,245,44,0],[245,44,245,62,0],[245,62,245,102,0],[246,21,246,32,0],[247,13,247,14,0],[249,13,249,33,0],[251,13,251,20,0],[251,22,251,27,0],[251,28,251,30,0],[251,31,251,39,0],[252,13,252,14,0],[253,17,253,43,0],[254,21,254,30,0],[256,17,256,52,0],[257,17,257,18,0],[258,21,258,41,0],[259,21,259,32,0],[260,21,260,36,0],[261,17,261,18,0],[263,17,263,18,0],[264,21,264,41,0],[265,21,265,95,0],[266,17,266,18,0],[268,17,268,44,0],[269,13,269,14,0],[270,9,270,10,0],[273,9,273,10,0],[274,13,274,20,0],[274,22,274,38,0],[274,39,274,41,0],[274,42,274,56,0],[275,13,275,14,0],[276,17,279,20,0],[280,13,280,14,0],[281,9,281,10,0],[284,9,284,10,0],[285,13,285,20,0],[285,22,285,27,0],[285,28,285,30,0],[285,31,285,39,0],[286,13,286,14,0],[287,17,287,43,0],[288,17,288,18,0],[289,21,289,37,0],[290,21,290,22,0],[291,25,291,45,0],[292,25,292,45,0],[293,21,293,22,0],[294,17,294,18,0],[295,13,295,14,0],[296,9,296,10,0],[299,13,299,69,0],[312,47,312,68,0],[323,24,323,32,0],[326,17,326,18,0],[327,21,327,38,0],[329,21,329,34,0],[330,25,330,45,0],[332,25,332,46,0],[333,17,333,18,0],[337,19,337,29,0],[338,13,338,14,0],[339,17,339,44,0],[340,17,340,44,0],[342,17,342,51,0],[343,17,343,32,0],[344,17,344,35,0],[346,17,346,27,0],[348,17,348,45,0],[349,17,349,45,0],[350,17,350,48,0],[352,17,361,19,0],[362,13,362,14,0]]);
+    </script>
+  </body>
+</html>

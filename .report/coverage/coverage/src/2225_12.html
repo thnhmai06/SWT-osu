@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Scoring/ScoreImporter.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using Newtonsoft.Json;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Game.Beatmaps;
+using osu.Game.Database;
+using osu.Game.IO.Archives;
+using osu.Game.Rulesets;
+using osu.Game.Scoring.Legacy;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Utils;
+using Realms;
+
+namespace osu.Game.Scoring
+{
+    public class ScoreImporter : RealmArchiveModelImporter&lt;ScoreInfo&gt;
+    {
+        public override IEnumerable&lt;string&gt; HandledExtensions =&gt; new[] { &quot;.osr&quot; };
+
+        protected override string[] HashableFileTypes =&gt; new[] { &quot;.osr&quot; };
+
+        private readonly RulesetStore rulesets;
+        private readonly Func&lt;BeatmapManager&gt; beatmaps;
+
+        private readonly IAPIProvider api;
+
+        public ScoreImporter(RulesetStore rulesets, Func&lt;BeatmapManager&gt; beatmaps, Storage storage, RealmAccess realm, IAPIProvider api)
+            : base(storage, realm)
+        {
+            this.rulesets = rulesets;
+            this.beatmaps = beatmaps;
+            this.api = api;
+        }
+
+        protected override ScoreInfo? CreateModel(ArchiveReader archive, ImportParameters parameters)
+        {
+            string name = archive.Filenames.First(f =&gt; f.EndsWith(&quot;.osr&quot;, StringComparison.OrdinalIgnoreCase));
+
+            using (var stream = archive.GetStream(name))
+            {
+                try
+                {
+                    return new DatabasedLegacyScoreDecoder(rulesets, beatmaps()).Parse(stream).ScoreInfo;
+                }
+                catch (LegacyScoreDecoder.BeatmapNotFoundException notFound)
+                {
+                    Logger.Log($@&quot;Score &#39;{archive.Name}&#39; failed to import: no corresponding beatmap with the hash &#39;{notFound.Hash}&#39; could be found.&quot;, LoggingTarget.Database);
+
+                    if (!parameters.Batch)
+                    {
+                        // In the case of a missing beatmap, let&#39;s attempt to resolve it and show a prompt to the user to download the required beatmap.
+                        var req = new GetBeatmapRequest(new BeatmapInfo { MD5Hash = notFound.Hash });
+                        req.Success += res =&gt; PostNotification?.Invoke(new MissingBeatmapNotification(res, notFound.Hash, archive));
+                        api.Queue(req);
+                    }
+
+                    return null;
+                }
+                catch (Exception e)
+                {
+                    Logger.Log($@&quot;Failed to parse headers of score &#39;{archive.Name}&#39;: {e}.&quot;, LoggingTarget.Database);
+                    return null;
+                }
+            }
+        }
+
+        public Score GetScore(ScoreInfo score) =&gt; new LegacyDatabasedScore(score, rulesets, beatmaps(), Files.Store);
+
+        protected override void Populate(ScoreInfo model, ArchiveReader? archive, Realm realm, CancellationToken cancellationToken = default)
+        {
+            Debug.Assert(model.BeatmapInfo != null);
+
+            // Ensure the beatmap is not detached.
+            if (!model.BeatmapInfo.IsManaged)
+                model.BeatmapInfo = realm.Find&lt;BeatmapInfo&gt;(model.BeatmapInfo.ID)!;
+
+            if (!model.Ruleset.IsManaged)
+                model.Ruleset = realm.Find&lt;RulesetInfo&gt;(model.Ruleset.ShortName)!;
+
+            // These properties are known to be non-null, but these final checks ensure a null hasn&#39;t come from somewhere (or the refetch has failed).
+            // Under no circumstance do we want these to be written to realm as null.
+            ArgumentNullException.ThrowIfNull(model.BeatmapInfo);
+            ArgumentNullException.ThrowIfNull(model.Ruleset);
+
+            if (!ModUtils.CheckCompatibleSet(model.Mods))
+                throw new InvalidOperationException(@&quot;The score specifies an incompatible set of mods!&quot;);
+
+            if (string.IsNullOrEmpty(model.StatisticsJson))
+                model.StatisticsJson = JsonConvert.SerializeObject(model.Statistics);
+
+            if (string.IsNullOrEmpty(model.MaximumStatisticsJson))
+                model.MaximumStatisticsJson = JsonConvert.SerializeObject(model.MaximumStatistics);
+        }
+
+        // Very naive local caching to improve performance of large score imports (where the username is usually the same for most or all scores).
+
+        // TODO: `UserLookupCache` cannot currently be used here because of async foibles.
+        // It only supports lookups by user ID (username would require web changes), and even then the ID lookups cannot be used.
+        // That is because that component provides an async interface, and async functions cannot be consumed safely here due to the rigid structure of `RealmArchiveModelImporter`.
+        // The importer has two paths, one async and one sync; the async path runs the sync path in a task.
+        // This means that sometimes `PostImport()` is called from a sync context, and sometimes from an async one, whilst itself being a sync method.
+        // That in turn makes `.GetResultSafely()` not callable inside `PostImport()`, as it will throw when called from an async context,
+        private readonly Dictionary&lt;int, APIUser&gt; idLookupCache = new Dictionary&lt;int, APIUser&gt;();
+        private readonly Dictionary&lt;string, APIUser&gt; usernameLookupCache = new Dictionary&lt;string, APIUser&gt;();
+
+        protected override void PostImport(ScoreInfo model, Realm realm, ImportParameters parameters)
+        {
+            base.PostImport(model, realm, parameters);
+
+            populateUserDetails(model);
+
+            Debug.Assert(model.BeatmapInfo != null);
+
+            // This needs to be run after user detail population to ensure we have a valid user id.
+            if (api.IsLoggedIn &amp;&amp; api.LocalUser.Value.OnlineID == model.UserID &amp;&amp; (model.BeatmapInfo.LastPlayed == null || model.Date &gt; model.BeatmapInfo.LastPlayed))
+                model.BeatmapInfo.LastPlayed = model.Date;
+        }
+
+        /// &lt;summary&gt;
+        /// Legacy replays only store a username.
+        /// This will populate a user ID during import.
+        /// &lt;/summary&gt;
+        private void populateUserDetails(ScoreInfo model)
+        {
+            if (model.RealmUser.OnlineID == APIUser.SYSTEM_USER_ID)
+                return;
+
+            if (model.RealmUser.OnlineID &gt; 1)
+            {
+                model.User = lookupUserById(model.RealmUser.OnlineID) ?? model.User;
+                return;
+            }
+
+            if (model.OnlineID &lt; 0 &amp;&amp; model.LegacyOnlineID &lt;= 0)
+                return;
+
+            model.User = lookupUserByName(model.RealmUser.Username) ?? model.User;
+        }
+
+        private APIUser? lookupUserById(int id)
+        {
+            if (idLookupCache.TryGetValue(id, out var existing))
+            {
+                return existing;
+            }
+
+            var userRequest = new GetUserRequest(id);
+
+            api.Perform(userRequest);
+
+            if (userRequest.Response is APIUser user)
+            {
+                APIUser cachedUser;
+
+                idLookupCache.TryAdd(id, cachedUser = new APIUser
+                {
+                    // Because this is a permanent cache, let&#39;s only store the pieces we&#39;re interested in,
+                    // rather than the full API response. If we start to store more than these three fields
+                    // in realm, this should be undone.
+                    Id = user.Id,
+                    Username = user.Username,
+                    CountryCode = user.CountryCode,
+                });
+
+                return cachedUser;
+            }
+
+            return null;
+        }
+
+        private APIUser? lookupUserByName(string username)
+        {
+            if (usernameLookupCache.TryGetValue(username, out var existing))
+            {
+                return existing;
+            }
+
+            var userRequest = new GetUserRequest(username);
+
+            api.Perform(userRequest);
+
+            if (userRequest.Response is APIUser user)
+            {
+                APIUser cachedUser;
+
+                usernameLookupCache.TryAdd(username, cachedUser = new APIUser
+                {
+                    // Because this is a permanent cache, let&#39;s only store the pieces we&#39;re interested in,
+                    // rather than the full API response. If we start to store more than these three fields
+                    // in realm, this should be undone.
+                    Id = user.Id,
+                    Username = user.Username,
+                    CountryCode = user.CountryCode,
+                });
+
+                return cachedUser;
+            }
+
+            return null;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,66,27,82,0],[29,58,29,74,0],[37,15,37,35,0],[38,9,38,10,0],[39,13,39,38,0],[40,13,40,38,0],[41,13,41,28,0],[42,9,42,10,0],[45,9,45,10,0],[46,13,46,56,0],[46,56,46,110,0],[46,110,46,112,0],[48,20,48,56,0],[49,13,49,14,0],[51,17,51,18,0],[52,21,52,106,0],[54,17,54,77,0],[55,17,55,18,0],[56,21,56,175,0],[58,21,58,43,0],[59,21,59,22,0],[61,25,61,102,0],[62,25,62,47,0],[62,47,62,132,0],[62,132,62,133,0],[63,25,63,40,0],[64,21,64,22,0],[66,21,66,33,0],[68,17,68,36,0],[69,17,69,18,0],[70,21,70,117,0],[71,21,71,33,0],[74,9,74,10,0],[76,51,76,117,0],[79,9,79,10,0],[80,13,80,53,0],[83,13,83,46,0],[84,17,84,84,0],[86,13,86,42,0],[87,17,87,83,0],[91,13,91,66,0],[92,13,92,62,0],[94,13,94,58,0],[95,17,95,106,0],[97,13,97,60,0],[98,17,98,86,0],[100,13,100,67,0],[101,17,101,100,0],[102,9,102,10,0],[112,9,112,98,0],[113,9,113,110,0],[116,9,116,10,0],[117,13,117,55,0],[119,13,119,40,0],[121,13,121,53,0],[124,13,124,167,0],[125,17,125,59,0],[126,9,126,10,0],[133,9,133,10,0],[134,13,134,68,0],[135,17,135,24,0],[137,13,137,46,0],[138,13,138,14,0],[139,17,139,85,0],[140,17,140,24,0],[143,13,143,65,0],[144,17,144,24,0],[146,13,146,83,0],[147,9,147,10,0],[150,9,150,10,0],[151,13,151,65,0],[152,13,152,14,0],[153,17,153,33,0],[156,13,156,54,0],[158,13,158,38,0],[160,13,160,54,0],[161,13,161,14,0],[164,17,172,20,0],[174,17,174,35,0],[177,13,177,25,0],[178,9,178,10,0],[181,9,181,10,0],[182,13,182,77,0],[183,13,183,14,0],[184,17,184,33,0],[187,13,187,60,0],[189,13,189,38,0],[191,13,191,54,0],[192,13,192,14,0],[195,17,203,20,0],[205,17,205,35,0],[208,13,208,25,0],[209,9,209,10,0]]);
+    </script>
+  </body>
+</html>

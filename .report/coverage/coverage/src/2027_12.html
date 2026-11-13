@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Menu/MainMenu.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Diagnostics;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Sprites;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Logging;
+using osu.Framework.Platform;
+using osu.Framework.Screens;
+using osu.Framework.Threading;
+using osu.Game.Audio;
+using osu.Game.Beatmaps;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Input.Bindings;
+using osu.Game.IO;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.Matchmaking;
+using osu.Game.Overlays;
+using osu.Game.Overlays.Dialog;
+using osu.Game.Overlays.SkinEditor;
+using osu.Game.Overlays.Volume;
+using osu.Game.Rulesets;
+using osu.Game.Screens.Backgrounds;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.OnlinePlay.DailyChallenge;
+using osu.Game.Screens.OnlinePlay.Multiplayer;
+using osu.Game.Screens.OnlinePlay.Playlists;
+using osu.Game.Screens.Select;
+using osu.Game.Seasonal;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Screens.Menu
+{
+    public partial class MainMenu : OsuScreen, IHandlePresentBeatmap, IKeyBindingHandler&lt;GlobalAction&gt;, ISamplePlaybackDisabler
+    {
+        public const float FADE_IN_DURATION = 300;
+
+        public const float FADE_OUT_DURATION = 400;
+
+        public override bool HideOverlaysOnEnter =&gt; Buttons == null || Buttons.State == ButtonSystemState.Initial;
+
+        public override bool AllowUserExit =&gt; false;
+
+        public override bool AllowExternalScreenChange =&gt; true;
+
+        public override bool? AllowGlobalTrackControl =&gt; true;
+
+        private MenuSideFlashes sideFlashes;
+
+        protected ButtonSystem Buttons;
+
+        [Resolved]
+        private GameHost host { get; set; }
+
+        [Resolved]
+        private INotificationOverlay notifications { get; set; }
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        [Resolved]
+        private IAPIProvider api { get; set; }
+
+        [Resolved]
+        private Storage storage { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private LoginOverlay login { get; set; }
+
+        [Resolved(canBeNull: true)]
+        private IDialogOverlay dialogOverlay { get; set; }
+
+        // used to stop kiai fountain samples when navigating to other screens
+        IBindable&lt;bool&gt; ISamplePlaybackDisabler.SamplePlaybackDisabled =&gt; samplePlaybackDisabled;
+        private readonly Bindable&lt;bool&gt; samplePlaybackDisabled = new Bindable&lt;bool&gt;();
+
+        protected override BackgroundScreen CreateBackground() =&gt; new BackgroundScreenDefault();
+
+        protected override bool PlayExitSound =&gt; false;
+
+        private Bindable&lt;double&gt; holdDelay;
+        private Bindable&lt;bool&gt; loginDisplayed;
+        private Bindable&lt;bool&gt; showMobileDisclaimer;
+
+        private HoldToExitGameOverlay holdToExitGameOverlay;
+
+        private bool exitConfirmedViaDialog;
+        private bool exitConfirmedViaHoldOrClick;
+
+        private ParallaxContainer buttonsContainer;
+        private SongTicker songTicker;
+        private Container logoTarget;
+        private OnlineMenuBanner onlineMenuBanner;
+        private MenuTipDisplay menuTipDisplay;
+        private FillFlowContainer bottomElementsFlow;
+        private SupporterDisplay supporterDisplay;
+
+        private Sample reappearSampleSwoosh;
+
+        [Resolved(canBeNull: true)]
+        private SkinEditorOverlay skinEditor { get; set; }
+
+        [CanBeNull]
+        private IDisposable logoProxy;
+
+        [BackgroundDependencyLoader(true)]
+        private void load(BeatmapListingOverlay beatmapListing, SettingsOverlay settings, OsuConfigManager config, SessionStatics statics, AudioManager audio)
+        {
+            holdDelay = config.GetBindable&lt;double&gt;(OsuSetting.UIHoldActivationDelay);
+            loginDisplayed = statics.GetBindable&lt;bool&gt;(Static.LoginOverlayDisplayed);
+            showMobileDisclaimer = config.GetBindable&lt;bool&gt;(OsuSetting.ShowMobileDisclaimer);
+
+            if (host.CanExit)
+            {
+                AddInternal(holdToExitGameOverlay = new HoldToExitGameOverlay
+                {
+                    Action = () =&gt;
+                    {
+                        exitConfirmedViaHoldOrClick = holdDelay.Value &gt; 0;
+                        this.Exit();
+                    }
+                });
+            }
+
+            AddRangeInternal(new[]
+            {
+                SeasonalUIConfig.ENABLED ? new MainMenuSeasonalLighting() : Empty(),
+                new GlobalScrollAdjustsVolume(),
+                buttonsContainer = new ParallaxContainer
+                {
+                    ParallaxAmount = 0.01f,
+                    Children = new Drawable[]
+                    {
+                        Buttons = new ButtonSystem
+                        {
+                            OnEditBeatmap = () =&gt;
+                            {
+                                Beatmap.SetDefault();
+                                this.Push(new EditorLoader());
+                            },
+                            OnEditSkin = () =&gt;
+                            {
+                                skinEditor?.Show();
+                            },
+                            OnSolo = loadSongSelect,
+                            OnMultiplayer = () =&gt; this.Push(new Multiplayer()),
+                            OnQuickPlay = loadQuickPlay,
+                            OnRankedPlay = loadRankedPlay,
+                            OnPlaylists = () =&gt; this.Push(new Playlists()),
+                            OnDailyChallenge = room =&gt;
+                            {
+                                if (statics.Get&lt;bool&gt;(Static.DailyChallengeIntroPlayed))
+                                    this.Push(new DailyChallenge(room));
+                                else
+                                    this.Push(new DailyChallengeIntro(room));
+                            },
+                            OnExit = e =&gt;
+                            {
+                                exitConfirmedViaHoldOrClick = e is MouseEvent;
+                                this.Exit();
+                            }
+                        }
+                    }
+                },
+                logoTarget = new Container { RelativeSizeAxes = Axes.Both, },
+                sideFlashes = SeasonalUIConfig.ENABLED ? new SeasonalMenuSideFlashes() : new MenuSideFlashes(),
+                songTicker = new SongTicker
+                {
+                    Anchor = Anchor.TopRight,
+                    Origin = Anchor.TopRight,
+                    Margin = new MarginPadding { Right = 15, Top = 5 }
+                },
+                // For now, this is too much alongside the seasonal lighting.
+                SeasonalUIConfig.ENABLED ? Empty() : new KiaiMenuFountains(),
+                bottomElementsFlow = new FillFlowContainer
+                {
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Vertical,
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    Spacing = new Vector2(5),
+                    Children = new Drawable[]
+                    {
+                        menuTipDisplay = new MenuTipDisplay
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                        },
+                        onlineMenuBanner = new OnlineMenuBanner
+                        {
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                        }
+                    }
+                },
+                supporterDisplay = new SupporterDisplay
+                {
+                    Margin = new MarginPadding(5),
+                    Anchor = Anchor.TopLeft,
+                    Origin = Anchor.TopLeft,
+                },
+                holdToExitGameOverlay?.CreateProxy() ?? Empty()
+            });
+
+            float baseDim = SeasonalUIConfig.ENABLED ? 0.84f : 1;
+
+            Buttons.StateChanged += state =&gt;
+            {
+                switch (state)
+                {
+                    case ButtonSystemState.Initial:
+                    case ButtonSystemState.Exit:
+                        ApplyToBackground(b =&gt; b.FadeColour(OsuColour.Gray(baseDim), 500, Easing.OutSine));
+                        onlineMenuBanner.State.Value = Visibility.Hidden;
+                        break;
+
+                    default:
+                        ApplyToBackground(b =&gt; b.FadeColour(OsuColour.Gray(baseDim * 0.8f), 500, Easing.OutSine));
+                        onlineMenuBanner.State.Value = Visibility.Visible;
+                        break;
+                }
+            };
+
+            Buttons.OnSettings = () =&gt; settings?.ToggleVisibility();
+            Buttons.OnBeatmapListing = () =&gt; beatmapListing?.ToggleVisibility();
+
+            reappearSampleSwoosh = audio.Samples.Get(@&quot;Menu/reappear-swoosh&quot;);
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+            GetContainingInputManager();
+        }
+
+        public void ReturnToOsuLogo() =&gt; Buttons.State = ButtonSystemState.Initial;
+
+        public override void OnEntering(ScreenTransitionEvent e)
+        {
+            base.OnEntering(e);
+            Buttons.FadeInFromZero(500);
+
+            if (e.Last is IntroScreen &amp;&amp; musicController.TrackLoaded)
+            {
+                var track = musicController.CurrentTrack;
+
+                // presume the track is the current beatmap&#39;s track. not sure how correct this assumption is but it has worked until now.
+                if (!track.IsRunning)
+                {
+                    Beatmap.Value.PrepareTrackForPreview(false);
+                    track.Restart();
+                }
+            }
+
+            if (storage is OsuStorage osuStorage &amp;&amp; osuStorage.Error != OsuStorageError.None)
+                dialogOverlay?.Push(new StorageErrorDialog(osuStorage, osuStorage.Error));
+        }
+
+        [CanBeNull]
+        private ScheduledDelegate mobileDisclaimerSchedule;
+
+        protected override void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            base.LogoArriving(logo, resuming);
+
+            Buttons.SetOsuLogo(logo);
+
+            logo.FadeColour(Color4.White, 100, Easing.OutQuint);
+            logo.FadeIn(100, Easing.OutQuint);
+
+            logoProxy = logo.ProxyToContainer(logoTarget);
+
+            if (resuming)
+            {
+                Buttons.State = ButtonSystemState.TopLevel;
+
+                this.FadeIn(FADE_IN_DURATION, Easing.OutQuint);
+                buttonsContainer.MoveTo(new Vector2(0, 0), FADE_IN_DURATION, Easing.OutQuint);
+
+                sideFlashes.Delay(FADE_IN_DURATION).FadeIn(64, Easing.InQuint);
+            }
+            else
+            {
+                // copy out old action to avoid accidentally capturing logo.Action in closure, causing a self-reference loop.
+                var previousAction = logo.Action;
+
+                // we want to hook into logo.Action to display certain overlays, but also preserve the return value of the old action.
+                // therefore pass the old action to displayLogin, so that it can return that value.
+                // this ensures that the OsuLogo sample does not play when it is not desired.
+                logo.Action = () =&gt; onLogoClick(previousAction);
+            }
+        }
+
+        private bool onLogoClick(Func&lt;bool&gt; originalAction)
+        {
+            if (showMobileDisclaimer.Value)
+            {
+                mobileDisclaimerSchedule?.Cancel();
+                mobileDisclaimerSchedule = Scheduler.AddDelayed(() =&gt;
+                {
+                    dialogOverlay.Push(new MobileDisclaimerDialog(() =&gt;
+                    {
+                        showMobileDisclaimer.Value = false;
+                        displayLoginIfApplicable();
+                    }));
+                }, 500);
+            }
+            else
+                displayLoginIfApplicable();
+
+            return originalAction.Invoke();
+        }
+
+        private void displayLoginIfApplicable()
+        {
+            if (loginDisplayed.Value) return;
+
+            if (!api.IsLoggedIn || api.State.Value == APIState.RequiresSecondFactorAuth)
+            {
+                Scheduler.AddDelayed(() =&gt; login?.Show(), 500);
+                loginDisplayed.Value = true;
+            }
+        }
+
+        protected override void LogoSuspending(OsuLogo logo)
+        {
+            var seq = logo.FadeOut(300, Easing.InSine)
+                          .ScaleTo(0.2f, 300, Easing.InSine);
+
+            logoProxy?.Dispose();
+            logoProxy = null;
+
+            seq.OnComplete(_ =&gt; Buttons.SetOsuLogo(null));
+            seq.OnAbort(_ =&gt; Buttons.SetOsuLogo(null));
+        }
+
+        protected override void LogoExiting(OsuLogo logo)
+        {
+            base.LogoExiting(logo);
+
+            logoProxy?.Dispose();
+            logoProxy = null;
+        }
+
+        public override void OnSuspending(ScreenTransitionEvent e)
+        {
+            base.OnSuspending(e);
+
+            Buttons.State = ButtonSystemState.EnteringMode;
+
+            this.FadeOut(FADE_OUT_DURATION, Easing.InSine);
+            buttonsContainer.MoveTo(new Vector2(-800, 0), FADE_OUT_DURATION, Easing.InSine);
+
+            sideFlashes.FadeOut(64, Easing.OutQuint);
+
+            bottomElementsFlow
+                .ScaleTo(0.9f, 1000, Easing.OutQuint)
+                .FadeOut(500, Easing.OutQuint);
+
+            supporterDisplay
+                .FadeOut(500, Easing.OutQuint);
+
+            samplePlaybackDisabled.Value = true;
+        }
+
+        public override void OnResuming(ScreenTransitionEvent e)
+        {
+            base.OnResuming(e);
+
+            // Ensures any playing `ButtonSystem` samples are stopped when returning to MainMenu (as to not overlap with the &#39;back&#39; sample)
+            Buttons.StopSamplePlayback();
+            reappearSampleSwoosh?.Play();
+
+            ApplyToBackground(b =&gt; (b as BackgroundScreenDefault)?.Next());
+
+            musicController.EnsurePlayingSomething();
+
+            // Cycle tip on resuming
+            menuTipDisplay.ShowNextTip();
+
+            bottomElementsFlow
+                .ScaleTo(1, 1000, Easing.OutQuint)
+                .FadeIn(1000, Easing.OutQuint);
+
+            samplePlaybackDisabled.Value = false;
+        }
+
+        public override bool OnExiting(ScreenExitEvent e)
+        {
+            bool requiresConfirmation =
+                // we need to have a dialog overlay to confirm in the first place.
+                dialogOverlay != null
+                // if the dialog has already displayed and been accepted by the user, we are good.
+                &amp;&amp; !exitConfirmedViaDialog
+                // Only require confirmation if there is either an ongoing operation or the user exited via a non-hold escape press.
+                &amp;&amp; (notifications.HasOngoingOperations || !exitConfirmedViaHoldOrClick);
+
+            if (requiresConfirmation)
+            {
+                if (dialogOverlay.CurrentDialog is ConfirmExitDialog exitDialog)
+                {
+                    if (exitDialog.Buttons.OfType&lt;PopupDialogOkButton&gt;().FirstOrDefault() != null)
+                        exitDialog.PerformOkAction();
+                    else
+                        exitDialog.Flash();
+                }
+                else
+                {
+                    dialogOverlay.Push(new ConfirmExitDialog(() =&gt;
+                    {
+                        exitConfirmedViaDialog = true;
+                        this.Exit();
+                    }, () =&gt;
+                    {
+                        holdToExitGameOverlay.Abort();
+                        Game.CancelRestartOnExit();
+                    }));
+                }
+
+                return true;
+            }
+
+            Buttons.State = ButtonSystemState.Exit;
+            OverlayActivationMode.Value = OverlayActivation.Disabled;
+
+            songTicker.Hide();
+
+            this.FadeOut(3000);
+
+            bottomElementsFlow
+                .FadeOut(500, Easing.OutQuint);
+
+            supporterDisplay
+                .FadeOut(500, Easing.OutQuint);
+
+            return base.OnExiting(e);
+        }
+
+        public void PresentBeatmap(WorkingBeatmap beatmap, RulesetInfo ruleset)
+        {
+            Logger.Log($&quot;{nameof(MainMenu)} completing {nameof(PresentBeatmap)} with beatmap {beatmap} ruleset {ruleset}&quot;);
+
+            Beatmap.Value = beatmap;
+            Ruleset.Value = ruleset;
+
+            Schedule(loadSongSelect);
+        }
+
+        public bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            if (e.Repeat)
+                return false;
+
+            switch (e.Action)
+            {
+                case GlobalAction.Back:
+                    // In the case of a host being able to exit, the back action is handled by ExitConfirmOverlay.
+                    Debug.Assert(!host.CanExit);
+
+                    return host.SuspendToBackground();
+            }
+
+            return false;
+        }
+
+        public void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        private void loadSongSelect() =&gt; this.Push(new SoloSongSelect());
+
+        private void loadQuickPlay() =&gt; this.Push(new OnlinePlay.Matchmaking.Intro.ScreenIntro(MatchmakingPoolType.QuickPlay));
+
+        private void loadRankedPlay() =&gt; this.Push(new OnlinePlay.Matchmaking.Intro.ScreenIntro(MatchmakingPoolType.RankedPlay));
+
+        private partial class MobileDisclaimerDialog : PopupDialog
+        {
+            public MobileDisclaimerDialog(Action confirmed)
+            {
+                HeaderText = ButtonSystemStrings.MobileDisclaimerHeader;
+                BodyText = ButtonSystemStrings.MobileDisclaimerBody;
+
+                Icon = FontAwesome.Solid.SmileBeam;
+
+                Buttons = new PopupDialogButton[]
+                {
+                    new PopupDialogOkButton
+                    {
+                        Text = ButtonSystemStrings.MobileDisclaimerOkButton,
+                        Action = confirmed,
+                    },
+                };
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[56,53,56,114,0],[58,47,58,52,0],[60,59,60,63,0],[62,58,62,62,0],[69,33,69,37,0],[69,38,69,42,0],[72,54,72,58,0],[72,59,72,63,0],[75,51,75,55,0],[75,56,75,60,0],[78,36,78,40,0],[78,41,78,45,0],[81,35,81,39,0],[81,40,81,44,0],[84,38,84,42,0],[84,43,84,47,0],[87,48,87,52,0],[87,53,87,57,0],[90,75,90,97,0],[91,9,91,87,0],[93,67,93,96,0],[95,50,95,55,0],[117,48,117,52,0],[117,53,117,57,0],[124,9,124,10,0],[125,13,125,86,0],[126,13,126,86,0],[127,13,127,94,0],[129,13,129,30,0],[130,13,130,14,0],[131,17,134,21,0],[134,21,134,22,0],[134,22,135,25,0],[135,25,135,75,0],[135,75,136,25,0],[136,25,136,37,0],[136,37,137,21,0],[137,21,137,22,0],[137,22,138,20,0],[139,13,139,14,0],[141,13,153,29,0],[153,29,153,30,0],[153,30,154,33,0],[154,33,154,54,0],[154,54,155,33,0],[155,33,155,63,0],[155,63,156,29,0],[156,29,156,30,0],[156,30,158,29,0],[158,29,158,30,0],[158,30,159,33,0],[159,33,159,52,0],[159,52,160,29,0],[160,29,160,30,0],[160,30,162,51,0],[162,51,162,79,0],[162,79,165,49,0],[165,49,165,75,0],[165,75,167,29,0],[167,29,167,30,0],[167,30,168,33,0],[168,33,168,89,0],[168,89,169,37,0],[169,37,169,73,0],[169,73,171,37,0],[171,37,171,78,0],[171,78,172,29,0],[172,29,172,30,0],[172,30,174,29,0],[174,29,174,30,0],[174,30,175,33,0],[175,33,175,79,0],[175,79,176,33,0],[176,33,176,45,0],[176,45,177,29,0],[177,29,177,30,0],[177,30,219,16,0],[221,13,221,66,0],[223,13,224,13,0],[224,13,224,14,0],[224,14,225,17,0],[225,17,225,31,0],[225,31,229,25,0],[229,25,229,48,0],[229,48,229,106,0],[229,106,229,108,0],[229,108,230,25,0],[230,25,230,74,0],[230,74,231,25,0],[231,25,231,31,0],[231,31,234,25,0],[234,25,234,48,0],[234,48,234,113,0],[234,113,234,115,0],[234,115,235,25,0],[235,25,235,75,0],[235,75,236,25,0],[236,25,236,31,0],[236,31,238,13,0],[238,13,238,14,0],[238,14,238,15,0],[240,13,240,40,0],[240,40,240,68,0],[240,68,240,69,0],[241,13,241,46,0],[241,46,241,80,0],[241,80,241,81,0],[243,13,243,79,0],[244,9,244,10,0],[247,9,247,10,0],[248,13,248,33,0],[249,13,249,41,0],[250,9,250,10,0],[252,42,252,83,0],[255,9,255,10,0],[256,13,256,32,0],[257,13,257,41,0],[259,13,259,70,0],[260,13,260,14,0],[261,17,261,58,0],[264,17,264,38,0],[265,17,265,18,0],[266,21,266,65,0],[267,21,267,37,0],[268,17,268,18,0],[269,13,269,14,0],[271,13,271,94,0],[272,17,272,91,0],[273,9,273,10,0],[279,9,279,10,0],[280,13,280,47,0],[282,13,282,38,0],[284,13,284,65,0],[285,13,285,47,0],[287,13,287,59,0],[289,13,289,26,0],[290,13,290,14,0],[291,17,291,60,0],[293,17,293,64,0],[294,17,294,95,0],[296,17,296,80,0],[297,13,297,14,0],[299,13,299,14,0],[301,17,301,50,0],[306,17,306,37,0],[306,37,306,64,0],[306,64,306,65,0],[307,13,307,14,0],[308,9,308,10,0],[311,9,311,10,0],[312,13,312,44,0],[313,13,313,14,0],[314,17,314,52,0],[315,17,316,17,0],[316,17,316,18,0],[316,18,317,21,0],[317,21,318,21,0],[318,21,318,22,0],[318,22,319,25,0],[319,25,319,60,0],[319,60,320,25,0],[320,25,320,52,0],[320,52,321,21,0],[321,21,321,22,0],[321,22,321,25,0],[321,25,322,17,0],[322,17,322,18,0],[322,18,322,25,0],[323,13,323,14,0],[325,17,325,44,0],[327,13,327,44,0],[328,9,328,10,0],[331,9,331,10,0],[332,13,332,38,0],[332,39,332,46,0],[334,13,334,89,0],[335,13,335,14,0],[336,17,336,44,0],[336,44,336,57,0],[336,57,336,64,0],[337,17,337,45,0],[338,13,338,14,0],[339,9,339,10,0],[342,9,342,10,0],[343,13,344,62,0],[346,13,346,34,0],[347,13,347,30,0],[349,13,349,33,0],[349,33,349,57,0],[349,57,349,59,0],[350,13,350,30,0],[350,30,350,54,0],[350,54,350,56,0],[351,9,351,10,0],[354,9,354,10,0],[355,13,355,36,0],[357,13,357,34,0],[358,13,358,30,0],[359,9,359,10,0],[362,9,362,10,0],[363,13,363,34,0],[365,13,365,60,0],[367,13,367,60,0],[368,13,368,93,0],[370,13,370,54,0],[372,13,374,48,0],[376,13,377,48,0],[379,13,379,49,0],[380,9,380,10,0],[383,9,383,10,0],[384,13,384,32,0],[387,13,387,42,0],[388,13,388,42,0],[390,13,390,36,0],[390,36,390,74,0],[390,74,390,76,0],[392,13,392,54,0],[395,13,395,42,0],[397,13,399,48,0],[401,13,401,50,0],[402,9,402,10,0],[405,9,405,10,0],[406,13,412,89,0],[414,13,414,38,0],[415,13,415,14,0],[416,17,416,81,0],[417,17,417,18,0],[418,21,418,99,0],[419,25,419,54,0],[421,25,421,44,0],[422,17,422,18,0],[424,17,424,18,0],[425,21,426,21,0],[426,21,426,22,0],[426,22,427,25,0],[427,25,427,55,0],[427,55,428,25,0],[428,25,428,37,0],[428,37,429,21,0],[429,21,429,22,0],[429,22,430,21,0],[430,21,430,22,0],[430,22,431,25,0],[431,25,431,55,0],[431,55,432,25,0],[432,25,432,52,0],[432,52,433,21,0],[433,21,433,22,0],[433,22,433,25,0],[434,17,434,18,0],[436,17,436,29,0],[439,13,439,52,0],[440,13,440,70,0],[442,13,442,31,0],[444,13,444,32,0],[446,13,447,48,0],[449,13,450,48,0],[452,13,452,38,0],[453,9,453,10,0],[456,9,456,10,0],[457,13,457,124,0],[459,13,459,37,0],[460,13,460,37,0],[462,13,462,38,0],[463,9,463,10,0],[466,9,466,10,0],[467,13,467,26,0],[468,17,468,30,0],[470,13,470,30,0],[474,21,474,49,0],[476,21,476,55,0],[479,13,479,26,0],[480,9,480,10,0],[483,9,483,10,0],[484,9,484,10,0],[486,42,486,73,0],[488,41,488,127,0],[490,42,490,129,0],[494,13,494,60,0],[495,13,495,14,0],[496,17,496,73,0],[497,17,497,69,0],[499,17,499,52,0],[501,17,508,19,0],[509,13,509,14,0]]);
+    </script>
+  </body>
+</html>

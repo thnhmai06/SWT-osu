@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Login/SecondFactorAuthForm.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Threading.Tasks;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Input;
+using osu.Framework.Input.Events;
+using osu.Framework.Logging;
+using osu.Game.Graphics;
+using osu.Game.Graphics.Containers;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Localisation;
+using osu.Game.Online.API;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Overlays.Settings;
+using osu.Game.Resources.Localisation.Web;
+using osuTK;
+
+namespace osu.Game.Overlays.Login
+{
+    public partial class SecondFactorAuthForm : Container
+    {
+        private ErrorTextFlowContainer errorText = null!;
+
+        private LoadingLayer loading = null!;
+        private FillFlowContainer contentFlow = null!;
+        private OsuTextBox codeTextBox = null!;
+        private readonly IBindable&lt;APIState&gt; apiState = new Bindable&lt;APIState&gt;();
+
+        [Resolved]
+        private IAPIProvider api { get; set; } = null!;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            RelativeSizeAxes = Axes.X;
+            AutoSizeAxes = Axes.Y;
+
+            Padding = new MarginPadding { Horizontal = SettingsPanel.CONTENT_MARGINS };
+
+            Children = new Drawable[]
+            {
+                new FillFlowContainer
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Direction = FillDirection.Vertical,
+                    Spacing = new Vector2(0, SettingsSection.ITEM_SPACING),
+                    Children = new Drawable[]
+                    {
+                        contentFlow = new FillFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Direction = FillDirection.Vertical,
+                            Spacing = new Vector2(0f, SettingsSection.ITEM_SPACING),
+                        },
+                        errorText = new ErrorTextFlowContainer
+                        {
+                            RelativeSizeAxes = Axes.X,
+                            AutoSizeAxes = Axes.Y,
+                            Alpha = 0,
+                        },
+                    }
+                },
+                loading = new LoadingLayer(true)
+                {
+                    Padding = new MarginPadding { Vertical = -SettingsSection.ITEM_SPACING },
+                }
+            };
+
+            updateLastError();
+
+            showContent(api.SessionVerificationMethod!.Value);
+            apiState.BindTo(api.State);
+        }
+
+        private void updateLastError()
+        {
+            if (api.LastLoginError?.Message is string error)
+            {
+                errorText.Alpha = 1;
+                errorText.AddErrors(new[] { error });
+            }
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            apiState.BindValueChanged(val =&gt;
+            {
+                // this handles failed verifications.
+                // in the case of failed verifications, `apiState` will briefly change to `Connecting` and then revert to `RequiresSecondFactorAuth`.
+                // the login overlay doesn&#39;t need this logic as it will construct a new instance of this screen anyway,
+                // but the *registration* overlay has no such logic and thus needs special handling.
+                if (val.NewValue == APIState.RequiresSecondFactorAuth)
+                {
+                    // scheduling required as `APIAccess.State` value can be changed from threads that aren&#39;t update
+                    // see: `APIAccess.run()` (which is given a dedicated thread) calls `APIAccess.attemptConnect()` which mutates `APIAccess.State`
+                    Schedule(() =&gt;
+                    {
+                        codeTextBox.Current.Disabled = false;
+                        codeTextBox.Current.Value = string.Empty;
+                        updateLastError();
+                    });
+                }
+            });
+        }
+
+        private void showContent(SessionVerificationMethod sessionVerificationMethod)
+        {
+            switch (sessionVerificationMethod)
+            {
+                case SessionVerificationMethod.EmailMessage:
+                    showEmailVerification();
+                    break;
+
+                case SessionVerificationMethod.TimedOneTimePassword:
+                    showTotpVerification();
+                    break;
+            }
+        }
+
+        private void showEmailVerification()
+        {
+            LinkFlowContainer explainText;
+
+            contentFlow.Clear();
+            contentFlow.AddRange(new Drawable[]
+            {
+                new OsuTextFlowContainer(s =&gt; s.Font = OsuFont.GetFont(weight: FontWeight.Regular))
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Text = LoginPanelStrings.CodeSent,
+                },
+                codeTextBox = new OsuTextBox
+                {
+                    InputProperties = new TextInputProperties(TextInputType.Code),
+                    PlaceholderText = LoginPanelStrings.EnterCode,
+                    RelativeSizeAxes = Axes.X,
+                    TabbableContentContainer = this,
+                },
+                explainText = new LinkFlowContainer(s =&gt; s.Font = OsuFont.GetFont(weight: FontWeight.Regular))
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                },
+            });
+
+            explainText.AddParagraph(UserVerificationStrings.BoxInfoCheckSpam);
+            // We can&#39;t support localisable strings with nested links yet. Not sure if we even can (probably need to allow markdown link formatting or something).
+            explainText.AddParagraph(&quot;If you can&#39;t access your email or have forgotten what you used, please follow the &quot;);
+            explainText.AddLink(UserVerificationStrings.BoxInfoRecoverLink, $&quot;{api.Endpoints.WebsiteUrl}/home/password-reset&quot;);
+            explainText.AddText(&quot;. You can also &quot;);
+            explainText.AddLink(UserVerificationStrings.BoxInfoReissueLink, () =&gt;
+            {
+                loading.Show();
+
+                var reissueRequest = new ReissueVerificationCodeRequest();
+                reissueRequest.Failure += ex =&gt;
+                {
+                    Logger.Error(ex, @&quot;Failed to retrieve new verification code.&quot;);
+                    loading.Hide();
+                };
+                reissueRequest.Success += () =&gt;
+                {
+                    loading.Hide();
+                };
+
+                Task.Run(() =&gt; api.Perform(reissueRequest));
+            });
+            explainText.AddText(&quot; or &quot;);
+            explainText.AddLink(UserVerificationStrings.BoxInfoLogoutLink, () =&gt; { api.Logout(); });
+            explainText.AddText(&quot;.&quot;);
+
+            codeTextBox.Current.BindValueChanged(code =&gt;
+            {
+                string trimmedCode = code.NewValue.Trim();
+
+                if (trimmedCode.Length == 8)
+                {
+                    api.AuthenticateSecondFactor(trimmedCode);
+                    codeTextBox.Current.Disabled = true;
+                }
+            });
+        }
+
+        private void showTotpVerification()
+        {
+            LinkFlowContainer explainText;
+
+            contentFlow.Clear();
+            contentFlow.AddRange(new Drawable[]
+            {
+                new OsuTextFlowContainer(s =&gt; s.Font = OsuFont.GetFont(weight: FontWeight.Regular))
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Text = UserVerificationStrings.BoxTotpHeading,
+                },
+                codeTextBox = new OsuNumberBox
+                {
+                    InputProperties = new TextInputProperties(TextInputType.NumericalPassword),
+                    PlaceholderText = LoginPanelStrings.EnterCode,
+                    RelativeSizeAxes = Axes.X,
+                    TabbableContentContainer = this,
+                },
+                explainText = new LinkFlowContainer(s =&gt; s.Font = OsuFont.GetFont(weight: FontWeight.Regular))
+                {
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                },
+            });
+
+            // We can&#39;t support localisable strings with nested links yet. Not sure if we even can (probably need to allow markdown link formatting or something).
+            explainText.AddParagraph(&quot;If you can&#39;t access your app, &quot;);
+            explainText.AddLink(&quot;you can verify using email instead&quot;, () =&gt;
+            {
+                var fallbackRequest = new VerificationMailFallbackRequest();
+                fallbackRequest.Success += showEmailVerification;
+                fallbackRequest.Failure += ex =&gt; errorText.Text = ex.Message;
+                Task.Run(() =&gt; api.Perform(fallbackRequest));
+            });
+            explainText.AddText(&quot;. You can also &quot;);
+            explainText.AddLink(UserVerificationStrings.BoxInfoLogoutLink, () =&gt; { api.Logout(); });
+            explainText.AddText(&quot;.&quot;);
+
+            codeTextBox.Current.BindValueChanged(code =&gt;
+            {
+                string trimmedCode = code.NewValue.Trim();
+
+                if (trimmedCode.Length == 6)
+                {
+                    api.AuthenticateSecondFactor(trimmedCode);
+                    codeTextBox.Current.Disabled = true;
+                }
+            });
+        }
+
+        public override bool AcceptsFocus =&gt; true;
+
+        protected override bool OnClick(ClickEvent e) =&gt; true;
+
+        protected override void OnFocus(FocusEvent e)
+        {
+            Schedule(() =&gt; { GetContainingFocusManager()!.ChangeFocus(codeTextBox); });
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,9,27,58,0],[29,9,29,46,0],[30,9,30,55,0],[31,9,31,48,0],[32,9,32,82,0],[35,36,35,40,0],[35,41,35,45,0],[35,50,35,55,0],[39,9,39,10,0],[40,13,40,39,0],[41,13,41,35,0],[43,13,43,88,0],[45,13,74,15,0],[76,13,76,31,0],[78,13,78,63,0],[79,13,79,40,0],[80,9,80,10,0],[83,9,83,10,0],[84,13,84,61,0],[85,13,85,14,0],[86,17,86,37,0],[87,17,87,54,0],[88,13,88,14,0],[89,9,89,10,0],[92,9,92,10,0],[93,13,93,33,0],[95,13,96,13,0],[96,13,96,14,0],[96,14,101,17,0],[101,17,101,71,0],[101,71,102,17,0],[102,17,102,18,0],[102,18,105,21,0],[105,21,106,21,0],[106,21,106,22,0],[106,22,107,25,0],[107,25,107,62,0],[107,62,108,25,0],[108,25,108,66,0],[108,66,109,25,0],[109,25,109,43,0],[109,43,110,21,0],[110,21,110,22,0],[110,22,110,24,0],[110,24,111,17,0],[111,17,111,18,0],[111,18,112,13,0],[112,13,112,14,0],[112,14,112,16,0],[113,9,113,10,0],[116,9,116,10,0],[117,13,117,47,0],[120,21,120,45,0],[121,21,121,27,0],[124,21,124,44,0],[125,21,125,27,0],[127,9,127,10,0],[130,9,130,10,0],[133,13,133,33,0],[134,13,136,47,0],[136,47,136,99,0],[136,99,149,58,0],[149,58,149,110,0],[149,110,154,16,0],[156,13,156,80,0],[158,13,158,124,0],[159,13,159,128,0],[160,13,160,52,0],[161,13,162,13,0],[162,13,162,14,0],[162,14,163,17,0],[163,17,163,32,0],[163,32,165,17,0],[165,17,165,75,0],[165,75,166,17,0],[166,17,167,17,0],[167,17,167,18,0],[167,18,168,21,0],[168,21,168,84,0],[168,84,169,21,0],[169,21,169,36,0],[169,36,170,17,0],[170,17,170,18,0],[170,18,170,19,0],[170,19,171,17,0],[171,17,172,17,0],[172,17,172,18,0],[172,18,173,21,0],[173,21,173,36,0],[173,36,174,17,0],[174,17,174,18,0],[174,18,174,19,0],[174,19,176,17,0],[176,17,176,32,0],[176,32,176,59,0],[176,59,176,61,0],[176,61,177,13,0],[177,13,177,14,0],[177,14,177,16,0],[178,13,178,41,0],[179,13,179,82,0],[179,82,179,83,0],[179,83,179,84,0],[179,84,179,97,0],[179,97,179,98,0],[179,98,179,99,0],[179,99,179,101,0],[180,13,180,38,0],[182,13,183,13,0],[183,13,183,14,0],[183,14,184,17,0],[184,17,184,59,0],[184,59,186,17,0],[186,17,186,45,0],[186,45,187,17,0],[187,17,187,18,0],[187,18,188,21,0],[188,21,188,63,0],[188,63,189,21,0],[189,21,189,57,0],[189,57,190,17,0],[190,17,190,18,0],[190,18,191,13,0],[191,13,191,14,0],[191,14,191,16,0],[192,9,192,10,0],[195,9,195,10,0],[198,13,198,33,0],[199,13,201,47,0],[201,47,201,99,0],[201,99,214,58,0],[214,58,214,110,0],[214,110,219,16,0],[222,13,222,72,0],[223,13,224,13,0],[224,13,224,14,0],[224,14,225,17,0],[225,17,225,77,0],[225,77,226,17,0],[226,17,226,66,0],[226,66,227,17,0],[227,17,227,50,0],[227,50,227,77,0],[227,77,227,78,0],[227,78,228,17,0],[228,17,228,32,0],[228,32,228,60,0],[228,60,228,62,0],[228,62,229,13,0],[229,13,229,14,0],[229,14,229,16,0],[230,13,230,52,0],[231,13,231,82,0],[231,82,231,83,0],[231,83,231,84,0],[231,84,231,97,0],[231,97,231,98,0],[231,98,231,99,0],[231,99,231,101,0],[232,13,232,38,0],[234,13,235,13,0],[235,13,235,14,0],[235,14,236,17,0],[236,17,236,59,0],[236,59,238,17,0],[238,17,238,45,0],[238,45,239,17,0],[239,17,239,18,0],[239,18,240,21,0],[240,21,240,63,0],[240,63,241,21,0],[241,21,241,57,0],[241,57,242,17,0],[242,17,242,18,0],[242,18,243,13,0],[243,13,243,14,0],[243,14,243,16,0],[244,9,244,10,0],[246,46,246,50,0],[248,58,248,62,0],[251,9,251,10,0],[252,13,252,28,0],[252,28,252,29,0],[252,29,252,30,0],[252,30,252,84,0],[252,84,252,85,0],[252,85,252,86,0],[252,86,252,88,0],[253,9,253,10,0]]);
+    </script>
+  </body>
+</html>

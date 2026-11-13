@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Chat/DrawableChannel.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Game.Online.Chat;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.Chat
+{
+    public partial class DrawableChannel : Container
+    {
+        public readonly Channel Channel;
+        protected FillFlowContainer ChatLineFlow;
+        private ChannelScrollContainer scroll;
+
+        private bool scrollbarVisible = true;
+
+        public bool ScrollbarVisible
+        {
+            set
+            {
+                if (scrollbarVisible == value) return;
+
+                scrollbarVisible = value;
+                scroll?.ScrollbarVisible = value;
+            }
+        }
+
+        public DrawableChannel(Channel channel)
+        {
+            Channel = channel;
+            RelativeSizeAxes = Axes.Both;
+        }
+
+        private Bindable&lt;Message&gt; highlightedMessage;
+
+        [BackgroundDependencyLoader]
+        private void load()
+        {
+            Child = scroll = new ChannelScrollContainer
+            {
+                ScrollbarVisible = scrollbarVisible,
+                RelativeSizeAxes = Axes.Both,
+                // Some chat lines have effects that slightly protrude to the bottom,
+                // which we do not want to mask away, hence the padding.
+                Padding = new MarginPadding { Bottom = 5 },
+                Child = ChatLineFlow = new FillFlowContainer
+                {
+                    Padding = new MarginPadding { Left = 3, Right = 10 },
+                    RelativeSizeAxes = Axes.X,
+                    AutoSizeAxes = Axes.Y,
+                    Direction = FillDirection.Vertical,
+                }
+            };
+
+            newMessagesArrived(Channel.Messages);
+
+            Channel.NewMessagesArrived += newMessagesArrived;
+            Channel.MessageRemoved += messageRemoved;
+            Channel.PendingMessageResolved += pendingMessageResolved;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            highlightedMessage = Channel.HighlightedMessage.GetBoundCopy();
+            highlightedMessage.BindValueChanged(_ =&gt; processMessageHighlighting(), true);
+        }
+
+        /// &lt;summary&gt;
+        /// Processes any pending message in &lt;see cref=&quot;highlightedMessage&quot;/&gt;.
+        /// &lt;/summary&gt;
+        // ScheduleAfterChildren is for ensuring the scroll flow has updated with any new chat lines.
+        private void processMessageHighlighting() =&gt; SchedulerAfterChildren.AddOnce(() =&gt;
+        {
+            if (highlightedMessage.Value == null)
+                return;
+
+            var chatLine = chatLines.FirstOrDefault(c =&gt; c.Message.Equals(highlightedMessage.Value));
+            if (chatLine == null)
+                return;
+
+            double center = scroll.GetChildPosInContent(chatLine, chatLine.DrawSize / 2) - scroll.DisplayableContent / 2;
+            scroll.ScrollTo(Math.Clamp(center, 0, scroll.ScrollableExtent));
+            chatLine.Highlight();
+
+            highlightedMessage.Value = null;
+        });
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            Channel.NewMessagesArrived -= newMessagesArrived;
+            Channel.MessageRemoved -= messageRemoved;
+            Channel.PendingMessageResolved -= pendingMessageResolved;
+        }
+
+        [CanBeNull]
+        protected virtual ChatLine CreateChatLine(Message m) =&gt; new ChatLine(m);
+
+        protected virtual DaySeparator CreateDaySeparator(DateTimeOffset time) =&gt; new DaySeparator(time);
+
+        private void newMessagesArrived(IEnumerable&lt;Message&gt; newMessages) =&gt; Schedule(() =&gt;
+        {
+            if (newMessages.Min(m =&gt; m.Id) &lt; chatLines.Max(c =&gt; c.Message.Id))
+            {
+                // there is a case (on initial population) that we may receive past messages and need to reorder.
+                // easiest way is to just combine messages and recreate drawables (less worrying about day separators etc.)
+                newMessages = newMessages.Concat(chatLines.Select(c =&gt; c.Message)).OrderBy(m =&gt; m.Id).ToList();
+                ChatLineFlow.Clear();
+            }
+
+            // Add up to last Channel.MAX_HISTORY messages
+            var displayMessages = newMessages.Skip(Math.Max(0, newMessages.Count() - Channel.MAX_HISTORY));
+
+            ChatLine lastLine = chatLines.LastOrDefault();
+            Message lastMessage = lastLine?.Message;
+
+            foreach (var message in displayMessages)
+            {
+                addDaySeparatorIfRequired(lastMessage, message);
+
+                ChatLine line = CreateChatLine(message);
+
+                if (line == null)
+                    continue;
+
+                long minutes = line.Message.Timestamp.ToUnixTimeSeconds() / 60;
+                long? lastMinutes = lastLine?.Message.Timestamp.ToUnixTimeSeconds() / 60;
+
+                line.AlternatingBackground = lastLine?.AlternatingBackground == false;
+                line.RequiresTimestamp = minutes != lastMinutes;
+
+                ChatLineFlow.Add(line);
+
+                lastMessage = message;
+                lastLine = line;
+            }
+
+            var staleMessages = chatLines.Where(c =&gt; c.LifetimeEnd == double.MaxValue).ToArray();
+
+            int count = staleMessages.Length - Channel.MAX_HISTORY;
+
+            if (count &gt; 0)
+            {
+                for (int i = 0; i &lt; count; i++)
+                    expireAndAdjustScroll(staleMessages[i]);
+
+                removeAdjacentDaySeparators();
+            }
+
+            // due to the scroll adjusts from old messages removal above, a scroll-to-end must be enforced,
+            // to avoid making the container think the user has scrolled back up and unwantedly disable auto-scrolling.
+            if (newMessages.Any(m =&gt; m is LocalMessage))
+                scroll.ScrollToEnd();
+
+            processMessageHighlighting();
+        });
+
+        private void pendingMessageResolved(Message existing, Message updated) =&gt; Schedule(() =&gt;
+        {
+            var found = chatLines.LastOrDefault(c =&gt; c.Message == existing);
+
+            if (found != null)
+            {
+                Trace.Assert(updated.Id.HasValue, &quot;An updated message was returned with no ID.&quot;);
+
+                ChatLineFlow.Remove(found, false);
+                found.Message = updated;
+
+                addDaySeparatorIfRequired(chatLines.LastOrDefault()?.Message, updated);
+                ChatLineFlow.Add(found);
+            }
+        });
+
+        private void addDaySeparatorIfRequired(Message lastMessage, Message message)
+        {
+            if (lastMessage == null || lastMessage.Timestamp.ToLocalTime().Date != message.Timestamp.ToLocalTime().Date)
+            {
+                // A day separator is displayed even if no messages are in the channel.
+                // If there are no messages after it, the simplest way to ensure it is fresh is to remove it
+                // and add a new one instead.
+                if (ChatLineFlow.LastOrDefault() is DaySeparator ds)
+                    ChatLineFlow.Remove(ds, true);
+
+                ChatLineFlow.Add(CreateDaySeparator(message.Timestamp));
+
+                removeAdjacentDaySeparators();
+            }
+        }
+
+        private void removeAdjacentDaySeparators()
+        {
+            // remove all adjacent day separators after stale message removal
+            for (int i = 0; i &lt; ChatLineFlow.Count - 1; i++)
+            {
+                if (!(ChatLineFlow[i] is DaySeparator)) break;
+                if (!(ChatLineFlow[i + 1] is DaySeparator)) break;
+
+                expireAndAdjustScroll(ChatLineFlow[i]);
+            }
+        }
+
+        private void expireAndAdjustScroll(Drawable d)
+        {
+            scroll.OffsetScrollPosition(-d.DrawHeight);
+            d.Expire();
+        }
+
+        private void messageRemoved(Message removed) =&gt; Schedule(() =&gt;
+        {
+            const double fade_time = 600;
+
+            ChatLine removedLine = chatLines.FirstOrDefault(c =&gt; c.Message == removed);
+
+            if (removedLine == null)
+                return;
+
+            removedLine.FadeColour(Color4.Red, 400).FadeOut(fade_time).Expire();
+
+            // Resolve new colours and timestamps resulting from the removal.
+            this.Delay(fade_time).Schedule(() =&gt;
+            {
+                ChatLine lastLine = null;
+
+                // Preserve the colours of most-recent messages while updating the ones upwards in the list.
+                foreach (var line in chatLines.Reverse().Except([removedLine]))
+                {
+                    if (lastLine != null)
+                        line.AlternatingBackground = !lastLine.AlternatingBackground;
+
+                    lastLine = line;
+                }
+
+                lastLine = null;
+
+                // Timestamps may migrate to more recent messages.
+                foreach (var line in chatLines.Except([removedLine]))
+                {
+                    long minutes = line.Message.Timestamp.ToUnixTimeSeconds() / 60;
+                    long? lastMinutes = lastLine?.Message.Timestamp.ToUnixTimeSeconds() / 60;
+                    line.RequiresTimestamp = minutes != lastMinutes;
+
+                    lastLine = line;
+                }
+            });
+        });
+
+        private IEnumerable&lt;ChatLine&gt; chatLines =&gt; ChatLineFlow.Children.OfType&lt;ChatLine&gt;();
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[26,9,26,46,0],[31,13,31,14,0],[32,17,32,47,0],[32,48,32,55,0],[34,17,34,42,0],[35,17,35,50,0],[36,13,36,14,0],[39,9,39,48,0],[40,9,40,10,0],[41,13,41,31,0],[42,13,42,42,0],[43,9,43,10,0],[49,9,49,10,0],[50,13,64,15,0],[66,13,66,50,0],[68,13,68,62,0],[69,13,69,54,0],[70,13,70,70,0],[71,9,71,10,0],[74,9,74,10,0],[75,13,75,33,0],[77,13,77,76,0],[78,13,78,54,0],[78,54,78,82,0],[78,82,78,90,0],[79,9,79,10,0],[85,54,86,9,0],[86,9,86,10,0],[86,10,87,13,0],[87,13,87,50,0],[87,50,88,17,0],[88,17,88,24,0],[88,24,90,13,0],[90,13,90,58,0],[90,58,90,100,0],[90,100,90,102,0],[90,102,91,13,0],[91,13,91,34,0],[91,34,92,17,0],[92,17,92,24,0],[92,24,94,13,0],[94,13,94,122,0],[94,122,95,13,0],[95,13,95,77,0],[95,77,96,13,0],[96,13,96,34,0],[96,34,98,13,0],[98,13,98,45,0],[98,45,99,9,0],[99,9,99,10,0],[99,10,99,11,0],[102,9,102,10,0],[103,13,103,39,0],[105,13,105,62,0],[106,13,106,54,0],[107,13,107,70,0],[108,9,108,10,0],[111,65,111,80,0],[113,83,113,105,0],[115,78,116,9,0],[116,9,116,10,0],[116,10,117,13,0],[117,13,117,38,0],[117,38,117,42,0],[117,42,117,65,0],[117,65,117,77,0],[117,77,117,79,0],[117,79,118,13,0],[118,13,118,14,0],[118,14,121,17,0],[121,17,121,72,0],[121,72,121,81,0],[121,81,121,97,0],[121,97,121,101,0],[121,101,121,112,0],[121,112,122,17,0],[122,17,122,38,0],[122,38,123,13,0],[123,13,123,14,0],[123,14,126,13,0],[126,13,126,108,0],[126,108,128,13,0],[128,13,128,59,0],[128,59,129,13,0],[129,13,129,53,0],[129,53,131,13,0],[131,13,131,20,0],[131,20,131,22,0],[131,22,131,33,0],[131,33,131,34,0],[131,34,131,36,0],[131,36,131,37,0],[131,37,131,52,0],[131,52,132,13,0],[132,13,132,14,0],[132,14,133,17,0],[133,17,133,65,0],[133,65,135,17,0],[135,17,135,57,0],[135,57,137,17,0],[137,17,137,34,0],[137,34,138,21,0],[138,21,138,30,0],[138,30,140,17,0],[140,17,140,80,0],[140,80,141,17,0],[141,17,141,90,0],[141,90,143,17,0],[143,17,143,87,0],[143,87,144,17,0],[144,17,144,65,0],[144,65,146,17,0],[146,17,146,40,0],[146,40,148,17,0],[148,17,148,39,0],[148,39,149,17,0],[149,17,149,33,0],[149,33,150,13,0],[150,13,150,14,0],[150,14,152,13,0],[152,13,152,54,0],[152,54,152,86,0],[152,86,152,98,0],[152,98,154,13,0],[154,13,154,68,0],[154,68,156,13,0],[156,13,156,27,0],[156,27,157,13,0],[157,13,157,14,0],[157,14,158,22,0],[158,22,158,31,0],[158,31,158,33,0],[158,33,158,42,0],[158,42,158,44,0],[158,44,158,47,0],[158,47,159,21,0],[159,21,159,61,0],[159,61,161,17,0],[161,17,161,47,0],[161,47,162,13,0],[162,13,162,14,0],[162,14,166,13,0],[166,13,166,38,0],[166,38,166,55,0],[166,55,166,57,0],[166,57,167,17,0],[167,17,167,38,0],[167,38,169,13,0],[169,13,169,42,0],[169,42,170,9,0],[170,9,170,10,0],[170,10,170,11,0],[172,83,173,9,0],[173,9,173,10,0],[173,10,174,13,0],[174,13,174,54,0],[174,54,174,75,0],[174,75,174,77,0],[174,77,176,13,0],[176,13,176,31,0],[176,31,177,13,0],[177,13,177,14,0],[177,14,178,17,0],[178,17,178,98,0],[178,98,180,17,0],[180,17,180,51,0],[180,51,181,17,0],[181,17,181,41,0],[181,41,183,17,0],[183,17,183,88,0],[183,88,184,17,0],[184,17,184,41,0],[184,41,185,13,0],[185,13,185,14,0],[185,14,186,9,0],[186,9,186,10,0],[186,10,186,11,0],[189,9,189,10,0],[190,13,190,121,0],[191,13,191,14,0],[195,17,195,69,0],[196,21,196,51,0],[198,17,198,73,0],[200,17,200,47,0],[201,13,201,14,0],[202,9,202,10,0],[205,9,205,10,0],[207,18,207,27,0],[207,29,207,55,0],[207,57,207,60,0],[208,13,208,14,0],[209,17,209,56,0],[209,57,209,63,0],[210,17,210,60,0],[210,61,210,67,0],[212,17,212,56,0],[213,13,213,14,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,56,0],[219,13,219,24,0],[220,9,220,10,0],[222,57,223,9,0],[223,9,223,10,0],[223,10,226,13,0],[226,13,226,66,0],[226,66,226,86,0],[226,86,226,88,0],[226,88,228,13,0],[228,13,228,37,0],[228,37,229,17,0],[229,17,229,24,0],[229,24,231,13,0],[231,13,231,81,0],[231,81,234,13,0],[234,13,235,13,0],[235,13,235,14,0],[235,14,236,17,0],[236,17,236,42,0],[236,42,239,17,0],[239,17,239,24,0],[239,24,239,26,0],[239,26,239,34,0],[239,34,239,35,0],[239,35,239,37,0],[239,37,239,38,0],[239,38,239,79,0],[239,79,240,17,0],[240,17,240,18,0],[240,18,241,21,0],[241,21,241,42,0],[241,42,242,25,0],[242,25,242,86,0],[242,86,244,21,0],[244,21,244,37,0],[244,37,245,17,0],[245,17,245,18,0],[245,18,247,17,0],[247,17,247,33,0],[247,33,250,17,0],[250,17,250,24,0],[250,24,250,26,0],[250,26,250,34,0],[250,34,250,35,0],[250,35,250,37,0],[250,37,250,38,0],[250,38,250,69,0],[250,69,251,17,0],[251,17,251,18,0],[251,18,252,21,0],[252,21,252,84,0],[252,84,253,21,0],[253,21,253,94,0],[253,94,254,21,0],[254,21,254,69,0],[254,69,256,21,0],[256,21,256,37,0],[256,37,257,17,0],[257,17,257,18,0],[257,18,258,13,0],[258,13,258,14,0],[258,14,258,16,0],[258,16,259,9,0],[259,9,259,10,0],[259,10,259,11,0],[261,52,261,92,0]]);
+    </script>
+  </body>
+</html>

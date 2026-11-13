@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/Toolbar/ToolbarRulesetSelector.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Shapes;
+using osu.Framework.Graphics.UserInterface;
+using osu.Framework.Input.Events;
+using osu.Framework.IO.Stores;
+using osu.Game.Rulesets;
+using osuTK;
+using osuTK.Graphics;
+using osuTK.Input;
+
+namespace osu.Game.Overlays.Toolbar
+{
+    public partial class ToolbarRulesetSelector : RulesetSelector
+    {
+        protected Drawable ModeButtonLine { get; private set; }
+
+        [Resolved]
+        private MusicController musicController { get; set; }
+
+        private readonly Dictionary&lt;RulesetInfo, Sample&gt; rulesetSelectionSample = new Dictionary&lt;RulesetInfo, Sample&gt;();
+        private readonly Dictionary&lt;RulesetInfo, SampleChannel&gt; rulesetSelectionChannel = new Dictionary&lt;RulesetInfo, SampleChannel&gt;();
+        private Sample defaultSelectSample;
+
+        private ISampleStore samples;
+
+        public ToolbarRulesetSelector()
+        {
+            RelativeSizeAxes = Axes.Y;
+            AutoSizeAxes = Axes.X;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio, OsuGameBase game)
+        {
+            AddRangeInternal(new[]
+            {
+                new OpaqueBackground
+                {
+                    Depth = 1,
+                    Masking = true,
+                },
+                ModeButtonLine = new Container
+                {
+                    Size = new Vector2(Toolbar.HEIGHT, 3),
+                    Anchor = Anchor.BottomLeft,
+                    Origin = Anchor.BottomLeft,
+                    Y = -1,
+                    Children = new Drawable[]
+                    {
+                        new Circle
+                        {
+                            Anchor = Anchor.Centre,
+                            Origin = Anchor.Centre,
+                            Size = new Vector2(18, 3),
+                        }
+                    }
+                },
+            });
+
+            var store = new ResourceStore&lt;byte[]&gt;(game.Resources);
+            samples = audio.GetSampleStore(new NamespacedResourceStore&lt;byte[]&gt;(store, &quot;Samples&quot;), audio.SampleMixer);
+
+            foreach (var r in Rulesets.AvailableRulesets)
+            {
+                store.AddStore(r.CreateInstance().CreateResourceStore());
+
+                rulesetSelectionSample[r] = samples.Get($@&quot;UI/ruleset-select-{r.ShortName}&quot;);
+            }
+
+            defaultSelectSample = audio.Samples.Get(@&quot;UI/default-select&quot;);
+
+            Current.ValueChanged += playRulesetSelectionSample;
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            Current.BindDisabledChanged(_ =&gt; Scheduler.AddOnce(currentDisabledChanged));
+            currentDisabledChanged();
+
+            Current.BindValueChanged(_ =&gt; moveLineToCurrent());
+            // Scheduled to allow the button flow layout to be computed before the line position is updated
+            ScheduleAfterChildren(moveLineToCurrent);
+        }
+
+        private void currentDisabledChanged()
+        {
+            this.FadeColour(Current.Disabled ? Color4.Gray : Color4.White, 300);
+        }
+
+        private bool hasInitialPosition;
+
+        private void moveLineToCurrent()
+        {
+            if (SelectedTab != null)
+            {
+                ModeButtonLine.MoveToX(SelectedTab.DrawPosition.X, !hasInitialPosition ? 0 : 500, Easing.OutElasticQuarter);
+                hasInitialPosition = true;
+            }
+        }
+
+        private void playRulesetSelectionSample(ValueChangedEvent&lt;RulesetInfo&gt; r)
+        {
+            // Don&#39;t play sample on first setting of value
+            if (r.OldValue == null)
+                return;
+
+            var channel = rulesetSelectionSample[r.NewValue]?.GetChannel();
+
+            // Skip sample choking and ducking for the default/fallback sample
+            if (channel == null)
+            {
+                defaultSelectSample.Play();
+                return;
+            }
+
+            foreach (var pair in rulesetSelectionChannel)
+                pair.Value?.Stop();
+
+            rulesetSelectionChannel[r.NewValue] = channel;
+            channel.Play();
+
+            // Longer unduck delay for Mania sample
+            int unduckDelay = r.NewValue.OnlineID == 3 ? 750 : 500;
+            musicController?.DuckMomentarily(unduckDelay, new DuckParameters { DuckDuration = 0 });
+        }
+
+        public override bool HandleNonPositionalInput =&gt; !Current.Disabled &amp;&amp; base.HandleNonPositionalInput;
+
+        public override bool HandlePositionalInput =&gt; !Current.Disabled &amp;&amp; base.HandlePositionalInput;
+
+        public override bool PropagatePositionalInputSubTree =&gt; !Current.Disabled &amp;&amp; base.PropagatePositionalInputSubTree;
+
+        protected override TabItem&lt;RulesetInfo&gt; CreateTabItem(RulesetInfo value) =&gt; new ToolbarRulesetTabButton(value);
+
+        protected override TabFillFlowContainer CreateTabFlow() =&gt; new TabFillFlowContainer
+        {
+            RelativeSizeAxes = Axes.Y,
+            AutoSizeAxes = Axes.X,
+            Direction = FillDirection.Horizontal,
+        };
+
+        protected override bool OnKeyDown(KeyDownEvent e)
+        {
+            base.OnKeyDown(e);
+
+            if (e.ControlPressed &amp;&amp; !e.Repeat &amp;&amp; e.Key &gt;= Key.Number1 &amp;&amp; e.Key &lt;= Key.Number9)
+            {
+                int requested = e.Key - Key.Number1;
+
+                RulesetInfo found = Rulesets.AvailableRulesets.ElementAtOrDefault(requested);
+                if (found != null)
+                    SelectItem(found);
+                return true;
+            }
+
+            return false;
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            samples?.Dispose();
+
+            base.Dispose(isDisposing);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[27,45,27,49,0],[27,50,27,62,0],[30,51,30,55,0],[30,56,30,60,0],[32,9,32,121,0],[33,9,33,136,0],[38,9,38,40,0],[39,9,39,10,0],[40,13,40,39,0],[41,13,41,35,0],[42,9,42,10,0],[46,9,46,10,0],[47,13,70,16,0],[72,13,72,67,0],[73,13,73,118,0],[75,13,75,20,0],[75,22,75,27,0],[75,28,75,30,0],[75,31,75,57,0],[76,13,76,14,0],[77,17,77,74,0],[79,17,79,94,0],[80,13,80,14,0],[82,13,82,75,0],[84,13,84,64,0],[85,9,85,10,0],[88,9,88,10,0],[89,13,89,33,0],[91,13,91,46,0],[91,46,91,87,0],[91,87,91,89,0],[92,13,92,38,0],[94,13,94,43,0],[94,43,94,62,0],[94,62,94,64,0],[96,13,96,54,0],[97,9,97,10,0],[100,9,100,10,0],[101,13,101,81,0],[102,9,102,10,0],[107,9,107,10,0],[108,13,108,37,0],[109,13,109,14,0],[110,17,110,125,0],[111,17,111,43,0],[112,13,112,14,0],[113,9,113,10,0],[116,9,116,10,0],[118,13,118,36,0],[119,17,119,24,0],[121,13,121,76,0],[124,13,124,33,0],[125,13,125,14,0],[126,17,126,44,0],[127,17,127,24,0],[130,13,130,20,0],[130,22,130,30,0],[130,31,130,33,0],[130,34,130,57,0],[131,17,131,36,0],[133,13,133,59,0],[134,13,134,28,0],[137,13,137,68,0],[138,13,138,100,0],[139,9,139,10,0],[141,58,141,108,0],[143,55,143,102,0],[145,65,145,122,0],[147,85,147,119,0],[149,68,154,10,0],[157,9,157,10,0],[158,13,158,31,0],[160,13,160,95,0],[161,13,161,14,0],[162,17,162,53,0],[164,17,164,94,0],[165,17,165,35,0],[166,21,166,39,0],[167,17,167,29,0],[170,13,170,26,0],[171,9,171,10,0],[174,9,174,10,0],[175,13,175,32,0],[177,13,177,39,0],[178,9,178,10,0]]);
+    </script>
+  </body>
+</html>

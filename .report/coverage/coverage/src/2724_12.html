@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Overlays/OSD/TrackedSettingToast.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
+using osu.Framework.Bindables;
+using osu.Framework.Configuration.Tracking;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Framework.Graphics;
+using osu.Framework.Graphics.Containers;
+using osu.Framework.Graphics.Effects;
+using osu.Framework.Graphics.Shapes;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osuTK;
+using osuTK.Graphics;
+
+namespace osu.Game.Overlays.OSD
+{
+    public partial class TrackedSettingToast : Toast
+    {
+        private const int lights_bottom_margin = 40;
+
+        private readonly int optionCount;
+        private readonly int selectedOption = -1;
+
+        private Sample sampleOn;
+        private Sample sampleOff;
+        private Sample sampleChange;
+
+        private Bindable&lt;double?&gt; lastPlaybackTime;
+
+        public TrackedSettingToast(SettingDescription description)
+            : base(description.Name, description.Value)
+        {
+            ExtraText = description.Shortcut;
+
+            FillFlowContainer&lt;OptionLight&gt; optionLights;
+
+            Children = new Drawable[]
+            {
+                new Container
+                {
+                    Anchor = Anchor.BottomCentre,
+                    Origin = Anchor.BottomCentre,
+                    Margin = new MarginPadding { Bottom = lights_bottom_margin },
+                    Children = new Drawable[]
+                    {
+                        optionLights = new FillFlowContainer&lt;OptionLight&gt;
+                        {
+                            Margin = new MarginPadding { Bottom = 5 },
+                            Spacing = new Vector2(5, 0),
+                            Direction = FillDirection.Horizontal,
+                            Anchor = Anchor.TopCentre,
+                            Origin = Anchor.TopCentre,
+                            AutoSizeAxes = Axes.Both
+                        },
+                    }
+                }
+            };
+
+            switch (description.RawValue)
+            {
+                case bool val:
+                    optionCount = 1;
+                    if (val) selectedOption = 0;
+                    break;
+
+                case Enum:
+                    var values = Enum.GetValues(description.RawValue.GetType());
+                    optionCount = values.Length;
+                    selectedOption = Convert.ToInt32(description.RawValue);
+                    break;
+            }
+
+            ValueSpriteText.Origin = optionCount &gt; 0 ? Anchor.BottomCentre : Anchor.Centre;
+
+            for (int i = 0; i &lt; optionCount; i++)
+                optionLights.Add(new OptionLight { Glowing = i == selectedOption });
+        }
+
+        [Resolved]
+        private SessionStatics statics { get; set; }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            playSound();
+        }
+
+        private void playSound()
+        {
+            // This debounce code roughly follows what we&#39;re using in HoverSampleDebounceComponent.
+            // We&#39;re sharing the existing static for hover sounds because it doesn&#39;t really matter if they block each other.
+            // This is a simple solution, but if this ever becomes a problem (or other performance issues arise),
+            // the whole toast system should be rewritten to avoid recreating this drawable each time a value changes.
+            lastPlaybackTime = statics.GetBindable&lt;double?&gt;(Static.LastHoverSoundPlaybackTime);
+
+            bool enoughTimePassedSinceLastPlayback = !lastPlaybackTime.Value.HasValue || Time.Current - lastPlaybackTime.Value &gt;= OsuGameBase.SAMPLE_DEBOUNCE_TIME;
+
+            if (!enoughTimePassedSinceLastPlayback) return;
+
+            if (optionCount == 1)
+            {
+                if (selectedOption == 0)
+                    sampleOn?.Play();
+                else
+                    sampleOff?.Play();
+            }
+            else
+            {
+                if (sampleChange == null) return;
+
+                sampleChange.Frequency.Value = 1 + (double)selectedOption / (optionCount - 1) * 0.25f;
+                sampleChange.Play();
+            }
+
+            lastPlaybackTime.Value = Time.Current;
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            sampleOn = audio.Samples.Get(&quot;UI/osd-on&quot;);
+            sampleOff = audio.Samples.Get(&quot;UI/osd-off&quot;);
+            sampleChange = audio.Samples.Get(&quot;UI/osd-change&quot;);
+        }
+
+        private partial class OptionLight : Container
+        {
+            private Color4 glowingColour, idleColour;
+
+            private const float transition_speed = 300;
+
+            private const float glow_strength = 0.4f;
+
+            private readonly Box fill;
+
+            public OptionLight()
+            {
+                Children = new[]
+                {
+                    fill = new Box
+                    {
+                        RelativeSizeAxes = Axes.Both,
+                        Alpha = 1,
+                    },
+                };
+            }
+
+            private bool glowing;
+
+            public bool Glowing
+            {
+                set
+                {
+                    glowing = value;
+                    if (!IsLoaded) return;
+
+                    updateGlow();
+                }
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(OsuColour colours)
+            {
+                fill.Colour = idleColour = Color4.White.Opacity(0.4f);
+                glowingColour = Color4.White;
+
+                Size = new Vector2(25, 5);
+
+                Masking = true;
+                CornerRadius = 3;
+
+                EdgeEffect = new EdgeEffectParameters
+                {
+                    Colour = colours.BlueDark.Opacity(glow_strength),
+                    Type = EdgeEffectType.Glow,
+                    Radius = 8,
+                };
+            }
+
+            protected override void LoadComplete()
+            {
+                updateGlow();
+                FinishTransforms(true);
+            }
+
+            private void updateGlow()
+            {
+                if (glowing)
+                {
+                    fill.FadeColour(glowingColour, transition_speed, Easing.OutQuint);
+                    FadeEdgeEffectTo(glow_strength, transition_speed, Easing.OutQuint);
+                }
+                else
+                {
+                    FadeEdgeEffectTo(0, transition_speed, Easing.OutQuint);
+                    fill.FadeColour(idleColour, transition_speed, Easing.OutQuint);
+                }
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,9,29,50,0],[38,15,38,56,0],[39,9,39,10,0],[40,13,40,46,0],[44,13,64,15,0],[66,13,66,42,0],[69,21,69,37,0],[70,21,70,29,0],[70,30,70,49,0],[71,21,71,27,0],[74,21,74,81,0],[75,21,75,49,0],[76,21,76,76,0],[77,21,77,27,0],[80,13,80,92,0],[82,18,82,27,0],[82,29,82,44,0],[82,46,82,49,0],[83,17,83,85,0],[84,9,84,10,0],[87,42,87,46,0],[87,47,87,51,0],[90,9,90,10,0],[91,13,91,33,0],[93,13,93,25,0],[94,9,94,10,0],[97,9,97,10,0],[102,13,102,96,0],[104,13,104,164,0],[106,13,106,52,0],[106,53,106,60,0],[108,13,108,34,0],[109,13,109,14,0],[110,17,110,41,0],[111,21,111,38,0],[113,21,113,39,0],[114,13,114,14,0],[116,13,116,14,0],[117,17,117,42,0],[117,43,117,50,0],[119,17,119,103,0],[120,17,120,37,0],[121,13,121,14,0],[123,13,123,51,0],[124,9,124,10,0],[128,9,128,10,0],[129,13,129,55,0],[130,13,130,57,0],[131,13,131,63,0],[132,9,132,10,0],[144,13,144,33,0],[145,13,145,14,0],[146,17,153,19,0],[154,13,154,14,0],[161,17,161,18,0],[162,21,162,37,0],[163,21,163,35,0],[163,36,163,43,0],[165,21,165,34,0],[166,17,166,18,0],[171,13,171,14,0],[172,17,172,71,0],[173,17,173,46,0],[175,17,175,43,0],[177,17,177,32,0],[178,17,178,34,0],[180,17,185,19,0],[186,13,186,14,0],[189,13,189,14,0],[190,17,190,30,0],[191,17,191,40,0],[192,13,192,14,0],[195,13,195,14,0],[196,17,196,29,0],[197,17,197,18,0],[198,21,198,87,0],[199,21,199,88,0],[200,17,200,18,0],[202,17,202,18,0],[203,21,203,76,0],[204,21,204,84,0],[205,17,205,18,0],[206,13,206,14,0]]);
+    </script>
+  </body>
+</html>

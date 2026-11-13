@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Beatmaps/ControlPoints/ControlPointInfo.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using JetBrains.Annotations;
+using Newtonsoft.Json;
+using osu.Framework.Bindables;
+using osu.Framework.Lists;
+using osu.Framework.Utils;
+using osu.Game.Screens.Edit;
+using osu.Game.Utils;
+
+namespace osu.Game.Beatmaps.ControlPoints
+{
+    [Serializable]
+    [System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)]
+    public class ControlPointInfo : IDeepCloneable&lt;ControlPointInfo&gt;
+    {
+        /// &lt;summary&gt;
+        /// Invoked on any change to the set of control points.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        public event Action ControlPointsChanged;
+
+        private void raiseControlPointsChanged([CanBeNull] ControlPoint _ = null) =&gt; ControlPointsChanged?.Invoke();
+
+        /// &lt;summary&gt;
+        /// All control points grouped by time.
+        /// &lt;/summary&gt;
+        [JsonProperty]
+        public IBindableList&lt;ControlPointGroup&gt; Groups =&gt; groups;
+
+        private readonly BindableList&lt;ControlPointGroup&gt; groups = new BindableList&lt;ControlPointGroup&gt;();
+
+        /// &lt;summary&gt;
+        /// All timing points.
+        /// &lt;/summary&gt;
+        [JsonProperty]
+        public IReadOnlyList&lt;TimingControlPoint&gt; TimingPoints =&gt; timingPoints;
+
+        private readonly SortedList&lt;TimingControlPoint&gt; timingPoints = new SortedList&lt;TimingControlPoint&gt;(Comparer&lt;TimingControlPoint&gt;.Default);
+
+        /// &lt;summary&gt;
+        /// All effect points.
+        /// &lt;/summary&gt;
+        [JsonProperty]
+        public IReadOnlyList&lt;EffectControlPoint&gt; EffectPoints =&gt; effectPoints;
+
+        private readonly SortedList&lt;EffectControlPoint&gt; effectPoints = new SortedList&lt;EffectControlPoint&gt;(Comparer&lt;EffectControlPoint&gt;.Default);
+
+        /// &lt;summary&gt;
+        /// All control points, of all types.
+        /// &lt;/summary&gt;
+        [JsonIgnore]
+        public IEnumerable&lt;ControlPoint&gt; AllControlPoints =&gt; Groups.SelectMany(g =&gt; g.ControlPoints).ToArray();
+
+        /// &lt;summary&gt;
+        /// Finds the effect control point that is active at &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the effect control point at.&lt;/param&gt;
+        /// &lt;returns&gt;The effect control point.&lt;/returns&gt;
+        [NotNull]
+        public EffectControlPoint EffectPointAt(double time) =&gt; BinarySearchWithFallback(EffectPoints, time, EffectControlPoint.DEFAULT);
+
+        /// &lt;summary&gt;
+        /// Finds the timing control point that is active at &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the timing control point at.&lt;/param&gt;
+        /// &lt;returns&gt;The timing control point.&lt;/returns&gt;
+        [NotNull]
+        public TimingControlPoint TimingPointAt(double time) =&gt; BinarySearchWithFallback(TimingPoints, time, TimingPoints.Count &gt; 0 ? TimingPoints[0] : TimingControlPoint.DEFAULT);
+
+        /// &lt;summary&gt;
+        /// Finds the first timing point that is active strictly after &lt;paramref name=&quot;time&quot;/&gt;, or null if no such point exists.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time after which to find the timing control point.&lt;/param&gt;
+        /// &lt;returns&gt;The timing control point.&lt;/returns&gt;
+        [CanBeNull]
+        public TimingControlPoint TimingPointAfter(double time)
+        {
+            int index = BinarySearch(TimingPoints, time, EqualitySelection.Rightmost);
+            index = index &lt; 0 ? ~index : index + 1;
+            return index &lt; TimingPoints.Count ? TimingPoints[index] : null;
+        }
+
+        /// &lt;summary&gt;
+        /// Finds the maximum BPM represented by any timing control point.
+        /// &lt;/summary&gt;
+        [JsonIgnore]
+        public double BPMMaximum =&gt;
+            60000 / (TimingPoints.MinBy(c =&gt; c.BeatLength) ?? TimingControlPoint.DEFAULT).BeatLength;
+
+        /// &lt;summary&gt;
+        /// Finds the minimum BPM represented by any timing control point.
+        /// &lt;/summary&gt;
+        [JsonIgnore]
+        public double BPMMinimum =&gt;
+            60000 / (TimingPoints.MaxBy(c =&gt; c.BeatLength) ?? TimingControlPoint.DEFAULT).BeatLength;
+
+        /// &lt;summary&gt;
+        /// Remove all &lt;see cref=&quot;ControlPointGroup&quot;/&gt;s and return to a pristine state.
+        /// &lt;/summary&gt;
+        public virtual void Clear()
+        {
+            groups.Clear();
+            timingPoints.Clear();
+            effectPoints.Clear();
+        }
+
+        /// &lt;summary&gt;
+        /// Add a new &lt;see cref=&quot;ControlPoint&quot;/&gt;. Note that the provided control point may not be added if the correct state is already present at the provided time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time at which the control point should be added.&lt;/param&gt;
+        /// &lt;param name=&quot;controlPoint&quot;&gt;The control point to add.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the control point was added.&lt;/returns&gt;
+        public bool Add(double time, ControlPoint controlPoint)
+        {
+            if (CheckAlreadyExisting(time, controlPoint))
+                return false;
+
+            GroupAt(time, true).Add(controlPoint);
+            return true;
+        }
+
+        public ControlPointGroup GroupAt(double time, bool addIfNotExisting = false)
+        {
+            var newGroup = new ControlPointGroup(time);
+
+            int i = groups.BinarySearch(newGroup);
+
+            if (i &gt;= 0)
+                return groups[i];
+
+            if (addIfNotExisting)
+            {
+                newGroup.ItemAdded += GroupItemAdded;
+                newGroup.ItemChanged += raiseControlPointsChanged;
+                newGroup.ItemRemoved += GroupItemRemoved;
+
+                groups.Insert(~i, newGroup);
+                return newGroup;
+            }
+
+            return null;
+        }
+
+        public void RemoveGroup(ControlPointGroup group)
+        {
+            foreach (var item in group.ControlPoints.ToArray())
+                group.Remove(item);
+
+            group.ItemAdded -= GroupItemAdded;
+            group.ItemChanged -= raiseControlPointsChanged;
+            group.ItemRemoved -= GroupItemRemoved;
+
+            groups.Remove(group);
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the time on the given beat divisor closest to the given time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the closest snapped time to.&lt;/param&gt;
+        /// &lt;param name=&quot;beatDivisor&quot;&gt;The beat divisor to snap to.&lt;/param&gt;
+        /// &lt;param name=&quot;referenceTime&quot;&gt;An optional reference point to use for timing point lookup.&lt;/param&gt;
+        public double GetClosestSnappedTime(double time, int beatDivisor, double? referenceTime = null)
+        {
+            var timingPoint = TimingPointAt(referenceTime ?? time);
+            double snappedTime = getClosestPositiveSnappedTime(timingPoint, time, beatDivisor);
+
+            if (referenceTime.HasValue)
+                return snappedTime;
+
+            // If there is a timing point right after the given time, we should check if it is closer than the snapped time and snap to it.
+            var timingPointAfter = TimingPointAfter(time);
+            return timingPointAfter is null || Math.Abs(time - snappedTime) &lt; Math.Abs(time - timingPointAfter.Time) ? snappedTime : timingPointAfter.Time;
+        }
+
+        /// &lt;summary&gt;
+        /// Returns the time on *ANY* valid beat divisor, favouring the divisor closest to the given time.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the closest snapped time to.&lt;/param&gt;
+        public double GetClosestSnappedTime(double time) =&gt; GetClosestSnappedTime(time, GetClosestBeatDivisor(time));
+
+        /// &lt;summary&gt;
+        /// Returns the beat snap divisor closest to the given time. If two are equally close, the smallest divisor is returned.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the closest beat snap divisor to.&lt;/param&gt;
+        /// &lt;param name=&quot;referenceTime&quot;&gt;An optional reference point to use for timing point lookup.&lt;/param&gt;
+        public int GetClosestBeatDivisor(double time, double? referenceTime = null)
+        {
+            TimingControlPoint timingPoint = TimingPointAt(referenceTime ?? time);
+
+            int closestDivisor = 0;
+            double closestTime = double.MaxValue;
+
+            // `getClosestSnappedTime()` only returns positive time values.
+            // due to that, if `time` is allowed to be negative, the loop lower below could return bogus results
+            // as the &quot;snapped time&quot; will not necessarily be &quot;closest&quot; at that point.
+            // compensate for this by moving `time` by enough beat lengths to go back to the positives.
+            if (time &lt; 0)
+            {
+                int offsetBeats = (int)Math.Ceiling(-time / timingPoint.BeatLength);
+                time += offsetBeats * timingPoint.BeatLength;
+            }
+
+            foreach (int divisor in BindableBeatDivisor.PREDEFINED_DIVISORS)
+            {
+                double distanceFromSnap = Math.Abs(time - getClosestPositiveSnappedTime(timingPoint, time, divisor));
+
+                if (Precision.DefinitelyBigger(closestTime, distanceFromSnap))
+                {
+                    closestDivisor = divisor;
+                    closestTime = distanceFromSnap;
+                }
+            }
+
+            return closestDivisor;
+        }
+
+        private static double getClosestPositiveSnappedTime(TimingControlPoint timingPoint, double time, int beatDivisor)
+        {
+            double beatLength = timingPoint.BeatLength / beatDivisor;
+            double beats = (Math.Max(time, 0) - timingPoint.Time) / beatLength;
+
+            int roundedBeats = (int)Math.Round(beats, MidpointRounding.AwayFromZero);
+            double snappedTime = timingPoint.Time + roundedBeats * beatLength;
+
+            if (snappedTime &gt;= 0)
+                return snappedTime;
+
+            return snappedTime + beatLength;
+        }
+
+        /// &lt;summary&gt;
+        /// Binary searches one of the control point lists to find the active control point at &lt;paramref name=&quot;time&quot;/&gt;.
+        /// Includes logic for returning a specific point when no matching point is found.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;list&quot;&gt;The list to search.&lt;/param&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the control point at.&lt;/param&gt;
+        /// &lt;param name=&quot;fallback&quot;&gt;The control point to use when &lt;paramref name=&quot;time&quot;/&gt; is before any control points.&lt;/param&gt;
+        /// &lt;returns&gt;The active control point at &lt;paramref name=&quot;time&quot;/&gt;, or a fallback &lt;see cref=&quot;ControlPoint&quot;/&gt; if none found.&lt;/returns&gt;
+        public static T BinarySearchWithFallback&lt;T&gt;(IReadOnlyList&lt;T&gt; list, double time, T fallback)
+            where T : class, IControlPoint
+        {
+            return BinarySearch(list, time) ?? fallback;
+        }
+
+        /// &lt;summary&gt;
+        /// Binary searches one of the control point lists to find the active control point at &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;list&quot;&gt;The list to search.&lt;/param&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the control point at.&lt;/param&gt;
+        /// &lt;returns&gt;The active control point at &lt;paramref name=&quot;time&quot;/&gt;. Will return &lt;c&gt;null&lt;/c&gt; if there are no control points, or if the time is before the first control point.&lt;/returns&gt;
+        public static T BinarySearch&lt;T&gt;(IReadOnlyList&lt;T&gt; list, double time)
+            where T : class, IControlPoint
+        {
+            ArgumentNullException.ThrowIfNull(list);
+
+            int index = BinarySearch(list, time, EqualitySelection.Rightmost);
+
+            if (index &lt; 0)
+                index = ~index - 1;
+
+            return index &gt;= 0 ? list[index] : null;
+        }
+
+        /// &lt;summary&gt;
+        /// Binary searches one of the control point lists to find the active control point at &lt;paramref name=&quot;time&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;list&quot;&gt;The list to search.&lt;/param&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the control point at.&lt;/param&gt;
+        /// &lt;param name=&quot;equalitySelection&quot;&gt;Determines which index to return if there are multiple exact matches.&lt;/param&gt;
+        /// &lt;returns&gt;The index of the control point at &lt;paramref name=&quot;time&quot;/&gt;. Will return the complement of the index of the control point after &lt;paramref name=&quot;time&quot;/&gt; if no exact match is found.&lt;/returns&gt;
+        public static int BinarySearch&lt;T&gt;(IReadOnlyList&lt;T&gt; list, double time, EqualitySelection equalitySelection)
+            where T : class, IControlPoint
+        {
+            ArgumentNullException.ThrowIfNull(list);
+
+            int n = list.Count;
+
+            if (n == 0)
+                return -1;
+
+            if (time &lt; list[0].Time)
+                return -1;
+
+            if (time &gt; list[^1].Time)
+                return ~n;
+
+            int l = 0;
+            int r = n - 1;
+            bool equalityFound = false;
+
+            while (l &lt;= r)
+            {
+                int pivot = l + ((r - l) &gt;&gt; 1);
+
+                if (list[pivot].Time &lt; time)
+                    l = pivot + 1;
+                else if (list[pivot].Time &gt; time)
+                    r = pivot - 1;
+                else
+                {
+                    equalityFound = true;
+
+                    switch (equalitySelection)
+                    {
+                        case EqualitySelection.Leftmost:
+                            r = pivot - 1;
+                            break;
+
+                        case EqualitySelection.Rightmost:
+                            l = pivot + 1;
+                            break;
+
+                        default:
+                        case EqualitySelection.FirstFound:
+                            return pivot;
+                    }
+                }
+            }
+
+            if (!equalityFound) return ~l;
+
+            switch (equalitySelection)
+            {
+                case EqualitySelection.Leftmost:
+                    return l;
+
+                default:
+                case EqualitySelection.Rightmost:
+                    return l - 1;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Check whether &lt;paramref name=&quot;newPoint&quot;/&gt; should be added.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;time&quot;&gt;The time to find the timing control point at.&lt;/param&gt;
+        /// &lt;param name=&quot;newPoint&quot;&gt;A point to be added.&lt;/param&gt;
+        /// &lt;returns&gt;Whether the new point should be added.&lt;/returns&gt;
+        protected virtual bool CheckAlreadyExisting(double time, ControlPoint newPoint)
+        {
+            ControlPoint existing = null;
+
+            switch (newPoint)
+            {
+                case TimingControlPoint:
+                    // Timing points are a special case and need to be added regardless of fallback availability.
+                    existing = BinarySearch(TimingPoints, time);
+                    break;
+
+                case EffectControlPoint:
+                    existing = EffectPointAt(time);
+                    break;
+            }
+
+            return newPoint?.IsRedundant(existing) == true;
+        }
+
+        protected virtual void GroupItemAdded(ControlPoint controlPoint)
+        {
+            switch (controlPoint)
+            {
+                case TimingControlPoint typed:
+                    timingPoints.Add(typed);
+                    break;
+
+                case EffectControlPoint typed:
+                    effectPoints.Add(typed);
+                    break;
+
+                default:
+                    throw new ArgumentException($&quot;A control point of unexpected type {controlPoint.GetType()} was added to this {nameof(ControlPointInfo)}&quot;);
+            }
+
+            raiseControlPointsChanged();
+        }
+
+        protected virtual void GroupItemRemoved(ControlPoint controlPoint)
+        {
+            switch (controlPoint)
+            {
+                case TimingControlPoint typed:
+                    timingPoints.Remove(typed);
+                    break;
+
+                case EffectControlPoint typed:
+                    effectPoints.Remove(typed);
+                    break;
+            }
+
+            raiseControlPointsChanged();
+        }
+
+        public ControlPointInfo DeepClone()
+        {
+            var controlPointInfo = (ControlPointInfo)Activator.CreateInstance(GetType())!;
+
+            foreach (var point in AllControlPoints)
+                controlPointInfo.Add(point.Time, point.DeepClone());
+
+            return controlPointInfo;
+        }
+    }
+
+    public enum EqualitySelection
+    {
+        FirstFound,
+        Leftmost,
+        Rightmost
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[29,86,29,116,1],[35,59,35,65,1],[37,9,37,105,1],[43,66,43,78,1],[45,9,45,145,1],[51,66,51,78,1],[53,9,53,145,1],[59,62,59,85,1],[59,85,59,100,1],[59,100,59,111,1],[67,65,67,137,1],[75,65,75,180,1],[84,9,84,10,0],[85,13,85,87,0],[86,13,86,52,0],[87,13,87,76,0],[88,9,88,10,0],[95,13,95,46,0],[95,46,95,58,0],[95,58,95,101,0],[102,13,102,46,0],[102,46,102,58,0],[102,58,102,101,0],[108,9,108,10,0],[109,13,109,28,0],[110,13,110,34,0],[111,13,111,34,0],[112,9,112,10,0],[121,9,121,10,1],[122,13,122,58,1],[123,17,123,30,1],[125,13,125,51,1],[126,13,126,25,1],[127,9,127,10,1],[130,9,130,10,1],[131,13,131,56,1],[133,13,133,51,1],[135,13,135,24,1],[136,17,136,34,1],[138,13,138,34,1],[139,13,139,14,1],[140,17,140,54,1],[141,17,141,67,1],[142,17,142,58,1],[144,17,144,45,1],[145,17,145,33,1],[148,13,148,25,1],[149,9,149,10,1],[152,9,152,10,1],[153,13,153,20,1],[153,22,153,30,1],[153,31,153,33,1],[153,34,153,63,1],[154,17,154,36,1],[156,13,156,47,1],[157,13,157,60,1],[158,13,158,51,1],[160,13,160,34,1],[161,9,161,10,1],[170,9,170,10,0],[171,13,171,68,0],[172,13,172,96,0],[174,13,174,40,0],[175,17,175,36,0],[178,13,178,59,0],[179,13,179,156,0],[180,9,180,10,0],[186,61,186,117,0],[194,9,194,10,1],[195,13,195,83,1],[197,13,197,36,1],[198,13,198,50,1],[204,13,204,26,1],[205,13,205,14,0],[206,17,206,85,0],[207,17,207,62,0],[208,13,208,14,0],[210,13,210,20,1],[210,22,210,33,1],[210,34,210,36,1],[210,37,210,76,1],[211,13,211,14,1],[212,17,212,118,1],[214,17,214,79,1],[215,17,215,18,1],[216,21,216,46,1],[217,21,217,52,1],[218,17,218,18,1],[219,13,219,14,1],[221,13,221,35,1],[222,9,222,10,1],[225,9,225,10,1],[226,13,226,70,1],[227,13,227,80,1],[229,13,229,86,1],[230,13,230,79,1],[232,13,232,34,1],[233,17,233,36,1],[235,13,235,45,0],[236,9,236,10,1],[248,9,248,10,1],[249,13,249,57,1],[250,9,250,10,1],[260,9,260,10,1],[261,13,261,53,1],[263,13,263,79,1],[265,13,265,27,1],[266,17,266,36,1],[268,13,268,52,1],[269,9,269,10,1],[280,9,280,10,1],[281,13,281,53,1],[283,13,283,32,1],[285,13,285,24,1],[286,17,286,27,1],[288,13,288,37,1],[289,17,289,27,1],[291,13,291,38,1],[292,17,292,27,1],[294,13,294,23,1],[295,13,295,27,1],[296,13,296,40,1],[298,13,298,27,1],[299,13,299,14,1],[300,17,300,48,1],[302,17,302,45,1],[303,21,303,35,1],[304,22,304,50,1],[305,21,305,35,1],[307,17,307,18,1],[308,21,308,42,1],[310,21,310,47,1],[313,29,313,43,0],[314,29,314,35,0],[317,29,317,43,1],[318,29,318,35,1],[322,29,322,42,0],[324,17,324,18,1],[325,13,325,14,1],[327,13,327,32,1],[327,33,327,43,0],[329,13,329,39,1],[332,21,332,30,0],[336,21,336,34,1],[338,9,338,10,1],[347,9,347,10,1],[348,13,348,42,1],[350,13,350,30,1],[354,21,354,65,1],[355,21,355,27,1],[358,21,358,52,1],[359,21,359,27,1],[362,13,362,60,1],[363,9,363,10,1],[366,9,366,10,1],[367,13,367,34,1],[370,21,370,45,1],[371,21,371,27,1],[374,21,374,45,1],[375,21,375,27,1],[378,21,378,158,0],[381,13,381,41,1],[382,9,382,10,1],[385,9,385,10,1],[386,13,386,34,1],[389,21,389,48,1],[390,21,390,27,1],[393,21,393,48,0],[394,21,394,27,0],[397,13,397,41,1],[398,9,398,10,1],[401,9,401,10,1],[402,13,402,91,1],[404,13,404,20,1],[404,22,404,31,1],[404,32,404,34,1],[404,35,404,51,1],[405,17,405,69,1],[407,13,407,37,1],[408,9,408,10,1]]);
+    </script>
+  </body>
+</html>

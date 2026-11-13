@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/Select/FilterCriteria.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using osu.Game.Beatmaps;
+using osu.Game.Collections;
+using osu.Game.Rulesets;
+using osu.Game.Rulesets.Filter;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Screens.Select.Filter;
+
+namespace osu.Game.Screens.Select
+{
+    public class FilterCriteria
+    {
+        public GroupMode Group;
+        public SortMode Sort;
+
+        public BeatmapSetInfo? SelectedBeatmapSet;
+
+        public OptionalRange&lt;double&gt; StarDifficulty;
+        public OptionalRange&lt;float&gt; ApproachRate;
+        public OptionalRange&lt;float&gt; DrainRate;
+        public OptionalRange&lt;float&gt; CircleSize;
+        public OptionalRange&lt;float&gt; OverallDifficulty;
+        public OptionalRange&lt;double&gt; Length;
+        public OptionalRange&lt;double&gt; BPM;
+        public OptionalRange&lt;int&gt; BeatDivisor;
+        public OptionalSet&lt;BeatmapOnlineStatus&gt; OnlineStatus = new OptionalSet&lt;BeatmapOnlineStatus&gt;();
+        public OptionalRange&lt;DateTimeOffset&gt; LastPlayed;
+        public OptionalRange&lt;DateTimeOffset&gt; DateRanked;
+        public OptionalRange&lt;DateTimeOffset&gt; DateSubmitted;
+        public OptionalTextFilter Creator;
+        public OptionalTextFilter Artist;
+        public OptionalTextFilter Title;
+        public OptionalTextFilter DifficultyName;
+        public OptionalTextFilter Source;
+        public List&lt;OptionalTextFilter&gt; UserTags = [];
+
+        public OptionalRange&lt;double&gt; UserStarDifficulty = new OptionalRange&lt;double&gt;
+        {
+            IsLowerInclusive = true,
+            IsUpperInclusive = true
+        };
+
+        public OptionalTextFilter[] SearchTerms = Array.Empty&lt;OptionalTextFilter&gt;();
+
+        public RulesetInfo? Ruleset;
+        public IReadOnlyList&lt;Mod&gt;? Mods;
+        public bool AllowConvertedBeatmaps;
+        public int? BeatmapSetId;
+
+        public bool? HasOnlineID;
+
+        private string searchText = string.Empty;
+
+        /// &lt;summary&gt;
+        /// &lt;see cref=&quot;SearchText&quot;/&gt; as a number (if it can be parsed as one).
+        /// &lt;/summary&gt;
+        public int? SearchNumber { get; private set; }
+
+        public string SearchText
+        {
+            get =&gt; searchText;
+            set
+            {
+                searchText = value;
+
+                List&lt;OptionalTextFilter&gt; terms = new List&lt;OptionalTextFilter&gt;();
+
+                string remainingText = value;
+
+                // Match either an open difficulty tag to the end of string,
+                // or match a closed one with a whitespace after it.
+                //
+                // To keep things simple, the closing &#39;]&#39; may be included in the match group,
+                // and is trimmed post-match.
+                foreach (Match quotedSegment in Regex.Matches(value, &quot;(^|\\s)\\[(.*)(\\]\\s|$)&quot;))
+                {
+                    DifficultyName = new OptionalTextFilter
+                    {
+                        SearchTerm = quotedSegment.Groups[2].Value.Trim(&#39;]&#39;)
+                    };
+
+                    remainingText = remainingText.Replace(quotedSegment.Value, string.Empty);
+                }
+
+                // First handle quoted segments to ensure we keep inline spaces in exact matches.
+                foreach (Match quotedSegment in Regex.Matches(value, &quot;(\&quot;[^\&quot;]+\&quot;[!]?)&quot;))
+                {
+                    terms.Add(new OptionalTextFilter { SearchTerm = quotedSegment.Value });
+                    remainingText = remainingText.Replace(quotedSegment.Value, string.Empty);
+                }
+
+                // Then handle the rest splitting on any spaces.
+                terms.AddRange(remainingText.Split(&#39; &#39;, StringSplitOptions.RemoveEmptyEntries).Select(s =&gt; new OptionalTextFilter
+                {
+                    SearchTerm = s
+                }));
+
+                SearchTerms = terms.ToArray();
+
+                SearchNumber = null;
+
+                if (SearchTerms.Length == 1 &amp;&amp; int.TryParse(SearchTerms[0].SearchTerm, out int parsed))
+                    SearchNumber = parsed;
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Hashes from the &lt;see cref=&quot;BeatmapCollection&quot;/&gt; to filter to.
+        /// &lt;/summary&gt;
+        public IEnumerable&lt;string&gt;? CollectionBeatmapMD5Hashes { get; set; }
+
+        public IRulesetFilterCriteria? RulesetCriteria { get; set; }
+
+        /// &lt;summary&gt;
+        /// The user ID of the current local user, used to filter to own maps when &lt;see cref=&quot;GroupMode.MyMaps&quot;/&gt; is selected.
+        /// Or null if the user is not logged in.
+        /// &lt;/summary&gt;
+        public int? LocalUserId { get; set; }
+
+        /// &lt;summary&gt;
+        /// The username of the current local user, used to filter to own maps when &lt;see cref=&quot;GroupMode.MyMaps&quot;/&gt; is selected.
+        /// Or null if the user is not logged in.
+        /// &lt;/summary&gt;
+        public string? LocalUserUsername { get; set; }
+
+        public readonly struct OptionalSet&lt;T&gt; : IEquatable&lt;OptionalSet&lt;T&gt;&gt;
+            where T : struct, Enum
+        {
+            public bool HasFilter =&gt; true;
+
+            public bool IsInRange(T value) =&gt; Values.Contains(value);
+
+            public HashSet&lt;T&gt; Values { get; }
+
+            public OptionalSet()
+            {
+                Values = Enum.GetValues&lt;T&gt;().ToHashSet();
+            }
+
+            public bool Equals(OptionalSet&lt;T&gt; other) =&gt; Values.SetEquals(other.Values);
+        }
+
+        public struct OptionalRange&lt;T&gt; : IEquatable&lt;OptionalRange&lt;T&gt;&gt;
+            where T : struct
+        {
+            public bool HasFilter =&gt; Max != null || Min != null;
+
+            public bool IsInRange(T value)
+            {
+                bool lowerRangeSatisfied = true;
+                bool upperRangeSatisfied = true;
+
+                if (Min != null)
+                {
+                    int comparison = Comparer&lt;T&gt;.Default.Compare(value, Min.Value);
+                    lowerRangeSatisfied = comparison &gt; 0 || (comparison == 0 &amp;&amp; IsLowerInclusive);
+                }
+
+                if (Max != null)
+                {
+                    int comparison = Comparer&lt;T&gt;.Default.Compare(value, Max.Value);
+                    upperRangeSatisfied = comparison &lt; 0 || (comparison == 0 &amp;&amp; IsUpperInclusive);
+                }
+
+                bool result = lowerRangeSatisfied &amp;&amp; upperRangeSatisfied;
+                if (InvertRange)
+                    result = !result;
+                return result;
+            }
+
+            public T? Min;
+            public T? Max;
+            public bool IsLowerInclusive;
+            public bool IsUpperInclusive;
+
+            /// &lt;summary&gt;
+            /// When &lt;see langword=&quot;true&quot;/&gt;, the meaning of this filter is inverted, i.e. it will &lt;i&gt;exclude&lt;/i&gt; items that satisfy this range.
+            /// &lt;/summary&gt;
+            public bool InvertRange;
+
+            public bool Equals(OptionalRange&lt;T&gt; other)
+                =&gt; EqualityComparer&lt;T?&gt;.Default.Equals(Min, other.Min)
+                   &amp;&amp; EqualityComparer&lt;T?&gt;.Default.Equals(Max, other.Max)
+                   &amp;&amp; IsLowerInclusive.Equals(other.IsLowerInclusive)
+                   &amp;&amp; IsUpperInclusive.Equals(other.IsUpperInclusive);
+        }
+
+        public struct OptionalTextFilter : IEquatable&lt;OptionalTextFilter&gt;
+        {
+            public bool HasFilter =&gt; !string.IsNullOrEmpty(SearchTerm);
+
+            public MatchMode MatchMode { get; private set; }
+
+            public bool Matches(string value)
+            {
+                if (!HasFilter)
+                    return true;
+
+                // search term is guaranteed to be non-empty, so if the string we&#39;re comparing is empty, it&#39;s not matching
+                if (string.IsNullOrEmpty(value))
+                    return ExcludeTerm;
+
+                bool result;
+
+                switch (MatchMode)
+                {
+                    default:
+                    case MatchMode.Substring:
+                        // Note that we are using ordinal here to avoid performance issues caused by globalisation concerns.
+                        // See https://github.com/ppy/osu/issues/11571 / https://github.com/dotnet/docs/issues/18423.
+                        result = value.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase);
+                        break;
+
+                    case MatchMode.IsolatedPhrase:
+                        result = Regex.IsMatch(value, $@&quot;(^|\b){Regex.Escape(searchTerm)}($|\b)&quot;, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                        break;
+
+                    case MatchMode.FullPhrase:
+                        result = CultureInfo.InvariantCulture.CompareInfo.Compare(value, searchTerm, CompareOptions.OrdinalIgnoreCase) == 0;
+                        break;
+                }
+
+                if (ExcludeTerm)
+                    result = !result;
+
+                return result;
+            }
+
+            /// &lt;summary&gt;
+            /// When &lt;see langword=&quot;true&quot;/&gt;, the meaning of this filter is inverted, i.e. it will &lt;i&gt;exclude&lt;/i&gt; items which match &lt;see cref=&quot;SearchTerm&quot;/&gt;.
+            /// &lt;/summary&gt;
+            public bool ExcludeTerm;
+
+            private string searchTerm;
+
+            public string SearchTerm
+            {
+                get =&gt; searchTerm;
+                set
+                {
+                    searchTerm = value;
+
+                    if (searchTerm.StartsWith(&#39;\&quot;&#39;))
+                    {
+                        // length check ensures that the quote character in the `StartsWith()` check above and the `EndsWith()` check below is not the same character.
+                        if (searchTerm.EndsWith(&quot;\&quot;!&quot;, StringComparison.Ordinal) &amp;&amp; searchTerm.Length &gt;= 3)
+                        {
+                            searchTerm = searchTerm.TrimEnd(&#39;!&#39;).Trim(&#39;\&quot;&#39;);
+                            MatchMode = MatchMode.FullPhrase;
+                        }
+                        else
+                        {
+                            searchTerm = searchTerm.Trim(&#39;\&quot;&#39;);
+                            MatchMode = MatchMode.IsolatedPhrase;
+                        }
+                    }
+                    else
+                        MatchMode = MatchMode.Substring;
+                }
+            }
+
+            public bool Equals(OptionalTextFilter other) =&gt; SearchTerm == other.SearchTerm;
+        }
+
+        /// &lt;summary&gt;
+        /// Given a new filter criteria, decide whether a full sort needs to be performed.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;newCriteria&quot;&gt;&lt;/param&gt;
+        /// &lt;returns&gt;&lt;/returns&gt;
+        public bool RequiresSorting(FilterCriteria newCriteria)
+        {
+            if (Sort != newCriteria.Sort)
+                return true;
+
+            switch (Sort)
+            {
+                // Some sorts are stable across all other changes.
+                // Running these sorts will sort all items, including currently hidden items.
+                case SortMode.Artist:
+                case SortMode.Author:
+                case SortMode.DateSubmitted:
+                case SortMode.DateAdded:
+                case SortMode.DateRanked:
+                case SortMode.Source:
+                case SortMode.Title:
+                    return false;
+
+                // Some sorts use aggregate max comparisons, which will change based on filtered items.
+                // These sorts generally ignore items hidden by filtered state, so we must force a sort under all circumstances here.
+                //
+                // This makes things very slow when typing a text search, and we probably want to consider a way to optimise things going forward.
+                case SortMode.LastPlayed:
+                case SortMode.BPM:
+                case SortMode.Length:
+                case SortMode.Difficulty:
+                    return true;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(Sort), Sort, &quot;Unknown sort mode&quot;);
+            }
+        }
+
+        public enum MatchMode
+        {
+            /// &lt;summary&gt;
+            /// Match using a simple &quot;contains&quot; substring match.
+            /// &lt;/summary&gt;
+            Substring,
+
+            /// &lt;summary&gt;
+            /// Match for the search phrase being isolated by spaces, or at the start or end of the text.
+            /// &lt;/summary&gt;
+            IsolatedPhrase,
+
+            /// &lt;summary&gt;
+            /// Match for the search phrase matching the full text in completion.
+            /// &lt;/summary&gt;
+            FullPhrase,
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[33,9,33,103,1],[42,9,42,55,1],[44,9,48,11,1],[50,9,50,85,1],[59,9,59,50,1],[64,36,64,40,1],[64,41,64,53,1],[68,20,68,30,1],[70,13,70,14,1],[71,17,71,36,1],[73,17,73,81,1],[75,17,75,46,1],[82,17,82,24,1],[82,26,82,45,1],[82,46,82,48,1],[82,49,82,97,1],[83,17,83,18,1],[84,21,87,23,1],[89,21,89,94,1],[90,17,90,18,1],[93,17,93,24,1],[93,26,93,45,1],[93,46,93,48,1],[93,49,93,89,1],[94,17,94,18,1],[95,21,95,92,1],[96,21,96,94,1],[97,17,97,18,1],[100,17,100,108,1],[100,108,103,18,1],[103,18,103,21,1],[105,17,105,47,1],[107,17,107,37,1],[109,17,109,104,1],[110,21,110,43,1],[111,13,111,14,1],[117,66,117,70,1],[117,71,117,75,1],[119,58,119,62,1],[119,63,119,67,1],[125,35,125,39,1],[125,40,125,44,1],[131,44,131,48,1],[131,49,131,53,1],[136,38,136,42,1],[138,47,138,69,1],[140,40,140,44,1],[143,13,143,14,1],[144,17,144,58,1],[145,13,145,14,1],[147,57,147,87,1],[153,38,153,64,1],[156,13,156,14,1],[157,17,157,49,1],[158,17,158,49,1],[160,17,160,33,1],[161,17,161,18,1],[162,21,162,84,1],[163,21,163,99,1],[164,17,164,18,1],[166,17,166,33,1],[167,17,167,18,1],[168,21,168,84,1],[169,21,169,99,1],[170,17,170,18,1],[172,17,172,74,1],[173,17,173,33,1],[174,21,174,38,1],[175,17,175,31,1],[176,13,176,14,1],[189,20,192,70,1],[197,38,197,71,1],[199,42,199,46,1],[199,47,199,59,1],[202,13,202,14,1],[203,17,203,32,1],[204,21,204,33,1],[207,17,207,49,1],[208,21,208,40,1],[212,17,212,35,1],[218,25,218,97,1],[219,25,219,31,1],[222,25,222,156,1],[223,25,223,31,1],[226,25,226,141,1],[227,25,227,31,1],[230,17,230,33,1],[231,21,231,38,1],[233,17,233,31,1],[234,13,234,14,1],[245,24,245,34,1],[247,17,247,18,1],[248,21,248,40,1],[250,21,250,53,1],[251,21,251,22,1],[253,25,253,108,1],[254,25,254,26,1],[255,29,255,77,1],[256,29,256,62,1],[257,25,257,26,1],[259,25,259,26,1],[260,29,260,64,1],[261,29,261,66,1],[262,25,262,26,1],[263,21,263,22,1],[265,25,265,57,1],[266,17,266,18,1],[269,61,269,91,1],[278,9,278,10,1],[279,13,279,42,1],[280,17,280,29,1],[282,13,282,26,1],[293,21,293,34,1],[303,21,303,33,1],[306,21,306,100,1],[308,9,308,10,1]]);
+    </script>
+  </body>
+</html>

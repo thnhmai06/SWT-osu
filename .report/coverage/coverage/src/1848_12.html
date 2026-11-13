@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Game.Screens.Play;
+
+namespace osu.Game.Screens.OnlinePlay.Multiplayer.Spectate
+{
+    /// &lt;summary&gt;
+    /// Manages the synchronisation between one or more &lt;see cref=&quot;SpectatorPlayerClock&quot;/&gt;s in relation to a master clock.
+    /// &lt;/summary&gt;
+    public partial class SpectatorSyncManager : Component
+    {
+        /// &lt;summary&gt;
+        /// The offset from the master clock to which player clocks should remain within to be considered in-sync.
+        /// &lt;/summary&gt;
+        public const double SYNC_TARGET = 16;
+
+        /// &lt;summary&gt;
+        /// The offset from the master clock at which player clocks begin resynchronising.
+        /// &lt;/summary&gt;
+        public const double MAX_SYNC_OFFSET = 50;
+
+        /// &lt;summary&gt;
+        /// The maximum delay to start gameplay, if any (but not all) player clocks are ready.
+        /// &lt;/summary&gt;
+        public const double MAXIMUM_START_DELAY = 15000;
+
+        /// &lt;summary&gt;
+        /// An event which is invoked when gameplay is ready to start.
+        /// &lt;/summary&gt;
+        public Action? ReadyToStart;
+
+        public double CurrentMasterTime =&gt; masterClock.CurrentTime;
+
+        /// &lt;summary&gt;
+        /// The master clock which is used to control the timing of all player clocks clocks.
+        /// &lt;/summary&gt;
+        private readonly GameplayClockContainer masterClock;
+
+        /// &lt;summary&gt;
+        /// The player clocks.
+        /// &lt;/summary&gt;
+        private readonly List&lt;SpectatorPlayerClock&gt; playerClocks = new List&lt;SpectatorPlayerClock&gt;();
+
+        private MasterClockState masterState = MasterClockState.Synchronised;
+
+        private bool hasStarted;
+
+        private double? firstStartAttemptTime;
+
+        public SpectatorSyncManager(GameplayClockContainer master)
+        {
+            masterClock = master;
+        }
+
+        /// &lt;summary&gt;
+        /// Create a new managed &lt;see cref=&quot;SpectatorPlayerClock&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;The newly created &lt;see cref=&quot;SpectatorPlayerClock&quot;/&gt;.&lt;/returns&gt;
+        public SpectatorPlayerClock CreateManagedClock()
+        {
+            var clock = new SpectatorPlayerClock(masterClock);
+            playerClocks.Add(clock);
+            return clock;
+        }
+
+        /// &lt;summary&gt;
+        /// Removes an &lt;see cref=&quot;SpectatorPlayerClock&quot;/&gt;, stopping it from being managed by this &lt;see cref=&quot;SpectatorSyncManager&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;clock&quot;&gt;The &lt;see cref=&quot;SpectatorPlayerClock&quot;/&gt; to remove.&lt;/param&gt;
+        public void RemoveManagedClock(SpectatorPlayerClock clock)
+        {
+            playerClocks.Remove(clock);
+            Logger.Log($&quot;Removing managed clock from {nameof(SpectatorSyncManager)} ({playerClocks.Count} remain)&quot;);
+            clock.IsRunning = false;
+        }
+
+        protected override void Update()
+        {
+            base.Update();
+
+            if (!attemptStart())
+            {
+                // Ensure all player clocks are stopped until the start succeeds.
+                foreach (var clock in playerClocks)
+                    clock.IsRunning = false;
+                return;
+            }
+
+            updatePlayerCatchup();
+            updateMasterState();
+        }
+
+        /// &lt;summary&gt;
+        /// Attempts to start playback. Waits for all player clocks to have available frames for up to &lt;see cref=&quot;MAXIMUM_START_DELAY&quot;/&gt; milliseconds.
+        /// &lt;/summary&gt;
+        /// &lt;returns&gt;Whether playback was started and syncing should occur.&lt;/returns&gt;
+        private bool attemptStart()
+        {
+            if (hasStarted)
+                return true;
+
+            if (playerClocks.Count == 0)
+                return false;
+
+            int readyCount = playerClocks.Count(s =&gt; !s.WaitingOnFrames);
+
+            if (readyCount == playerClocks.Count)
+                return performStart();
+
+            if (readyCount &gt; 0)
+            {
+                firstStartAttemptTime ??= Time.Current;
+
+                if (Time.Current - firstStartAttemptTime &gt; MAXIMUM_START_DELAY)
+                    return performStart();
+            }
+
+            bool performStart()
+            {
+                ReadyToStart?.Invoke();
+                return hasStarted = true;
+            }
+
+            return false;
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the catchup states of all player clocks.
+        /// &lt;/summary&gt;
+        private void updatePlayerCatchup()
+        {
+            for (int i = 0; i &lt; playerClocks.Count; i++)
+            {
+                var clock = playerClocks[i];
+
+                // How far this player&#39;s clock is out of sync, compared to the master clock.
+                // A negative value means the player is running fast (ahead); a positive value means the player is running behind (catching up).
+                double timeDelta = masterClock.CurrentTime - clock.CurrentTime;
+
+                // Check that the player clock isn&#39;t too far ahead.
+                // This is a quiet case in which the catchup is done by the master clock, so IsCatchingUp is not set on the player clock.
+                if (timeDelta &lt; -SYNC_TARGET)
+                {
+                    // Importantly, set the clock to a non-catchup state. if this isn&#39;t done, updateMasterState may incorrectly pause the master clock
+                    // when it is required to be running (ie. if all players are ahead of the master).
+                    clock.IsCatchingUp = false;
+                    clock.IsRunning = false;
+                    continue;
+                }
+
+                // Make sure the player clock is running if it can.
+                clock.IsRunning = !clock.WaitingOnFrames;
+
+                if (clock.IsCatchingUp)
+                {
+                    // Stop the player clock from catching up if it&#39;s within the sync target.
+                    if (timeDelta &lt;= SYNC_TARGET)
+                        clock.IsCatchingUp = false;
+                }
+                else
+                {
+                    // Make the player clock start catching up if it&#39;s exceeded the maximum allowable sync offset.
+                    if (timeDelta &gt; MAX_SYNC_OFFSET)
+                        clock.IsCatchingUp = true;
+                }
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Updates the state of the master clock.
+        /// &lt;/summary&gt;
+        private void updateMasterState()
+        {
+            // Clocks are removed as players complete the beatmap.
+            // Once there are no clocks we want to make sure the track plays out to the end.
+            MasterClockState newState = playerClocks.Count == 0 || playerClocks.Any(s =&gt; !s.IsCatchingUp) ? MasterClockState.Synchronised : MasterClockState.TooFarAhead;
+
+            if (masterState == newState)
+                return;
+
+            masterState = newState;
+            Logger.Log($&quot;{nameof(SpectatorSyncManager)}&#39;s master clock became {masterState}&quot;);
+
+            switch (masterState)
+            {
+                case MasterClockState.Synchronised:
+                    if (hasStarted)
+                        masterClock.Start();
+
+                    break;
+
+                case MasterClockState.TooFarAhead:
+                    masterClock.Stop();
+                    break;
+            }
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[38,44,38,67,0],[48,9,48,101,0],[50,9,50,78,0],[56,9,56,67,0],[57,9,57,10,0],[58,13,58,34,0],[59,9,59,10,0],[66,9,66,10,0],[67,13,67,63,0],[68,13,68,37,0],[69,13,69,26,0],[70,9,70,10,0],[77,9,77,10,0],[78,13,78,40,0],[79,13,79,117,0],[80,13,80,37,0],[81,9,81,10,0],[84,9,84,10,0],[85,13,85,27,0],[87,13,87,33,0],[88,13,88,14,0],[90,17,90,24,0],[90,26,90,35,0],[90,36,90,38,0],[90,39,90,51,0],[91,21,91,45,0],[92,17,92,24,0],[95,13,95,35,0],[96,13,96,33,0],[97,9,97,10,0],[104,9,104,10,0],[105,13,105,28,0],[106,17,106,29,0],[108,13,108,41,0],[109,17,109,30,0],[111,13,111,54,0],[111,54,111,72,0],[111,72,111,74,0],[113,13,113,50,0],[114,17,114,39,0],[116,13,116,32,0],[117,13,117,14,0],[118,17,118,56,0],[120,17,120,80,0],[121,21,121,43,0],[122,13,122,14,0],[125,13,125,14,0],[126,17,126,40,0],[127,17,127,42,0],[128,13,128,14,0],[130,13,130,26,0],[131,9,131,10,0],[137,9,137,10,0],[138,18,138,27,0],[138,29,138,51,0],[138,53,138,56,0],[139,13,139,14,0],[140,17,140,45,0],[144,17,144,80,0],[148,17,148,46,0],[149,17,149,18,0],[152,21,152,48,0],[153,21,153,45,0],[154,21,154,30,0],[158,17,158,58,0],[160,17,160,40,0],[161,17,161,18,0],[163,21,163,50,0],[164,25,164,52,0],[165,17,165,18,0],[167,17,167,18,0],[169,21,169,53,0],[170,25,170,51,0],[171,17,171,18,0],[172,13,172,14,0],[173,9,173,10,0],[179,9,179,10,0],[182,13,182,90,0],[182,90,182,105,0],[182,105,182,170,0],[184,13,184,41,0],[185,17,185,24,0],[187,13,187,36,0],[188,13,188,95,0],[190,13,190,33,0],[193,21,193,36,0],[194,25,194,45,0],[196,21,196,27,0],[199,21,199,40,0],[200,21,200,27,0],[202,9,202,10,0]]);
+    </script>
+  </body>
+</html>

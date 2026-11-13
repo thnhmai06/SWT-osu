@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Edit/ComposerDistanceSnapProvider.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions;
+using osu.Framework.Extensions.LocalisationExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Framework.Utils;
+using osu.Game.Graphics.UserInterface;
+using osu.Game.Input;
+using osu.Game.Input.Bindings;
+using osu.Game.Overlays;
+using osu.Game.Overlays.OSD;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Edit;
+using osu.Game.Screens.Edit.Components.TernaryButtons;
+using osuTK;
+
+namespace osu.Game.Rulesets.Edit
+{
+    public abstract partial class ComposerDistanceSnapProvider : Component, IDistanceSnapProvider, IScrollBindingHandler&lt;GlobalAction&gt;
+    {
+        private const float adjust_step = 0.1f;
+
+        public BindableDouble DistanceSpacingMultiplier { get; } = new BindableDouble(1.0)
+        {
+            MinValue = 0.1,
+            MaxValue = 6.0,
+            Precision = 0.01,
+        };
+
+        Bindable&lt;double&gt; IDistanceSnapProvider.DistanceSpacingMultiplier =&gt; DistanceSpacingMultiplier;
+
+        private ExpandableSlider&lt;double&gt; distanceSpacingSlider = null!;
+        private ExpandableButton currentDistanceSpacingButton = null!;
+
+        [Resolved]
+        private Playfield playfield { get; set; } = null!;
+
+        [Resolved]
+        private EditorClock editorClock { get; set; } = null!;
+
+        [Resolved]
+        protected EditorBeatmap EditorBeatmap { get; private set; } = null!;
+
+        [Resolved]
+        private IBeatSnapProvider beatSnapProvider { get; set; } = null!;
+
+        [Resolved]
+        private OnScreenDisplay? onScreenDisplay { get; set; }
+
+        public readonly Bindable&lt;TernaryState&gt; DistanceSnapToggle = new Bindable&lt;TernaryState&gt;();
+
+        private bool distanceSnapMomentary;
+        private TernaryState? distanceSnapStateBeforeMomentaryToggle;
+
+        private EditorToolboxGroup? toolboxGroup;
+
+        public void AttachToToolbox(ExpandingToolboxContainer toolboxContainer)
+        {
+            if (toolboxGroup != null)
+                throw new InvalidOperationException($&quot;{nameof(AttachToToolbox)} may be called only once for a single {nameof(ComposerDistanceSnapProvider)} instance.&quot;);
+
+            toolboxContainer.Add(toolboxGroup = new EditorToolboxGroup(&quot;snapping&quot;)
+            {
+                Name = &quot;snapping&quot;,
+                Spacing = new Vector2(5),
+                Alpha = DistanceSpacingMultiplier.Disabled ? 0 : 1,
+                Children = new Drawable[]
+                {
+                    distanceSpacingSlider = new ExpandableSlider&lt;double&gt;
+                    {
+                        KeyboardStep = adjust_step,
+                        // Manual binding in LoadComplete to handle one-way event flow.
+                        Current = DistanceSpacingMultiplier.GetUnboundCopy(),
+                        ExpandedLabelText = &quot;Distance spacing&quot;,
+                    },
+                    currentDistanceSpacingButton = new ExpandableButton
+                    {
+                        Action = () =&gt;
+                        {
+                            (HitObject before, HitObject after)? objects = getObjectsOnEitherSideOfCurrentTime();
+
+                            Debug.Assert(objects != null);
+
+                            DistanceSpacingMultiplier.Value = ReadCurrentDistanceSnap(objects.Value.before, objects.Value.after);
+                            DistanceSnapToggle.Value = TernaryState.True;
+                        },
+                        RelativeSizeAxes = Axes.X,
+                    }
+                }
+            });
+
+            DistanceSpacingMultiplier.Value = EditorBeatmap.DistanceSpacing;
+            DistanceSpacingMultiplier.BindValueChanged(multiplier =&gt;
+            {
+                distanceSpacingSlider.ContractedLabelText = $&quot;D. S. ({multiplier.NewValue:0.##x})&quot;;
+                distanceSpacingSlider.Current.Value = multiplier.NewValue;
+
+                if (multiplier.NewValue != multiplier.OldValue)
+                    onScreenDisplay?.Display(new DistanceSpacingToast(multiplier.NewValue.ToLocalisableString(@&quot;0.##x&quot;), multiplier));
+
+                EditorBeatmap.DistanceSpacing = multiplier.NewValue;
+            }, true);
+
+            DistanceSpacingMultiplier.BindDisabledChanged(disabled =&gt; distanceSpacingSlider.Alpha = disabled ? 0 : 1, true);
+
+            // Manual binding to handle enabling distance spacing when the slider is interacted with.
+            distanceSpacingSlider.Current.BindValueChanged(spacing =&gt;
+            {
+                DistanceSpacingMultiplier.Value = spacing.NewValue;
+                DistanceSnapToggle.Value = TernaryState.True;
+            });
+            DistanceSpacingMultiplier.BindValueChanged(spacing =&gt; distanceSpacingSlider.Current.Value = spacing.NewValue);
+        }
+
+        private (HitObject before, HitObject after)? getObjectsOnEitherSideOfCurrentTime()
+        {
+            HitObject? lastBefore = null;
+
+            foreach (var entry in playfield.HitObjectContainer.AliveEntries)
+            {
+                double objTime = entry.Value.HitObject.StartTime;
+
+                if (objTime &gt;= editorClock.CurrentTime)
+                    continue;
+
+                if (lastBefore == null || objTime &gt; lastBefore.StartTime)
+                    lastBefore = entry.Value.HitObject;
+            }
+
+            if (lastBefore == null)
+                return null;
+
+            HitObject? firstAfter = null;
+
+            foreach (var entry in playfield.HitObjectContainer.AliveEntries)
+            {
+                double objTime = entry.Value.HitObject.StartTime;
+
+                if (objTime &lt; editorClock.CurrentTime)
+                    continue;
+
+                if (firstAfter == null || objTime &lt; firstAfter.StartTime)
+                    firstAfter = entry.Value.HitObject;
+            }
+
+            if (firstAfter == null)
+                return null;
+
+            if (lastBefore == firstAfter)
+                return null;
+
+            return (lastBefore, firstAfter);
+        }
+
+        public abstract double ReadCurrentDistanceSnap(HitObject before, HitObject after);
+
+        protected override void Update()
+        {
+            base.Update();
+
+            (HitObject before, HitObject after)? objects = getObjectsOnEitherSideOfCurrentTime();
+
+            double currentSnap = objects == null
+                ? 0
+                : ReadCurrentDistanceSnap(objects.Value.before, objects.Value.after);
+
+            if (currentSnap &gt; DistanceSpacingMultiplier.MinValue)
+            {
+                currentDistanceSpacingButton.Enabled.Value = currentDistanceSpacingButton.Expanded.Value
+                                                             &amp;&amp; !DistanceSpacingMultiplier.Disabled
+                                                             &amp;&amp; !Precision.AlmostEquals(currentSnap, DistanceSpacingMultiplier.Value, DistanceSpacingMultiplier.Precision / 2);
+                currentDistanceSpacingButton.ContractedLabelText = $&quot;current {currentSnap:N2}x&quot;;
+                currentDistanceSpacingButton.ExpandedLabelText = $&quot;Use current ({currentSnap:N2}x)&quot;;
+            }
+            else
+            {
+                currentDistanceSpacingButton.Enabled.Value = false;
+                currentDistanceSpacingButton.ContractedLabelText = string.Empty;
+                currentDistanceSpacingButton.ExpandedLabelText = &quot;Use current (unavailable)&quot;;
+            }
+        }
+
+        public abstract IEnumerable&lt;DrawableTernaryButton&gt; CreateTernaryButtons();
+
+        public void HandleToggleViaKey(KeyboardEvent key)
+        {
+            bool altPressed = key.AltPressed;
+
+            if (altPressed &amp;&amp; !distanceSnapMomentary)
+            {
+                distanceSnapStateBeforeMomentaryToggle = DistanceSnapToggle.Value;
+                DistanceSnapToggle.Value = DistanceSnapToggle.Value == TernaryState.False ? TernaryState.True : TernaryState.False;
+                distanceSnapMomentary = true;
+            }
+
+            if (!altPressed &amp;&amp; distanceSnapMomentary)
+            {
+                Debug.Assert(distanceSnapStateBeforeMomentaryToggle != null);
+                DistanceSnapToggle.Value = distanceSnapStateBeforeMomentaryToggle.Value;
+                distanceSnapStateBeforeMomentaryToggle = null;
+                distanceSnapMomentary = false;
+            }
+        }
+
+        public virtual bool OnPressed(KeyBindingPressEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.EditorIncreaseDistanceSpacing:
+                case GlobalAction.EditorDecreaseDistanceSpacing:
+                    return AdjustDistanceSpacing(e.Action, adjust_step);
+            }
+
+            return false;
+        }
+
+        public virtual void OnReleased(KeyBindingReleaseEvent&lt;GlobalAction&gt; e)
+        {
+        }
+
+        public bool OnScroll(KeyBindingScrollEvent&lt;GlobalAction&gt; e)
+        {
+            switch (e.Action)
+            {
+                case GlobalAction.EditorIncreaseDistanceSpacing:
+                case GlobalAction.EditorDecreaseDistanceSpacing:
+                    return AdjustDistanceSpacing(e.Action, e.ScrollAmount * adjust_step);
+            }
+
+            return false;
+        }
+
+        protected virtual bool AdjustDistanceSpacing(GlobalAction action, float amount)
+        {
+            if (DistanceSpacingMultiplier.Disabled)
+                return false;
+
+            if (action == GlobalAction.EditorIncreaseDistanceSpacing)
+                DistanceSpacingMultiplier.Value += amount;
+            else if (action == GlobalAction.EditorDecreaseDistanceSpacing)
+                DistanceSpacingMultiplier.Value -= amount;
+
+            DistanceSnapToggle.Value = TernaryState.True;
+            return true;
+        }
+
+        #region IDistanceSnapProvider
+
+        public virtual float GetBeatSnapDistance(IHasSliderVelocity? withVelocity = null)
+        {
+            return (float)(100 * (withVelocity?.SliderVelocityMultiplier ?? 1) * EditorBeatmap.Difficulty.SliderMultiplier * 1
+                           / beatSnapProvider.BeatDivisor);
+        }
+
+        public virtual float DurationToDistance(double duration, double timingReference, IHasSliderVelocity? withVelocity = null)
+        {
+            double beatLength = beatSnapProvider.GetBeatLengthAtTime(timingReference);
+            return (float)(duration / beatLength * GetBeatSnapDistance(withVelocity));
+        }
+
+        public virtual double DistanceToDuration(float distance, double timingReference, IHasSliderVelocity? withVelocity = null)
+        {
+            double beatLength = beatSnapProvider.GetBeatLengthAtTime(timingReference);
+            return distance / GetBeatSnapDistance(withVelocity) * beatLength;
+        }
+
+        public virtual float FindSnappedDistance(float distance, double snapReferenceTime, IHasSliderVelocity? withVelocity = null)
+        {
+            double actualDuration = snapReferenceTime + DistanceToDuration(distance, snapReferenceTime, withVelocity);
+
+            double snappedTime = beatSnapProvider.SnapTime(actualDuration, snapReferenceTime);
+
+            double beatLength = beatSnapProvider.GetBeatLengthAtTime(snapReferenceTime);
+
+            // we don&#39;t want to exceed the actual duration and snap to a point in the future.
+            // as we are snapping to beat length via SnapTime (which will round-to-nearest), check for snapping in the forward direction and reverse it.
+            if (snappedTime &gt; actualDuration + 1)
+                snappedTime -= beatLength;
+
+            return DurationToDistance(snappedTime - snapReferenceTime, snapReferenceTime, withVelocity);
+        }
+
+        #endregion
+
+        private partial class DistanceSpacingToast : Toast
+        {
+            private readonly ValueChangedEvent&lt;double&gt; change;
+
+            public DistanceSpacingToast(LocalisableString value, ValueChangedEvent&lt;double&gt; change)
+                : base(getAction(change).GetLocalisableDescription(), value)
+            {
+                this.change = change;
+            }
+
+            [BackgroundDependencyLoader]
+            private void load(RealmKeyBindingStore keyBindingStore)
+            {
+                ExtraText = keyBindingStore.GetBindingsStringFor(getAction(change));
+            }
+
+            private static GlobalAction getAction(ValueChangedEvent&lt;double&gt; change) =&gt; change.NewValue - change.OldValue &gt; 0
+                ? GlobalAction.EditorIncreaseDistanceSpacing
+                : GlobalAction.EditorDecreaseDistanceSpacing;
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[34,59,34,63,0],[34,68,39,10,0],[41,77,41,102,0],[43,9,43,72,0],[44,9,44,71,0],[47,39,47,43,0],[47,44,47,48,0],[47,53,47,58,0],[50,43,50,47,0],[50,48,50,52,0],[50,57,50,62,0],[53,49,53,53,0],[53,54,53,66,0],[53,71,53,76,0],[56,54,56,58,0],[56,59,56,63,0],[56,68,56,73,0],[59,52,59,56,0],[59,57,59,61,0],[61,9,61,98,0],[69,9,69,10,0],[70,13,70,38,0],[71,17,71,169,0],[73,13,90,25,0],[90,25,90,26,0],[90,26,91,29,0],[91,29,91,114,0],[91,114,93,29,0],[93,29,93,59,0],[93,59,95,29,0],[95,29,95,130,0],[95,130,96,29,0],[96,29,96,74,0],[96,74,97,25,0],[97,25,97,26,0],[97,26,101,16,0],[103,13,103,77,0],[104,13,105,13,0],[105,13,105,14,0],[105,14,106,17,0],[106,17,106,100,0],[106,100,107,17,0],[107,17,107,75,0],[107,75,109,17,0],[109,17,109,64,0],[109,64,110,21,0],[110,21,110,135,0],[110,135,112,17,0],[112,17,112,69,0],[112,69,113,13,0],[113,13,113,14,0],[113,14,113,22,0],[115,13,115,71,0],[115,71,115,117,0],[115,117,115,125,0],[118,13,119,13,0],[119,13,119,14,0],[119,14,120,17,0],[120,17,120,68,0],[120,68,121,17,0],[121,17,121,62,0],[121,62,122,13,0],[122,13,122,14,0],[122,14,122,16,0],[123,13,123,67,0],[123,67,123,121,0],[123,121,123,123,0],[124,9,124,10,0],[127,9,127,10,0],[128,13,128,42,0],[130,13,130,20,0],[130,22,130,31,0],[130,32,130,34,0],[130,35,130,76,0],[131,13,131,14,0],[132,17,132,66,0],[134,17,134,56,0],[135,21,135,30,0],[137,17,137,74,0],[138,21,138,56,0],[139,13,139,14,0],[141,13,141,36,0],[142,17,142,29,0],[144,13,144,42,0],[146,13,146,20,0],[146,22,146,31,0],[146,32,146,34,0],[146,35,146,76,0],[147,13,147,14,0],[148,17,148,66,0],[150,17,150,55,0],[151,21,151,30,0],[153,17,153,74,0],[154,21,154,56,0],[155,13,155,14,0],[157,13,157,36,0],[158,17,158,29,0],[160,13,160,42,0],[161,17,161,29,0],[163,13,163,45,0],[164,9,164,10,0],[169,9,169,10,0],[170,13,170,27,0],[172,13,172,98,0],[174,13,176,86,0],[178,13,178,66,0],[179,13,179,14,0],[180,17,182,176,0],[183,17,183,97,0],[184,17,184,101,0],[185,13,185,14,0],[187,13,187,14,0],[188,17,188,68,0],[189,17,189,81,0],[190,17,190,94,0],[191,13,191,14,0],[192,9,192,10,0],[197,9,197,10,0],[198,13,198,46,0],[200,13,200,54,0],[201,13,201,14,0],[202,17,202,83,0],[203,17,203,132,0],[204,17,204,46,0],[205,13,205,14,0],[207,13,207,54,0],[208,13,208,14,0],[209,17,209,78,0],[210,17,210,89,0],[211,17,211,63,0],[212,17,212,47,0],[213,13,213,14,0],[214,9,214,10,0],[217,9,217,10,0],[218,13,218,30,0],[222,21,222,73,0],[225,13,225,26,0],[226,9,226,10,0],[229,9,229,10,0],[230,9,230,10,0],[233,9,233,10,0],[234,13,234,30,0],[238,21,238,90,0],[241,13,241,26,0],[242,9,242,10,0],[245,9,245,10,0],[246,13,246,52,0],[247,17,247,30,0],[249,13,249,70,0],[250,17,250,59,0],[251,18,251,75,0],[252,17,252,59,0],[254,13,254,58,0],[255,13,255,25,0],[256,9,256,10,0],[261,9,261,10,0],[262,13,263,60,0],[264,9,264,10,0],[267,9,267,10,0],[268,13,268,87,0],[269,13,269,87,0],[270,9,270,10,0],[273,9,273,10,0],[274,13,274,87,0],[275,13,275,78,0],[276,9,276,10,0],[279,9,279,10,0],[280,13,280,119,0],[282,13,282,95,0],[284,13,284,89,0],[288,13,288,50,0],[289,17,289,43,0],[291,13,291,105,0],[292,9,292,10,0],[301,19,301,77,0],[302,13,302,14,0],[303,17,303,38,0],[304,13,304,14,0],[308,13,308,14,0],[309,17,309,85,0],[310,13,310,14,0],[312,88,314,61,0]]);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Online/API/LocalUserState.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System.Diagnostics;
+using System.Linq;
+using osu.Framework.Bindables;
+using osu.Framework.Development;
+using osu.Framework.Graphics;
+using osu.Framework.Logging;
+using osu.Framework.Threading;
+using osu.Game.Configuration;
+using osu.Game.Extensions;
+using osu.Game.Online.API.Requests;
+using osu.Game.Online.API.Requests.Responses;
+using osu.Game.Users;
+
+namespace osu.Game.Online.API
+{
+    public partial class LocalUserState : Component, ILocalUserState
+    {
+        public IBindable&lt;APIUser&gt; User =&gt; localUser;
+        public IBindableList&lt;APIRelation&gt; Friends =&gt; friends;
+        public IBindableList&lt;APIRelation&gt; Blocks =&gt; blocks;
+        public IBindableList&lt;int&gt; FavouriteBeatmapSets =&gt; favouriteBeatmapSets;
+
+        private readonly IAPIProvider api;
+
+        private readonly Bindable&lt;APIUser&gt; localUser = new Bindable&lt;APIUser&gt;(createGuestUser());
+        private readonly BindableList&lt;APIRelation&gt; friends = new BindableList&lt;APIRelation&gt;();
+        private readonly BindableList&lt;APIRelation&gt; blocks = new BindableList&lt;APIRelation&gt;();
+        private readonly BindableList&lt;int&gt; favouriteBeatmapSets = new BindableList&lt;int&gt;();
+
+        #region Config settings synced from online
+
+        private bool populatingSettings;
+
+        private readonly Bindable&lt;UserStatus&gt; configStatus = new Bindable&lt;UserStatus&gt;();
+        private readonly Bindable&lt;bool&gt; configSupporter = new Bindable&lt;bool&gt;();
+        private readonly Bindable&lt;bool&gt; configPMFriendsOnly = new Bindable&lt;bool&gt;();
+
+        #endregion
+
+        public LocalUserState(IAPIProvider api, OsuConfigManager config)
+        {
+            this.api = api;
+
+            config.BindWith(OsuSetting.UserOnlineStatus, configStatus);
+            config.BindWith(OsuSetting.WasSupporter, configSupporter);
+
+            config.BindWith(OsuSetting.PMFriendsOnly, configPMFriendsOnly);
+            configPMFriendsOnly.BindValueChanged(_ =&gt; scheduleSettingSyncToWeb());
+        }
+
+        #region Logging in / out
+
+        private static APIUser createGuestUser() =&gt; new GuestUser();
+
+        /// &lt;summary&gt;
+        /// Show a placeholder user if saved credentials are available.
+        /// This is useful for storing local scores and showing a placeholder username after starting the game,
+        /// until a valid connection has been established.
+        /// &lt;/summary&gt;
+        public void SetPlaceholderLocalUser(string username)
+        {
+            if (!localUser.IsDefault)
+                return;
+
+            localUser.Value = new APIUser
+            {
+                Username = username,
+                IsSupporter = configSupporter.Value,
+            };
+        }
+
+        public void SetLocalUser(APIMe me)
+        {
+            localUser.Value = me;
+
+            syncSettingsFromWeb(me);
+            UpdateFriends();
+            UpdateBlocks();
+            UpdateFavouriteBeatmapSets();
+        }
+
+        public void ClearLocalUser()
+        {
+            // Reset the status to be broadcast on the next login, in case multiple players share the same system.
+            configStatus.Value = UserStatus.Online;
+
+            // Scheduled prior to state change such that the state changed event is invoked with the correct user and their friends present
+            Schedule(() =&gt;
+            {
+                localUser.Value = createGuestUser();
+                configSupporter.Value = false;
+                friends.Clear();
+                blocks.Clear();
+                favouriteBeatmapSets.Clear();
+            });
+        }
+
+        #endregion
+
+        #region Setting sync between web and client
+
+        private void syncSettingsFromWeb(APIMe me)
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            populatingSettings = true;
+
+            configSupporter.Value = me.IsSupporter;
+
+            // `last_visit` is assumed to be `null` if and only if the web-side &quot;hide online presence toggle&quot; is enabled
+            if (me.LastVisit == null)
+                configStatus.Value = UserStatus.Offline;
+
+            configPMFriendsOnly.Value = me.PMFriendsOnly;
+
+            populatingSettings = false;
+        }
+
+        private void syncSettingsToWeb()
+        {
+            Debug.Assert(ThreadSafety.IsUpdateThread);
+
+            if (!api.IsLoggedIn || populatingSettings)
+                return;
+
+            var request = new UpdateUserOptionsRequest
+            {
+                UserSettings = new UpdateUserOptionsRequest.UserSettingUpdate
+                {
+                    PMFriendsOnly = configPMFriendsOnly.Value
+                }
+            };
+            request.Success += me =&gt;
+            {
+                if (!api.IsLoggedIn || !me.MatchesOnlineID(localUser.Value))
+                    return;
+
+                syncSettingsFromWeb(me);
+            };
+            request.Failure += ex =&gt;
+            {
+                if (!api.IsLoggedIn)
+                    return;
+
+                Logger.Error(ex, @&quot;Failed to synchronise setting&quot;);
+                if (localUser.Value is APIMe oldMe)
+                    syncSettingsFromWeb(oldMe);
+            };
+            api.Queue(request);
+        }
+
+        private ScheduledDelegate? scheduledSync;
+
+        private void scheduleSettingSyncToWeb()
+        {
+            scheduledSync?.Cancel();
+            scheduledSync = Scheduler.AddDelayed(syncSettingsToWeb, 500);
+        }
+
+        #endregion
+
+        public void UpdateFriends()
+        {
+            if (!api.IsLoggedIn)
+                return;
+
+            var friendsReq = new GetFriendsRequest();
+            friendsReq.Success += res =&gt;
+            {
+                var existingFriends = friends.Select(f =&gt; f.TargetID).ToHashSet();
+                var updatedFriends = res.Select(f =&gt; f.TargetID).ToHashSet();
+
+                // Add new friends into local list.
+                friends.AddRange(res.Where(r =&gt; !existingFriends.Contains(r.TargetID)));
+
+                // Remove non-friends from local list.
+                friends.RemoveAll(f =&gt; !updatedFriends.Contains(f.TargetID));
+            };
+
+            api.Queue(friendsReq);
+        }
+
+        public void UpdateBlocks()
+        {
+            if (!api.IsLoggedIn)
+                return;
+
+            var blocksReq = new GetBlocksRequest();
+            blocksReq.Success += res =&gt;
+            {
+                var existingBlocks = blocks.Select(f =&gt; f.TargetID).ToHashSet();
+                var updatedBlocks = res.Select(f =&gt; f.TargetID).ToHashSet();
+
+                // Add new blocked users to local list.
+                blocks.AddRange(res.Where(r =&gt; !existingBlocks.Contains(r.TargetID)));
+
+                // Remove non-blocked users from local list.
+                blocks.RemoveAll(b =&gt; !updatedBlocks.Contains(b.TargetID));
+
+                // Remove friends who got blocked since last check.
+                friends.RemoveAll(f =&gt; updatedBlocks.Contains(f.TargetID));
+            };
+
+            api.Queue(blocksReq);
+        }
+
+        public void UpdateFavouriteBeatmapSets()
+        {
+            if (!api.IsLoggedIn)
+                return;
+
+            var favouritesReq = new GetMyFavouriteBeatmapSetsRequest();
+            favouritesReq.Success += res =&gt;
+            {
+                var existingBeatmapSets = favouriteBeatmapSets.ToHashSet();
+                var updatedBeatmapSets = res.BeatmapSetIds.ToHashSet();
+
+                favouriteBeatmapSets.AddRange(updatedBeatmapSets.Except(existingBeatmapSets));
+                favouriteBeatmapSets.RemoveAll(b =&gt; !updatedBeatmapSets.Contains(b));
+            };
+
+            api.Queue(favouritesReq);
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[21,43,21,52,0],[22,54,22,61,0],[23,53,23,59,0],[24,59,24,79,0],[28,9,28,97,0],[29,9,29,94,0],[30,9,30,93,0],[31,9,31,91,0],[37,9,37,89,0],[38,9,38,80,0],[39,9,39,84,0],[43,9,43,73,0],[44,9,44,10,0],[45,13,45,28,0],[47,13,47,72,0],[48,13,48,71,0],[50,13,50,76,0],[51,13,51,55,0],[51,55,51,81,0],[51,81,51,83,0],[52,9,52,10,0],[56,53,56,68,0],[64,9,64,10,0],[65,13,65,38,0],[66,17,66,24,0],[68,13,72,15,0],[73,9,73,10,0],[76,9,76,10,0],[77,13,77,34,0],[79,13,79,37,0],[80,13,80,29,0],[81,13,81,28,0],[82,13,82,42,0],[83,9,83,10,0],[86,9,86,10,0],[88,13,88,52,0],[91,13,92,13,0],[92,13,92,14,0],[92,14,93,17,0],[93,17,93,53,0],[93,53,94,17,0],[94,17,94,47,0],[94,47,95,17,0],[95,17,95,33,0],[95,33,96,17,0],[96,17,96,32,0],[96,32,97,17,0],[97,17,97,46,0],[97,46,98,13,0],[98,13,98,14,0],[98,14,98,16,0],[99,9,99,10,0],[106,9,106,10,0],[107,13,107,55,0],[109,13,109,39,0],[111,13,111,52,0],[114,13,114,38,0],[115,17,115,57,0],[117,13,117,58,0],[119,13,119,40,0],[120,9,120,10,0],[123,9,123,10,0],[124,13,124,55,0],[126,13,126,55,0],[127,17,127,24,0],[129,13,135,15,0],[136,13,137,13,0],[137,13,137,14,0],[137,14,138,17,0],[138,17,138,77,0],[138,77,139,21,0],[139,21,139,28,0],[139,28,141,17,0],[141,17,141,41,0],[141,41,142,13,0],[142,13,142,14,0],[142,14,142,15,0],[143,13,144,13,0],[144,13,144,14,0],[144,14,145,17,0],[145,17,145,37,0],[145,37,146,21,0],[146,21,146,28,0],[146,28,148,17,0],[148,17,148,68,0],[148,68,149,17,0],[149,17,149,52,0],[149,52,150,21,0],[150,21,150,48,0],[150,48,151,13,0],[151,13,151,14,0],[151,14,151,15,0],[152,13,152,32,0],[153,9,153,10,0],[158,9,158,10,0],[159,13,159,37,0],[160,13,160,74,0],[161,9,161,10,0],[166,9,166,10,0],[167,13,167,33,0],[168,17,168,24,0],[170,13,170,54,0],[171,13,172,13,0],[172,13,172,14,0],[172,14,173,17,0],[173,17,173,59,0],[173,59,173,69,0],[173,69,173,83,0],[173,83,174,17,0],[174,17,174,54,0],[174,54,174,64,0],[174,64,174,78,0],[174,78,177,17,0],[177,17,177,49,0],[177,49,177,86,0],[177,86,177,89,0],[177,89,180,17,0],[180,17,180,40,0],[180,40,180,76,0],[180,76,180,78,0],[180,78,181,13,0],[181,13,181,14,0],[181,14,181,15,0],[183,13,183,35,0],[184,9,184,10,0],[187,9,187,10,0],[188,13,188,33,0],[189,17,189,24,0],[191,13,191,52,0],[192,13,193,13,0],[193,13,193,14,0],[193,14,194,17,0],[194,17,194,57,0],[194,57,194,67,0],[194,67,194,81,0],[194,81,195,17,0],[195,17,195,53,0],[195,53,195,63,0],[195,63,195,77,0],[195,77,198,17,0],[198,17,198,48,0],[198,48,198,84,0],[198,84,198,87,0],[198,87,201,17,0],[201,17,201,39,0],[201,39,201,74,0],[201,74,201,76,0],[201,76,204,17,0],[204,17,204,40,0],[204,40,204,74,0],[204,74,204,76,0],[204,76,205,13,0],[205,13,205,14,0],[205,14,205,15,0],[207,13,207,34,0],[208,9,208,10,0],[211,9,211,10,0],[212,13,212,33,0],[213,17,213,24,0],[215,13,215,72,0],[216,13,217,13,0],[217,13,217,14,0],[217,14,218,17,0],[218,17,218,76,0],[218,76,219,17,0],[219,17,219,72,0],[219,72,221,17,0],[221,17,221,95,0],[221,95,222,17,0],[222,17,222,53,0],[222,53,222,84,0],[222,84,222,86,0],[222,86,223,13,0],[223,13,223,14,0],[223,14,223,15,0],[225,13,225,38,0],[226,9,226,10,0]]);
+    </script>
+  </body>
+</html>

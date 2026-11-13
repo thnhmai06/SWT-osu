@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <title>/mnt/shared/Development/SWT-osu/osu.Game/Rulesets/Objects/Drawables/DrawableHitObject.cs</title>
+    <script type="text/javascript" src="../js/dotcover.sourceview.js"></script>
+    <link rel="stylesheet" type="text/css" href="../css/dotcover.report.css" />
+  </head>
+  <body>
+    <pre id="content" class="source-code">
+// Copyright (c) ppy Pty Ltd &lt;contact@ppy.sh&gt;. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+#nullable disable
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using JetBrains.Annotations;
+using osu.Framework.Allocation;
+using osu.Framework.Bindables;
+using osu.Framework.Extensions.ListExtensions;
+using osu.Framework.Extensions.ObjectExtensions;
+using osu.Framework.Extensions.TypeExtensions;
+using osu.Framework.Graphics;
+using osu.Framework.Lists;
+using osu.Framework.Utils;
+using osu.Game.Audio;
+using osu.Game.Configuration;
+using osu.Game.Graphics;
+using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects.Pooling;
+using osu.Game.Rulesets.Objects.Types;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Play;
+using osu.Game.Skinning;
+using osuTK.Graphics;
+
+namespace osu.Game.Rulesets.Objects.Drawables
+{
+    [Cached(typeof(DrawableHitObject))]
+    public abstract partial class DrawableHitObject : PoolableDrawableWithLifetime&lt;HitObjectLifetimeEntry&gt;, IAnimationTimeReference
+    {
+        /// &lt;summary&gt;
+        /// Invoked after this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;&#39;s applied &lt;see cref=&quot;HitObject&quot;/&gt; has had its defaults applied.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject&gt; DefaultsApplied;
+
+        /// &lt;summary&gt;
+        /// Invoked after a &lt;see cref=&quot;HitObject&quot;/&gt; has been applied to this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject&gt; HitObjectApplied;
+
+        /// &lt;summary&gt;
+        /// The &lt;see cref=&quot;HitObject&quot;/&gt; currently represented by this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public HitObject HitObject =&gt; Entry?.HitObject;
+
+        /// &lt;summary&gt;
+        /// The parenting &lt;see cref=&quot;DrawableHitObject&quot;/&gt;, if any.
+        /// &lt;/summary&gt;
+        [CanBeNull]
+        protected internal DrawableHitObject ParentHitObject { get; internal set; }
+
+        /// &lt;summary&gt;
+        /// The colour used for various elements of this DrawableHitObject.
+        /// &lt;/summary&gt;
+        public readonly Bindable&lt;Color4&gt; AccentColour = new Bindable&lt;Color4&gt;(Color4.Gray);
+
+        protected PausableSkinnableSound Samples { get; private set; }
+
+        private bool samplesLoaded;
+
+        public virtual IEnumerable&lt;HitSampleInfo&gt; GetSamples() =&gt; HitObject.Samples;
+
+        private readonly List&lt;DrawableHitObject&gt; nestedHitObjects = new List&lt;DrawableHitObject&gt;();
+        public SlimReadOnlyListWrapper&lt;DrawableHitObject&gt; NestedHitObjects =&gt; nestedHitObjects.AsSlimReadOnly();
+
+        /// &lt;summary&gt;
+        /// Whether this object should handle any user input events.
+        /// &lt;/summary&gt;
+        public bool HandleUserInput { get; set; } = true;
+
+        public override bool PropagatePositionalInputSubTree =&gt; HandleUserInput;
+
+        public override bool PropagateNonPositionalInputSubTree =&gt; HandleUserInput;
+
+        /// &lt;summary&gt;
+        /// Invoked by this or a nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt; after a &lt;see cref=&quot;JudgementResult&quot;/&gt; has been applied.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject, JudgementResult&gt; OnNewResult;
+
+        /// &lt;summary&gt;
+        /// Invoked by this or a nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt; prior to a &lt;see cref=&quot;JudgementResult&quot;/&gt; being reverted.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is only invoked if this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; is alive when the result is reverted.
+        /// &lt;/remarks&gt;
+        public event Action&lt;DrawableHitObject, JudgementResult&gt; OnRevertResult;
+
+        /// &lt;summary&gt;
+        /// Invoked when a new nested hit object is created by &lt;see cref=&quot;CreateNestedHitObject&quot; /&gt;.
+        /// &lt;/summary&gt;
+        internal event Action&lt;DrawableHitObject&gt; OnNestedDrawableCreated;
+
+        /// &lt;summary&gt;
+        /// Whether a visual indicator should be displayed when a scoring result occurs.
+        /// &lt;/summary&gt;
+        public virtual bool DisplayResult =&gt; true;
+
+        /// &lt;summary&gt;
+        /// The scoring result of this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public JudgementResult Result =&gt; Entry?.Result;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; has been hit. This occurs if &lt;see cref=&quot;Result&quot;/&gt; is hit.
+        /// Note: This does NOT include nested hitobjects.
+        /// &lt;/summary&gt;
+        public bool IsHit =&gt; Result?.IsHit ?? false;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; has been judged.
+        /// Note: This does NOT include nested hitobjects.
+        /// &lt;/summary&gt;
+        public bool Judged =&gt; Entry?.Judged ?? false;
+
+        /// &lt;summary&gt;
+        /// Whether this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; and all of its nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s have been judged.
+        /// &lt;/summary&gt;
+        public bool AllJudged =&gt; Entry?.AllJudged ?? false;
+
+        /// &lt;summary&gt;
+        /// The relative X position of this hit object for sample playback balance adjustment.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is a range of 0..1 (0 for far-left, 0.5 for centre, 1 for far-right).
+        /// Dampening is post-applied to ensure the effect is not too intense.
+        /// &lt;/remarks&gt;
+        protected virtual float SamplePlaybackPosition =&gt; 0.5f;
+
+        public readonly Bindable&lt;double&gt; StartTimeBindable = new Bindable&lt;double&gt;();
+        private readonly BindableList&lt;HitSampleInfo&gt; samplesBindable = new BindableList&lt;HitSampleInfo&gt;();
+        private readonly Bindable&lt;int&gt; comboIndexBindable = new Bindable&lt;int&gt;();
+
+        private readonly IBindable&lt;float&gt; positionalHitsoundsLevel = new Bindable&lt;float&gt;();
+        private readonly IBindable&lt;float&gt; comboColourBrightness = new Bindable&lt;float&gt;();
+        private readonly Bindable&lt;int&gt; comboIndexWithOffsetsBindable = new Bindable&lt;int&gt;();
+
+        protected override bool RequiresChildrenUpdate =&gt; true;
+
+        public override bool IsPresent =&gt; base.IsPresent || (State.Value == ArmedState.Idle &amp;&amp; Clock.IsNotNull() &amp;&amp; Clock.CurrentTime &gt;= LifetimeStart);
+
+        private readonly Bindable&lt;ArmedState&gt; state = new Bindable&lt;ArmedState&gt;();
+
+        /// &lt;summary&gt;
+        /// The state of this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// For pooled hitobjects, &lt;see cref=&quot;ApplyCustomUpdateState&quot;/&gt; is recommended to be used instead for better editor/rewinding support.
+        /// &lt;/remarks&gt;
+        public IBindable&lt;ArmedState&gt; State =&gt; state;
+
+        [Resolved(CanBeNull = true)]
+        private IPooledHitObjectProvider pooledObjectProvider { get; set; }
+
+        [Resolved(CanBeNull = true)]
+        [CanBeNull]
+        private GameplayState gameplayState { get; set; }
+
+        /// &lt;summary&gt;
+        /// Whether the initialization logic in &lt;see cref=&quot;Playfield&quot; /&gt; has applied.
+        /// &lt;/summary&gt;
+        internal bool IsInitialized;
+
+        /// &lt;summary&gt;
+        /// The minimum allowable volume for sample playback.
+        /// &lt;see cref=&quot;Samples&quot;/&gt; quieter than that will be forcibly played at this volume instead.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// &lt;para&gt;
+        /// Drawable hitobjects adding their own custom samples, or other sample playback sources
+        /// (i.e. &lt;see cref=&quot;GameplaySampleTriggerSource&quot;/&gt;) must enforce this themselves.
+        /// &lt;/para&gt;
+        /// &lt;para&gt;
+        /// This sample volume floor is present in stable, although it is set at 8% rather than 5%.
+        /// See: https://github.com/peppy/osu-stable-reference/blob/3ea48705eb67172c430371dcfc8a16a002ed0d3d/osu!/Audio/AudioEngine.cs#L1070,
+        /// https://github.com/peppy/osu-stable-reference/blob/3ea48705eb67172c430371dcfc8a16a002ed0d3d/osu!/Audio/AudioEngine.cs#L1404-L1405.
+        /// The reason why it is 5% here is that the 8% cap was enforced in a silent manner
+        /// (i.e. the minimum selectable volume in the editor was 5%, but it would be played at 8% anyways),
+        /// which is confusing and arbitrary, so we&#39;re just doing 5% here at the cost of sacrificing strict parity.
+        /// &lt;/para&gt;
+        /// &lt;/remarks&gt;
+        public const int MINIMUM_SAMPLE_VOLUME = 5;
+
+        /// &lt;summary&gt;
+        /// Creates a new &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;initialHitObject&quot;&gt;
+        /// The &lt;see cref=&quot;HitObject&quot;/&gt; to be initially applied to this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// If &lt;c&gt;null&lt;/c&gt;, a hitobject is expected to be later applied via &lt;see cref=&quot;PoolableDrawableWithLifetime{TEntry}.Apply&quot;/&gt; (or automatically via pooling).
+        /// &lt;/param&gt;
+        protected DrawableHitObject([CanBeNull] HitObject initialHitObject = null)
+        {
+            if (initialHitObject == null) return;
+
+            Entry = new SyntheticHitObjectEntry(initialHitObject);
+            ensureEntryHasResult();
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(IGameplaySettings gameplaySettings, ISkinSource skinSource)
+        {
+            positionalHitsoundsLevel.BindTo(gameplaySettings.PositionalHitsoundsLevel);
+            comboColourBrightness.BindTo(gameplaySettings.ComboColourNormalisationAmount);
+
+            // Explicit non-virtual function call in case a DrawableHitObject overrides AddInternal.
+            base.AddInternal(Samples = new PausableSkinnableSound
+            {
+                MinimumSampleVolume = MINIMUM_SAMPLE_VOLUME
+            });
+
+            CurrentSkin = skinSource;
+            CurrentSkin.SourceChanged += skinSourceChanged;
+        }
+
+        protected override void LoadAsyncComplete()
+        {
+            base.LoadAsyncComplete();
+            skinChanged();
+        }
+
+        protected override void LoadComplete()
+        {
+            base.LoadComplete();
+
+            comboIndexBindable.BindValueChanged(_ =&gt; UpdateComboColour());
+            comboIndexWithOffsetsBindable.BindValueChanged(_ =&gt; UpdateComboColour(), true);
+
+            comboColourBrightness.BindValueChanged(_ =&gt; UpdateComboColour());
+
+            samplesBindable.BindCollectionChanged((_, _) =&gt;
+            {
+                if (samplesLoaded)
+                    LoadSamples();
+            });
+
+            // Apply transforms
+            updateStateFromResult();
+        }
+
+        /// &lt;summary&gt;
+        /// Applies a new &lt;see cref=&quot;HitObject&quot;/&gt; to be represented by this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// A new &lt;see cref=&quot;HitObjectLifetimeEntry&quot;/&gt; is automatically created and applied to this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void Apply([NotNull] HitObject hitObject)
+        {
+            ArgumentNullException.ThrowIfNull(hitObject);
+
+            Apply(new SyntheticHitObjectEntry(hitObject));
+        }
+
+        protected sealed override void OnApply(HitObjectLifetimeEntry entry)
+        {
+            Debug.Assert(Entry != null);
+
+            // LifetimeStart is already computed using HitObjectLifetimeEntry&#39;s InitialLifetimeOffset.
+            // We override this with DHO&#39;s InitialLifetimeOffset for a non-pooled DHO.
+            if (entry is SyntheticHitObjectEntry)
+                LifetimeStart = HitObject.StartTime - InitialLifetimeOffset;
+
+            ensureEntryHasResult();
+
+            entry.RevertResult += onRevertResult;
+
+            foreach (var h in HitObject.NestedHitObjects)
+            {
+                var pooledDrawableNested = pooledObjectProvider?.GetPooledDrawableRepresentation(h, this);
+                var drawableNested = pooledDrawableNested
+                                     ?? CreateNestedHitObject(h)
+                                     ?? throw new InvalidOperationException($&quot;{nameof(CreateNestedHitObject)} returned null for {h.GetType().ReadableName()}.&quot;);
+
+                // Only invoke the event for non-pooled DHOs, otherwise the event will be fired by the playfield.
+                if (pooledDrawableNested == null)
+                    OnNestedDrawableCreated?.Invoke(drawableNested);
+
+                drawableNested.OnNewResult += onNewResult;
+                drawableNested.OnRevertResult += onNestedRevertResult;
+                drawableNested.ApplyCustomUpdateState += onApplyCustomUpdateState;
+
+                // This is only necessary for non-pooled DHOs. For pooled DHOs, this is handled inside GetPooledDrawableRepresentation().
+                // Must be done before the nested DHO is added to occur before the nested Apply()!
+                drawableNested.ParentHitObject = this;
+
+                nestedHitObjects.Add(drawableNested);
+
+                // assume that synthetic entries are not pooled and therefore need to be managed from within the DHO.
+                // this is important for the correctness of value of flags such as `AllJudged`.
+                if (drawableNested.Entry is SyntheticHitObjectEntry syntheticNestedEntry)
+                    Entry.NestedEntries.Add(syntheticNestedEntry);
+
+                AddNestedHitObject(drawableNested);
+            }
+
+            StartTimeBindable.BindTo(HitObject.StartTimeBindable);
+
+            if (HitObject is IHasComboInformation combo)
+            {
+                comboIndexBindable.BindTo(combo.ComboIndexBindable);
+                comboIndexWithOffsetsBindable.BindTo(combo.ComboIndexWithOffsetsBindable);
+            }
+
+            samplesBindable.BindTo(HitObject.SamplesBindable);
+            HitObject.DefaultsApplied += onDefaultsApplied;
+
+            OnApply();
+            HitObjectApplied?.Invoke(this);
+
+            // If not loaded, the state update happens in LoadComplete().
+            if (IsLoaded)
+            {
+                updateStateFromResult();
+
+                // Combo colour may have been applied via a bindable flow while no object entry was attached.
+                // Update here to ensure we&#39;re in a good state.
+                UpdateComboColour();
+            }
+        }
+
+        private void updateStateFromResult()
+        {
+            if (Result.IsHit)
+                UpdateState(ArmedState.Hit, true);
+            else if (Result.HasResult)
+                UpdateState(ArmedState.Miss, true);
+            else
+                UpdateState(ArmedState.Idle, true);
+        }
+
+        protected sealed override void OnFree(HitObjectLifetimeEntry entry)
+        {
+            Debug.Assert(Entry != null);
+
+            StartTimeBindable.UnbindFrom(HitObject.StartTimeBindable);
+
+            if (HitObject is IHasComboInformation combo)
+            {
+                comboIndexBindable.UnbindFrom(combo.ComboIndexBindable);
+                comboIndexWithOffsetsBindable.UnbindFrom(combo.ComboIndexWithOffsetsBindable);
+            }
+
+            samplesBindable.UnbindFrom(HitObject.SamplesBindable);
+
+            // Release the samples for other hitobjects to use.
+            samplesLoaded = false;
+            Samples?.ClearSamples();
+
+            foreach (var obj in nestedHitObjects)
+            {
+                obj.OnNewResult -= onNewResult;
+                obj.OnRevertResult -= onNestedRevertResult;
+                obj.ApplyCustomUpdateState -= onApplyCustomUpdateState;
+            }
+
+            nestedHitObjects.Clear();
+            // clean up synthetic entries manually added in `Apply()`.
+            Entry.NestedEntries.RemoveAll(nestedEntry =&gt; nestedEntry is SyntheticHitObjectEntry);
+            ClearNestedHitObjects();
+
+            // Changes to `HitObject` properties trigger default application, which triggers `State` updates.
+            // When a new hitobject is applied, `OnApply()` automatically performs a state update.
+            HitObject.DefaultsApplied -= onDefaultsApplied;
+
+            entry.RevertResult -= onRevertResult;
+
+            OnFree();
+
+            ParentHitObject = null;
+
+            clearExistingStateTransforms();
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked for this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to take on any values from a newly-applied &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// This is also fired after any changes which occurred via an &lt;see cref=&quot;osu.Game.Rulesets.Objects.HitObject.ApplyDefaults&quot;/&gt; call.
+        /// &lt;/summary&gt;
+        protected virtual void OnApply()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked for this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to revert any values previously taken on from the currently-applied &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// This is also fired after any changes which occurred via an &lt;see cref=&quot;osu.Game.Rulesets.Objects.HitObject.ApplyDefaults&quot;/&gt; call.
+        /// &lt;/summary&gt;
+        protected virtual void OnFree()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked by the base &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to populate samples, once on initial load and potentially again on any change to the samples collection.
+        /// &lt;/summary&gt;
+        protected virtual void LoadSamples()
+        {
+            var samples = GetSamples().ToArray();
+
+            if (samples.Length &lt;= 0)
+                return;
+
+            Samples.Samples = samples.Cast&lt;ISampleInfo&gt;().ToArray();
+        }
+
+        private void onNewResult(DrawableHitObject drawableHitObject, JudgementResult result) =&gt; OnNewResult?.Invoke(drawableHitObject, result);
+
+        private void onRevertResult()
+        {
+            UpdateState(ArmedState.Idle);
+            OnRevertResult?.Invoke(this, Result);
+        }
+
+        private void onNestedRevertResult(DrawableHitObject drawableHitObject, JudgementResult result) =&gt; OnRevertResult?.Invoke(drawableHitObject, result);
+
+        private void onApplyCustomUpdateState(DrawableHitObject drawableHitObject, ArmedState state) =&gt; ApplyCustomUpdateState?.Invoke(drawableHitObject, state);
+
+        private void onDefaultsApplied(HitObject hitObject)
+        {
+            Debug.Assert(Entry != null);
+            Apply(Entry);
+
+            // Applied defaults indicate a change in hit object state.
+            // We need to update the judgement result time to the new end time
+            // and update state to ensure the hit object fades out at the correct time.
+            if (Result is not null)
+            {
+                Result.TimeOffset = 0;
+                UpdateState(State.Value, true);
+            }
+
+            DefaultsApplied?.Invoke(this);
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked by the base &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to add nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s to the hierarchy.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to be added.&lt;/param&gt;
+        protected virtual void AddNestedHitObject(DrawableHitObject hitObject)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Invoked by the base &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to remove all previously-added nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s.
+        /// &lt;/summary&gt;
+        protected virtual void ClearNestedHitObjects()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the drawable representation for a nested &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;hitObject&quot;&gt;The &lt;see cref=&quot;HitObject&quot;/&gt;.&lt;/param&gt;
+        /// &lt;returns&gt;The drawable representation for &lt;paramref name=&quot;hitObject&quot;/&gt;.&lt;/returns&gt;
+        protected virtual DrawableHitObject CreateNestedHitObject(HitObject hitObject) =&gt; null;
+
+        #region State / Transform Management
+
+        /// &lt;summary&gt;
+        /// Invoked by this or a nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt; to apply a custom state that can override the default implementation.
+        /// &lt;/summary&gt;
+        public event Action&lt;DrawableHitObject, ArmedState&gt; ApplyCustomUpdateState;
+
+        protected override void ClearInternal(bool disposeChildren = true) =&gt;
+            // See sample addition in load method.
+            throw new InvalidOperationException(
+                $&quot;Should never clear a {nameof(DrawableHitObject)} as the base implementation adds components. If attempting to use {nameof(InternalChild)} or {nameof(InternalChildren)}, using {nameof(AddInternal)} or {nameof(AddRangeInternal)} instead.&quot;);
+
+        protected void UpdateState(ArmedState newState, bool force = false)
+        {
+            if (State.Value == newState &amp;&amp; !force)
+                return;
+
+            LifetimeEnd = double.MaxValue;
+
+            clearExistingStateTransforms();
+
+            double initialTransformsTime = HitObject.StartTime - InitialLifetimeOffset;
+
+            AnimationStartTime.Value = initialTransformsTime;
+
+            using (BeginAbsoluteSequence(initialTransformsTime))
+                UpdateInitialTransforms();
+
+            using (BeginAbsoluteSequence(StateUpdateTime))
+                UpdateStartTimeStateTransforms();
+
+            using (BeginAbsoluteSequence(HitStateUpdateTime))
+                UpdateHitStateTransforms(newState);
+
+            state.Value = newState;
+
+            if (LifetimeEnd == double.MaxValue &amp;&amp; (state.Value != ArmedState.Idle || HitObject.HitWindows == null))
+                LifetimeEnd = Math.Max(LatestTransformEndTime, HitStateUpdateTime + (Samples?.Length ?? 0));
+
+            // apply any custom state overrides
+            ApplyCustomUpdateState?.Invoke(this, newState);
+
+            if (!force &amp;&amp; newState == ArmedState.Hit)
+                PlaySamples();
+        }
+
+        private void clearExistingStateTransforms()
+        {
+            base.ApplyTransformsAt(double.MinValue, true);
+
+            // has to call this method directly (not ClearTransforms) to bypass the local ClearTransformsAfter override.
+            base.ClearTransformsAfter(double.MinValue, true);
+        }
+
+        /// &lt;summary&gt;
+        /// Reapplies the current &lt;see cref=&quot;ArmedState&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public void RefreshStateTransforms() =&gt; UpdateState(State.Value, true);
+
+        /// &lt;summary&gt;
+        /// Apply (generally fade-in) transforms leading into the &lt;see cref=&quot;HitObject&quot;/&gt; start time.
+        /// By default, this will fade in the object from zero with no duration.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// This is called once before every &lt;see cref=&quot;UpdateHitStateTransforms&quot;/&gt;. This is to ensure a good state in the case
+        /// the &lt;see cref=&quot;JudgementResult.TimeOffset&quot;/&gt; was negative and potentially altered the pre-hit transforms.
+        /// &lt;/remarks&gt;
+        protected virtual void UpdateInitialTransforms()
+        {
+            this.FadeInFromZero();
+        }
+
+        /// &lt;summary&gt;
+        /// Apply passive transforms at the &lt;see cref=&quot;HitObject&quot;/&gt;&#39;s StartTime.
+        /// This is called each time &lt;see cref=&quot;State&quot;/&gt; changes.
+        /// Previous states are automatically cleared.
+        /// &lt;/summary&gt;
+        protected virtual void UpdateStartTimeStateTransforms()
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Apply transforms based on the current &lt;see cref=&quot;ArmedState&quot;/&gt;. This call is offset by &lt;see cref=&quot;HitStateUpdateTime&quot;/&gt; (HitObject.EndTime + Result.Offset), equivalent to when the user hit the object.
+        /// If &lt;see cref=&quot;Drawable.LifetimeEnd&quot;/&gt; was not set during this call, &lt;see cref=&quot;Drawable.Expire&quot;/&gt; will be invoked.
+        /// Previous states are automatically cleared.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;state&quot;&gt;The new armed state.&lt;/param&gt;
+        protected virtual void UpdateHitStateTransforms(ArmedState state)
+        {
+        }
+
+        public override void ClearTransformsAfter(double time, bool propagateChildren = false, string targetMember = null)
+        {
+            // Parent calls to this should be blocked for safety, as we are manually handling this in updateState.
+        }
+
+        public override void ApplyTransformsAt(double time, bool propagateChildren = false)
+        {
+            // Parent calls to this should be blocked for safety, as we are manually handling this in updateState.
+        }
+
+        #endregion
+
+        #region Skinning
+
+        protected ISkinSource CurrentSkin { get; private set; }
+
+        private void skinSourceChanged() =&gt; Scheduler.AddOnce(skinChanged);
+
+        private void skinChanged()
+        {
+            UpdateComboColour();
+
+            ApplySkin(CurrentSkin, true);
+
+            if (IsLoaded)
+                UpdateState(State.Value, true);
+        }
+
+        protected void UpdateComboColour()
+        {
+            if (!(HitObject is IHasComboInformation combo)) return;
+
+            Color4 colour = combo.GetComboColour(CurrentSkin);
+
+            // Normalise the combo colour to the given brightness level.
+            if (comboColourBrightness.Value != 0)
+            {
+                colour = Interpolation.ValueAt(Math.Abs(comboColourBrightness.Value), colour, new HSPAColour(colour) { P = 0.6f }.ToColor4(), 0, 1);
+            }
+
+            AccentColour.Value = colour;
+        }
+
+        /// &lt;summary&gt;
+        /// Called when a change is made to the skin.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;skin&quot;&gt;The new skin.&lt;/param&gt;
+        /// &lt;param name=&quot;allowFallback&quot;&gt;Whether fallback to default skin should be allowed if the custom skin is missing this resource.&lt;/param&gt;
+        protected virtual void ApplySkin(ISkinSource skin, bool allowFallback)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Calculate the position to be used for sample playback at a specified X position (0..1).
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;position&quot;&gt;The lookup X position. Generally should be &lt;see cref=&quot;SamplePlaybackPosition&quot;/&gt;.&lt;/param&gt;
+        protected double CalculateSamplePlaybackBalance(double position)
+        {
+            float balanceAdjustAmount = positionalHitsoundsLevel.Value * 2;
+            double returnedValue = balanceAdjustAmount * (position - 0.5f);
+
+            // Rounded to reduce the overhead of audio adjustments (which are currently bindable heavy).
+            // Balance is very hard to perceive in small increments anyways.
+            return Math.Round(returnedValue, 2);
+        }
+
+        /// &lt;summary&gt;
+        /// Plays all the hit sounds for this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// This is invoked automatically when this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; is hit.
+        /// &lt;/summary&gt;
+        public virtual void PlaySamples()
+        {
+            if (Samples != null)
+            {
+                Samples.Balance.Value = CalculateSamplePlaybackBalance(SamplePlaybackPosition);
+                Samples.Play();
+                gameplayState?.ApplySamples(Samples.Samples);
+            }
+        }
+
+        /// &lt;summary&gt;
+        /// Stops playback of all relevant samples. Generally only looping samples should be stopped by this, and the rest let to play out.
+        /// Automatically called when &lt;see cref=&quot;DrawableHitObject{TObject}&quot;/&gt;&#39;s lifetime has been exceeded.
+        /// &lt;/summary&gt;
+        public virtual void StopAllSamples()
+        {
+            if (Samples?.Looping == true)
+                Samples.Stop();
+        }
+
+        #endregion
+
+        protected override void Update()
+        {
+            // We use a flag here to load samples only when they are required to be played.
+            // Why in Update and not PlaySamples? Because some hit object implementations may expect LoadSamples to be called to load custom samples
+            // (slider slide sound as an example).
+            //
+            // This is best effort optimisation (over previous method of loading and de-pooling in `OnApply`) due to requiring knowledge of
+            // hitobjects&#39; metadata. For cases like sliders with many repeats, there can be a sudden request to de-pool (ie slider with many repeats)
+            // hundreds of samples, causing a gameplay stutter.
+            //
+            // Note that we already have optimisations in OsuPlayfield for this but it applies to DrawableHitObjects and not samples.
+            //
+            // This is definitely not the end of optimisation of sample loading, but the structure of gameplay samples is going to take some
+            // time to dismantle and optimise. Optimally:
+            //
+            // - we would want to remove as much of the drawable overheads from samples as possible (currently two drawables per sample worst case)
+            // - pool the rawest representation of samples possible (if required at that point).
+            // - infer metadata at beatmap load to asynchronously preload the samples (into memory / bass).
+            if (!samplesLoaded)
+            {
+                samplesLoaded = true;
+                LoadSamples();
+            }
+
+            base.Update();
+        }
+
+        public override bool UpdateSubTreeMasking() =&gt; false;
+
+        protected override void UpdateAfterChildren()
+        {
+            base.UpdateAfterChildren();
+
+            UpdateResult(false);
+        }
+
+        /// &lt;summary&gt;
+        /// An offset prior to the start time of &lt;see cref=&quot;HitObject&quot;/&gt; at which this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; may begin displaying contents.
+        /// By default, &lt;see cref=&quot;DrawableHitObject&quot;/&gt;s are assumed to display their contents within 10 seconds prior to the start time of &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// The initial transformation (&lt;see cref=&quot;UpdateInitialTransforms&quot;/&gt;) starts at this offset before the start time of &lt;see cref=&quot;HitObject&quot;/&gt;.
+        /// &lt;/remarks&gt;
+        protected virtual double InitialLifetimeOffset =&gt; 10000;
+
+        /// &lt;summary&gt;
+        /// The time at which state transforms should be applied that line up to &lt;see cref=&quot;HitObject&quot;/&gt;&#39;s StartTime.
+        /// This is used to offset calls to &lt;see cref=&quot;UpdateStartTimeStateTransforms&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double StateUpdateTime =&gt; HitObject.StartTime;
+
+        /// &lt;summary&gt;
+        /// The time at which judgement dependent state transforms should be applied. This is equivalent of the (end) time of the object, in addition to any judgement offset.
+        /// This is used to offset calls to &lt;see cref=&quot;UpdateHitStateTransforms&quot;/&gt;.
+        /// &lt;/summary&gt;
+        public double HitStateUpdateTime =&gt; Result?.TimeAbsolute ?? HitObject.GetEndTime();
+
+        /// &lt;summary&gt;
+        /// Will be called at least once after this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; has become not alive.
+        /// &lt;/summary&gt;
+        public virtual void OnKilled()
+        {
+            foreach (var nested in NestedHitObjects)
+                nested.OnKilled();
+
+            // failsafe to ensure looping samples don&#39;t get stuck in a playing state.
+            // this could occur in a non-frame-stable context where DrawableHitObjects get killed before a SkinnableSound has the chance to be stopped.
+            StopAllSamples();
+
+            UpdateResult(false);
+        }
+
+        protected void ApplyMaxResult() =&gt; ApplyResult((r, _) =&gt; r.Type = r.Judgement.MaxResult);
+        protected void ApplyMinResult() =&gt; ApplyResult((r, _) =&gt; r.Type = r.Judgement.MinResult);
+
+        protected void ApplyResult(HitResult type) =&gt; ApplyResult(static (result, state) =&gt; result.Type = state, type);
+
+        protected void ApplyResult(Action&lt;JudgementResult, DrawableHitObject&gt; application) =&gt; ApplyResult(application, this);
+
+        /// &lt;summary&gt;
+        /// Applies the &lt;see cref=&quot;Result&quot;/&gt; of this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;, notifying responders such as
+        /// the &lt;see cref=&quot;ScoreProcessor&quot;/&gt; of the &lt;see cref=&quot;JudgementResult&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;application&quot;&gt;The callback that applies changes to the &lt;see cref=&quot;JudgementResult&quot;/&gt;. Using a `static` delegate is recommended to avoid allocation overhead.&lt;/param&gt;
+        /// &lt;param name=&quot;state&quot;&gt;
+        /// Use this parameter to pass any data that &lt;paramref name=&quot;application&quot;/&gt; requires
+        /// to apply a result, so that it can remain a `static` delegate and thus not allocate.
+        /// &lt;/param&gt;
+        protected void ApplyResult&lt;T&gt;(Action&lt;JudgementResult, T&gt; application, T state)
+        {
+            if (Result.HasResult)
+                throw new InvalidOperationException(&quot;Cannot apply result on a hitobject that already has a result.&quot;);
+
+            application?.Invoke(Result, state);
+
+            if (!Result.HasResult)
+                throw new InvalidOperationException($&quot;{GetType().ReadableName()} applied a {nameof(JudgementResult)} but did not update {nameof(JudgementResult.Type)}.&quot;);
+
+            HitResultExtensions.ValidateHitResultPair(Result.Judgement.MaxResult, Result.Judgement.MinResult);
+
+            if (!Result.Type.IsValidHitResult(Result.Judgement.MinResult, Result.Judgement.MaxResult))
+            {
+                throw new InvalidOperationException(
+                    $&quot;{GetType().ReadableName()} applied an invalid hit result (was: {Result.Type}, expected: [{Result.Judgement.MinResult} ... {Result.Judgement.MaxResult}]).&quot;);
+            }
+
+            Result.RawTime = Time.Current;
+            Result.GameplayRate = (Clock as IGameplayClock)?.GetTrueGameplayRate() ?? Clock.Rate;
+
+            if (Result.HasResult)
+                UpdateState(Result.IsHit ? ArmedState.Hit : ArmedState.Miss);
+
+            OnNewResult?.Invoke(this, Result);
+        }
+
+        /// &lt;summary&gt;
+        /// Processes this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;, checking if a scoring result has occurred.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;userTriggered&quot;&gt;Whether the user triggered this process.&lt;/param&gt;
+        /// &lt;returns&gt;Whether a scoring result has occurred from this &lt;see cref=&quot;DrawableHitObject&quot;/&gt; or any nested &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.&lt;/returns&gt;
+        protected bool UpdateResult(bool userTriggered)
+        {
+            // It&#39;s possible for input to get into a bad state when rewinding gameplay, so results should not be processed
+            if ((Clock as IGameplayClock)?.IsRewinding == true)
+                return false;
+
+            if (Judged)
+                return false;
+
+            CheckForResult(userTriggered, Time.Current - HitObject.GetEndTime());
+
+            return Judged;
+        }
+
+        /// &lt;summary&gt;
+        /// Checks if a scoring result has occurred for this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;remarks&gt;
+        /// If a scoring result has occurred, this method must invoke &lt;see cref=&quot;ApplyResult{T}&quot;/&gt; to update the result and notify responders.
+        /// &lt;/remarks&gt;
+        /// &lt;param name=&quot;userTriggered&quot;&gt;Whether the user triggered this check.&lt;/param&gt;
+        /// &lt;param name=&quot;timeOffset&quot;&gt;The offset from the end time of the &lt;see cref=&quot;HitObject&quot;/&gt; at which this check occurred.
+        /// A &lt;paramref name=&quot;timeOffset&quot;/&gt; &amp;gt; 0 implies that this check occurred after the end time of the &lt;see cref=&quot;HitObject&quot;/&gt;. &lt;/param&gt;
+        protected virtual void CheckForResult(bool userTriggered, double timeOffset)
+        {
+        }
+
+        /// &lt;summary&gt;
+        /// Creates the &lt;see cref=&quot;JudgementResult&quot;/&gt; that represents the scoring result for this &lt;see cref=&quot;DrawableHitObject&quot;/&gt;.
+        /// &lt;/summary&gt;
+        /// &lt;param name=&quot;judgement&quot;&gt;The &lt;see cref=&quot;Judgement&quot;/&gt; that provides the scoring information.&lt;/param&gt;
+        protected internal virtual JudgementResult CreateResult(Judgement judgement) =&gt; new JudgementResult(HitObject, judgement);
+
+        private void ensureEntryHasResult()
+        {
+            Debug.Assert(Entry != null);
+            Entry.Result ??= CreateResult(HitObject.Judgement)
+                             ?? throw new InvalidOperationException($&quot;{GetType().ReadableName()} must provide a {nameof(JudgementResult)} through {nameof(CreateResult)}.&quot;);
+        }
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            if (HitObject != null)
+                HitObject.DefaultsApplied -= onDefaultsApplied;
+
+            if (CurrentSkin != null)
+                CurrentSkin.SourceChanged -= skinSourceChanged;
+
+            // Safeties against shooting in foot in cases where these are bound by external entities (like playfield) that don&#39;t clean up.
+            OnNestedDrawableCreated = null;
+            OnNewResult = null;
+            OnRevertResult = null;
+            DefaultsApplied = null;
+            HitObjectApplied = null;
+        }
+
+        public Bindable&lt;double&gt; AnimationStartTime { get; } = new BindableDouble();
+    }
+
+    public abstract partial class DrawableHitObject&lt;TObject&gt; : DrawableHitObject
+        where TObject : HitObject
+    {
+        public new TObject HitObject =&gt; (TObject)base.HitObject;
+
+        protected DrawableHitObject([CanBeNull] TObject hitObject)
+            : base(hitObject)
+        {
+        }
+    }
+}
+
+    </pre>
+    <script type="text/javascript">
+      highlightRanges([[49,39,49,55,0],[55,64,55,68,0],[55,69,55,82,0],[60,9,60,91,0],[62,52,62,56,0],[62,57,62,69,0],[66,67,66,84,0],[68,9,68,99,0],[69,79,69,112,0],[74,39,74,43,0],[74,44,74,48,0],[74,53,74,57,0],[76,65,76,80,0],[78,68,78,83,0],[101,46,101,50,0],[106,42,106,55,0],[112,30,112,52,0],[118,31,118,53,0],[123,34,123,59,0],[132,59,132,63,0],[134,9,134,85,0],[135,9,135,106,0],[136,9,136,81,0],[138,9,138,92,0],[139,9,139,89,0],[140,9,140,92,0],[142,59,142,63,0],[144,43,144,152,0],[146,9,146,82,0],[154,47,154,52,0],[157,65,157,69,0],[157,70,157,74,0],[161,47,161,51,0],[161,52,161,56,0],[195,9,195,83,0],[196,9,196,10,0],[197,13,197,42,0],[197,43,197,50,0],[199,13,199,67,0],[200,13,200,36,0],[201,9,201,10,0],[205,9,205,10,0],[206,13,206,88,0],[207,13,207,91,0],[210,13,213,16,0],[215,13,215,38,0],[216,13,216,60,0],[217,9,217,10,0],[220,9,220,10,0],[221,13,221,38,0],[222,13,222,27,0],[223,9,223,10,0],[226,9,226,10,0],[227,13,227,33,0],[229,13,229,54,0],[229,54,229,73,0],[229,73,229,75,0],[230,13,230,65,0],[230,65,230,84,0],[230,84,230,92,0],[232,13,232,57,0],[232,57,232,76,0],[232,76,232,78,0],[234,13,235,13,0],[235,13,235,14,0],[235,14,236,17,0],[236,17,236,35,0],[236,35,237,21,0],[237,21,237,35,0],[237,35,238,13,0],[238,13,238,14,0],[238,14,238,16,0],[241,13,241,37,0],[242,9,242,10,0],[249,9,249,10,0],[250,13,250,58,0],[252,13,252,59,0],[253,9,253,10,0],[256,9,256,10,0],[257,13,257,41,0],[261,13,261,50,0],[262,17,262,77,0],[264,13,264,36,0],[266,13,266,50,0],[268,13,268,20,0],[268,22,268,27,0],[268,28,268,30,0],[268,31,268,57,0],[269,13,269,14,0],[270,17,270,107,0],[271,17,273,161,0],[276,17,276,50,0],[277,21,277,69,0],[279,17,279,59,0],[280,17,280,71,0],[281,17,281,83,0],[285,17,285,55,0],[287,17,287,54,0],[291,17,291,90,0],[292,21,292,67,0],[294,17,294,52,0],[295,13,295,14,0],[297,13,297,67,0],[299,13,299,57,0],[300,13,300,14,0],[301,17,301,69,0],[302,17,302,91,0],[303,13,303,14,0],[305,13,305,63,0],[306,13,306,60,0],[308,13,308,23,0],[309,13,309,44,0],[312,13,312,26,0],[313,13,313,14,0],[314,17,314,41,0],[318,17,318,37,0],[319,13,319,14,0],[320,9,320,10,0],[323,9,323,10,0],[324,13,324,30,0],[325,17,325,51,0],[326,18,326,39,0],[327,17,327,52,0],[329,17,329,52,0],[330,9,330,10,0],[333,9,333,10,0],[334,13,334,41,0],[336,13,336,71,0],[338,13,338,57,0],[339,13,339,14,0],[340,17,340,73,0],[341,17,341,95,0],[342,13,342,14,0],[344,13,344,67,0],[347,13,347,35,0],[348,13,348,37,0],[350,13,350,20,0],[350,22,350,29,0],[350,30,350,32,0],[350,33,350,49,0],[351,13,351,14,0],[352,17,352,48,0],[353,17,353,60,0],[354,17,354,72,0],[355,13,355,14,0],[357,13,357,38,0],[359,13,359,58,0],[359,58,359,96,0],[359,96,359,98,0],[360,13,360,37,0],[364,13,364,60,0],[366,13,366,50,0],[368,13,368,22,0],[370,13,370,36,0],[372,13,372,44,0],[373,9,373,10,0],[380,9,380,10,0],[381,9,381,10,0],[388,9,388,10,0],[389,9,389,10,0],[395,9,395,10,0],[396,13,396,50,0],[398,13,398,37,0],[399,17,399,24,0],[401,13,401,69,0],[402,9,402,10,0],[404,98,404,144,0],[407,9,407,10,0],[408,13,408,42,0],[409,13,409,50,0],[410,9,410,10,0],[412,107,412,156,0],[414,105,414,161,0],[417,9,417,10,0],[418,13,418,41,0],[419,13,419,26,0],[424,13,424,36,0],[425,13,425,14,0],[426,17,426,39,0],[427,17,427,48,0],[428,13,428,14,0],[430,13,430,43,0],[431,9,431,10,0],[438,9,438,10,0],[439,9,439,10,0],[445,9,445,10,0],[446,9,446,10,0],[453,91,453,95,0],[464,13,465,256,0],[468,9,468,10,0],[469,13,469,51,0],[470,17,470,24,0],[472,13,472,43,0],[474,13,474,44,0],[476,13,476,88,0],[478,13,478,62,0],[480,13,480,65,0],[481,17,481,43,0],[483,13,483,59,0],[484,17,484,50,0],[486,13,486,62,0],[487,17,487,52,0],[489,13,489,36,0],[491,13,491,116,0],[492,17,492,109,0],[495,13,495,60,0],[497,13,497,54,0],[498,17,498,31,0],[499,9,499,10,0],[502,9,502,10,0],[503,13,503,59,0],[506,13,506,62,0],[507,9,507,10,0],[512,49,512,79,0],[523,9,523,10,0],[524,13,524,35,0],[525,9,525,10,0],[533,9,533,10,0],[534,9,534,10,0],[543,9,543,10,0],[544,9,544,10,0],[547,9,547,10,0],[549,9,549,10,0],[552,9,552,10,0],[554,9,554,10,0],[560,45,560,49,0],[560,50,560,62,0],[562,45,562,75,0],[565,9,565,10,0],[566,13,566,33,0],[568,13,568,42,0],[570,13,570,26,0],[571,17,571,48,0],[572,9,572,10,0],[575,9,575,10,0],[576,13,576,60,0],[576,61,576,68,0],[578,13,578,63,0],[581,13,581,50,0],[582,13,582,14,0],[583,17,583,149,0],[584,13,584,14,0],[586,13,586,41,0],[587,9,587,10,0],[595,9,595,10,0],[596,9,596,10,0],[603,9,603,10,0],[604,13,604,76,0],[605,13,605,76,0],[609,13,609,49,0],[610,9,610,10,0],[617,9,617,10,0],[618,13,618,33,0],[619,13,619,14,0],[620,17,620,96,0],[621,17,621,32,0],[622,17,622,62,0],[623,13,623,14,0],[624,9,624,10,0],[631,9,631,10,0],[632,13,632,42,0],[633,17,633,32,0],[634,9,634,10,0],[639,9,639,10,0],[656,13,656,32,0],[657,13,657,14,0],[658,17,658,38,0],[659,17,659,31,0],[660,13,660,14,0],[662,13,662,27,0],[663,9,663,10,0],[665,56,665,61,0],[668,9,668,10,0],[669,13,669,40,0],[671,13,671,33,0],[672,9,672,10,0],[681,59,681,64,0],[687,42,687,61,0],[693,45,693,91,0],[699,9,699,10,0],[700,13,700,20,0],[700,22,700,32,0],[700,33,700,35,0],[700,36,700,52,0],[701,17,701,35,0],[705,13,705,30,0],[707,13,707,33,0],[708,9,708,10,0],[710,44,710,66,0],[710,66,710,96,0],[710,96,710,97,0],[711,44,711,66,0],[711,66,711,96,0],[711,96,711,97,0],[713,55,713,93,0],[713,93,713,112,0],[713,112,713,119,0],[715,95,715,125,0],[727,9,727,10,0],[728,13,728,34,0],[729,17,729,118,0],[731,13,731,48,0],[733,13,733,35,0],[734,17,734,171,0],[736,13,736,111,0],[738,13,738,103,0],[739,13,739,14,0],[740,17,741,179,0],[744,13,744,43,0],[745,13,745,98,0],[747,13,747,34,0],[748,17,748,78,0],[750,13,750,47,0],[751,9,751,10,0],[759,9,759,10,0],[761,13,761,64,0],[762,17,762,30,0],[764,13,764,24,0],[765,17,765,30,0],[767,13,767,82,0],[769,13,769,27,0],[770,9,770,10,0],[782,9,782,10,0],[783,9,783,10,0],[789,89,789,130,0],[792,9,792,10,0],[793,13,793,41,0],[794,13,795,173,0],[796,9,796,10,0],[799,9,799,10,0],[800,13,800,39,0],[802,13,802,35,0],[803,17,803,64,0],[805,13,805,37,0],[806,17,806,64,0],[809,13,809,44,0],[810,13,810,32,0],[811,13,811,35,0],[812,13,812,36,0],[813,13,813,37,0],[814,9,814,10,0],[816,54,816,58,0],[816,63,816,83,0],[822,41,822,64,0],[825,15,825,30,0],[826,9,826,10,0],[827,9,827,10,0]]);
+    </script>
+  </body>
+</html>
