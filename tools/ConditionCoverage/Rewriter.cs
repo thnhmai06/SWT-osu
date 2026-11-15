@@ -165,7 +165,7 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
         if (!isBool(e) || model.GetConstantValue(e).HasValue) return inner;
 
         int id = registry.Conditions.Count;
-        registry.Conditions.Add(new ConditionInfo(id, decisionId, registry.Assembly, file, lineOf(e), compact(e), namespaceOf(e), typeOf(e), memberOf(e)));
+        registry.Conditions.Add(new ConditionInfo(id, decisionId, registry.Assembly, file, lineOf(e), compact(e), namespaceOf(e), typeOf(e), memberOf(e), inUiFramework(e)));
 
         var bare = inner.WithoutTrivia();
         string p = $"global::{registry.ProbeName}";
@@ -182,6 +182,34 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
         }
 
         return wrapped.WithTriviaFrom(e);
+    }
+
+    private readonly Dictionary<ITypeSymbol, bool> uiCache = new(SymbolEqualityComparer.Default);
+
+    /// <summary>Điều kiện nằm trong (hoặc lồng trong) type dẫn xuất từ <c>osu.Framework.Graphics.Drawable</c> nhưng không qua <c>Component</c>: code UI cần scene graph/game host nên không unit test thuần được.</summary>
+    private bool inUiFramework(SyntaxNode n)
+    {
+        for (var t = model.GetEnclosingSymbol(n.SpanStart)?.ContainingType; t != null; t = t.ContainingType)
+        {
+            if (!uiCache.TryGetValue(t, out bool ui))
+            {
+                // Component kế thừa Drawable nhưng không hiển thị (logic thuần, vd. EditorBeatmap) nên không tính là UI.
+                bool drawable = false, component = false;
+                for (var b = t; b != null; b = b.BaseType)
+                {
+                    string name = b.OriginalDefinition.ToDisplayString();
+                    drawable |= name == "osu.Framework.Graphics.Drawable";
+                    component |= name == "osu.Framework.Graphics.Component";
+                }
+
+                ui = drawable && !component;
+                uiCache[t] = ui;
+            }
+
+            if (ui) return true;
+        }
+
+        return false;
     }
 
     private static bool declaresVariables(ExpressionSyntax e)
