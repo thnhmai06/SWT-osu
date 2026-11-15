@@ -90,6 +90,16 @@ public static class Report
         foreach (var g in all.GroupBy(h => h.Assembly).OrderBy(g => g.Key))
             sb.AppendLine($"| [{g.Key}](condition-coverage-{g.Key}.md) | {Agg.Of(g).Row()} |");
         sb.AppendLine($"| **Tổng** | {Agg.Of(all).Row()} |");
+        sb.AppendLine();
+        sb.AppendLine("## Solution — sau khi loại bỏ code UI framework");
+        sb.AppendLine();
+        sb.AppendLine("Loại các điều kiện nằm trong type dẫn xuất từ `osu.Framework.Graphics.Drawable` (Drawable/Container/Screen/Overlay/Blueprint/HUD…, **không** tính type qua `Component` vì đó là logic không hiển thị), vì chúng cần scene graph, game host, GL/audio nên không unit test thuần được. Phần còn lại là code logic. Lưu ý: phần này vẫn còn code không phải UI nhưng khó unit test (skin transformer, truy cập Realm/mạng, cần game host); chúng chưa bị loại nên coverage của phần logic có thể thấp hơn thực tế.");
+        sb.AppendLine();
+        sb.AppendLine("| Project | Tổng điều kiện | Điều kiện UI (loại) | Điều kiện logic còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic) | Condition coverage (toàn bộ) |");
+        sb.AppendLine("|---|---|---|---|---|---|---|---|---|");
+        foreach (var g in all.GroupBy(h => h.Assembly).OrderBy(g => g.Key))
+            sb.AppendLine(Compare($"[{g.Key}](condition-coverage-{g.Key}.md)", g));
+        sb.AppendLine(Compare("**Tổng**", all));
         File.WriteAllText(Path.Combine(outDir, "condition-coverage.md"), sb.ToString());
 
         foreach (var g in all.GroupBy(h => h.Assembly))
@@ -97,6 +107,14 @@ public static class Report
 
         var total = Agg.Of(all);
         Console.WriteLine($"TOTAL conditions={total.Conditions} outcomes={total.Outcomes}/{2 * total.Conditions} full={total.Full} unreached={total.Unreached} coverage={total.Percent:0.0}%");
+    }
+
+    private static string Compare(string name, IEnumerable<Hit> hits)
+    {
+        var list = hits.ToList();
+        var logic = Agg.Of(list.Where(h => !h.Cond.UiFramework));
+        var ui = list.Count(h => h.Cond.UiFramework);
+        return $"| {name} | {list.Count} | {ui} | {logic.Conditions} | {logic.Outcomes}/{2 * logic.Conditions} | {logic.Full} | {logic.Unreached} | {logic.Percent:0.0}% | {Agg.Of(list).Percent:0.0}% |";
     }
 
     private static string esc(string s) => "`" + s.Replace("`", "'") + "`";
@@ -117,13 +135,24 @@ public static class Report
         foreach (var g in hits.GroupBy(h => h.Cond.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
             sb.AppendLine($"| {cell(g.Key)} | {Agg.Of(g).Row()} |");
 
+        var logicHits = hits.Where(h => !h.Cond.UiFramework).ToList();
+        sb.AppendLine();
+        sb.AppendLine("## Namespace — sau khi loại bỏ code UI framework");
+        sb.AppendLine();
+        sb.AppendLine($"Loại {hits.Count - logicHits.Count} điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: {Agg.Of(logicHits).Row()}");
+        sb.AppendLine();
+        sb.AppendLine("| Namespace |" + header[1..]);
+        sb.AppendLine("|---|---|---|---|---|---|");
+        foreach (var g in logicHits.GroupBy(h => h.Cond.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
+            sb.AppendLine($"| {cell(g.Key)} | {Agg.Of(g).Row()} |");
+
         sb.AppendLine();
         sb.AppendLine("## Type");
         sb.AppendLine();
         sb.AppendLine("| Type |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
         foreach (var g in hits.GroupBy(h => (h.Cond.Namespace, h.Cond.Type)).OrderBy(g => g.Key.Namespace, StringComparer.Ordinal).ThenBy(g => g.Key.Type, StringComparer.Ordinal))
-            sb.AppendLine($"| {cell(g.Key.Namespace + "." + g.Key.Type)} | {Agg.Of(g).Row()} |");
+            sb.AppendLine($"| {cell(g.Key.Namespace + "." + g.Key.Type)}{(g.All(h => h.Cond.UiFramework) ? " _(UI)_" : "")} | {Agg.Of(g).Row()} |");
 
         sb.AppendLine();
         sb.AppendLine("## Method");

@@ -141,4 +141,25 @@ public class RewriterTests
         Assert.That(b.Registry.Conditions.All(c => c.Namespace == "N.M" && c.Type == "T"), Is.True);
         Assert.That(b.Call("N.M.T", "Loop", 5), Is.EqualTo(10));
     }
+
+    [Test]
+    public void ConditionsInDrawableDerivedTypesAreFlaggedAsUiFramework()
+    {
+        var b = build("""
+                      namespace osu.Framework.Graphics { public class Drawable { } public class Component : Drawable { } }
+                      namespace Game
+                      {
+                          public class Box : osu.Framework.Graphics.Drawable
+                          {
+                              public bool A(bool x, bool y) => x && y;
+                              public class Inner { public bool B(bool x, bool y) => x || y; }
+                          }
+                          public class Logic { public bool C(bool x, bool y) => x && y; }
+                          public class NonVisual : osu.Framework.Graphics.Component { public bool D(bool x, bool y) => x && y; }
+                      }
+                      """);
+
+        Assert.That(b.Registry.Conditions.Where(c => c.Type == "Box" || c.Type == "Box.Inner").All(c => c.UiFramework), Is.True);
+        Assert.That(b.Registry.Conditions.Where(c => c.Type is "Logic" or "NonVisual").Any(c => c.UiFramework), Is.False);
+    }
 }
