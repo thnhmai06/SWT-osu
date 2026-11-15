@@ -85,7 +85,7 @@ public static class Report
         sb.AppendLine();
         sb.AppendLine("## Solution");
         sb.AppendLine();
-        sb.AppendLine("| Project " + header[1..]);
+        sb.AppendLine("| Project |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
         foreach (var g in all.GroupBy(h => h.Assembly).OrderBy(g => g.Key))
             sb.AppendLine($"| [{g.Key}](condition-coverage-{g.Key}.md) | {Agg.Of(g).Row()} |");
@@ -112,7 +112,7 @@ public static class Report
 
         sb.AppendLine("## Namespace");
         sb.AppendLine();
-        sb.AppendLine("| Namespace " + header[1..]);
+        sb.AppendLine("| Namespace |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
         foreach (var g in hits.GroupBy(h => h.Cond.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
             sb.AppendLine($"| {cell(g.Key)} | {Agg.Of(g).Row()} |");
@@ -120,7 +120,7 @@ public static class Report
         sb.AppendLine();
         sb.AppendLine("## Type");
         sb.AppendLine();
-        sb.AppendLine("| Type " + header[1..]);
+        sb.AppendLine("| Type |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
         foreach (var g in hits.GroupBy(h => (h.Cond.Namespace, h.Cond.Type)).OrderBy(g => g.Key.Namespace, StringComparer.Ordinal).ThenBy(g => g.Key.Type, StringComparer.Ordinal))
             sb.AppendLine($"| {cell(g.Key.Namespace + "." + g.Key.Type)} | {Agg.Of(g).Row()} |");
@@ -132,7 +132,7 @@ public static class Report
         {
             sb.AppendLine($"### {tg.Key.Namespace}.{tg.Key.Type}");
             sb.AppendLine();
-            sb.AppendLine("| Method " + header[1..]);
+            sb.AppendLine("| Method |" + header[1..]);
             sb.AppendLine("|---|---|---|---|---|---|");
             var methods = tg.GroupBy(h => h.Cond.Member).OrderBy(g => g.Key, StringComparer.Ordinal).ToList();
             foreach (var mg in methods)

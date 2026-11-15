@@ -12,7 +12,7 @@ public static class Instrumenter
     public static async Task<InstrumentMap> RunAsync(string csproj, string mapPath, Regex? include, Regex? exclude)
     {
         using var ws = MSBuildWorkspace.Create(new Dictionary<string, string> { ["Configuration"] = "Debug" });
-        ws.RegisterWorkspaceFailedHandler(e => { if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure) Console.Error.WriteLine("  [ws] " + e.Diagnostic.Message); });
+        ws.RegisterWorkspaceFailedHandler(e => { if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure && !e.Diagnostic.Message.Contains("known")) Console.Error.WriteLine("  [ws] " + e.Diagnostic.Message); });
 
         var project = await ws.OpenProjectAsync(Path.GetFullPath(csproj));
         string projDir = Path.GetDirectoryName(project.FilePath)!;
