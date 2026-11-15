@@ -42,7 +42,7 @@ Tổng: 1722 | 896/3444 | 400 | 1226 | 26.0%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 1147 điều kiện phụ thuộc ngoài (UI: 1082, Input: 43, Host/IO: 11, Database/Online: 0, DI: 11, TestInfra: 0). Còn lại: 575 | 821/1150 | 364 | 118 | 71.4%
+Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 37, Database/Online: 0, DI: 61, TestInfra: 0). Còn lại: 556 | 825/1112 | 366 | 97 | 74.2%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -55,15 +55,13 @@ Loại 1147 điều kiện phụ thuộc ngoài (UI: 1082, Input: 43, Host/IO: 1
 | osu.Game.Rulesets.Osu.Difficulty.Preprocessing | 27 | 48/54 | 21 | 0 | 88.9% |
 | osu.Game.Rulesets.Osu.Difficulty.Skills | 38 | 52/76 | 14 | 0 | 68.4% |
 | osu.Game.Rulesets.Osu.Difficulty.Utils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Edit | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks | 51 | 102/102 | 51 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Mods | 56 | 37/112 | 14 | 33 | 33.0% |
-| osu.Game.Rulesets.Osu.Objects | 14 | 28/28 | 14 | 0 | 100.0% |
+| osu.Game.Rulesets.Osu.Mods | 62 | 37/124 | 14 | 39 | 29.8% |
+| osu.Game.Rulesets.Osu.Objects | 16 | 32/32 | 16 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Objects.Drawables | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Rulesets.Osu.Objects.Drawables.Connections | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Replays | 60 | 57/120 | 19 | 22 | 47.5% |
 | osu.Game.Rulesets.Osu.Scoring | 22 | 42/44 | 20 | 0 | 95.5% |
-| osu.Game.Rulesets.Osu.Skinning.Default | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Osu.Utils | 20 | 40/40 | 20 | 0 | 100.0% |
 
 ## Type
@@ -104,8 +102,8 @@ Loại 1147 điều kiện phụ thuộc ngoài (UI: 1082, Input: 43, Host/IO: 1
 | osu.Game.Rulesets.Osu.Edit.OsuHitObjectComposer _(loại)_ | 47 | 0/94 | 0 | 47 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuHitObjectInspector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSelectionHandler _(loại)_ | 38 | 0/76 | 0 | 38 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSelectionRotationHandler | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSelectionScaleHandler | 42 | 0/84 | 0 | 42 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuSelectionRotationHandler _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuSelectionScaleHandler _(loại)_ | 42 | 0/84 | 0 | 42 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup.ExpandableSliderVelocityAdjustmentControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.PolygonGenerationPopover _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
@@ -233,7 +231,7 @@ Loại 1147 điều kiện phụ thuộc ngoài (UI: 1082, Input: 43, Host/IO: 1
 | osu.Game.Rulesets.Osu.Skinning.Default.KiaiFlash _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.MainCirclePiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.SpinnerRotationTracker _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerSpmCalculator | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerSpmCalculator _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.SpinnerTicks _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.TrianglesPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursor _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
