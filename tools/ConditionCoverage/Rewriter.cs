@@ -184,6 +184,45 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
         return wrapped.WithTriviaFrom(e);
     }
 
+    /// <summary>
+    /// Liệt kê mọi type/member bị loại (không chỉ nơi có điều kiện), dùng đúng <c>selfReason</c>/<c>reasonOfMember</c> như lúc gán <c>Exclusion</c>.
+    /// Type loại cả type → một span (Kind="type"); member loại → span của member (Kind="member"), chỉ phát khi mọi type chứa nó không bị loại.
+    /// Group giữ nguyên tiền tố <c>~</c> (nhóm bị ẩn khỏi báo cáo condition khi --hide-skipped).
+    /// </summary>
+    public static List<ExcludedSpan> ListExcluded(SemanticModel model, string file)
+        => new ConditionRewriter(model, file, new Registry("")).listExcluded();
+
+    private List<ExcludedSpan> listExcluded()
+    {
+        var spans = new List<ExcludedSpan>();
+        foreach (var node in model.SyntaxTree.GetRoot().DescendantNodes())
+        {
+            if (node is BaseTypeDeclarationSyntax td)
+            {
+                if (model.GetDeclaredSymbol(td) is not ITypeSymbol t) continue;
+                string r = selfReason(t);
+                if (r.Length > 0) spans.Add(span(td, r, "type"));
+            }
+            else if (node is MemberDeclarationSyntax m && m.Parent is BaseTypeDeclarationSyntax owner && model.GetDeclaredSymbol(owner) is ITypeSymbol ot)
+            {
+                bool typeExcluded = false;
+                for (var t = ot; t != null && !typeExcluded; t = t.ContainingType) typeExcluded = selfReason(t).Length > 0;
+                if (typeExcluded) continue;
+
+                string r = reasonOfMember(m);
+                if (r.Length > 0) spans.Add(span(m, r, "member"));
+            }
+        }
+
+        return spans;
+    }
+
+    private ExcludedSpan span(SyntaxNode n, string reason, string kind)
+    {
+        var ls = n.GetLocation().GetLineSpan();
+        return new ExcludedSpan(file, ls.StartLinePosition.Line + 1, ls.EndLinePosition.Line + 1, reason, kind);
+    }
+
     // ---- Phân loại phụ thuộc ngoài (không phải logic thuần) ----
 
     private static readonly (string Reason, string[] Namespaces)[] externalNamespaces =
@@ -299,7 +338,11 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
             if (a is MemberDeclarationSyntax) member = a;
         }
 
-        if (member == null) return "";
+        return member == null ? "" : reasonOfMember(member);
+    }
+
+    private string reasonOfMember(SyntaxNode member)
+    {
         if (memberCache.TryGetValue(member, out string? cached)) return cached;
 
         string reason = hasDiAttribute(member) ? "DI" : "";
