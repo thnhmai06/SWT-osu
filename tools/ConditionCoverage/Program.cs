@@ -8,7 +8,7 @@ public static class Program
     private const string usage = """
         instrument --project <csproj> --map <map.json> [--include <regex>] [--exclude <regex>]
             Ghi đè .cs của project bằng bản có probe (chạy trên worktree!). regex khớp đường dẫn tương đối so với project.
-        report --maps <a.json,b.json,...> --hits <dir> --out <dir> [--title <text>] [--scope <regex>]
+        report --maps <a.json,b.json,...> --hits <dir> --out <dir> [--title <text>] [--scope <regex>] [--hide-skipped true]
             Gom số liệu hits-*.txt thành báo cáo Markdown (solution > project > namespace > type > method).
         """;
 
@@ -31,7 +31,8 @@ public static class Program
             case "report":
                 Report.Run(opt["maps"].Split(',', StringSplitOptions.RemoveEmptyEntries), opt["hits"], opt["out"],
                     opt.GetValueOrDefault("title", "Condition coverage"),
-                    opt.TryGetValue("scope", out var sc) ? new Regex(sc) : null);
+                    opt.TryGetValue("scope", out var sc) ? new Regex(sc) : null,
+                    opt.GetValueOrDefault("hide-skipped") == "true");
                 return 0;
 
             default:

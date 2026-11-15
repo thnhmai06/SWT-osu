@@ -199,8 +199,8 @@ public class RewriterTests
 
         Assert.That(reason("WithDi"), Is.EqualTo("DI"));
         Assert.That(reason("Stored"), Is.EqualTo("Database/Online"));
-        Assert.That(reason("NeedsStorage"), Is.EqualTo("Host/IO"));
-        Assert.That(reason("NeedsDiType"), Is.EqualTo("DI"));
+        Assert.That(reason("NeedsStorage"), Is.EqualTo("~Host/IO"), "tiền tố ~: nhóm bỏ qua hẳn khỏi báo cáo");
+        Assert.That(reason("NeedsDiType"), Is.EqualTo("~DI"));
         Assert.That(reason("Constructible"), Is.Empty);
         Assert.That(reason("OneEasyCtor"), Is.Empty, "có ctor không cần thứ ngoài thì dựng được");
         Assert.That(reason("Util"), Is.Empty);

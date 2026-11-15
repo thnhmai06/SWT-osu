@@ -10,6 +10,9 @@ public static class Report
     {
         public int Outcomes => (T > 0 ? 1 : 0) + (F > 0 ? 1 : 0);
         public bool Excluded => Cond.Exclusion.Length > 0;
+
+        /// <summary>Nhóm bị bỏ qua hẳn khỏi phạm vi (không xuất hiện trong báo cáo khi --hide-skipped).</summary>
+        public bool Skipped => Cond.Exclusion is "DI" or "Database/Online" || Cond.Exclusion.StartsWith('~');
     }
 
     private readonly record struct Agg(int Conditions, int Outcomes, int Full, int Unreached)
@@ -34,8 +37,10 @@ public static class Report
 
     private const string header = "| Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |";
 
-    public static void Run(string[] mapPaths, string hitsDir, string outDir, string title, Regex? scope)
+    public static void Run(string[] mapPaths, string hitsDir, string outDir, string title, Regex? scope, bool hide = false)
     {
+        hideSkipped = hide;
+        if (hide) reasons = ["UI", "Input", "Host/IO", "TestInfra"];
         Directory.CreateDirectory(outDir);
 
         var hitsByAsm = new Dictionary<string, (long[] t, long[] f)>();
@@ -68,7 +73,9 @@ public static class Report
             foreach (var c in m.Conditions)
             {
                 if (scope != null && !scope.IsMatch($"{c.Namespace}.{c.Type}.{c.Member}")) continue;
-                all.Add(new Hit(m.Assembly, c, t[c.Id], f[c.Id]));
+                var hit = new Hit(m.Assembly, c, t[c.Id], f[c.Id]);
+                if (hideSkipped && hit.Skipped) continue;
+                all.Add(hit);
             }
         }
 
@@ -94,7 +101,7 @@ public static class Report
         sb.AppendLine();
         sb.AppendLine("## Solution — chỉ tính logic thuần (loại code phụ thuộc ngoài)");
         sb.AppendLine();
-        sb.AppendLine("Logic thuần = điều kiện nằm trong code **không phụ thuộc** vào thứ ngoài code đó (không cần UI, input thật, game host, IO/audio/texture, database/online, hay DI của framework). Bị loại, theo thứ tự ưu tiên:");
+        sb.AppendLine("Logic thuần = điều kiện nằm trong code **không phụ thuộc** vào thứ ngoài code đó (không cần UI, input thật, game host, IO/audio/texture" + (hideSkipped ? "" : ", database/online, hay DI của framework") + "). Bị loại, theo thứ tự ưu tiên:");
         sb.AppendLine();
         sb.AppendLine("| Nhóm loại | Nhận diện (tự động bằng Roslyn) |");
         sb.AppendLine("|---|---|");
@@ -102,15 +109,21 @@ public static class Report
         sb.AppendLine("| UI | type dẫn xuất từ `Drawable` (không qua `Component`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |");
         sb.AppendLine("| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|IO` |");
         sb.AppendLine("| Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |");
-        sb.AppendLine("| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |");
+        if (!hideSkipped) sb.AppendLine("| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |");
+        if (!hideSkipped)
+        {
         sb.AppendLine("| DI | **type** có member `[Resolved]`/`[BackgroundDependencyLoader]` (cần DI container mới dựng được) → loại cả type; hoặc member có `[Cached]` hoặc dùng symbol có `[Resolved]`; hoặc mọi constructor đều đòi tham số là type DI |");
         sb.AppendLine("| Database/Online (mở rộng) | type dẫn xuất từ `Realms.*` (`RealmObject`) → loại cả type |");
         sb.AppendLine("| Host/IO (mở rộng) | type mà **mọi** constructor tường minh đều đòi tham số là thứ ngoài (vd. `Storage`, `IAPIProvider`) → loại cả type. Type static, type không có constructor tường minh, hoặc có ít nhất một constructor nhận tham số thuần/interface nội bộ thì vẫn tính |");
+        }
         sb.AppendLine();
-        sb.AppendLine("Việc loại làm theo **member**; riêng các trường hợp ghi \"loại cả type\" thì loại toàn bộ type (vì type đó không dựng/kiểm thử được bằng control-flow test thuần). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột \"toàn bộ\" để đối chiếu.");
+        sb.AppendLine(hideSkipped
+            ? "Việc loại làm theo **member** (type tự là UI/Input/Host/TestInfra thì loại cả type). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài."
+            : "Việc loại làm theo **member**; riêng các trường hợp ghi \"loại cả type\" thì loại toàn bộ type (vì type đó không dựng/kiểm thử được bằng control-flow test thuần). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột \"toàn bộ\" để đối chiếu.");
         sb.AppendLine();
-        sb.AppendLine("| Project | Tổng điều kiện | UI | Input | Host/IO | Database/Online | DI | TestInfra | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |");
-        sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
+        string cols = string.Join(" | ", reasons);
+        sb.AppendLine($"| Project | Tổng điều kiện | {cols} | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |");
+        sb.AppendLine("|" + string.Join("|", Enumerable.Repeat("---", 8 + reasons.Length)) + "|");
         foreach (var g in all.GroupBy(h => h.Assembly).OrderBy(g => g.Key))
             sb.AppendLine(Compare($"[{g.Key}](condition-coverage-{g.Key}.md)", g));
         sb.AppendLine(Compare("**Tổng**", all));
@@ -123,13 +136,14 @@ public static class Report
         Console.WriteLine($"TOTAL conditions={total.Conditions} outcomes={total.Outcomes}/{2 * total.Conditions} full={total.Full} unreached={total.Unreached} coverage={total.Percent:0.0}%");
     }
 
-    private static readonly string[] reasons = ["UI", "Input", "Host/IO", "Database/Online", "DI", "TestInfra"];
+    private static string[] reasons = ["UI", "Input", "Host/IO", "Database/Online", "DI", "TestInfra"];
+    private static bool hideSkipped;
 
     private static string Compare(string name, IEnumerable<Hit> hits)
     {
         var list = hits.ToList();
         var logic = Agg.Of(list.Where(h => !h.Excluded));
-        string byReason = string.Join(" | ", reasons.Select(r => list.Count(h => h.Cond.Exclusion == r)));
+        string byReason = string.Join(" | ", reasons.Select(r => list.Count(h => h.Cond.Exclusion.TrimStart('~') == r)));
         return $"| {name} | {list.Count} | {byReason} | {logic.Conditions} | {logic.Outcomes}/{2 * logic.Conditions} | {logic.Full} | {logic.Unreached} | {logic.Percent:0.0}% | {Agg.Of(list).Percent:0.0}% |";
     }
 
@@ -155,7 +169,7 @@ public static class Report
         sb.AppendLine();
         sb.AppendLine("## Namespace — chỉ tính logic thuần");
         sb.AppendLine();
-        string excl = string.Join(", ", reasons.Select(r => $"{r}: {hits.Count(h => h.Cond.Exclusion == r)}"));
+        string excl = string.Join(", ", reasons.Select(r => $"{r}: {hits.Count(h => h.Cond.Exclusion.TrimStart('~') == r)}"));
         sb.AppendLine($"Loại {hits.Count - logicHits.Count} điều kiện phụ thuộc ngoài ({excl}). Còn lại: {Agg.Of(logicHits).Row()}");
         sb.AppendLine();
         sb.AppendLine("| Namespace |" + header[1..]);
