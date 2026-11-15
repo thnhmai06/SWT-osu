@@ -8,6 +8,8 @@ public static class Program
     private const string usage = """
         instrument --project <csproj> --map <map.json> [--include <regex>] [--exclude <regex>]
             Ghi đè .cs của project bằng bản có probe (chạy trên worktree!). regex khớp đường dẫn tương đối so với project.
+        list-excluded --project <csproj> --out <excluded.json> [--root <dir>]
+            Liệt kê (JSON) mọi type/member bị loại khỏi logic thuần, theo đúng phân loại của instrument. Không ghi đè mã nguồn. Đường dẫn tính từ --root (mặc định: thư mục cha của project).
         report --maps <a.json,b.json,...> --hits <dir> --out <dir> [--title <text>] [--scope <regex>] [--hide-skipped true]
             Gom số liệu hits-*.txt thành báo cáo Markdown (solution > project > namespace > type > method).
         """;
@@ -26,6 +28,11 @@ public static class Program
                 await Instrumenter.RunAsync(opt["project"], opt["map"],
                     opt.TryGetValue("include", out var inc) ? new Regex(inc) : null,
                     opt.TryGetValue("exclude", out var exc) ? new Regex(exc) : null);
+                return 0;
+
+            case "list-excluded":
+                MSBuildLocator.RegisterDefaults();
+                await Instrumenter.ListExcludedAsync(opt["project"], opt["out"], opt.GetValueOrDefault("root"));
                 return 0;
 
             case "report":
