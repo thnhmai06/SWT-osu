@@ -35,14 +35,14 @@ Tổng: 714 | 654/1428 | 298 | 358 | 45.8%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 389 điều kiện phụ thuộc ngoài (UI: 324, Input: 6, Host/IO: 59, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 325 | 579/650 | 267 | 13 | 89.1%
+Loại 344 điều kiện phụ thuộc ngoài (UI: 308, Input: 6, Host/IO: 30, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 370 | 644/740 | 294 | 20 | 87.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Rulesets.Mania | 46 | 92/92 | 46 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps | 25 | 50/50 | 25 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps.Patterns | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Beatmaps.Patterns.Legacy | 127 | 208/254 | 90 | 9 | 81.9% |
+| osu.Game.Rulesets.Mania.Beatmaps.Patterns.Legacy | 171 | 269/342 | 115 | 17 | 78.7% |
 | osu.Game.Rulesets.Mania.Configuration | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Difficulty | 12 | 24/24 | 12 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Difficulty.Evaluators | 10 | 19/20 | 9 | 0 | 95.0% |
@@ -51,10 +51,10 @@ Loại 389 điều kiện phụ thuộc ngoài (UI: 324, Input: 6, Host/IO: 59, 
 | osu.Game.Rulesets.Mania.Edit.Checks | 12 | 21/24 | 10 | 1 | 87.5% |
 | osu.Game.Rulesets.Mania.Judgements | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.MathUtils | 22 | 41/44 | 19 | 0 | 93.2% |
-| osu.Game.Rulesets.Mania.Mods | 11 | 18/22 | 8 | 1 | 81.8% |
+| osu.Game.Rulesets.Mania.Mods | 12 | 20/24 | 9 | 1 | 83.3% |
+| osu.Game.Rulesets.Mania.Objects | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Replays | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring | 32 | 57/64 | 25 | 0 | 89.1% |
-| osu.Game.Rulesets.Mania.Skinning.Argon | 1 | 0/2 | 0 | 1 | 0.0% |
 
 ## Type
 
@@ -107,11 +107,11 @@ Loại 389 điều kiện phụ thuộc ngoài (UI: 324, Input: 6, Host/IO: 59, 
 | osu.Game.Rulesets.Mania.Mods.ManiaModHidden _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModHidden.LegacyPlayfieldCover _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModHoldOff | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModInvert _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModInvert | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModNoRelease | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModNoRelease.NoReleaseDrawableHoldNoteTail _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModPerfect | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Rulesets.Mania.Objects.HoldNote _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.Objects.HoldNote | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNote _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
 | osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteBody _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteHead _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -135,7 +135,7 @@ Loại 389 điều kiện phụ thuộc ngoài (UI: 324, Input: 6, Host/IO: 59, 
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonKeyArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonManiaComboCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonNotePiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ManiaArgonSkinTransformer | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ManiaArgonSkinTransformer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBarLine _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece.ForegroundPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |

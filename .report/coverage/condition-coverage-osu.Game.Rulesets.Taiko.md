@@ -32,12 +32,12 @@ Tổng: 576 | 459/1152 | 219 | 336 | 39.8%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 333 điều kiện phụ thuộc ngoài (UI: 314, Input: 0, Host/IO: 19, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 243 | 439/486 | 209 | 13 | 90.3%
+Loại 318 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 37, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 258 | 459/516 | 219 | 18 | 89.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Rulesets.Taiko | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Beatmaps | 11 | 22/22 | 11 | 0 | 100.0% |
+| osu.Game.Rulesets.Taiko.Beatmaps | 15 | 30/30 | 15 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Difficulty | 59 | 113/118 | 54 | 0 | 95.8% |
 | osu.Game.Rulesets.Taiko.Difficulty.Evaluators | 31 | 56/62 | 25 | 0 | 90.3% |
 | osu.Game.Rulesets.Taiko.Difficulty.Preprocessing | 1 | 2/2 | 1 | 0 | 100.0% |
@@ -49,9 +49,10 @@ Loại 333 điều kiện phụ thuộc ngoài (UI: 314, Input: 0, Host/IO: 19, 
 | osu.Game.Rulesets.Taiko.Difficulty.Utils | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Rulesets.Taiko.Edit.Checks | 8 | 14/16 | 6 | 0 | 87.5% |
 | osu.Game.Rulesets.Taiko.Mods | 23 | 45/46 | 22 | 0 | 97.8% |
-| osu.Game.Rulesets.Taiko.Objects | 7 | 13/14 | 6 | 0 | 92.9% |
+| osu.Game.Rulesets.Taiko.Objects | 13 | 25/26 | 12 | 0 | 96.2% |
 | osu.Game.Rulesets.Taiko.Replays | 24 | 22/48 | 11 | 13 | 45.8% |
 | osu.Game.Rulesets.Taiko.Scoring | 12 | 22/24 | 10 | 0 | 91.7% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon | 5 | 0/10 | 0 | 5 | 0.0% |
 
 ## Type
 
@@ -121,7 +122,7 @@ Loại 333 điều kiện phụ thuộc ngoài (UI: 314, Input: 0, Host/IO: 19, 
 | osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonTickPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Argon.TaikoArgonSkinTransformer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.CirclePiece _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultBarLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultHitExplosion _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |

@@ -27,12 +27,11 @@ Tổng: 381 | 47/762 | 22 | 356 | 6.2%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 350 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 15, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 31 | 47/62 | 22 | 6 | 75.8%
+Loại 356 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 6, Database/Online: 0, DI: 15, TestInfra: 0). Còn lại: 25 | 47/50 | 22 | 0 | 94.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Tournament | 6 | 9/12 | 3 | 0 | 75.0% |
-| osu.Game.Tournament.IPC | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Tournament.Models | 19 | 38/38 | 19 | 0 | 100.0% |
 
 ## Type
@@ -57,7 +56,7 @@ Loại 350 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 15, 
 | osu.Game.Tournament.Components.TournamentMatchChatDisplay.MatchMessage _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Tournament.Components.TournamentModIcon _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Tournament.Components.TourneyVideo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.IPC.FileBasedIPC | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Tournament.IPC.FileBasedIPC _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Tournament.Models.StableInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Tournament.Models.TournamentBeatmap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Tournament.Models.TournamentMatch | 11 | 22/22 | 11 | 0 | 100.0% |

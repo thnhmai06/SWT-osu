@@ -190,7 +190,7 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
     [
         ("Input", ["osu.Framework.Input", "osu.Game.Input"]),
         ("Host/IO", ["osu.Framework.Platform", "osu.Framework.IO", "osu.Framework.Audio", "osu.Framework.Graphics.Textures", "osu.Framework.Graphics.Rendering",
-                     "osu.Framework.Graphics.Shaders", "osu.Framework.Threading", "osu.Game.Skinning", "osu.Game.Audio", "osu.Game.IO"]),
+                     "osu.Framework.Graphics.Shaders", "osu.Framework.Threading", "osu.Game.Skinning", "osu.Game.IO"]),
         ("Database/Online", ["Realms", "osu.Game.Database", "osu.Game.Online", "System.Net"]),
     ];
 
@@ -241,9 +241,52 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
             var inherited = drawableType?.AllInterfaces ?? [];
             input |= t.AllInterfaces.Any(i => inNamespace(i.ContainingNamespace, ["osu.Framework.Input"]) && !inherited.Contains(i, SymbolEqualityComparer.Default));
             reason = drawable && !component ? "UI" : host ? "Host/IO" : input ? "Input" : "";
+
+            // Loại thêm: type không dựng/kiểm thử được bằng CFT thuần nếu thiếu thứ ngoài.
+            if (reason.Length == 0 && isRealmBacked(t)) reason = "Database/Online";
+            if (reason.Length == 0 && declaresDi(t)) reason = "DI";
+            if (reason.Length == 0) reason = constructorReason(t);
         }
 
         return typeSelfCache[t] = reason;
+    }
+
+    private static bool isRealmBacked(ITypeSymbol t)
+    {
+        for (var b = t; b != null; b = b.BaseType)
+            if (inNamespace(b.ContainingNamespace, ["Realms"])) return true;
+
+        return t.AllInterfaces.Any(i => inNamespace(i.ContainingNamespace, ["Realms"]));
+    }
+
+    /// <summary>Type có member [Resolved]/[BackgroundDependencyLoader]: cần DI container của framework mới dựng/chạy được.</summary>
+    private static bool declaresDi(ITypeSymbol t)
+        => t.GetMembers().Any(m => m.GetAttributes().Any(a => a.AttributeClass?.Name is "ResolvedAttribute" or "BackgroundDependencyLoaderAttribute"));
+
+    /// <summary>Mọi constructor tường minh đều đòi tham số là thứ ngoài (host/IO/online/DI…) thì không dựng được trong unit test thuần.</summary>
+    private string constructorReason(ITypeSymbol t)
+    {
+        if (t is not INamedTypeSymbol { IsStatic: false } named) return "";
+
+        var ctors = named.InstanceConstructors.Where(c => !c.IsImplicitlyDeclared).ToList();
+        if (ctors.Count == 0) return "";
+
+        string first = "";
+        foreach (var c in ctors)
+        {
+            string reason = c.Parameters.Select(p => paramReason(p.Type)).FirstOrDefault(x => x.Length > 0) ?? "";
+            if (reason.Length == 0) return "";
+            if (first.Length == 0) first = reason;
+        }
+
+        return first;
+    }
+
+    private string paramReason(ITypeSymbol p)
+    {
+        string r = typeReason(p);
+        if (r.Length > 0) return r;
+        return p is INamedTypeSymbol && declaresDi(p) ? "DI" : "";
     }
 
     /// <summary>Member (hoặc type tham chiếu trong member) phụ thuộc: DI, UI, Input, Host/IO, Database/Online.</summary>

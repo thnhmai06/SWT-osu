@@ -27,7 +27,7 @@ Tổng: 472 | 353/944 | 167 | 286 | 37.4%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 321 điều kiện phụ thuộc ngoài (UI: 307, Input: 0, Host/IO: 14, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 151 | 286/302 | 136 | 1 | 94.7%
+Loại 314 điều kiện phụ thuộc ngoài (UI: 284, Input: 0, Host/IO: 30, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 158 | 300/316 | 143 | 1 | 94.9%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -39,7 +39,7 @@ Loại 321 điều kiện phụ thuộc ngoài (UI: 307, Input: 0, Host/IO: 14, 
 | osu.Game.Rulesets.Catch.Edit | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Edit.Checks | 15 | 30/30 | 15 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Mods | 11 | 19/22 | 9 | 1 | 86.4% |
-| osu.Game.Rulesets.Catch.Objects | 27 | 51/54 | 24 | 0 | 94.4% |
+| osu.Game.Rulesets.Catch.Objects | 34 | 65/68 | 31 | 0 | 95.6% |
 | osu.Game.Rulesets.Catch.Replays | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Scoring | 18 | 33/36 | 15 | 0 | 91.7% |
 
@@ -87,9 +87,9 @@ Loại 321 điều kiện phụ thuộc ngoài (UI: 307, Input: 0, Host/IO: 14, 
 | osu.Game.Rulesets.Catch.Mods.CatchModRelax _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Catch.Mods.CatchModSynesthesia | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Catch.Objects.Banana.BananaHitSampleInfo | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Rulesets.Catch.Objects.BananaShower _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Objects.BananaShower | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Objects.CatchHitObject | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Objects.JuiceStream _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Objects.JuiceStream | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Objects.JuiceStreamPath | 20 | 38/40 | 18 | 0 | 95.0% |
 | osu.Game.Rulesets.Catch.Objects.JuiceStreamPathVertex | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Objects.Drawables.DrawableBanana _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |

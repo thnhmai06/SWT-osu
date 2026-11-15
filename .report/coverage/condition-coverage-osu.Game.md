@@ -224,14 +224,15 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO: 668, Database/Online: 1066, DI: 99, TestInfra: 212). Còn lại: 1585 | 2557/3170 | 1190 | 218 | 80.7%
+Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO: 853, Database/Online: 609, DI: 707, TestInfra: 212). Còn lại: 1468 | 2524/2936 | 1185 | 129 | 86.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Beatmaps | 125 | 98/250 | 41 | 68 | 39.2% |
-| osu.Game.Beatmaps.ControlPoints | 62 | 91/124 | 38 | 9 | 73.4% |
+| osu.Game.Audio | 12 | 22/24 | 10 | 0 | 91.7% |
+| osu.Game.Beatmaps | 70 | 78/140 | 34 | 26 | 55.7% |
+| osu.Game.Beatmaps.ControlPoints | 63 | 92/126 | 38 | 9 | 73.0% |
 | osu.Game.Beatmaps.Drawables | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Formats | 143 | 270/286 | 127 | 0 | 94.4% |
+| osu.Game.Beatmaps.Formats | 117 | 223/234 | 106 | 0 | 95.3% |
 | osu.Game.Beatmaps.Legacy | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Beatmaps.Timing | 10 | 13/20 | 3 | 0 | 65.0% |
 | osu.Game.Configuration | 7 | 14/14 | 7 | 0 | 100.0% |
@@ -242,44 +243,38 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Graphics.OpenGL.Vertices | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.IO.Legacy | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.IPC | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.IPC | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Localisation | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Models | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Online.Chat | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Overlays.Mods | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Replays.Legacy | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Rulesets | 29 | 34/58 | 11 | 6 | 58.6% |
+| osu.Game.Rulesets | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Difficulty | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Difficulty.Skills | 19 | 37/38 | 18 | 0 | 97.4% |
 | osu.Game.Rulesets.Difficulty.Utils | 10 | 20/20 | 10 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit | 9 | 8/18 | 4 | 5 | 44.4% |
-| osu.Game.Rulesets.Edit.Checks | 120 | 225/240 | 108 | 3 | 93.8% |
+| osu.Game.Rulesets.Edit.Checks | 131 | 246/262 | 118 | 3 | 93.9% |
 | osu.Game.Rulesets.Edit.Checks.Components | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Judgements | 2 | 1/4 | 0 | 1 | 25.0% |
 | osu.Game.Rulesets.Mods | 86 | 101/172 | 48 | 33 | 58.7% |
-| osu.Game.Rulesets.Objects | 127 | 231/254 | 106 | 2 | 90.9% |
-| osu.Game.Rulesets.Objects.Legacy | 46 | 80/92 | 38 | 4 | 87.0% |
+| osu.Game.Rulesets.Objects | 132 | 241/264 | 111 | 2 | 91.3% |
+| osu.Game.Rulesets.Objects.Legacy | 92 | 164/184 | 76 | 4 | 89.1% |
 | osu.Game.Rulesets.Objects.Pooling | 8 | 15/16 | 7 | 0 | 93.8% |
-| osu.Game.Rulesets.Objects.Types | 8 | 5/16 | 2 | 5 | 31.3% |
+| osu.Game.Rulesets.Objects.Types | 11 | 10/22 | 4 | 5 | 45.5% |
 | osu.Game.Rulesets.Replays | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Scoring | 129 | 245/258 | 119 | 3 | 95.0% |
 | osu.Game.Rulesets.UI.Scrolling.Algorithms | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Scoring | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Scoring.Legacy | 27 | 47/54 | 20 | 0 | 87.0% |
 | osu.Game.Screens | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit | 80 | 126/160 | 56 | 10 | 78.8% |
+| osu.Game.Screens.Edit | 28 | 51/56 | 25 | 2 | 91.1% |
 | osu.Game.Screens.Edit.Components.Menus | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Screens.Edit.Timing | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Screens.OnlinePlay | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 9 | 8/18 | 4 | 5 | 44.4% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Screens.Play | 5 | 8/10 | 4 | 1 | 80.0% |
 | osu.Game.Screens.Play.HUD | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Screens.Select | 210 | 394/420 | 185 | 1 | 93.8% |
 | osu.Game.Storyboards | 19 | 37/38 | 18 | 0 | 97.4% |
 | osu.Game.Storyboards.Commands | 11 | 10/22 | 5 | 6 | 45.5% |
@@ -293,42 +288,42 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.OsuGame _(loại)_ | 131 | 0/262 | 0 | 131 | 0.0% |
 | osu.Game.OsuGameBase _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.PerformFromMenuRunner _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Audio.HitSampleInfo _(loại)_ | 8 | 15/16 | 7 | 0 | 93.8% |
+| osu.Game.Audio.HitSampleInfo | 8 | 15/16 | 7 | 0 | 93.8% |
 | osu.Game.Audio.PreviewTrack _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Audio.PreviewTrackManager _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Audio.PreviewTrackManager.TrackManagerPreviewTrack _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Audio.SampleInfo _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
+| osu.Game.Audio.SampleInfo | 4 | 7/8 | 3 | 0 | 87.5% |
 | osu.Game.Audio.SamplePlaybackHelper _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Audio.Effects.AudioFilter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Beatmaps.APIBeatmapMetadataSource _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.Beatmap | 5 | 8/10 | 3 | 0 | 80.0% |
 | osu.Game.Beatmaps.BeatmapConverter | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapDifficultyCache _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Beatmaps.BeatmapDifficultyCache.DifficultyCacheLookup | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.BeatmapDifficultyCache.DifficultyCacheLookup _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapExtensions | 2 | 3/4 | 1 | 0 | 75.0% |
 | osu.Game.Beatmaps.BeatmapImporter _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Beatmaps.BeatmapInfo | 16 | 6/32 | 2 | 12 | 18.8% |
+| osu.Game.Beatmaps.BeatmapInfo _(loại)_ | 16 | 6/32 | 2 | 12 | 18.8% |
 | osu.Game.Beatmaps.BeatmapInfoExtensions | 10 | 20/20 | 10 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapManager _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.Beatmaps.BeatmapMetadataInfoExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
 | osu.Game.Beatmaps.BeatmapOnlineChangeIngest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Beatmaps.BeatmapPanelBackgroundTextureLoaderStore _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapSetInfo | 8 | 5/16 | 2 | 5 | 31.3% |
+| osu.Game.Beatmaps.BeatmapSetInfo _(loại)_ | 8 | 5/16 | 2 | 5 | 31.3% |
 | osu.Game.Beatmaps.BeatmapSetInfoExtensions _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapSetOnlineStatusExtensions | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Beatmaps.BeatmapUpdater _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapUpdaterMetadataLookup | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.DifficultyRecommender | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Beatmaps.DifficultyRecommender _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Beatmaps.FlatWorkingBeatmap | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.FramedBeatmapClock | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Beatmaps.FramedBeatmapClock _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Beatmaps.IBeatmapDifficultyInfo | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Beatmaps.IBeatmapMetadataInfo | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.LocalCachedBeatmapMetadataSource | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Beatmaps.LocalCachedBeatmapMetadataSource _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Beatmaps.MetadataUtils | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Beatmaps.StarDifficulty | 7 | 6/14 | 0 | 1 | 42.9% |
-| osu.Game.Beatmaps.WorkingBeatmap | 14 | 10/28 | 3 | 7 | 35.7% |
-| osu.Game.Beatmaps.WorkingBeatmapCache | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Beatmaps.WorkingBeatmapCache.BeatmapManagerWorkingBeatmap | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Beatmaps.WorkingBeatmap _(loại)_ | 14 | 10/28 | 3 | 7 | 35.7% |
+| osu.Game.Beatmaps.WorkingBeatmapCache _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Beatmaps.WorkingBeatmapCache.BeatmapManagerWorkingBeatmap _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Beatmaps.ControlPoints.ControlPoint | 5 | 5/10 | 2 | 2 | 50.0% |
 | osu.Game.Beatmaps.ControlPoints.ControlPointGroup | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Beatmaps.ControlPoints.ControlPointInfo | 21 | 40/42 | 19 | 0 | 95.2% |
@@ -372,8 +367,8 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Beatmaps.Drawables.Cards.Statistics.NominationsStatistic _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Beatmaps.Formats.Decoder | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Beatmaps.Formats.LegacyBeatmapDecoder | 34 | 67/68 | 33 | 0 | 98.5% |
-| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder | 72 | 138/144 | 66 | 0 | 95.8% |
-| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder.LegacyControlPointProperties | 6 | 8/12 | 2 | 0 | 66.7% |
+| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder _(loại)_ | 72 | 138/144 | 66 | 0 | 95.8% |
+| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder.LegacyControlPointProperties _(loại)_ | 6 | 8/12 | 2 | 0 | 66.7% |
 | osu.Game.Beatmaps.Formats.LegacyDecoder | 23 | 46/46 | 23 | 0 | 100.0% |
 | osu.Game.Beatmaps.Formats.LegacyDecoder.LegacySampleControlPoint | 11 | 19/22 | 8 | 0 | 86.4% |
 | osu.Game.Beatmaps.Formats.LegacyStoryboardDecoder | 30 | 57/60 | 27 | 0 | 95.0% |
@@ -621,7 +616,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.IO.Serialization.Converters.TypedListConverter _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
 | osu.Game.IPC.ArchiveImportIPCChannel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.IPC.OsuSchemeLinkIPCChannel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.IPC.WebSocketChannel | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.IPC.WebSocketChannel _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.IPC.WebSocketServer | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Input.ConfineMouseTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Input.IdleTracker _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -632,7 +627,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Input.Bindings.RealmKeyBinding _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Input.Handlers.ReplayInputHandler.ReplayState _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Localisation.ResourceManagerLocalisationStore | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Models.RealmUser | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Models.RealmUser _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Online.BeatmapDownloadTracker _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Online.FriendPresenceNotifier _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Online.HubClientConnector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1112,12 +1107,12 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Overlays.Wiki.Markdown.WikiMarkdownImageBlock.BlockMarkdownImage.BlockImageContainer.ImageSprite _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Wiki.Markdown.WikiNoticeContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Replays.Legacy.LegacyReplayFrame | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Rulesets.RealmRulesetStore | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Rulesets.RealmRulesetStore _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Ruleset | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.RulesetConfigCache _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.RulesetInfo | 12 | 12/24 | 3 | 3 | 50.0% |
+| osu.Game.Rulesets.RulesetInfo _(loại)_ | 12 | 12/24 | 3 | 3 | 50.0% |
 | osu.Game.Rulesets.RulesetSelector _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.RulesetStore | 13 | 16/26 | 4 | 1 | 61.5% |
+| osu.Game.Rulesets.RulesetStore _(loại)_ | 13 | 16/26 | 4 | 1 | 61.5% |
 | osu.Game.Rulesets.Configuration.RulesetConfigManager _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Difficulty.DifficultyCalculator | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing.DifficultyHitObject | 6 | 11/12 | 5 | 0 | 91.7% |
@@ -1149,7 +1144,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects.IssueTemplateAlmostConcurrent | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects.IssueTemplateConcurrent | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.Checks.CheckDelayedHitsounds _(loại)_ | 17 | 12/34 | 5 | 10 | 35.3% |
+| osu.Game.Rulesets.Edit.Checks.CheckDelayedHitsounds | 17 | 12/34 | 5 | 10 | 35.3% |
 | osu.Game.Rulesets.Edit.Checks.CheckDrainLength | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckFewHitsounds | 18 | 34/36 | 17 | 1 | 94.4% |
 | osu.Game.Rulesets.Edit.Checks.CheckFilePresence | 2 | 4/4 | 2 | 0 | 100.0% |
@@ -1228,7 +1223,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Rulesets.Objects.Pooling.PoolableDrawableWithLifetime _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Rulesets.Objects.Pooling.PooledDrawableWithLifetimeContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Objects.Types.HasPathWithRepeatsExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Objects.Types.HasRepeatsExtensions _(loại)_ | 3 | 5/6 | 2 | 0 | 83.3% |
+| osu.Game.Rulesets.Objects.Types.HasRepeatsExtensions | 3 | 5/6 | 2 | 0 | 83.3% |
 | osu.Game.Rulesets.Objects.Types.IHasComboInformation | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Objects.Types.PathType | 5 | 3/10 | 1 | 3 | 30.0% |
 | osu.Game.Rulesets.Replays.AutoGenerator | 2 | 4/4 | 2 | 0 | 100.0% |
@@ -1266,8 +1261,8 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Rulesets.UI.Scrolling.Algorithms.SequentialScrollAlgorithm | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Scoring.LegacyDatabasedScore _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Scoring.ScoreImporter _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Scoring.ScoreInfo | 11 | 15/22 | 6 | 2 | 68.2% |
-| osu.Game.Scoring.ScoreManager | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Scoring.ScoreInfo _(loại)_ | 11 | 15/22 | 6 | 2 | 68.2% |
+| osu.Game.Scoring.ScoreManager _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Scoring.Legacy.LegacyReplaySoloScoreInfo _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Scoring.Legacy.LegacyScoreDecoder | 36 | 63/72 | 27 | 0 | 87.5% |
 | osu.Game.Scoring.Legacy.LegacyScoreEncoder | 6 | 11/12 | 5 | 0 | 91.7% |
@@ -1290,17 +1285,17 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Screens.Edit.BookmarkController _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.Edit.BottomBar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Editor _(loại)_ | 123 | 0/246 | 0 | 123 | 0.0% |
-| osu.Game.Screens.Edit.EditorBeatmap | 12 | 12/24 | 4 | 4 | 50.0% |
-| osu.Game.Screens.Edit.EditorBeatmapProcessor | 17 | 32/34 | 15 | 0 | 94.1% |
+| osu.Game.Screens.Edit.EditorBeatmap _(loại)_ | 12 | 12/24 | 4 | 4 | 50.0% |
+| osu.Game.Screens.Edit.EditorBeatmapProcessor _(loại)_ | 17 | 32/34 | 15 | 0 | 94.1% |
 | osu.Game.Screens.Edit.EditorBeatmapSkin _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.EditorBeatmapSkin.SampleSet | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.EditorBeatmapSkin.SampleSet _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.EditorChangeHandler | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Screens.Edit.EditorClock _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Screens.Edit.EditorClock.TransformSeek _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.EditorLoader _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Edit.EditorSkinProvidingContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.ExternalEditScreen _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.LegacyEditorBeatmapPatcher | 24 | 32/48 | 12 | 4 | 66.7% |
+| osu.Game.Screens.Edit.LegacyEditorBeatmapPatcher _(loại)_ | 24 | 32/48 | 12 | 4 | 66.7% |
 | osu.Game.Screens.Edit.TransactionalCommitComponent | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Screens.Edit.WaveformOpacityMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Components.EditorToolButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
@@ -1563,7 +1558,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation.MovingAvatar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector.SelectorButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController.BackgroundQueueNotification _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RankedPlayMatchPanel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
@@ -1583,7 +1578,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.PickScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBackgroundScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBeatmapAvailabilityTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayCardWithPlaylistItem | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayCardWithPlaylistItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayMatchInfo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayStageOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1668,7 +1663,7 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid.Cell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorPlayerClock | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorSyncManager | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorSyncManager _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.AddPlaylistToCollectionButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen.PanelListLoadingSpinner _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1785,14 +1780,14 @@ Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO:
 | osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter.JudgementFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.HitErrorMeter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.LegacyBarHitErrorMeter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCountController | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCountController _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounterDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.GameplayLeaderboardScore _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.MultiSpectatorLeaderboardProvider _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.MultiplayerLeaderboardProvider _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.PlaylistsGameplayLeaderboardProvider | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.SoloGameplayLeaderboardProvider | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards.PlaylistsGameplayLeaderboardProvider _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards.SoloGameplayLeaderboardProvider _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.BeatmapOffsetControl _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.InputSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.PlaybackSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |

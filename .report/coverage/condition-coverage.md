@@ -29,19 +29,21 @@ Logic thuần = điều kiện nằm trong code **không phụ thuộc** vào th
 |---|---|
 | TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |
 | UI | type dẫn xuất từ `Drawable` (không qua `Component`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |
-| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|Audio|IO` |
+| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|IO` |
 | Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |
 | Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |
-| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]` hoặc dùng symbol có `[Resolved]` |
+| DI | **type** có member `[Resolved]`/`[BackgroundDependencyLoader]` (cần DI container mới dựng được) → loại cả type; hoặc member có `[Cached]` hoặc dùng symbol có `[Resolved]`; hoặc mọi constructor đều đòi tham số là type DI |
+| Database/Online (mở rộng) | type dẫn xuất từ `Realms.*` (`RealmObject`) → loại cả type |
+| Host/IO (mở rộng) | type mà **mọi** constructor tường minh đều đòi tham số là thứ ngoài (vd. `Storage`, `IAPIProvider`) → loại cả type. Type static, type không có constructor tường minh, hoặc có ít nhất một constructor nhận tham số thuần/interface nội bộ thì vẫn tính |
 
-Việc loại làm theo **member** (không loại cả type nếu chỉ một số member phụ thuộc ngoài). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột "toàn bộ" để đối chiếu.
+Việc loại làm theo **member**; riêng các trường hợp ghi "loại cả type" thì loại toàn bộ type (vì type đó không dựng/kiểm thử được bằng control-flow test thuần). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột "toàn bộ" để đối chiếu.
 
 | Project | Tổng điều kiện | UI | Input | Host/IO | Database/Online | DI | TestInfra | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| [osu.Game](condition-coverage-osu.Game.md) | 12721 | 8947 | 144 | 668 | 1066 | 99 | 212 | 1585 | 2557/3170 | 1190 | 218 | 80.7% | 14.9% |
-| [osu.Game.Rulesets.Catch](condition-coverage-osu.Game.Rulesets.Catch.md) | 472 | 307 | 0 | 14 | 0 | 0 | 0 | 151 | 286/302 | 136 | 1 | 94.7% | 37.4% |
-| [osu.Game.Rulesets.Mania](condition-coverage-osu.Game.Rulesets.Mania.md) | 714 | 324 | 6 | 59 | 0 | 0 | 0 | 325 | 579/650 | 267 | 13 | 89.1% | 45.8% |
-| [osu.Game.Rulesets.Osu](condition-coverage-osu.Game.Rulesets.Osu.md) | 1722 | 1082 | 43 | 11 | 0 | 11 | 0 | 575 | 801/1150 | 347 | 121 | 69.7% | 25.3% |
-| [osu.Game.Rulesets.Taiko](condition-coverage-osu.Game.Rulesets.Taiko.md) | 576 | 314 | 0 | 19 | 0 | 0 | 0 | 243 | 439/486 | 209 | 13 | 90.3% | 39.8% |
-| [osu.Game.Tournament](condition-coverage-osu.Game.Tournament.md) | 381 | 335 | 0 | 15 | 0 | 0 | 0 | 31 | 47/62 | 22 | 6 | 75.8% | 6.2% |
-| **Tổng** | 16586 | 11309 | 193 | 786 | 1066 | 110 | 212 | 2910 | 4709/5820 | 2171 | 372 | 80.9% | 18.6% |
+| [osu.Game](condition-coverage-osu.Game.md) | 12721 | 8752 | 120 | 853 | 609 | 707 | 212 | 1468 | 2524/2936 | 1185 | 129 | 86.0% | 14.9% |
+| [osu.Game.Rulesets.Catch](condition-coverage-osu.Game.Rulesets.Catch.md) | 472 | 284 | 0 | 30 | 0 | 0 | 0 | 158 | 300/316 | 143 | 1 | 94.9% | 37.4% |
+| [osu.Game.Rulesets.Mania](condition-coverage-osu.Game.Rulesets.Mania.md) | 714 | 308 | 6 | 30 | 0 | 0 | 0 | 370 | 644/740 | 294 | 20 | 87.0% | 45.8% |
+| [osu.Game.Rulesets.Osu](condition-coverage-osu.Game.Rulesets.Osu.md) | 1722 | 1025 | 43 | 37 | 0 | 61 | 0 | 556 | 810/1112 | 350 | 96 | 72.8% | 25.3% |
+| [osu.Game.Rulesets.Taiko](condition-coverage-osu.Game.Rulesets.Taiko.md) | 576 | 281 | 0 | 37 | 0 | 0 | 0 | 258 | 459/516 | 219 | 18 | 89.0% | 39.8% |
+| [osu.Game.Tournament](condition-coverage-osu.Game.Tournament.md) | 381 | 335 | 0 | 6 | 0 | 15 | 0 | 25 | 47/50 | 22 | 0 | 94.0% | 6.2% |
+| **Tổng** | 16586 | 10985 | 169 | 993 | 609 | 783 | 212 | 2835 | 4784/5670 | 2213 | 264 | 84.4% | 18.6% |
