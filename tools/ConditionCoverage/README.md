@@ -33,6 +33,13 @@ mã nguồn ──(Roslyn rewriter)──▶ mã có probe ──build + chạy 
 | Toán hạng kiểu `bool?` / `dynamic` | Không phải `System.Boolean` |
 | Toán tử `&&`/`||` do người dùng định nghĩa | Hai vế không phải `bool` |
 
+### Loại bỏ code UI framework
+
+Mỗi điều kiện được gắn cờ `UiFramework` khi instrument: điều kiện nằm trong (hoặc lồng trong) type dẫn xuất từ `osu.Framework.Graphics.Drawable`
+(Drawable, Container, Screen, Overlay, Blueprint, HUD…), **trừ** type đi qua `Component` (`Component` kế thừa `Drawable` nhưng không hiển thị, ví dụ `EditorBeatmap`). Đây là code cần scene graph, game host, GL/audio nên không viết unit test thuần được.
+Báo cáo có thêm bảng **"sau khi loại bỏ code UI framework"** ở cấp solution (so sánh coverage toàn bộ và coverage phần logic) và ở cấp namespace của từng project;
+bảng type đánh dấu `_(UI)_` cho type bị loại. Giới hạn: code không phải UI nhưng khó unit test (skin transformer, Realm, mạng, cần game host) chưa bị loại. Các bảng còn lại vẫn tính toàn bộ để đối chiếu.
+
 ## 3. Cách dùng
 
 > **Luôn instrument trên một bản sao (git worktree), không instrument thư mục đang commit** — tool ghi đè các file `.cs`.

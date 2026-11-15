@@ -15,3 +15,12 @@
 |---|---|---|---|---|---|
 | [osu.Game](condition-coverage-osu.Game.md) | 12 | 24/24 | 12 | 0 | 100.0% |
 | **Tổng** | 12 | 24/24 | 12 | 0 | 100.0% |
+
+## Solution — sau khi loại bỏ code UI framework
+
+Loại các điều kiện nằm trong type dẫn xuất từ `osu.Framework.Graphics.Drawable` (Drawable/Container/Screen/Overlay/Blueprint/HUD…, **không** tính type qua `Component` vì đó là logic không hiển thị), vì chúng cần scene graph, game host, GL/audio nên không unit test thuần được. Phần còn lại là code logic. Lưu ý: phần này vẫn còn code không phải UI nhưng khó unit test (skin transformer, truy cập Realm/mạng, cần game host); chúng chưa bị loại nên coverage của phần logic có thể thấp hơn thực tế.
+
+| Project | Tổng điều kiện | Điều kiện UI (loại) | Điều kiện logic còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic) | Condition coverage (toàn bộ) |
+|---|---|---|---|---|---|---|---|---|
+| [osu.Game](condition-coverage-osu.Game.md) | 12 | 0 | 12 | 24/24 | 12 | 0 | 100.0% | 100.0% |
+| **Tổng** | 12 | 0 | 12 | 24/24 | 12 | 0 | 100.0% | 100.0% |

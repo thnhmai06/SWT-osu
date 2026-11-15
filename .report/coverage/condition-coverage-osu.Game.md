@@ -8,6 +8,14 @@ Tổng: 12 | 24/24 | 12 | 0 | 100.0%
 |---|---|---|---|---|---|
 | osu.Game.Screens.Edit | 12 | 24/24 | 12 | 0 | 100.0% |
 
+## Namespace — sau khi loại bỏ code UI framework
+
+Loại 0 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 12 | 24/24 | 12 | 0 | 100.0%
+
+| Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
+|---|---|---|---|---|---|
+| osu.Game.Screens.Edit | 12 | 24/24 | 12 | 0 | 100.0% |
+
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
