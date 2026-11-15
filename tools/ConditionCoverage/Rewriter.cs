@@ -165,7 +165,7 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
         if (!isBool(e) || model.GetConstantValue(e).HasValue) return inner;
 
         int id = registry.Conditions.Count;
-        registry.Conditions.Add(new ConditionInfo(id, decisionId, registry.Assembly, file, lineOf(e), compact(e), namespaceOf(e), typeOf(e), memberOf(e), inUiFramework(e)));
+        registry.Conditions.Add(new ConditionInfo(id, decisionId, registry.Assembly, file, lineOf(e), compact(e), namespaceOf(e), typeOf(e), memberOf(e), exclusionOf(e)));
 
         var bare = inner.WithoutTrivia();
         string p = $"global::{registry.ProbeName}";
@@ -184,32 +184,149 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
         return wrapped.WithTriviaFrom(e);
     }
 
-    private readonly Dictionary<ITypeSymbol, bool> uiCache = new(SymbolEqualityComparer.Default);
+    // ---- Phân loại phụ thuộc ngoài (không phải logic thuần) ----
 
-    /// <summary>Điều kiện nằm trong (hoặc lồng trong) type dẫn xuất từ <c>osu.Framework.Graphics.Drawable</c> nhưng không qua <c>Component</c>: code UI cần scene graph/game host nên không unit test thuần được.</summary>
-    private bool inUiFramework(SyntaxNode n)
+    private static readonly (string Reason, string[] Namespaces)[] externalNamespaces =
+    [
+        ("Input", ["osu.Framework.Input", "osu.Game.Input"]),
+        ("Host/IO", ["osu.Framework.Platform", "osu.Framework.IO", "osu.Framework.Audio", "osu.Framework.Graphics.Textures", "osu.Framework.Graphics.Rendering",
+                     "osu.Framework.Graphics.Shaders", "osu.Framework.Threading", "osu.Game.Skinning", "osu.Game.Audio", "osu.Game.IO"]),
+        ("Database/Online", ["Realms", "osu.Game.Database", "osu.Game.Online", "System.Net"]),
+    ];
+
+    private static bool inNamespace(INamespaceSymbol? ns, string[] prefixes)
+    {
+        string s = ns?.ToDisplayString() ?? "";
+        return prefixes.Any(p => s == p || s.StartsWith(p + "."));
+    }
+
+    private readonly Dictionary<ITypeSymbol, string> typeDependencyCache = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<ITypeSymbol, string> typeSelfCache = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<SyntaxNode, string> memberCache = new();
+
+    /// <summary>Lý do loại (rỗng nếu là logic thuần): type chứa là UI/Input/Host/test infra, hoặc member phụ thuộc ngoài.</summary>
+    private string exclusionOf(SyntaxNode n)
     {
         for (var t = model.GetEnclosingSymbol(n.SpanStart)?.ContainingType; t != null; t = t.ContainingType)
         {
-            if (!uiCache.TryGetValue(t, out bool ui))
-            {
-                // Component kế thừa Drawable nhưng không hiển thị (logic thuần, vd. EditorBeatmap) nên không tính là UI.
-                bool drawable = false, component = false;
-                for (var b = t; b != null; b = b.BaseType)
-                {
-                    string name = b.OriginalDefinition.ToDisplayString();
-                    drawable |= name == "osu.Framework.Graphics.Drawable";
-                    component |= name == "osu.Framework.Graphics.Component";
-                }
-
-                ui = drawable && !component;
-                uiCache[t] = ui;
-            }
-
-            if (ui) return true;
+            string r = selfReason(t);
+            if (r.Length > 0) return r;
         }
 
-        return false;
+        return memberReason(n);
+    }
+
+    /// <summary>Type tự nó là UI (Drawable không qua Component), kế thừa/triển khai input/host của framework, hoặc là scaffold test.</summary>
+    private string selfReason(ITypeSymbol t)
+    {
+        if (typeSelfCache.TryGetValue(t, out string? cached)) return cached;
+
+        string reason = "";
+        if (inNamespace(t.ContainingNamespace, ["osu.Game.Tests"])) reason = "TestInfra";
+        else
+        {
+            bool drawable = false, component = false, input = false, host = false;
+            INamedTypeSymbol? drawableType = null;
+            for (var b = t; b != null; b = b.BaseType)
+            {
+                string name = b.OriginalDefinition.ToDisplayString();
+                if (name == "osu.Framework.Graphics.Drawable") drawableType = b as INamedTypeSymbol;
+                drawable |= name == "osu.Framework.Graphics.Drawable";
+                component |= name == "osu.Framework.Graphics.Component";
+                host |= name == "osu.Framework.Game" || inNamespace(b.ContainingNamespace, ["osu.Framework.Platform"]);
+                input |= inNamespace(b.ContainingNamespace, ["osu.Framework.Input"]);
+            }
+
+            // interface input mà chính Drawable đã triển khai thì mọi Component đều có, không phải tín hiệu riêng của type này.
+            var inherited = drawableType?.AllInterfaces ?? [];
+            input |= t.AllInterfaces.Any(i => inNamespace(i.ContainingNamespace, ["osu.Framework.Input"]) && !inherited.Contains(i, SymbolEqualityComparer.Default));
+            reason = drawable && !component ? "UI" : host ? "Host/IO" : input ? "Input" : "";
+        }
+
+        return typeSelfCache[t] = reason;
+    }
+
+    /// <summary>Member (hoặc type tham chiếu trong member) phụ thuộc: DI, UI, Input, Host/IO, Database/Online.</summary>
+    private string memberReason(SyntaxNode n)
+    {
+        SyntaxNode? member = null;
+        foreach (var a in n.Ancestors())
+        {
+            if (a is BaseTypeDeclarationSyntax) break;
+            if (a is MemberDeclarationSyntax) member = a;
+        }
+
+        if (member == null) return "";
+        if (memberCache.TryGetValue(member, out string? cached)) return cached;
+
+        string reason = hasDiAttribute(member) ? "DI" : "";
+        if (reason.Length == 0)
+        {
+            foreach (var id in member.DescendantNodes().OfType<SimpleNameSyntax>())
+            {
+                reason = symbolReason(model.GetSymbolInfo(id).Symbol);
+                if (reason.Length > 0) break;
+            }
+        }
+
+        return memberCache[member] = reason;
+    }
+
+    private bool hasDiAttribute(SyntaxNode member)
+        => member is MemberDeclarationSyntax m && m.AttributeLists.SelectMany(l => l.Attributes)
+                                                    .Any(a => a.Name.ToString().Split('.')[^1] is "BackgroundDependencyLoader" or "Resolved" or "Cached" or "BackgroundDependencyLoaderAttribute" or "ResolvedAttribute" or "CachedAttribute");
+
+    private string symbolReason(ISymbol? s)
+    {
+        if (s == null) return "";
+        if (s.GetAttributes().Any(a => a.AttributeClass?.Name is "ResolvedAttribute" or "BackgroundDependencyLoaderAttribute")) return "DI";
+
+        ITypeSymbol? type = s switch
+        {
+            ITypeSymbol t => t,
+            ILocalSymbol l => l.Type,
+            IParameterSymbol p => p.Type,
+            IFieldSymbol f => f.Type,
+            IPropertySymbol pr => pr.Type,
+            IMethodSymbol { MethodKind: MethodKind.Constructor } c => c.ContainingType,
+            IMethodSymbol me => me.ContainingType,
+            _ => null,
+        };
+
+        if (type == null) return "";
+        string r = typeReason(type);
+        if (r.Length > 0) return r;
+
+        // member của type ngoài (vd. host.Window) cũng được tính qua ContainingType.
+        return s is not ITypeSymbol && s.ContainingType != null ? typeReason(s.ContainingType) : "";
+    }
+
+    private string typeReason(ITypeSymbol type)
+    {
+        while (type is IArrayTypeSymbol arr) type = arr.ElementType;
+
+        if (typeDependencyCache.TryGetValue(type, out string? cached)) return cached;
+
+        string reason = "";
+        foreach (var (r, namespaces) in externalNamespaces)
+        {
+            if (inNamespace(type.ContainingNamespace, namespaces)) { reason = r; break; }
+        }
+
+        if (reason.Length == 0 && type is INamedTypeSymbol)
+        {
+            bool drawable = false, component = false;
+            for (var b = type; b != null; b = b.BaseType)
+            {
+                string name = b.OriginalDefinition.ToDisplayString();
+                drawable |= name == "osu.Framework.Graphics.Drawable";
+                component |= name == "osu.Framework.Graphics.Component";
+            }
+
+            if (drawable && !component) reason = "UI";
+        }
+
+        return typeDependencyCache[type] = reason;
     }
 
     private static bool declaresVariables(ExpressionSyntax e)
