@@ -1,37 +1,36 @@
 # Condition coverage — osu.Game
 
-Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
+Tổng: 10688 | 2921/21376 | 1371 | 9138 | 13.7%
 
 ## Namespace
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game | 175 | 0/350 | 0 | 175 | 0.0% |
-| osu.Game.Audio | 24 | 22/48 | 10 | 12 | 45.8% |
-| osu.Game.Audio.Effects | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps | 264 | 121/528 | 52 | 195 | 22.9% |
+| osu.Game | 160 | 0/320 | 0 | 160 | 0.0% |
+| osu.Game.Audio | 13 | 22/26 | 10 | 1 | 84.6% |
+| osu.Game.Beatmaps | 70 | 78/140 | 34 | 26 | 55.7% |
 | osu.Game.Beatmaps.ControlPoints | 63 | 92/126 | 38 | 9 | 73.0% |
 | osu.Game.Beatmaps.Drawables | 39 | 0/78 | 0 | 39 | 0.0% |
 | osu.Game.Beatmaps.Drawables.Cards | 63 | 0/126 | 0 | 63 | 0.0% |
 | osu.Game.Beatmaps.Drawables.Cards.Buttons | 30 | 0/60 | 0 | 30 | 0.0% |
 | osu.Game.Beatmaps.Drawables.Cards.Statistics | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps.Formats | 208 | 394/416 | 186 | 0 | 94.7% |
+| osu.Game.Beatmaps.Formats | 130 | 248/260 | 118 | 0 | 95.4% |
 | osu.Game.Beatmaps.Legacy | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Beatmaps.Timing | 12 | 13/24 | 3 | 2 | 54.2% |
-| osu.Game.Collections | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Configuration | 26 | 14/52 | 7 | 19 | 26.9% |
-| osu.Game.Database | 410 | 42/820 | 16 | 384 | 5.1% |
-| osu.Game.Extensions | 48 | 87/96 | 42 | 3 | 90.6% |
-| osu.Game.Graphics | 65 | 57/130 | 27 | 35 | 43.8% |
-| osu.Game.Graphics.Backgrounds | 74 | 0/148 | 0 | 74 | 0.0% |
+| osu.Game.Collections | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Configuration | 12 | 14/24 | 7 | 5 | 58.3% |
+| osu.Game.Database | 11 | 12/22 | 6 | 5 | 54.5% |
+| osu.Game.Extensions | 38 | 68/76 | 33 | 3 | 89.5% |
+| osu.Game.Graphics | 56 | 53/112 | 25 | 28 | 47.3% |
+| osu.Game.Graphics.Backgrounds | 56 | 0/112 | 0 | 56 | 0.0% |
 | osu.Game.Graphics.Carousel | 113 | 2/226 | 1 | 112 | 0.9% |
 | osu.Game.Graphics.Containers | 185 | 0/370 | 0 | 185 | 0.0% |
 | osu.Game.Graphics.Containers.Markdown | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Graphics.Containers.Markdown.Footnotes | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.Cursor | 40 | 0/80 | 0 | 40 | 0.0% |
 | osu.Game.Graphics.OpenGL.Vertices | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Sprites | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.UserInterface | 366 | 0/732 | 0 | 366 | 0.0% |
+| osu.Game.Graphics.Sprites | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface | 348 | 0/696 | 0 | 348 | 0.0% |
 | osu.Game.Graphics.UserInterface.PageSelector | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Graphics.UserInterfaceV2 | 140 | 0/280 | 0 | 140 | 0.0% |
 | osu.Game.Graphics.UserInterfaceV2.FileSelection | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -39,27 +38,18 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.IO.Archives | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.IO.Legacy | 24 | 48/48 | 24 | 0 | 100.0% |
 | osu.Game.IO.Serialization.Converters | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.IPC | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Input | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.IPC | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Input | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Input.Bindings | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Input.Handlers | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Localisation | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Models | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online | 81 | 4/162 | 2 | 79 | 2.5% |
-| osu.Game.Online.API | 110 | 42/220 | 19 | 87 | 19.1% |
-| osu.Game.Online.API.Requests | 47 | 74/94 | 37 | 10 | 78.7% |
-| osu.Game.Online.API.Requests.Responses | 39 | 72/78 | 35 | 2 | 92.3% |
-| osu.Game.Online.Chat | 157 | 78/314 | 38 | 117 | 24.8% |
-| osu.Game.Online.Leaderboards | 64 | 0/128 | 0 | 64 | 0.0% |
-| osu.Game.Online.Matchmaking | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Online.Metadata | 30 | 0/60 | 0 | 30 | 0.0% |
-| osu.Game.Online.Multiplayer | 103 | 44/206 | 22 | 81 | 21.4% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay | 14 | 27/28 | 13 | 0 | 96.4% |
-| osu.Game.Online.Multiplayer.MatchTypes.TeamVersus | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Rooms | 41 | 77/82 | 38 | 2 | 93.9% |
-| osu.Game.Online.Spectator | 59 | 16/118 | 8 | 51 | 13.6% |
+| osu.Game.Online | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Online.API | 49 | 0/98 | 0 | 49 | 0.0% |
+| osu.Game.Online.API.Requests | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Online.Chat | 83 | 1/166 | 0 | 82 | 0.6% |
+| osu.Game.Online.Leaderboards | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Online.Multiplayer | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Rooms | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Overlays | 408 | 0/816 | 0 | 408 | 0.0% |
 | osu.Game.Overlays.AccountCreation | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Overlays.BeatmapListing | 64 | 0/128 | 0 | 64 | 0.0% |
@@ -72,7 +62,7 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Overlays.Chat.Listing | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Overlays.Comments | 87 | 0/174 | 0 | 87 | 0.0% |
 | osu.Game.Overlays.Comments.Buttons | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Overlays.Dashboard.CurrentlyOnline | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Overlays.Dashboard.Friends | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Overlays.Dashboard.Home | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Dashboard.UserSearch | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -107,14 +97,13 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Overlays.Settings.Sections.Input | 84 | 0/168 | 0 | 84 | 0.0% |
 | osu.Game.Overlays.Settings.Sections.Maintenance | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Overlays.Settings.Sections.UserInterface | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.SkinEditor | 135 | 0/270 | 0 | 135 | 0.0% |
+| osu.Game.Overlays.SkinEditor | 103 | 0/206 | 0 | 103 | 0.0% |
 | osu.Game.Overlays.Toolbar | 62 | 0/124 | 0 | 62 | 0.0% |
 | osu.Game.Overlays.Volume | 17 | 0/34 | 0 | 17 | 0.0% |
 | osu.Game.Overlays.Wiki | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Overlays.Wiki.Markdown | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Replays.Legacy | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Rulesets | 46 | 36/92 | 11 | 21 | 39.1% |
-| osu.Game.Rulesets.Configuration | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets | 6 | 8/12 | 4 | 2 | 66.7% |
 | osu.Game.Rulesets.Difficulty | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Difficulty.Skills | 19 | 37/38 | 18 | 0 | 97.4% |
@@ -123,39 +112,38 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Rulesets.Edit.Checks | 176 | 284/352 | 134 | 26 | 80.7% |
 | osu.Game.Rulesets.Edit.Checks.Components | 5 | 7/10 | 3 | 1 | 70.0% |
 | osu.Game.Rulesets.Judgements | 14 | 1/28 | 0 | 13 | 3.6% |
-| osu.Game.Rulesets.Mods | 135 | 111/270 | 53 | 77 | 41.1% |
+| osu.Game.Rulesets.Mods | 133 | 109/266 | 52 | 76 | 41.0% |
 | osu.Game.Rulesets.Objects | 132 | 241/264 | 111 | 2 | 91.3% |
 | osu.Game.Rulesets.Objects.Drawables | 38 | 0/76 | 0 | 38 | 0.0% |
 | osu.Game.Rulesets.Objects.Legacy | 92 | 164/184 | 76 | 4 | 89.1% |
 | osu.Game.Rulesets.Objects.Pooling | 28 | 15/56 | 7 | 20 | 26.8% |
 | osu.Game.Rulesets.Objects.Types | 11 | 10/22 | 4 | 5 | 45.5% |
 | osu.Game.Rulesets.Replays | 26 | 47/52 | 21 | 0 | 90.4% |
-| osu.Game.Rulesets.Scoring | 134 | 249/268 | 121 | 6 | 92.9% |
-| osu.Game.Rulesets.UI | 148 | 0/296 | 0 | 148 | 0.0% |
+| osu.Game.Rulesets.Scoring | 132 | 245/264 | 119 | 6 | 92.8% |
+| osu.Game.Rulesets.UI | 146 | 0/292 | 0 | 146 | 0.0% |
 | osu.Game.Rulesets.UI.Scrolling | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Rulesets.UI.Scrolling.Algorithms | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Scoring | 40 | 15/80 | 6 | 31 | 18.8% |
-| osu.Game.Scoring.Legacy | 45 | 80/90 | 35 | 0 | 88.9% |
+| osu.Game.Scoring.Legacy | 41 | 72/82 | 31 | 0 | 87.8% |
 | osu.Game.Screens | 38 | 0/76 | 0 | 38 | 0.0% |
 | osu.Game.Screens.Backgrounds | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Screens.Edit | 263 | 127/526 | 56 | 192 | 24.1% |
+| osu.Game.Screens.Edit | 197 | 51/394 | 25 | 171 | 12.9% |
 | osu.Game.Screens.Edit.Components | 39 | 0/78 | 0 | 39 | 0.0% |
 | osu.Game.Screens.Edit.Components.Menus | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Screens.Edit.Components.RadioButtons | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.Edit.Components.TernaryButtons | 36 | 0/72 | 0 | 36 | 0.0% |
 | osu.Game.Screens.Edit.Components.Timelines.Summary.Parts | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.Compose | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components | 310 | 4/620 | 2 | 308 | 0.6% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline | 224 | 0/448 | 0 | 224 | 0.0% |
+| osu.Game.Screens.Edit.Compose | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components | 277 | 4/554 | 2 | 275 | 0.7% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline | 221 | 0/442 | 0 | 221 | 0.0% |
 | osu.Game.Screens.Edit.GameplayTest | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Screens.Edit.Setup | 76 | 0/152 | 0 | 76 | 0.0% |
-| osu.Game.Screens.Edit.Submission | 34 | 0/68 | 0 | 34 | 0.0% |
-| osu.Game.Screens.Edit.Timing | 164 | 10/328 | 5 | 159 | 3.0% |
+| osu.Game.Screens.Edit.Submission | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Screens.Edit.Timing | 162 | 10/324 | 5 | 157 | 3.1% |
 | osu.Game.Screens.Edit.Timing.RowAttributes | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.Verify | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Footer | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Screens.Footer | 35 | 0/70 | 0 | 35 | 0.0% |
 | osu.Game.Screens.Import | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Menu | 225 | 0/450 | 0 | 225 | 0.0% |
+| osu.Game.Screens.Menu | 222 | 0/444 | 0 | 222 | 0.0% |
 | osu.Game.Screens.OnlinePlay | 99 | 0/198 | 0 | 99 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Components | 31 | 0/62 | 0 | 31 | 0.0% |
 | osu.Game.Screens.OnlinePlay.DailyChallenge | 74 | 0/148 | 0 | 74 | 0.0% |
@@ -170,45 +158,44 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Screens.OnlinePlay.Matchmaking.Match.Gameplay | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Match.Results | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Match.RoundResults | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue | 73 | 0/146 | 0 | 73 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay | 120 | 0/240 | 0 | 120 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card | 39 | 0/78 | 0 | 39 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue | 59 | 0/118 | 0 | 59 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay | 112 | 0/224 | 0 | 112 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card | 33 | 0/66 | 0 | 33 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components | 69 | 0/138 | 0 | 69 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand | 86 | 0/172 | 0 | 86 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand | 75 | 0/150 | 0 | 75 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer | 192 | 0/384 | 0 | 192 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Match | 111 | 0/222 | 0 | 111 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist | 24 | 0/48 | 0 | 24 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Participants | 71 | 0/142 | 0 | 71 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 57 | 8/114 | 4 | 53 | 7.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 42 | 8/84 | 4 | 38 | 9.5% |
 | osu.Game.Screens.OnlinePlay.Playlists | 121 | 0/242 | 0 | 121 | 0.0% |
-| osu.Game.Screens.Play | 435 | 8/870 | 4 | 431 | 0.9% |
+| osu.Game.Screens.Play | 426 | 8/852 | 4 | 422 | 0.9% |
 | osu.Game.Screens.Play.Break | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD | 247 | 0/494 | 0 | 247 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Play.HUD.ClicksPerSecond | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD | 244 | 0/488 | 0 | 244 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards | 45 | 0/90 | 0 | 45 | 0.0% |
+| osu.Game.Screens.Play.HUD.JudgementCounter | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Screens.Ranking | 156 | 0/312 | 0 | 156 | 0.0% |
+| osu.Game.Screens.Ranking | 155 | 0/310 | 0 | 155 | 0.0% |
 | osu.Game.Screens.Ranking.Contracted | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Ranking.Expanded | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Ranking.Expanded.Accuracy | 25 | 0/50 | 0 | 25 | 0.0% |
 | osu.Game.Screens.Ranking.Expanded.Statistics | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Screens.Ranking.Statistics | 70 | 0/140 | 0 | 70 | 0.0% |
 | osu.Game.Screens.Ranking.Statistics.User | 36 | 0/72 | 0 | 36 | 0.0% |
-| osu.Game.Screens.Select | 919 | 423/1838 | 199 | 695 | 23.0% |
+| osu.Game.Screens.Select | 888 | 417/1776 | 196 | 667 | 23.5% |
 | osu.Game.Screens.Spectate | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Screens.Utility | 44 | 0/88 | 0 | 44 | 0.0% |
 | osu.Game.Screens.Utility.SampleComponents | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Seasonal | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Skinning | 392 | 75/784 | 35 | 352 | 9.6% |
+| osu.Game.Skinning | 205 | 58/410 | 27 | 174 | 14.1% |
 | osu.Game.Skinning.Components | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Skinning.Triangles | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Storyboards | 20 | 37/40 | 18 | 1 | 92.5% |
 | osu.Game.Storyboards.Commands | 12 | 10/24 | 5 | 7 | 41.7% |
-| osu.Game.Storyboards.Drawables | 87 | 0/174 | 0 | 87 | 0.0% |
+| osu.Game.Storyboards.Drawables | 53 | 0/106 | 0 | 53 | 0.0% |
 | osu.Game.Tests | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Tests.Beatmaps | 28 | 2/56 | 1 | 27 | 3.6% |
 | osu.Game.Tests.Visual | 82 | 0/164 | 0 | 82 | 0.0% |
@@ -218,13 +205,13 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Tests.Visual.OnlinePlay | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Tests.Visual.Spectator | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Updater | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Users | 45 | 16/90 | 8 | 37 | 17.8% |
+| osu.Game.Users | 42 | 10/84 | 5 | 37 | 11.9% |
 | osu.Game.Users.Drawables | 31 | 0/62 | 0 | 31 | 0.0% |
-| osu.Game.Utils | 125 | 214/250 | 104 | 15 | 85.6% |
+| osu.Game.Utils | 102 | 192/204 | 93 | 3 | 94.1% |
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO: 853, Database/Online: 609, DI: 707, TestInfra: 212). Còn lại: 1468 | 2524/2936 | 1185 | 129 | 86.0%
+Loại 9220 điều kiện phụ thuộc ngoài (UI: 8676, Input: 120, Host/IO: 212, TestInfra: 212). Còn lại: 1468 | 2524/2936 | 1185 | 129 | 86.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -287,43 +274,21 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 |---|---|---|---|---|---|
 | osu.Game.OsuGame _(loại)_ | 131 | 0/262 | 0 | 131 | 0.0% |
 | osu.Game.OsuGameBase _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.PerformFromMenuRunner _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Audio.HitSampleInfo | 8 | 15/16 | 7 | 0 | 93.8% |
-| osu.Game.Audio.PreviewTrack _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Audio.PreviewTrackManager _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Audio.PreviewTrackManager.TrackManagerPreviewTrack _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Audio.SampleInfo | 4 | 7/8 | 3 | 0 | 87.5% |
 | osu.Game.Audio.SamplePlaybackHelper _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Audio.Effects.AudioFilter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps.APIBeatmapMetadataSource _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.Beatmap | 5 | 8/10 | 3 | 0 | 80.0% |
 | osu.Game.Beatmaps.BeatmapConverter | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapDifficultyCache _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Beatmaps.BeatmapDifficultyCache.DifficultyCacheLookup _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapExtensions | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Beatmaps.BeatmapImporter _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Beatmaps.BeatmapInfo _(loại)_ | 16 | 6/32 | 2 | 12 | 18.8% |
-| osu.Game.Beatmaps.BeatmapInfoExtensions | 10 | 20/20 | 10 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapManager _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Beatmaps.BeatmapInfoExtensions | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapMetadataInfoExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
-| osu.Game.Beatmaps.BeatmapOnlineChangeIngest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.BeatmapPanelBackgroundTextureLoaderStore _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapSetInfo _(loại)_ | 8 | 5/16 | 2 | 5 | 31.3% |
-| osu.Game.Beatmaps.BeatmapSetInfoExtensions _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapSetOnlineStatusExtensions | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Beatmaps.BeatmapUpdater _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapUpdaterMetadataLookup | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.DifficultyRecommender _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Beatmaps.FlatWorkingBeatmap | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.FramedBeatmapClock _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Beatmaps.IBeatmapDifficultyInfo | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Beatmaps.IBeatmapMetadataInfo | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.LocalCachedBeatmapMetadataSource _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Beatmaps.MetadataUtils | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Beatmaps.StarDifficulty | 7 | 6/14 | 0 | 1 | 42.9% |
-| osu.Game.Beatmaps.WorkingBeatmap _(loại)_ | 14 | 10/28 | 3 | 7 | 35.7% |
-| osu.Game.Beatmaps.WorkingBeatmapCache _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Beatmaps.WorkingBeatmapCache.BeatmapManagerWorkingBeatmap _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Beatmaps.ControlPoints.ControlPoint | 5 | 5/10 | 2 | 2 | 50.0% |
 | osu.Game.Beatmaps.ControlPoints.ControlPointGroup | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Beatmaps.ControlPoints.ControlPointInfo | 21 | 40/42 | 19 | 0 | 95.2% |
@@ -367,8 +332,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Beatmaps.Drawables.Cards.Statistics.NominationsStatistic _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Beatmaps.Formats.Decoder | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Beatmaps.Formats.LegacyBeatmapDecoder | 34 | 67/68 | 33 | 0 | 98.5% |
-| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder _(loại)_ | 72 | 138/144 | 66 | 0 | 95.8% |
-| osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder.LegacyControlPointProperties _(loại)_ | 6 | 8/12 | 2 | 0 | 66.7% |
 | osu.Game.Beatmaps.Formats.LegacyDecoder | 23 | 46/46 | 23 | 0 | 100.0% |
 | osu.Game.Beatmaps.Formats.LegacyDecoder.LegacySampleControlPoint | 11 | 19/22 | 8 | 0 | 86.4% |
 | osu.Game.Beatmaps.Formats.LegacyStoryboardDecoder | 30 | 57/60 | 27 | 0 | 95.0% |
@@ -377,8 +340,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Beatmaps.Legacy.LegacyControlPointInfo | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Beatmaps.Timing.BreakPeriod | 10 | 10/20 | 2 | 2 | 50.0% |
 | osu.Game.Beatmaps.Timing.TimeSignature | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Collections.CollectionFilterMenuItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Collections.CollectionToggleMenuItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Collections.DrawableCollectionList _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Collections.DrawableCollectionList.Flow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Collections.DrawableCollectionListItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -387,43 +348,14 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Collections.DrawableCollectionListItem.ItemTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Collections.ManageCollectionsDialog.NewCollectionEntryItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Configuration.MigrateNewAudioDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Configuration.OsuConfigManager _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Configuration.SessionAverageHitErrorTracker _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Configuration.SettingSourceAttribute | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Configuration.SettingSourceExtensions | 6 | 4/12 | 2 | 4 | 33.3% |
-| osu.Game.Database.BackgroundDataStoreProcessor _(loại)_ | 56 | 0/112 | 0 | 56 | 0.0% |
-| osu.Game.Database.ExternalEditOperation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.ImportTask _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Database.LegacyArchiveExporter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Database.LegacyBeatmapExporter _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Database.LegacyBeatmapImporter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.LegacyCollectionImporter _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Database.LegacyExporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.LegacyImportManager _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Database.LegacyModelImporter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.LegacyScoreExporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.LegacyScoreImporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.Live _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.MemoryCachingComponent _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Database.MemoryCachingComponent.MemoryCachingStatistics _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.ImportTask _(loại)_ | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Database.MissingBeatmapNotification _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Database.ModelDownloader _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Database.ModelManager _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Database.OnlineLookupCache _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Database.RealmAccess _(loại)_ | 100 | 0/200 | 0 | 100 | 0.0% |
-| osu.Game.Database.RealmArchiveModelImporter _(loại)_ | 43 | 0/86 | 0 | 43 | 0.0% |
-| osu.Game.Database.RealmDetachedBeatmapStore _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Database.RealmExtensions _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Database.RealmFileStore _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Database.RealmLive _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Database.RealmLiveUnmanaged _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.RealmObjectExtensions _(loại)_ | 17 | 1/34 | 0 | 16 | 2.9% |
-| osu.Game.Database.RealmResetEmptySet _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Database.StandardisedScoreMigrationTools _(loại)_ | 33 | 27/66 | 9 | 15 | 40.9% |
 | osu.Game.Extensions.CollectionExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Extensions.DrawableExtensions _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Extensions.LanguageExtensions | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Extensions.ModelExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
+| osu.Game.Extensions.ModelExtensions | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Extensions.NumberFormattingExtensions | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Extensions.StringDehumanizeExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Extensions.TaskExtensions | 4 | 7/8 | 3 | 0 | 87.5% |
@@ -433,25 +365,19 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Graphics.ErrorTextFlowContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.GhostIcon.GhostIconDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.HSPAColour | 20 | 39/40 | 19 | 0 | 97.5% |
-| osu.Game.Graphics.OnlineAssetCachingStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.OsuColour | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Graphics.OsuColour | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Graphics.OsuFont | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Graphics.OsuFontExtensions | 2 | 2/4 | 0 | 0 | 50.0% |
-| osu.Game.Graphics.OsuIcon.OsuIconStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.ParticleExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.ParticleSpewer _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.ParticleSpewer.ParticleSpewerDrawNode _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Graphics.ScreenshotManager _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Graphics.Backgrounds.Background _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Graphics.Backgrounds.BeatmapBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.Backgrounds.BeatmapBackgroundWithStoryboard _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Graphics.Backgrounds.SeasonalBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Backgrounds.SeasonalBackgroundLoader _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Graphics.Backgrounds.SkinBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.Backgrounds.Triangles _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Graphics.Backgrounds.Triangles.TrianglesDrawNode _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.Backgrounds.TrianglesV2 _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Graphics.Backgrounds.TrianglesV2.TrianglesDrawNode _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Graphics.Carousel.Carousel _(loại)_ | 95 | 0/190 | 0 | 95 | 0.0% |
 | osu.Game.Graphics.Carousel.Carousel.ScrollContainer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Graphics.Carousel.Carousel.ScrollContainer.ScrollBar _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
@@ -495,12 +421,9 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Graphics.Cursor.OsuTooltipContainer.OsuTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.OpenGL.Vertices.PositionAndColourVertex | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.Sprites.LogoAnimation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode.LogoAnimationVertex _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.Sprites.TruncatingSpriteText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface.BackButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.UserInterface.BarGraph _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.BarGraph.BarGraphDrawNode _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Graphics.UserInterface.BarGraph.BarsInfo _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Graphics.UserInterface.BreadcrumbControl _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface.BreadcrumbControl.BreadcrumbTabItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
@@ -517,9 +440,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Graphics.UserInterface.HistoryTextBox _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Graphics.UserInterface.Hotkey _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Graphics.UserInterface.HotkeyDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverClickSounds _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverSampleDebounceComponent _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverSounds _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.UserInterface.LineGraph _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Graphics.UserInterface.LoadingButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.UserInterface.LoadingLayer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -536,7 +456,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem.Content _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface.OsuMenu _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuMenuSamples _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.UserInterface.OsuPasswordTextBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface.OsuSliderBar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Graphics.UserInterface.OsuTabControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
@@ -559,7 +478,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Graphics.UserInterface.SectionHeader _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.UserInterface.SegmentedGraph _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentManager _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentedGraphDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.UserInterface.ShearedButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.UserInterface.ShearedNub _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Graphics.UserInterface.ShearedRangeSlider.BoundSliderBar _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
@@ -616,135 +534,35 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.IO.Serialization.Converters.TypedListConverter _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
 | osu.Game.IPC.ArchiveImportIPCChannel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.IPC.OsuSchemeLinkIPCChannel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.IPC.WebSocketChannel _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.IPC.WebSocketServer | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Input.ConfineMouseTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.IPC.WebSocketServer | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Input.IdleTracker _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Input.RealmKeyBindingStore _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Input.TouchInputInterceptor _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Input.Bindings.DatabasedKeyBindingContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Input.Bindings.GlobalActionContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Input.Bindings.RealmKeyBinding _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Input.Handlers.ReplayInputHandler.ReplayState _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Localisation.ResourceManagerLocalisationStore | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Models.RealmUser _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.BeatmapDownloadTracker _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Online.FriendPresenceNotifier _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Online.HubClientConnector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.LocalUserStatisticsProvider _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Online.OnlineStatusNotifier _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Online.OnlineViewContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.PersistentEndpointClientConnector _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Online.PollingComponent _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Online.ScoreDownloadTracker _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Online.SignalRUnionWorkaroundResolver _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.TrustedDomainOnlineStore _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.UserStatisticsWatcher _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Online.API.APIAccess _(loại)_ | 48 | 0/96 | 0 | 48 | 0.0% |
-| osu.Game.Online.API.APIDownloadRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Online.API.APIMessagesRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.APIMod _(loại)_ | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Online.API.APIMod.ModSettingsEqualityComparer _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.APIRequest _(loại)_ | 18 | 17/36 | 7 | 8 | 47.2% |
-| osu.Game.Online.API.DummyAPIAccess _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Online.API.LocalUserState _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Online.API.ModSettingsDictionaryFormatter _(loại)_ | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Online.API.OAuth _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Online.API.OAuth.OAuthError _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.OAuthToken _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Online.API.Requests.ChatAckRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.CommentPostRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.CommentVoteRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.DownloadBeatmapSetRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Online.API.Requests.GetBeatmapRequest _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetBeatmapSetRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetBeatmapsRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetCommentsRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetNewsRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetScoresRequest _(loại)_ | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetUpdatesRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUserRankingsRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUserScoresRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUsersRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.LookupUsersRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.PatchBeatmapPackageRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.PutBeatmapSetRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.ReplaceBeatmapPackageRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.SearchBeatmapSetsRequest _(loại)_ | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.VerifySessionRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmap _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmap.APIRuleset _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmapSet _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIKudosuHistory _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIMenuContent _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Online.API.Requests.Responses.APIMenuImage _(loại)_ | 12 | 23/24 | 11 | 0 | 95.8% |
-| osu.Game.Online.API.Requests.Responses.APIUpdateStream _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIUser _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.CommentBundle _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.SoloScoreInfo _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Chat.Channel _(loại)_ | 11 | 22/22 | 11 | 0 | 100.0% |
 | osu.Game.Online.Chat.ChannelManager _(loại)_ | 73 | 0/146 | 0 | 73 | 0.0% |
-| osu.Game.Online.Chat.ClosedChannel _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Online.Chat.DrawableLinkCompiler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Online.Chat.DrawableLinkCompiler.LinkHoverSounds _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.ExternalLinkOpener _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Chat.Link _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Chat.Message _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Online.Chat.MessageFormatter | 19 | 36/38 | 17 | 0 | 94.7% |
-| osu.Game.Online.Chat.MessageNotifier _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Online.Chat.NowPlayingCommand _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Online.Chat.MessageFormatter | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Online.Chat.StandAloneChatDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Online.Chat.StandAloneChatDisplay.ChatTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.WatchCommand _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.WebSocketChatClient _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Online.Leaderboards.Leaderboard _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardManager _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
 | osu.Game.Online.Leaderboards.LeaderboardScore _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Online.Leaderboards.LeaderboardScore.RankLabel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Online.Leaderboards.LeaderboardScoreTooltip _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Online.Leaderboards.LeaderboardScoreTooltip.ModCell _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScores _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Online.Leaderboards.UpdateableRank _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Online.Leaderboards.UserTopScoreContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Matchmaking.MatchmakingPool _(loại)_ | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Online.Metadata.MetadataClient _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Metadata.MetadataClient.UserPresenceWatchToken _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Metadata.OnlineMetadataClient _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerClient _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerClientExtensions _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoom _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomExtensions _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomSettings _(loại)_ | 11 | 22/22 | 11 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomUser _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.OnlineMultiplayerClient _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
 | osu.Game.Online.Multiplayer.ServerShutdownNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Multiplayer.StandardMatchRoomState _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoomState _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoundList _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserComparer _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserList _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayCardItem _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayDamageInfo _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayRoomState _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.TeamVersus.TeamVersusRoomState _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.DummyNotificationsClient _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClient _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClientConnector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Rooms.BeatmapAvailability _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Online.Rooms.GetRoomsRequest _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Online.Rooms.IndexPlaylistScoresRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Rooms.JoinRoomRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Rooms.MultiplayerPlaylistItem _(loại)_ | 15 | 29/30 | 14 | 0 | 96.7% |
-| osu.Game.Online.Rooms.MultiplayerScore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Rooms.PlaylistExtensions _(loại)_ | 3 | 4/6 | 2 | 1 | 66.7% |
-| osu.Game.Online.Rooms.PlaylistItem _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Rooms.Room _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.Rooms.RoomExtensions _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Spectator.OnlineSpectatorClient _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorClient _(loại)_ | 31 | 0/62 | 0 | 31 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorScoreProcessor _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorState _(loại)_ | 6 | 12/12 | 6 | 0 | 100.0% |
-| osu.Game.Online.Spectator.SpectatorUser _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Overlays.AccountCreationOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.AfToggleSection.ToggleSettings _(loại)_ | 40 | 0/80 | 0 | 40 | 0.0% |
 | osu.Game.Overlays.BeatmapListingOverlay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
@@ -875,7 +693,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Overlays.Dashboard.CurrentlyOnline.CurrentlyOnlineDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Overlays.Dashboard.CurrentlyOnline.OnlineUserPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList.UserWithRankLookupCache _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Overlays.Dashboard.Friends.FriendDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Dashboard.Friends.FriendOnlineStreamControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Dashboard.Friends.FriendsList _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1069,13 +886,10 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Overlays.SkinEditor.SkinComponentToolbox.DependencyBorrowingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinComponentToolbox.ToolboxComponentButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinEditor _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditorChangeHandler _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinEditorOverlay _(loại)_ | 28 | 0/56 | 0 | 28 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinEditorOverlay.EndlessPlayer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinEditorSceneLibrary _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.SkinEditor.SkinSelectionHandler _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinSelectionRotationHandler _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinSelectionScaleHandler _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Overlays.Toolbar.AnalogClockDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Overlays.Toolbar.ClockDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Toolbar.DigitalClockDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
@@ -1107,13 +921,8 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Overlays.Wiki.Markdown.WikiMarkdownImageBlock.BlockMarkdownImage.BlockImageContainer.ImageSprite _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Overlays.Wiki.Markdown.WikiNoticeContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Replays.Legacy.LegacyReplayFrame | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Rulesets.RealmRulesetStore _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Ruleset | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.RulesetConfigCache _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.RulesetInfo _(loại)_ | 12 | 12/24 | 3 | 3 | 50.0% |
 | osu.Game.Rulesets.RulesetSelector _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.RulesetStore _(loại)_ | 13 | 16/26 | 4 | 1 | 61.5% |
-| osu.Game.Rulesets.Configuration.RulesetConfigManager _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Difficulty.DifficultyCalculator | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing.DifficultyHitObject | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Difficulty.Skills.HarmonicSkill | 4 | 8/8 | 4 | 0 | 100.0% |
@@ -1189,14 +998,12 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Rulesets.Mods.ModDoubleTime | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModEasyWithExtraLives | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mods.ModFlashlight.Flashlight _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Mods.ModFlashlight.Flashlight.FlashlightDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mods.ModFlashlight.PlayfieldDrawInfoTracker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mods.ModHalfTime | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModMuted | 6 | 2/12 | 1 | 5 | 16.7% |
 | osu.Game.Rulesets.Mods.ModNightcore.NightcoreBeatContainer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Mods.ModNoScope | 2 | 2/4 | 1 | 1 | 50.0% |
 | osu.Game.Rulesets.Mods.ModPerfect | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Mods.ModPreset _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.ModRateAdjust | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModSuddenDeath | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModTimeRamp | 5 | 8/10 | 3 | 0 | 80.0% |
@@ -1235,14 +1042,12 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Rulesets.Scoring.HitEventExtensions.UnstableRateCalculationResult | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Scoring.HitResultExtensions | 33 | 66/66 | 33 | 0 | 100.0% |
 | osu.Game.Rulesets.Scoring.HitWindows | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Rulesets.Scoring.JudgementProcessor | 7 | 8/14 | 4 | 3 | 57.1% |
+| osu.Game.Rulesets.Scoring.JudgementProcessor | 6 | 6/12 | 3 | 3 | 50.0% |
 | osu.Game.Rulesets.Scoring.LegacyDrainingHealthProcessor | 14 | 24/28 | 11 | 1 | 85.7% |
 | osu.Game.Rulesets.Scoring.ScoreMultiplierCalculator | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.Scoring.ScoreProcessor | 33 | 63/66 | 30 | 0 | 95.5% |
+| osu.Game.Rulesets.Scoring.ScoreProcessor | 32 | 61/64 | 29 | 0 | 95.3% |
 | osu.Game.Rulesets.UI.DrawableRuleset _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Rulesets.UI.DrawableRulesetDependencies _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackSampleStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackTextureStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.UI.DrawableRulesetDependenciesProvidingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.UI.FrameStabilityContainer _(loại)_ | 34 | 0/68 | 0 | 34 | 0.0% |
 | osu.Game.Rulesets.UI.GameplaySampleTriggerSource _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
@@ -1259,12 +1064,7 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Rulesets.UI.Scrolling.DrawableScrollingRuleset _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.UI.Scrolling.ScrollingHitObjectContainer _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Rulesets.UI.Scrolling.Algorithms.SequentialScrollAlgorithm | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Scoring.LegacyDatabasedScore _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Scoring.ScoreImporter _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Scoring.ScoreInfo _(loại)_ | 11 | 15/22 | 6 | 2 | 68.2% |
-| osu.Game.Scoring.ScoreManager _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Scoring.Legacy.LegacyReplaySoloScoreInfo _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Scoring.Legacy.LegacyScoreDecoder | 36 | 63/72 | 27 | 0 | 87.5% |
+| osu.Game.Scoring.Legacy.LegacyScoreDecoder | 33 | 57/66 | 24 | 0 | 86.4% |
 | osu.Game.Scoring.Legacy.LegacyScoreEncoder | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Scoring.Legacy.ScoreInfoExtensions | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Screens.BackgroundScreen _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
@@ -1285,17 +1085,12 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.BookmarkController _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.Edit.BottomBar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Editor _(loại)_ | 123 | 0/246 | 0 | 123 | 0.0% |
-| osu.Game.Screens.Edit.EditorBeatmap _(loại)_ | 12 | 12/24 | 4 | 4 | 50.0% |
-| osu.Game.Screens.Edit.EditorBeatmapProcessor _(loại)_ | 17 | 32/34 | 15 | 0 | 94.1% |
-| osu.Game.Screens.Edit.EditorBeatmapSkin _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.EditorBeatmapSkin.SampleSet _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.EditorChangeHandler | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Screens.Edit.EditorClock _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Screens.Edit.EditorClock.TransformSeek _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.EditorLoader _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Edit.EditorSkinProvidingContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.ExternalEditScreen _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.LegacyEditorBeatmapPatcher _(loại)_ | 24 | 32/48 | 12 | 4 | 66.7% |
 | osu.Game.Screens.Edit.TransactionalCommitComponent | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Screens.Edit.WaveformOpacityMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Components.EditorToolButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
@@ -1325,7 +1120,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.PreviewTimePart _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.TimelinePart _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.Compose.ComposeScreen _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Edit.Compose.HitObjectUsageEventBuffer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.CustomDivisorPopover _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
@@ -1347,7 +1141,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.Compose.Components.HitObjectInspector _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.HitObjectOrderedSelectionContainer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.LinedPositionSnapGrid _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.PlacementStateManager _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.PositionSnapGrid _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.SelectionBox _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.SelectionBoxButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1356,7 +1149,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.Compose.Components.SelectionBoxRotationHandle _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.SelectionBoxScaleHandle _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.SelectionHandler _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.CentreMarker.VerticalTriangles.VerticalTrianglesDrawNode _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.Timeline.DifficultyPointPiece.DifficultyEditPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece.NodeSampleEditPopover _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -1396,7 +1188,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.Submission.BeatmapSubmissionOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Submission.BeatmapSubmissionScreen _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
 | osu.Game.Screens.Edit.Submission.ScreenSubmissionSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Submission.SubmissionBeatmapExporter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Edit.Submission.SubmissionStageProgress _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Screens.Edit.Timing.ControlPointList _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.Edit.Timing.ControlPointTable.ControlGroupAttributes _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1411,7 +1202,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Edit.Timing.LabelledTimeSignature.TimeSignatureBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Timing.MetronomeDisplay _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Screens.Edit.Timing.MetronomeDisplay.MetronomeTick _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Timing.RepeatingButtonBehaviour _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Timing.Section _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl.SliderVelocityPresetTernaryButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -1431,7 +1221,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Footer.ScreenFooter.BackReceptor _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Footer.ScreenFooterButton _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.Footer.ScreenStackFooter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Footer.ScreenStackFooter.ScreenStackTracker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Import.FileImportScreen _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.Menu.ButtonArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Menu.ButtonArea.ButtonAreaBackground _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1450,7 +1239,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Menu.IntroWelcome.WelcomeIntroSequence _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Menu.KiaiMenuFountains _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Menu.LogoVisualisation _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Menu.LogoVisualisation.VisualisationDrawNode _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Menu.MainMenu _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.Menu.MainMenuButton _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Screens.Menu.MenuLogoVisualisation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1558,7 +1346,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation.MovingAvatar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector.SelectorButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController.BackgroundQueueNotification _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RankedPlayMatchPanel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
@@ -1578,8 +1365,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.PickScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBackgroundScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBeatmapAvailabilityTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayCardWithPlaylistItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayMatchInfo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayStageOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlaySubScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1595,7 +1380,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer.RippleVisualization _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.AttributeRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.CardColours _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.StarsDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.SongPreviewParticleContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.BackgroundMusicManager _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
@@ -1612,8 +1396,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.CardContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.HandCard _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayRecorder _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.OpponentHandOfCards _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards _(loại)_ | 30 | 0/60 | 0 | 30 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards.PlayerHandCard _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
@@ -1663,7 +1445,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid.Cell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorPlayerClock | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorSyncManager _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.AddPlaylistToCollectionButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen.PanelListLoadingSpinner _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1703,13 +1484,11 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Play.Player _(loại)_ | 105 | 0/210 | 0 | 105 | 0.0% |
 | osu.Game.Screens.Play.PlayerLoader _(loại)_ | 47 | 0/94 | 0 | 47 | 0.0% |
 | osu.Game.Screens.Play.PlayerLoaderDisclaimer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.PlayerTouchInputDetector _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Screens.Play.ReplayFailIndicator _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Play.ReplayPlayer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Play.ReplayPlayerLoader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.RoomSubmittingPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.SaveFailedScoreButton _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Play.ScreenSuspensionHandler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.ScrollingMessage _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.SkipOverlay _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Screens.Play.SkipOverlay.Button _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1728,7 +1507,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Play.HUD.ArgonComboCounter _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonCounterTextComponent _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText.GlyphStore _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonHealthDisplay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonPerformancePointsCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonScoreCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1773,21 +1551,15 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Play.HUD.SpectatorList _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Play.HUD.UnstableRateCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar.ArgonBarPathDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ClicksPerSecond.ClicksPerSecondController _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.BarHitErrorMeter _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter.JudgementFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.HitErrorMeter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.HUD.HitErrorMeters.LegacyBarHitErrorMeter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCountController _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounterDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.GameplayLeaderboardScore _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.MultiSpectatorLeaderboardProvider _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.MultiplayerLeaderboardProvider _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.PlaylistsGameplayLeaderboardProvider _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.SoloGameplayLeaderboardProvider _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.BeatmapOffsetControl _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.InputSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Play.PlayerSettings.PlaybackSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1803,7 +1575,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Ranking.ScorePanelList.Scroll _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Ranking.ScorePanelTrackingContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Ranking.SoloResultsScreen _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.Ranking.UserTag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Ranking.UserTagControl _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
 | osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover.DrawableAddableTag _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
@@ -1840,7 +1611,7 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Ranking.Statistics.User.RankingChangeRow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Ranking.Statistics.User.TotalScoreChangeRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Select.BeatmapCarousel _(loại)_ | 141 | 0/282 | 0 | 141 | 0.0% |
-| osu.Game.Screens.Select.BeatmapCarouselFilterGrouping | 49 | 94/98 | 46 | 1 | 95.9% |
+| osu.Game.Screens.Select.BeatmapCarouselFilterGrouping | 46 | 88/92 | 43 | 1 | 95.7% |
 | osu.Game.Screens.Select.BeatmapCarouselFilterMatching | 70 | 136/140 | 66 | 0 | 97.1% |
 | osu.Game.Screens.Select.BeatmapCarouselFilterSorting | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Screens.Select.BeatmapDetailsArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1857,7 +1628,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Select.BeatmapMetadataWedge _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable.GraphDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Select.BeatmapMetadataWedge.MetadataDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Select.BeatmapMetadataWedge.RatingSpreadDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Select.BeatmapMetadataWedge.SuccessRateDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1891,7 +1661,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Select.FooterButtonOptions.Popover _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Screens.Select.FooterButtonRandom _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.Select.LeftSideInteractionContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Select.ModSpeedHotkeyHandler _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Screens.Select.NoResultsPlaceholder _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Screens.Select.Panel _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
 | osu.Game.Screens.Select.Panel.PulsatingBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1907,10 +1676,8 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Screens.Select.PanelLocalRankDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Screens.Select.PanelSetBackground _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Screens.Select.PanelUpdateBeatmapButton _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.RealmPopulatingOnlineLookupSource _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.Select.SoloSongSelect _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Select.SongSelect _(loại)_ | 88 | 0/176 | 0 | 88 | 0.0% |
-| osu.Game.Screens.Select.SongSelectTouchInputDetector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Screens.Spectate.SpectatorScreen _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Screens.Utility.ButtonWithKeyBind _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Utility.CircleGameplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -1928,13 +1695,9 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Seasonal.MainMenuSeasonalLighting _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Seasonal.OsuLogoChristmas _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Seasonal.SeasonalMenuSideFlashes _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ArgonProSkin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ArgonSkin _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Skinning.BeatmapSkinProvidingContainer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Skinning.FontAdjustableSkinComponent.WeightDropdown.DropdownControl _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.GlobalSkinnableContainerLookup _(loại)_ | 9 | 17/18 | 8 | 0 | 94.4% |
 | osu.Game.Skinning.ISerialisableDrawable _(loại)_ | 2 | 2/4 | 0 | 0 | 50.0% |
-| osu.Game.Skinning.LegacyBeatmapSkin _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Skinning.LegacyColourCompatibility _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Skinning.LegacyDefaultComboCounter _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Skinning.LegacyHealthDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
@@ -1950,32 +1713,18 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Skinning.LegacyManiaSkinDecoder _(loại)_ | 10 | 20/20 | 10 | 0 | 100.0% |
 | osu.Game.Skinning.LegacyPerformancePointsCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Skinning.LegacyRankDisplay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Skinning.LegacySkin _(loại)_ | 39 | 0/78 | 0 | 39 | 0.0% |
 | osu.Game.Skinning.LegacySkinDecoder _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Skinning.LegacySkinEncoder _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Skinning.LegacySkinExtensions _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Skinning.LegacySkinExtensions.SkinnableTextureAnimation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.LegacySkinTransformer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Skinning.LegacySongProgress _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Skinning.LegacySpriteText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacySpriteText.LegacyGlyphStore _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Skinning.LegacyTextureLoaderStore _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.MaxDimensionLimitedTextureLoaderStore _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Skinning.PausableSkinnableSound _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Skinning.PoolableSkinnableSample _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Skinning.RealmBackedResourceStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ResourceStoreBackedSkin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.RetroSkin _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Skinning.RulesetSkinProvidingContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Skinning.SerialisableDrawableExtensions _(loại)_ | 9 | 16/18 | 7 | 0 | 88.9% |
 | osu.Game.Skinning.SerialisedDrawableInfo _(loại)_ | 7 | 8/14 | 4 | 3 | 57.1% |
-| osu.Game.Skinning.Skin _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
 | osu.Game.Skinning.SkinConfiguration _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Skinning.SkinImporter _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Skinning.SkinInfo _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.SkinManager _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Skinning.SkinProvidingContainer _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Skinning.SkinProvidingContainer.DisableableSkinSource _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Skinning.SkinReloadableDrawable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Skinning.SkinnableContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Skinning.SkinnableDrawable _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
@@ -1983,7 +1732,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Skinning.SkinnableSprite _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Skinning.SkinnableSprite.SpriteSelectorControl _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Skinning.SkinnableSpriteText _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Skinning.TrianglesSkin _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Skinning.Components.ArgonJudgementCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Skinning.Components.ArgonJudgementCounterDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Skinning.Components.BeatmapAttributeText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -2002,7 +1750,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Storyboards.Commands.StoryboardLoopingGroup.StoryboardLoopingCommand | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Storyboards.Commands.StoryboardTriggerGroup | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboard _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboard.StoryboardResourceLookupStore _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboardAnimation _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboardLayer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboardLayer.LayerElementContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -2010,8 +1757,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Storyboards.Drawables.DrawableStoryboardSprite _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboardVideo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Storyboards.Drawables.DrawableStoryboardVideo.DrawableVideo _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Storyboards.Drawables.StoryboardTriggerController _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Storyboards.Drawables.StoryboardTriggerController.HitSampleTriggerDefinition _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Tests.CleanRunHeadlessGameHost _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Tests.FlakyTestAttribute _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Tests.PollingChatClient _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -2065,7 +1810,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Updater.UpdateManager.UpdateReadyNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Users.ConfirmBlockActionDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Users.ExtendedUserPanel _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Users.IUser _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.EditingBeatmap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.InLobby | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.SpectatingUser | 1 | 2/2 | 1 | 0 | 100.0% |
@@ -2097,13 +1841,12 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 | osu.Game.Utils.LegacyUtils | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Utils.LimitedCapacityQueue | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Utils.MobileUtils | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Utils.ModUtils | 24 | 48/48 | 24 | 0 | 100.0% |
+| osu.Game.Utils.ModUtils | 13 | 26/26 | 13 | 0 | 100.0% |
 | osu.Game.Utils.NamingUtils | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Utils.Optional | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Utils.OrdinalSortByCaseStringComparer | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Utils.Period | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Utils.PeriodTracker | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Utils.SentryLogger _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Utils.TernaryStateUtils | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Utils.ZipUtils | 1 | 2/2 | 1 | 0 | 100.0% |
 
@@ -2491,42 +2234,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 
 </details>
 
-### osu.Game.PerformFromMenuRunner
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `checkCanComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `checkForDialog(IScreen)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `findValidTarget(IScreen)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`checkCanComplete()`**
-
-- `PerformFromMenuRunner.cs:75` `current == null` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:79` `checkForDialog(current)` — chưa được đánh giá
-
-**`checkForDialog(IScreen)`**
-
-- `PerformFromMenuRunner.cs:140` `current is IHasSubScreenStack currentWithSubScreenStack` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:144` `nestedCurrent == null` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:152` `lastEncounteredDialog != null` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:154` `lastEncounteredDialog == currentDialog` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:158` `lastEncounteredDialogScreen != current` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:177` `currentDialog == null` — chưa được đánh giá
-
-**`findValidTarget(IScreen)`**
-
-- `PerformFromMenuRunner.cs:91` `validScreens.Any(t => t.IsAssignableFrom(type))` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:93` `((Drawable)current).IsLoaded` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:102` `current != null` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:105` `current is IHasSubScreenStack currentSubScreen` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:109` `nestedCurrent != null` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:113` `findValidTarget(nestedCurrent)` — chưa được đánh giá
-- `PerformFromMenuRunner.cs:118` `validScreens.Any(t => t.IsAssignableFrom(type))` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Audio.HitSampleInfo
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -2540,68 +2247,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 **`Equals(object?)`**
 
 - `Audio/HitSampleInfo.cs:119` `Equals(other)` — thiếu `false`
-
-</details>
-
-### osu.Game.Audio.PreviewTrack
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Start()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Stop()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `load()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Start()`**
-
-- `Audio/PreviewTrack.cs:87` `Track == null` — chưa được đánh giá
-- `Audio/PreviewTrack.cs:92` `hasStarted` — chưa được đánh giá
-
-**`Stop()`**
-
-- `Audio/PreviewTrack.cs:111` `Track == null` — chưa được đánh giá
-- `Audio/PreviewTrack.cs:114` `hasStarted` — chưa được đánh giá
-- `Audio/PreviewTrack.cs:120` `Track.HasCompleted` — chưa được đánh giá
-
-**`load()`**
-
-- `Audio/PreviewTrack.cs:36` `Track != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Audio.PreviewTrackManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(IBeatmapSetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StopAnyPlaying(IPreviewTrackOwner)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(IBeatmapSetInfo)`**
-
-- `Audio/PreviewTrackManager.cs:57` `CurrentTrack != track` — chưa được đánh giá
-
-**`StopAnyPlaying(IPreviewTrackOwner)`**
-
-- `Audio/PreviewTrackManager.cs:79` `CurrentTrack == null` — chưa được đánh giá
-- `Audio/PreviewTrackManager.cs:79` `CurrentTrack.Owner != null` — chưa được đánh giá
-- `Audio/PreviewTrackManager.cs:79` `CurrentTrack.Owner != source` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Audio.PreviewTrackManager.TrackManagerPreviewTrack
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Audio/PreviewTrackManager.cs:110` `Owner == null` — chưa được đánh giá
 
 </details>
 
@@ -2634,52 +2279,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 
 </details>
 
-### osu.Game.Audio.Effects.AudioFilter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Cutoff.set` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ensureAttached()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ensureDetached()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `updateFilter()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Cutoff.set`**
-
-- `Audio/Effects/AudioFilter.cs:37` `value == cutoff` — chưa được đánh giá
-
-**`ensureAttached()`**
-
-- `Audio/Effects/AudioFilter.cs:116` `IsAttached` — chưa được đánh giá
-
-**`ensureDetached()`**
-
-- `Audio/Effects/AudioFilter.cs:125` `IsAttached` — chưa được đánh giá
-
-**`updateFilter()`**
-
-- `Audio/Effects/AudioFilter.cs:89` `Cutoff >= MAX_LOWPASS_CUTOFF` — chưa được đánh giá
-- `Audio/Effects/AudioFilter.cs:99` `Cutoff <= 1` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.APIBeatmapMetadataSource
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `TryLookup(BeatmapInfo, OnlineBeatmapMetadata?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`TryLookup(BeatmapInfo, OnlineBeatmapMetadata?)`**
-
-- `Beatmaps/APIBeatmapMetadataSource.cs:28` `Available` — chưa được đánh giá
-- `Beatmaps/APIBeatmapMetadataSource.cs:43` `req.CompletionState == APIRequestCompletionState.Failed` — chưa được đánh giá
-- `Beatmaps/APIBeatmapMetadataSource.cs:52` `res != null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Beatmaps.Beatmap
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -2703,64 +2302,6 @@ Loại 11253 điều kiện phụ thuộc ngoài (UI: 8752, Input: 120, Host/IO:
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
-### osu.Game.Beatmaps.BeatmapDifficultyCache
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ComputeValueAsync(DifficultyCacheLookup, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetDifficultyAsync(IBeatmapInfo, IRulesetInfo?, IEnumerable<Mod>?, CancellationToken, int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Invalidate(IBeatmapInfo, IBeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `computeDifficulty(DifficultyCacheLookup, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `updateBindable(BindableStarDifficulty, IRulesetInfo?, IEnumerable<Mod>?, CancellationTokenSource, int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ComputeValueAsync(DifficultyCacheLookup, CancellationToken)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:189` `CheckExists(lookup, out var existing)` — chưa được đánh giá
-
-**`GetDifficultyAsync(IBeatmapInfo, IRulesetInfo?, IEnumerable<Mod>?, CancellationToken, int)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:176` `localBeatmapInfo == null` — chưa được đánh giá
-- `Beatmaps/BeatmapDifficultyCache.cs:176` `localRulesetInfo == null` — chưa được đánh giá
-
-**`Invalidate(IBeatmapInfo, IBeatmapInfo)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:120` `trackedBindablesRefreshRequired` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:82` `mods.OldValue.SequenceEqual(mods.NewValue, ReferenceEqualityComparer.Instance)` — chưa được đánh giá
-
-**`computeDifficulty(DifficultyCacheLookup, CancellationToken)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:316` `performanceCalculator == null` — chưa được đánh giá
-- `Beatmaps/BeatmapDifficultyCache.cs:348` `rulesetInfo.Equals(beatmapInfo.Ruleset)` — chưa được đánh giá
-
-**`updateBindable(BindableStarDifficulty, IRulesetInfo?, IEnumerable<Mod>?, CancellationTokenSource, int)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:270` `linkedCancellationTokenSource.IsCancellationRequested` — chưa được đánh giá
-- `Beatmaps/BeatmapDifficultyCache.cs:274` `starDifficulty != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.BeatmapDifficultyCache.DifficultyCacheLookup
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(DifficultyCacheLookup)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(DifficultyCacheLookup)`**
-
-- `Beatmaps/BeatmapDifficultyCache.cs:386` `BeatmapInfo.Equals(other.BeatmapInfo)` — chưa được đánh giá
-- `Beatmaps/BeatmapDifficultyCache.cs:387` `Ruleset.Equals(other.Ruleset)` — chưa được đánh giá
-- `Beatmaps/BeatmapDifficultyCache.cs:388` `OrderedMods.SequenceEqual(other.OrderedMods)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Beatmaps.BeatmapExtensions
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -2776,243 +2317,15 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Beatmaps.BeatmapImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CanReuseExisting(BeatmapSetInfo, BeatmapSetInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `CanSkipImport(BeatmapSetInfo, BeatmapSetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CreateModel(ArchiveReader, ImportParameters)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ImportAsUpdate(ProgressNotification, ImportTask, BeatmapSetInfo)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `Populate(BeatmapSetInfo, ArchiveReader?, Realm, CancellationToken)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `PostImport(BeatmapSetInfo, Realm, ImportParameters)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PreImport(BeatmapSetInfo, Realm)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UndeleteForReuse(BeatmapSetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `createBeatmapDifficulties(BeatmapSetInfo, Realm)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `getDateAdded(ArchiveReader?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `transferCollectionReferences(Realm, BeatmapSetInfo, BeatmapSetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `validateOnlineIds(BeatmapSetInfo, Realm)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CanReuseExisting(BeatmapSetInfo, BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapImporter.cs:285` `base.CanReuseExisting(existing, import)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:292` `existing.OnlineID == import.OnlineID` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:292` `existingIds.SequenceEqual(importIds)` — chưa được đánh giá
-
-**`CanSkipImport(BeatmapSetInfo, BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapImporter.cs:277` `base.CanSkipImport(existing, import)` — chưa được đánh giá
-
-**`CreateModel(ArchiveReader, ImportParameters)`**
-
-- `Beatmaps/BeatmapImporter.cs:311` `string.IsNullOrEmpty(mapName)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:321` `stream.PeekLine() == null` — chưa được đánh giá
-
-**`ImportAsUpdate(ProgressNotification, ImportTask, BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapImporter.cs:52` `imported.Any()` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:60` `first.ID == originalId` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:95` `updatedBeatmap != null` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:98` `beatmap.Scores.Any()` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:125` `original.Beatmaps.Any()` — chưa được đánh giá
-
-**`Populate(BeatmapSetInfo, ArchiveReader?, Realm, CancellationToken)`**
-
-- `Beatmaps/BeatmapImporter.cs:169` `archive != null` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:180` `b.Ruleset.IsManaged` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:190` `hadOnlineIDs` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:190` `beatmapSet.Beatmaps.Any(b => b.OnlineID > 0)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:192` `beatmapSet.OnlineID > 0` — chưa được đánh giá
-
-**`PostImport(BeatmapSetInfo, Realm, ImportParameters)`**
-
-- `Beatmaps/BeatmapImporter.cs:237` `parameters.Batch` — chưa được đánh giá
-
-**`PreImport(BeatmapSetInfo, Realm)`**
-
-- `Beatmaps/BeatmapImporter.cs:207` `beatmapSet.OnlineID > 0` — chưa được đánh giá
-
-**`UndeleteForReuse(BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapImporter.cs:297` `existing.DeletePending` — chưa được đánh giá
-
-**`createBeatmapDifficulties(BeatmapSetInfo, Realm)`**
-
-- `Beatmaps/BeatmapImporter.cs:374` `f.Filename.Contains('/')` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:374` `f.Filename.EndsWith(@".osu", StringComparison.OrdinalIgnoreCase)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:382` `lineReader.PeekLine() == null` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:393` `beatmaps.Any(b => b.Hash == hash)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:404` `ruleset?.Available != true` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:453` `beatmaps.Any()` — chưa được đánh giá
-
-**`getDateAdded(ArchiveReader?)`**
-
-- `Beatmaps/BeatmapImporter.cs:345` `reader is DirectoryArchiveReader legacyReader` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:355` `currentDateAdded < dateAdded` — chưa được đánh giá
-
-**`transferCollectionReferences(Realm, BeatmapSetInfo, BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapImporter.cs:146` `original.Beatmaps.Select(b => b.MD5Hash).All(c.BeatmapMD5Hashes.Contains)` — chưa được đánh giá
-
-**`validateOnlineIds(BeatmapSetInfo, Realm)`**
-
-- `Beatmaps/BeatmapImporter.cs:245` `beatmapIds.GroupBy(b => b).Any(g => g.Count() > 1)` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:258` `existingBeatmaps.Any()` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:265` `existing == null` — chưa được đánh giá
-- `Beatmaps/BeatmapImporter.cs:265` `existingBeatmaps.Any(b => !existing.Beatmaps.Contains(b))` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.BeatmapInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AudioEquals(BeatmapInfo?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `BackgroundEquals(BeatmapInfo?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `Equals(BeatmapInfo?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `Equals(IBeatmapInfo?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `MatchesOnlineVersion` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ResetOnlineInfo(bool)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AudioEquals(BeatmapInfo?)`**
-
-- `Beatmaps/BeatmapInfo.cs:166` `other != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:167` `BeatmapSet != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:168` `other.BeatmapSet != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:169` `compareFiles(this, other, m => m.AudioFile)` — chưa được đánh giá
-
-**`BackgroundEquals(BeatmapInfo?)`**
-
-- `Beatmaps/BeatmapInfo.cs:171` `other != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:172` `BeatmapSet != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:173` `other.BeatmapSet != null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:174` `compareFiles(this, other, m => m.BackgroundFile)` — chưa được đánh giá
-
-**`Equals(BeatmapInfo?)`**
-
-- `Beatmaps/BeatmapInfo.cs:153` `other == null` — thiếu `true`
-
-**`Equals(IBeatmapInfo?)`**
-
-- `Beatmaps/BeatmapInfo.cs:158` `other is BeatmapInfo b` — thiếu `false`
-
-**`MatchesOnlineVersion`**
-
-- `Beatmaps/BeatmapInfo.cs:116` `LastOnlineUpdate == null` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:116` `MD5Hash == OnlineMD5Hash` — chưa được đánh giá
-
-**`ResetOnlineInfo(bool)`**
-
-- `Beatmaps/BeatmapInfo.cs:130` `resetOnlineId` — chưa được đánh giá
-- `Beatmaps/BeatmapInfo.cs:134` `Status != BeatmapOnlineStatus.LocallyModified` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Beatmaps.BeatmapInfoExtensions
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `AllowGameplayWithRuleset(IBeatmapInfo, RulesetInfo, bool)` | 4 | 8/8 | 4 | 0 | 100.0% |
 | `GetDisplayTitleRomanisable(IBeatmapInfo, bool, bool)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `GetOnlineURL(IBeatmapInfo, IAPIProvider, IRulesetInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `Match(IBeatmapInfo, FilterCriteria.OptionalTextFilter[])` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `getVersionString(IBeatmapInfo)` | 1 | 2/2 | 1 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Beatmaps.BeatmapManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Storage, RealmAccess, IAPIProvider?, AudioManager, IResourceStore<byte[]>, GameHost?, WorkingBeatmap?, BeatmapDifficultyCache?, bool)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `CanHide(BeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CreateNew(RulesetInfo, APIUser)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CreateNewDifficulty(BeatmapSetInfo, WorkingBeatmap, RulesetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Delete(Expression<Func<BeatmapSetInfo, bool>>?, bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `DeleteDifficultyImmediately(BeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `DeleteVideos(List<BeatmapSetInfo>, bool)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `GetWorkingBeatmap(BeatmapInfo?, bool)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `Hide(BeatmapInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ResetAllOffsets()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Restore(BeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Restore(BeatmapSetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `save(BeatmapInfo, IBeatmap, ISkin?, Storyboard?, bool)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Storage, RealmAccess, IAPIProvider?, AudioManager, IResourceStore<byte[]>, GameHost?, WorkingBeatmap?, BeatmapDifficultyCache?, bool)`**
-
-- `Beatmaps/BeatmapManager.cs:67` `performOnlineLookups` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:69` `api == null` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:72` `difficultyCache == null` — chưa được đánh giá
-
-**`CanHide(BeatmapInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:252` `beatmapInfo.IsManaged` — chưa được đánh giá
-
-**`CreateNew(RulesetInfo, APIUser)`**
-
-- `Beatmaps/BeatmapManager.cs:135` `imported == null` — chưa được đánh giá
-
-**`CreateNewDifficulty(BeatmapSetInfo, WorkingBeatmap, RulesetInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:172` `rulesetInfo.Equals(referenceWorkingBeatmap.BeatmapInfo.Ruleset)` — chưa được đánh giá
-
-**`Delete(Expression<Func<BeatmapSetInfo, bool>>?, bool)`**
-
-- `Beatmaps/BeatmapManager.cs:419` `filter != null` — chưa được đánh giá
-
-**`DeleteDifficultyImmediately(BeatmapInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:437` `beatmapInfo.IsManaged` — chưa được đánh giá
-
-**`DeleteVideos(List<BeatmapSetInfo>, bool)`**
-
-- `Beatmaps/BeatmapManager.cs:461` `items.Count == 0` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:463` `silent` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:476` `silent` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:484` `notification.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:490` `video != null` — chưa được đánh giá
-
-**`GetWorkingBeatmap(BeatmapInfo?, bool)`**
-
-- `Beatmaps/BeatmapManager.cs:649` `beatmapInfo != null` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:651` `refetch` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:658` `beatmapInfo.IsManaged` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:662` `refetch` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:662` `missingFiles` — chưa được đánh giá
-
-**`Hide(BeatmapInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:237` `beatmapInfo.IsManaged` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:240` `CanHide(beatmapInfo)` — chưa được đánh giá
-
-**`ResetAllOffsets()`**
-
-- `Beatmaps/BeatmapManager.cs:405` `beatmap.UserSettings.Offset != 0` — chưa được đánh giá
-
-**`Restore(BeatmapInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:268` `beatmapInfo.IsManaged` — chưa được đánh giá
-
-**`Restore(BeatmapSetInfo)`**
-
-- `Beatmaps/BeatmapManager.cs:287` `beatmapSetInfo.IsManaged` — chưa được đánh giá
-
-**`save(BeatmapInfo, IBeatmap, ISkin?, Storyboard?, bool)`**
-
-- `Beatmaps/BeatmapManager.cs:557` `beatmapInfo.Path != null` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:561` `b.ID != beatmapInfo.ID` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:561` `string.Equals(b.Path, targetFilename, StringComparison.OrdinalIgnoreCase)` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:561` `setInfo.Beatmaps.Any(b => b.ID != beatmapInfo.ID && string.Equals(b.Path, targetFilename, StringComparison.OrdinalIgnoreCase))` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:564` `existingFileInfo != null` — chưa được đánh giá
-- `Beatmaps/BeatmapManager.cs:580` `transferCollections` — chưa được đánh giá
-
-</details>
 
 ### osu.Game.Beatmaps.BeatmapMetadataInfoExtensions
 
@@ -3031,73 +2344,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Beatmaps.BeatmapOnlineChangeIngest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `changesDetected(int[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`changesDetected(int[])`**
-
-- `Beatmaps/BeatmapOnlineChangeIngest.cs:38` `matchingSet != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.BeatmapPanelBackgroundTextureLoaderStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `GetAsync(string, CancellationToken)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Beatmaps.BeatmapSetInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(IEnumerable<BeatmapInfo>?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Equals(BeatmapSetInfo?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `Equals(IBeatmapSetInfo?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `MaxBPM` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MaxLength` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MaxStarDifficulty` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(BeatmapSetInfo?)`**
-
-- `Beatmaps/BeatmapSetInfo.cs:88` `other == null` — thiếu `true`
-
-**`Equals(IBeatmapSetInfo?)`**
-
-- `Beatmaps/BeatmapSetInfo.cs:101` `other is BeatmapSetInfo b` — chưa được đánh giá
-- `Beatmaps/BeatmapSetInfo.cs:101` `Equals(b)` — chưa được đánh giá
-
-**`MaxBPM`**
-
-- `Beatmaps/BeatmapSetInfo.cs:70` `Beatmaps.Count == 0` — chưa được đánh giá
-
-**`MaxLength`**
-
-- `Beatmaps/BeatmapSetInfo.cs:68` `Beatmaps.Count == 0` — chưa được đánh giá
-
-**`MaxStarDifficulty`**
-
-- `Beatmaps/BeatmapSetInfo.cs:66` `Beatmaps.Count == 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.BeatmapSetInfoExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetOnlineURL(IBeatmapSetInfo, IAPIProvider, IRulesetInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
 ### osu.Game.Beatmaps.BeatmapSetOnlineStatusExtensions
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -3110,26 +2356,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Beatmaps/BeatmapOnlineStatus.cs:47` `status == BeatmapOnlineStatus.Ranked` — chưa được đánh giá
 - `Beatmaps/BeatmapOnlineStatus.cs:47` `status == BeatmapOnlineStatus.Approved` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.BeatmapUpdater
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Process(BeatmapSetInfo, MetadataLookupScope)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `Beatmaps/BeatmapUpdater.cs:94` `metadataLookup.IsNotNull()` — chưa được đánh giá
-- `Beatmaps/BeatmapUpdater.cs:97` `updateScheduler.IsNotNull()` — chưa được đánh giá
-
-**`Process(BeatmapSetInfo, MetadataLookupScope)`**
-
-- `Beatmaps/BeatmapUpdater.cs:51` `lookupScope != MetadataLookupScope.None` — chưa được đánh giá
 
 </details>
 
@@ -3161,48 +2387,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Beatmaps.DifficultyRecommender
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetRecommendedBeatmap(IEnumerable<BeatmapInfo>)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `GetRecommendedStarRatingFor(RulesetInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `orderedRulesets.get` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `updateMapping(RulesetInfo, UserStatistics)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Beatmaps/DifficultyRecommender.cs:122` `statisticsProvider.IsNotNull()` — chưa được đánh giá
-
-**`GetRecommendedBeatmap(IEnumerable<BeatmapInfo>)`**
-
-- `Beatmaps/DifficultyRecommender.cs:104` `recommendedDifficultyMapping.TryGetValue(r, out double recommendation)` — chưa được đánh giá
-- `Beatmaps/DifficultyRecommender.cs:110` `difference >= 0` — chưa được đánh giá
-- `Beatmaps/DifficultyRecommender.cs:113` `beatmapInfo != null` — chưa được đánh giá
-
-**`GetRecommendedStarRatingFor(RulesetInfo)`**
-
-- `Beatmaps/DifficultyRecommender.cs:90` `recommendedDifficultyMapping.TryGetValue(ruleset.ShortName, out double starRating)` — chưa được đánh giá
-
-**`load()`**
-
-- `Beatmaps/DifficultyRecommender.cs:64` `statisticsProvider.GetStatisticsFor(ruleset) is UserStatistics statistics` — chưa được đánh giá
-
-**`orderedRulesets.get`**
-
-- `Beatmaps/DifficultyRecommender.cs:43` `LoadState < LoadState.Ready` — chưa được đánh giá
-- `Beatmaps/DifficultyRecommender.cs:43` `gameRuleset.Value == null` — chưa được đánh giá
-
-**`updateMapping(RulesetInfo, UserStatistics)`**
-
-- `Beatmaps/DifficultyRecommender.cs:82` `ruleset.ShortName == @"taiko"` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Beatmaps.FlatWorkingBeatmap
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -3214,54 +2398,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`.ctor(string, int?)`**
 
 - `Beatmaps/FlatWorkingBeatmap.cs:27` `beatmapId.HasValue` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.FramedBeatmapClock
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(bool, bool, IClock?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetSnapshot()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `LoadComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Seek(double)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `TotalAppliedOffset.get` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Update()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `updatePlatformOffset()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(bool, bool, IClock?)`**
-
-- `Beatmaps/FramedBeatmapClock.cs:83` `applyOffsets` — chưa được đánh giá
-
-**`GetSnapshot()`**
-
-- `Beatmaps/FramedBeatmapClock.cs:274` `clock == null` — chưa được đánh giá
-- `Beatmaps/FramedBeatmapClock.cs:277` `clock is IFrameBasedClock framed` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Beatmaps/FramedBeatmapClock.cs:103` `applyOffsets` — chưa được đánh giá
-- `Beatmaps/FramedBeatmapClock.cs:124` `initialSeek != null` — chưa được đánh giá
-
-**`Seek(double)`**
-
-- `Beatmaps/FramedBeatmapClock.cs:216` `applyOffsets` — chưa được đánh giá
-- `Beatmaps/FramedBeatmapClock.cs:216` `IsLoaded` — chưa được đánh giá
-
-**`TotalAppliedOffset.get`**
-
-- `Beatmaps/FramedBeatmapClock.cs:178` `applyOffsets` — chưa được đánh giá
-
-**`Update()`**
-
-- `Beatmaps/FramedBeatmapClock.cs:170` `Clock.ElapsedFrameTime != 0` — chưa được đánh giá
-
-**`updatePlatformOffset()`**
-
-- `Beatmaps/FramedBeatmapClock.cs:144` `applyOffsets` — chưa được đánh giá
-- `Beatmaps/FramedBeatmapClock.cs:154` `audioManager.UseExperimentalWasapi.Value` — chưa được đánh giá
 
 </details>
 
@@ -3295,76 +2431,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Beatmaps/IBeatmapMetadataInfo.cs:77` `PreviewTime == other.PreviewTime` — chưa được đánh giá
 - `Beatmaps/IBeatmapMetadataInfo.cs:78` `AudioFile == other.AudioFile` — chưa được đánh giá
 - `Beatmaps/IBeatmapMetadataInfo.cs:79` `BackgroundFile == other.BackgroundFile` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.LocalCachedBeatmapMetadataSource
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Available` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `FetchCache()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetCacheFetchDate()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `IsAtLeastVersion(int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `TryLookup(BeatmapInfo, OnlineBeatmapMetadata?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `getCacheVersion(SqliteConnection)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `queryCacheVersion2(SqliteConnection, BeatmapInfo, OnlineBeatmapMetadata?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `queryCacheVersion3(SqliteConnection, BeatmapInfo, OnlineBeatmapMetadata?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `shouldFetchCache()` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Storage)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:48` `shouldFetchCache()` — chưa được đánh giá
-
-**`Available`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:78` `cacheDownloadRequest == null` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:80` `storage.Exists(cache_database_name)` — chưa được đánh giá
-
-**`FetchCache()`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:175` `DebugUtils.IsNUnitRunning` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:191` `isRefetch` — chưa được đánh giá
-
-**`GetCacheFetchDate()`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:299` `file.Exists` — chưa được đánh giá
-
-**`IsAtLeastVersion(int)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:259` `ex.SqliteErrorCode == 26` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:259` `ex.SqliteErrorCode == 11` — chưa được đánh giá
-
-**`TryLookup(BeatmapInfo, OnlineBeatmapMetadata?)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:86` `Available` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:92` `string.IsNullOrEmpty(beatmapInfo.MD5Hash)` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:93` `string.IsNullOrEmpty(beatmapInfo.Path)` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:130` `cacheDownloadRequest != null` — chưa được đánh giá
-
-**`getCacheVersion(SqliteConnection)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:274` `reader.Read()` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:278` `reader.GetInt32(0) == 0` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:288` `reader.Read()` — chưa được đánh giá
-
-**`queryCacheVersion2(SqliteConnection, BeatmapInfo, OnlineBeatmapMetadata?)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:328` `reader.Read()` — chưa được đánh giá
-
-**`queryCacheVersion3(SqliteConnection, BeatmapInfo, OnlineBeatmapMetadata?)`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:370` `reader.Read()` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:400` `tagsReader.Read()` — chưa được đánh giá
-
-**`shouldFetchCache()`**
-
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:55` `DebugUtils.IsNUnitRunning` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:58` `storage.Exists(cache_database_name)` — chưa được đánh giá
-- `Beatmaps/LocalCachedBeatmapMetadataSource.cs:67` `fileInfo.LastWriteTime < DateTime.Now.AddMonths(-1)` — chưa được đánh giá
 
 </details>
 
@@ -3403,132 +2469,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Beatmaps/StarDifficulty.cs:73` `Precision.AlmostBigger(starRating, 4.0, 0.005)` — thiếu `true`
 - `Beatmaps/StarDifficulty.cs:76` `Precision.AlmostBigger(starRating, 2.7, 0.005)` — thiếu `true`
 - `Beatmaps/StarDifficulty.cs:79` `Precision.AlmostBigger(starRating, 2.0, 0.005)` — thiếu `false`
-
-</details>
-
-### osu.Game.Beatmaps.WorkingBeatmap
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Beatmap.get` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CancelAsyncLoad()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetPlayableBeatmap(IRulesetInfo, IReadOnlyList<Mod>)` | 1 | 1/2 | 0 | 0 | 50.0% |
-| `GetPlayableBeatmap(IRulesetInfo, IReadOnlyList<Mod>, CancellationToken)` | 5 | 8/10 | 3 | 0 | 80.0% |
-| `PrepareTrackForPreview(bool, double?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Track.get` | 1 | 1/2 | 0 | 0 | 50.0% |
-| `TryTransferTrack(WorkingBeatmap)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Beatmap.get`**
-
-- `Beatmaps/WorkingBeatmap.cs:214` `ae.InnerExceptions.FirstOrDefault() is TaskCanceledException` — chưa được đánh giá
-
-**`CancelAsyncLoad()`**
-
-- `Beatmaps/WorkingBeatmap.cs:101` `beatmapLoadTask?.IsCompleted != true` — chưa được đánh giá
-
-**`GetPlayableBeatmap(IRulesetInfo, IReadOnlyList<Mod>)`**
-
-- `Beatmaps/WorkingBeatmap.cs:268` `Debugger.IsAttached` — thiếu `true`
-
-**`GetPlayableBeatmap(IRulesetInfo, IReadOnlyList<Mod>, CancellationToken)`**
-
-- `Beatmaps/WorkingBeatmap.cs:281` `rulesetInstance == null` — thiếu `true`
-- `Beatmaps/WorkingBeatmap.cs:287` `converter.CanConvert()` — thiếu `false`
-
-**`PrepareTrackForPreview(bool, double?)`**
-
-- `Beatmaps/WorkingBeatmap.cs:128` `Track.IsLoaded` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmap.cs:134` `Track.RestartPoint < 0` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmap.cs:134` `Track.RestartPoint > Track.Length` — chưa được đánh giá
-
-**`Track.get`**
-
-- `Beatmaps/WorkingBeatmap.cs:166` `TrackLoaded` — thiếu `false`
-
-**`TryTransferTrack(WorkingBeatmap)`**
-
-- `Beatmaps/WorkingBeatmap.cs:150` `BeatmapInfo?.AudioEquals(target.BeatmapInfo) != true` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmap.cs:150` `Track.IsDummyDevice` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.WorkingBeatmapCache
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetWorkingBeatmap(BeatmapInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Invalidate(BeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `confirmFileHashIsUpToDate(BeatmapInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetWorkingBeatmap(BeatmapInfo)`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:96` `beatmapInfo == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:96` `ReferenceEquals(beatmapInfo, DefaultBeatmap.BeatmapInfo)` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:103` `working != null` — chưa được đánh giá
-
-**`Invalidate(BeatmapInfo)`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:83` `working != null` — chưa được đánh giá
-
-**`confirmFileHashIsUpToDate(BeatmapInfo)`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:124` `refetchPath == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:124` `refetchPath == beatmapInfo.File?.File.Hash` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Beatmaps.WorkingBeatmapCache.BeatmapManagerWorkingBeatmap
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetBeatmap()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `GetBeatmapTrack()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `GetStoryboard()` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `GetWaveform()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `getBackgroundFromStore(TextureStore)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `getMainStoryboardFilename(IBeatmapMetadataInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetBeatmap()`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:154` `BeatmapInfo.Path == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:163` `stream == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:172` `streamMD5 != BeatmapInfo.MD5Hash` — chưa được đánh giá
-
-**`GetBeatmapTrack()`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:227` `string.IsNullOrEmpty(Metadata?.AudioFile)` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:230` `Metadata.AudioFile == virtual_track_filename` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:238` `track == null` — chưa được đánh giá
-
-**`GetStoryboard()`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:286` `BeatmapInfo.Path == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:294` `beatmapFileStream == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:308` `BeatmapSetInfo?.Files.FirstOrDefault(f => f.Filename.Equals(mainStoryboardFilename, StringComparison.OrdinalIgnoreCase))?.Filename is string storyboardFilename` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:314` `storyboardFileStream == null` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:318` `storyboardFileStream != null` — chưa được đánh giá
-
-**`GetWaveform()`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:255` `string.IsNullOrEmpty(Metadata?.AudioFile)` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:258` `Metadata.AudioFile == virtual_track_filename` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:267` `trackData == null` — chưa được đánh giá
-
-**`getBackgroundFromStore(TextureStore)`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:202` `string.IsNullOrEmpty(Metadata?.BackgroundFile)` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:210` `texture == null` — chưa được đánh giá
-
-**`getMainStoryboardFilename(IBeatmapMetadataInfo)`**
-
-- `Beatmaps/WorkingBeatmapCache.cs:358` `metadata.Artist.Length > 0` — chưa được đánh giá
-- `Beatmaps/WorkingBeatmapCache.cs:359` `metadata.Author.Username.Length > 0` — chưa được đánh giá
 
 </details>
 
@@ -4437,61 +3377,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(IBeatmap, ISkin?, Storyboard?)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `addEndTimeData(TextWriter, HitObject)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `addPathData(TextWriter, IHasPath, Vector2)` | 12 | 23/24 | 11 | 0 | 95.8% |
-| `getObjectType(HitObject)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `getSampleBank(IList<HitSampleInfo>, bool)` | 5 | 9/10 | 4 | 0 | 90.0% |
-| `handleColours(TextWriter)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `handleControlPoints(TextWriter)` | 23 | 42/46 | 19 | 0 | 91.3% |
-| `handleEditor(TextWriter)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `handleEvents(TextWriter)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `handleGeneral(TextWriter)` | 9 | 18/18 | 9 | 0 | 100.0% |
-| `handleHitObject(TextWriter, HitObject)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `handleHitObjects(TextWriter)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `handleMetadata(TextWriter)` | 6 | 12/12 | 6 | 0 | 100.0% |
-| `toLegacyCustomSampleBank(HitSampleInfo?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`addPathData(TextWriter, IHasPath, Vector2)`**
-
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:549` `curveData != null` — thiếu `false`
-
-**`getSampleBank(IList<HitSampleInfo>, bool)`**
-
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:582` `string.IsNullOrEmpty(s.Name)` — thiếu `true`
-
-**`handleControlPoints(TextWriter)`**
-
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:294` `customSampleBank >= 0` — thiếu `false`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:350` `spanDuration > LegacyBeatmapDecoder.CONTROL_POINT_LENIENCY + 1` — thiếu `false`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:377` `int.TryParse(s.Suffix, out int index)` — thiếu `true`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:380` `s.UseBeatmapSamples` — thiếu `true`
-
-</details>
-
-### osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder.LegacyControlPointProperties
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `IsRedundant(LegacyControlPointProperties)` | 6 | 8/12 | 2 | 0 | 66.7% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`IsRedundant(LegacyControlPointProperties)`**
-
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:674` `TimingSignature == other.TimingSignature` — thiếu `false`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:675` `SampleBank == other.SampleBank` — thiếu `false`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:676` `CustomSampleBank == other.CustomSampleBank` — thiếu `false`
-- `Beatmaps/Formats/LegacyBeatmapEncoder.cs:677` `SampleVolume == other.SampleVolume` — thiếu `false`
-
-</details>
-
 ### osu.Game.Beatmaps.Formats.LegacyDecoder
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -4627,36 +3512,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`Equals(TimeSignature)`**
 
 - `Beatmaps/Timing/TimeSignature.cs:38` `ReferenceEquals(null, other)` — thiếu `true`
-
-</details>
-
-### osu.Game.Collections.CollectionFilterMenuItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(CollectionFilterMenuItem?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(CollectionFilterMenuItem?)`**
-
-- `Collections/CollectionFilterMenuItem.cs:44` `ReferenceEquals(null, other)` — chưa được đánh giá
-- `Collections/CollectionFilterMenuItem.cs:45` `ReferenceEquals(this, other)` — chưa được đánh giá
-- `Collections/CollectionFilterMenuItem.cs:47` `Collection == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Collections.CollectionToggleMenuItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Live<BeatmapCollection>, IBeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Live<BeatmapCollection>, IBeatmapInfo)`**
-
-- `Collections/CollectionToggleMenuItem.cs:18` `state` — chưa được đánh giá
 
 </details>
 
@@ -4802,50 +3657,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Configuration.OsuConfigManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateTrackedSettings()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `InitialiseDefaults()` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateTrackedSettings()`**
-
-- `Configuration/OsuConfigManager.cs:267` `state` — chưa được đánh giá
-- `Configuration/OsuConfigManager.cs:273` `disabledState` — chưa được đánh giá
-- `Configuration/OsuConfigManager.cs:279` `state` — chưa được đánh giá
-- `Configuration/OsuConfigManager.cs:302` `Guid.TryParse(skin, out var id)` — chưa được đánh giá
-
-**`InitialiseDefaults()`**
-
-- `Configuration/OsuConfigManager.cs:79` `enabled.NewValue` — chưa được đánh giá
-- `Configuration/OsuConfigManager.cs:87` `enabled.NewValue` — chưa được đánh giá
-- `Configuration/OsuConfigManager.cs:190` `RuntimeInfo.IsMobile` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Configuration.SessionAverageHitErrorTracker
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `calculateAverageHitError(ScoreInfo?)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`calculateAverageHitError(ScoreInfo?)`**
-
-- `Configuration/SessionAverageHitErrorTracker.cs:37` `newScore == null` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:40` `m.UserPlayable` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:40` `m is IHasNoTimedInputs` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:40` `newScore.Mods.Any(m => !m.UserPlayable || m is IHasNoTimedInputs)` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:43` `newScore.HitEvents.Count < 50` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:46` `newScore.HitEvents.CalculateMedianHitError() is not double medianError` — chưa được đánh giá
-- `Configuration/SessionAverageHitErrorTracker.cs:50` `averageHitErrorHistory.Count >= 50` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Configuration.SettingSourceAttribute
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -4874,431 +3685,13 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Database.BackgroundDataStoreProcessor
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `backpopulateMissingSubmissionAndRankDates()` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `backpopulateUserTags()` | 11 | 0/22 | 0 | 11 | 0.0% |
-| `clearOutdatedStarRatings()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `completeNotification(ProgressNotification?, int, int, int?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `convertLegacyTotalScoreToStandardised()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `populateMissingStarRatings()` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `processBeatmapsWithMissingObjectCounts()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `processOnlineBeatmapSetsWithNoUpdate()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `processScoresWithMissingStatistics()` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `showProgressNotification(int, string, string)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `sleepIfRequired()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `updateNotificationProgress(ProgressNotification?, int, int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `upgradeModMultipliers()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `upgradeScoreRanks()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:87` `SkipProcessing` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:111` `t.Exception?.InnerException is ObjectDisposedException` — chưa được đánh giá
-
-**`backpopulateMissingSubmissionAndRankDates()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:615` `localMetadataSource.Available` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:623` `localMetadataSource.IsAtLeastVersion(2)` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:649` `beatmapSetIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:661` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:680` `lookupSucceeded` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:692` `succeeded` — chưa được đánh giá
-
-**`backpopulateUserTags()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:713` `localMetadataSource.Available` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:713` `localMetadataSource.IsAtLeastVersion(3)` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:718` `localMetadataSource.Available` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:718` `localMetadataSource.IsAtLeastVersion(3)` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:732` `metadataSourceFetchDate <= lastPopulation` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:749` `beatmapIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:763` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:774` `beatmap == null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:778` `lookupSucceeded` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:784` `userTags.SetEquals(beatmap.Metadata.UserTags)` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:791` `beatmap == null` — chưa được đánh giá
-
-**`clearOutdatedStarRatings()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:132` `ruleset.LastAppliedDifficultyVersion < currentVersion` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:142` `b.Ruleset.ShortName == ruleset.ShortName` — chưa được đánh giá
-
-**`completeNotification(ProgressNotification?, int, int, int?)`**
-
-- `Database/BackgroundDataStoreProcessor.cs:837` `notification == null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:840` `totalCount == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:844` `processedCount == totalCount` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:855` `failedCount > 0` — chưa được đánh giá
-
-**`convertLegacyTotalScoreToStandardised()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:508` `scoreIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:518` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-
-**`populateMissingStarRatings()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:174` `beatmapIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:188` `rulesetCache.TryGetValue(rulesetInfo.ShortName, out var ruleset)` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:196` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:205` `beatmap == null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:220` `r.Find<BeatmapInfo>(id) is BeatmapInfo liveBeatmapInfo` — chưa được đánh giá
-
-**`processBeatmapsWithMissingObjectCounts()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:311` `beatmapIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:323` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:334` `beatmap != null` — chưa được đánh giá
-
-**`processOnlineBeatmapSetsWithNoUpdate()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:250` `api.IsLoggedIn` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:257` `beatmapSetIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:269` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:280` `set != null` — chưa được đánh giá
-
-**`processScoresWithMissingStatistics()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:363` `score.BeatmapInfo != null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:364` `score.Statistics.Sum(kvp => kvp.Value) > 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:365` `score.MaximumStatistics.Sum(kvp => kvp.Value) == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:372` `scoreIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:384` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:395` `score != null` — chưa được đánh giá
-
-**`showProgressNotification(int, string, string)`**
-
-- `Database/BackgroundDataStoreProcessor.cs:864` `notificationOverlay == null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:867` `totalCount < 10` — chưa được đánh giá
-
-**`sleepIfRequired()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:886` `localUserPlayInfo?.PlayingState.Value != LocalUserPlayingState.NotPlaying` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:886` `highPerformanceSessionManager?.IsSessionActive == true` — chưa được đánh giá
-
-**`updateNotificationProgress(ProgressNotification?, int, int)`**
-
-- `Database/BackgroundDataStoreProcessor.cs:825` `notification == null` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:831` `processedCount % 100 == 0` — chưa được đánh giá
-
-**`upgradeModMultipliers()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:442` `scoreIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:452` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:466` `s.BeatmapInfo == null` — chưa được đánh giá
-
-**`upgradeScoreRanks()`**
-
-- `Database/BackgroundDataStoreProcessor.cs:568` `scoreIds.Count == 0` — chưa được đánh giá
-- `Database/BackgroundDataStoreProcessor.cs:578` `notification?.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.ExternalEditOperation
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Finish()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Finish()`**
-
-- `Database/ExternalEditOperation.cs:48` `Directory.Exists(MountedPath)` — chưa được đánh giá
-- `Database/ExternalEditOperation.cs:48` `IsMounted` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Database.ImportTask
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `DeleteFile()` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `GetReader()` | 6 | 12/12 | 6 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Database.LegacyArchiveExporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ExportToStream(TModel, Stream, ProgressNotification?, CancellationToken)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ExportToStream(TModel, Stream, ProgressNotification?, CancellationToken)`**
-
-- `Database/LegacyArchiveExporter.cs:43` `UseFixedEncoding` — chưa được đánh giá
-- `Database/LegacyArchiveExporter.cs:57` `filesWritten.Contains(file.Filename)` — chưa được đánh giá
-- `Database/LegacyArchiveExporter.cs:62` `stream == null` — chưa được đánh giá
-- `Database/LegacyArchiveExporter.cs:78` `anyFileMissing` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyBeatmapExporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ExportAsync(Live<BeatmapInfo>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetFileContents(BeatmapSetInfo, INamedFileUsage)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `MutateBeatmap(BeatmapSetInfo, IBeatmap)` | 23 | 0/46 | 0 | 23 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ExportAsync(Live<BeatmapInfo>)`**
-
-- `Database/LegacyBeatmapExporter.cs:217` `itemFilename.Length > MAX_FILENAME_LENGTH - osu_extension.Length` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:241` `inputFile == null` — chưa được đánh giá
-
-**`GetFileContents(BeatmapSetInfo, INamedFileUsage)`**
-
-- `Database/LegacyBeatmapExporter.cs:41` `beatmapInfo == null` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:47` `contentStream == null` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:61` `skinStream == null` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:72` `storyboardStream == null` — chưa được đánh giá
-
-**`MutateBeatmap(BeatmapSetInfo, IBeatmap)`**
-
-- `Database/LegacyBeatmapExporter.cs:102` `playableBeatmap.GridSize >= 24` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:104` `playableBeatmap.GridSize >= 12` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:106` `playableBeatmap.GridSize >= 6` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:115` `i < playableBeatmap.ControlPointInfo.TimingPoints.Count` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:119` `i + 1 < playableBeatmap.ControlPointInfo.TimingPoints.Count` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:124` `o.Time >= timingPoint.Time` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:124` `o.Time < nextTimingPointTime` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:128` `o.StartTime >= timingPoint.Time` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:128` `o.StartTime < nextTimingPointTime` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:135` `i < playableBeatmap.Breaks.Count` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:141` `hitObject is IHasDuration hasDuration` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:141` `hitObject is not IHasPath` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:146` `hitObject is IHasXPosition hasXPosition` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:149` `hitObject is IHasYPosition hasYPosition` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:152` `hitObject is not IHasPath hasPath` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:164` `hasPath.Path.ControlPoints.Count > 1` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:167` `BezierConverter.CountSegments(hasPath.Path.ControlPoints) <= 1` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:168` `hasPath.Path.ControlPoints[0].Type!.Value.Degree == null` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:171` `i < hasPath.Path.ControlPoints.Count` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:187` `i < convertedToBezier.Count` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:199` `i == 0` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:204` `convertedPoint.Type == PathType.BEZIER` — chưa được đánh giá
-- `Database/LegacyBeatmapExporter.cs:204` `i > 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyBeatmapImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetStableImportPaths(Storage)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetStableImportPaths(Storage)`**
-
-- `Database/LegacyBeatmapImporter.cs:23` `storage.ExistsDirectory(string.Empty)` — chưa được đánh giá
-- `Database/LegacyBeatmapImporter.cs:36` `directoryStorage.GetFiles(string.Empty, "*.osu").Any()` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyCollectionImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetAvailableCount(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ImportFromStorage(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `importCollections(List<BeatmapCollection>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `readCollections(Stream, ProgressNotification?)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetAvailableCount(Storage)`**
-
-- `Database/LegacyCollectionImporter.cs:33` `storage.Exists(database_name)` — chưa được đánh giá
-
-**`ImportFromStorage(Storage)`**
-
-- `Database/LegacyCollectionImporter.cs:48` `storage.Exists(database_name)` — chưa được đánh giá
-
-**`importCollections(List<BeatmapCollection>)`**
-
-- `Database/LegacyCollectionImporter.cs:91` `existing != null` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:95` `existing.BeatmapMD5Hashes.Contains(newBeatmap)` — chưa được đánh giá
-
-**`readCollections(Stream, ProgressNotification?)`**
-
-- `Database/LegacyCollectionImporter.cs:117` `notification != null` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:134` `i < collectionCount` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:136` `notification?.CancellationToken.IsCancellationRequested == true` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:142` `j < mapCount` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:144` `notification?.CancellationToken.IsCancellationRequested == true` — chưa được đánh giá
-- `Database/LegacyCollectionImporter.cs:152` `notification != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyExporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ExportAsync(Live<TModel>, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ExportAsync(Live<TModel>, CancellationToken)`**
-
-- `Database/LegacyExporter.cs:75` `itemFilename.Length > MAX_FILENAME_LENGTH - FileExtension.Length` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyImportManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CheckSongsFolderHardLinkAvailability()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetCurrentStableStorage()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetImportCount(StableContent, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ImportFromStableAsync(StableContent, bool)` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `IsUsableForStableImport(DirectoryInfo?, DirectoryInfo?)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CheckSongsFolderHardLinkAvailability()`**
-
-- `Database/LegacyImportManager.cs:106` `stableStorage == null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:106` `gameHost is not DesktopGameHost desktopGameHost` — chưa được đánh giá
-
-**`GetCurrentStableStorage()`**
-
-- `Database/LegacyImportManager.cs:190` `cachedStorage != null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:194` `stableStorage != null` — chưa được đánh giá
-
-**`GetImportCount(StableContent, CancellationToken)`**
-
-- `Database/LegacyImportManager.cs:119` `stableStorage == null` — chưa được đánh giá
-
-**`ImportFromStableAsync(StableContent, bool)`**
-
-- `Database/LegacyImportManager.cs:147` `stableStorage == null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:149` `interactiveLocateIfNotFound` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:160` `stableStorage == null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:166` `content.HasFlag(StableContent.Beatmaps)` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:169` `content.HasFlag(StableContent.Skins)` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:172` `content.HasFlag(StableContent.Collections)` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:182` `content.HasFlag(StableContent.Scores)` — chưa được đánh giá
-
-**`IsUsableForStableImport(DirectoryInfo?, DirectoryInfo?)`**
-
-- `Database/LegacyImportManager.cs:69` `directory == null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:77` `directory.GetFiles(@"osu!.*.cfg").Any()` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:85` `directory.GetDirectories(@"Songs").Any()` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:85` `directory.GetDirectories(@"Skins").Any()` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:92` `directory.Parent != null` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:92` `directory.Name == @"Songs"` — chưa được đánh giá
-- `Database/LegacyImportManager.cs:92` `directory.Name == @"Skins"` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyModelImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetStableImportPaths(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ImportFromStableAsync(StableStorage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetStableImportPaths(Storage)`**
-
-- `Database/LegacyModelImporter.cs:31` `storage.ExistsDirectory(ImportFromStablePath)` — chưa được đánh giá
-
-**`ImportFromStableAsync(StableStorage)`**
-
-- `Database/LegacyModelImporter.cs:52` `storage.ExistsDirectory(ImportFromStablePath)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyScoreExporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ExportToStream(ScoreInfo, Stream, ProgressNotification?, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ExportToStream(ScoreInfo, Stream, ProgressNotification?, CancellationToken)`**
-
-- `Database/LegacyScoreExporter.cs:34` `file == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.LegacyScoreImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetStableImportPaths(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetStableImportPaths(Storage)`**
-
-- `Database/LegacyScoreImporter.cs:19` `storage.ExistsDirectory(ImportFromStablePath)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.Live
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(Live<T>?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(Live<T>?)`**
-
-- `Database/Live.cs:56` `ReferenceEquals(this, other)` — chưa được đánh giá
-- `Database/Live.cs:57` `other == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.MemoryCachingComponent
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetAsync(TLookup, CancellationToken, int)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `Invalidate(Func<TLookup, bool>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetAsync(TLookup, CancellationToken, int)`**
-
-- `Database/MemoryCachingComponent.cs:42` `CheckExists(lookup, out TValue? existing)` — chưa được đánh giá
-- `Database/MemoryCachingComponent.cs:48` `computationDelay > 0` — chưa được đánh giá
-- `Database/MemoryCachingComponent.cs:55` `computed != null` — chưa được đánh giá
-- `Database/MemoryCachingComponent.cs:55` `CacheNullValues` — chưa được đánh giá
-
-**`Invalidate(Func<TLookup, bool>)`**
-
-- `Database/MemoryCachingComponent.cs:72` `matchKeyPredicate(kvp.Key)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.MemoryCachingComponent.MemoryCachingStatistics
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ToString()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ToString()`**
-
-- `Database/MemoryCachingComponent.cs:119` `totalAccesses == 0` — chưa được đánh giá
-
-</details>
 
 ### osu.Game.Database.MissingBeatmapNotification
 
@@ -5319,684 +3712,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Database/MissingBeatmapNotification.cs:91` `changes?.InsertedIndices == null` — chưa được đánh giá
 - `Database/MissingBeatmapNotification.cs:93` `sender.Any(s => s.Beatmaps.Any(b => b.MD5Hash == beatmapHash))` — chưa được đánh giá
 - `Database/MissingBeatmapNotification.cs:95` `scoreArchive != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.ModelDownloader
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Download(T, bool, TModel?)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `canDownload(T)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Download(T, bool, TModel?)`**
-
-- `Database/ModelDownloader.cs:53` `canDownload(model)` — chưa được đánh giá
-- `Database/ModelDownloader.cs:76` `originalModel != null` — chưa được đánh giá
-- `Database/ModelDownloader.cs:84` `importSuccessful` — chưa được đánh giá
-- `Database/ModelDownloader.cs:116` `error is OperationCanceledException` — chưa được đánh giá
-- `Database/ModelDownloader.cs:118` `error is WebException webException` — chưa được đánh giá
-- `Database/ModelDownloader.cs:118` `webException.Message == @"TooManyRequests"` — chưa được đánh giá
-
-**`canDownload(T)`**
-
-- `Database/ModelDownloader.cs:131` `GetExistingDownload(model) == null` — chưa được đánh giá
-- `Database/ModelDownloader.cs:131` `api != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.ModelManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AddFile(TModel, Stream, string, Realm)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Delete(List<TModel>, bool)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `Delete(TModel)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Undelete(List<TModel>, bool)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `Undelete(TModel)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `performFileOperation(TModel, Action<TModel>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AddFile(TModel, Stream, string, Realm)`**
-
-- `Database/ModelManager.cs:92` `FilesystemSanityCheckHelpers.IncursPathTraversalRisk(filename)` — chưa được đánh giá
-- `Database/ModelManager.cs:97` `existing != null` — chưa được đánh giá
-
-**`Delete(List<TModel>, bool)`**
-
-- `Database/ModelManager.cs:115` `items.Count == 0` — chưa được đánh giá
-- `Database/ModelManager.cs:117` `silent` — chưa được đánh giá
-- `Database/ModelManager.cs:130` `silent` — chưa được đánh giá
-- `Database/ModelManager.cs:137` `notification.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-
-**`Delete(TModel)`**
-
-- `Database/ModelManager.cs:199` `processableItem.IsManaged` — chưa được đánh giá
-- `Database/ModelManager.cs:202` `processableItem?.DeletePending != false` — chưa được đánh giá
-
-**`Undelete(List<TModel>, bool)`**
-
-- `Database/ModelManager.cs:157` `items.Any()` — chưa được đánh giá
-- `Database/ModelManager.cs:159` `silent` — chưa được đánh giá
-- `Database/ModelManager.cs:171` `silent` — chưa được đánh giá
-- `Database/ModelManager.cs:178` `notification.State == ProgressNotificationState.Cancelled` — chưa được đánh giá
-
-**`Undelete(TModel)`**
-
-- `Database/ModelManager.cs:217` `processableItem.IsManaged` — chưa được đánh giá
-- `Database/ModelManager.cs:220` `processableItem?.DeletePending != true` — chưa được đánh giá
-
-**`performFileOperation(TModel, Action<TModel>)`**
-
-- `Database/ModelManager.cs:51` `item.IsManaged` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.OnlineLookupCache
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LookupAsync(TLookup[], CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `finishPendingTask()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `performLookup()` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `queryValue(TLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LookupAsync(TLookup[], CancellationToken)`**
-
-- `Database/OnlineLookupCache.cs:58` `task.IsCompletedSuccessfully` — chưa được đánh giá
-
-**`finishPendingTask()`**
-
-- `Database/OnlineLookupCache.cs:163` `pendingTasks.Count > 0` — chưa được đánh giá
-
-**`performLookup()`**
-
-- `Database/OnlineLookupCache.cs:101` `pendingTasks.Count > 0` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:101` `nextTaskBatch.Count < 50` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:106` `CheckExists(next.id, out var existing)` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:110` `nextTaskBatch.TryGetValue(next.id, out var tasks)` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:118` `nextTaskBatch.Count == 0` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:135` `foundValues != null` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:139` `nextTaskBatch.TryGetValue(value.OnlineID, out var tasks)` — chưa được đánh giá
-
-**`queryValue(TLookup)`**
-
-- `Database/OnlineLookupCache.cs:86` `pendingRequestTask == null` — chưa được đánh giá
-- `Database/OnlineLookupCache.cs:86` `pendingRequestTask.IsFaulted` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmAccess
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Storage, string, GameThread?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `BlockAllOperations(string)` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `CreateBackup(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Dispose()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `RegisterCustomSubscription(Func<Realm, IDisposable?>)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `Run(Action<Realm>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Run(Func<Realm, T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RunAsync(Func<Realm, T>, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `SubscribeToPropertyChanged(Func<Realm, TModel?>, Expression<Func<TModel, TProperty>>, Action<TProperty>)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `Write(Action<Realm>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Write(Func<Realm, T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `WriteAsync(Action<Realm>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `WriteAsync(Func<Realm, T>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `applyFilenameSchemaSuffix(string)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `applyMigrationsForVersion(Migration, ulong)` | 48 | 0/96 | 0 | 48 | 0.0% |
-| `attemptRecoverFromFile(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `createBackup(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ensureUpdateRealm()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `getConfiguration(string?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `getRealmInstance()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `onMigration(Migration, ulong)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `prepareFirstRealmAccess()` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `registerSubscription(Func<Realm, IDisposable?>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Storage, string, GameThread?)`**
-
-- `Database/RealmAccess.cs:214` `Filename.EndsWith(realm_extension, StringComparison.Ordinal)` — chưa được đánh giá
-- `Database/RealmAccess.cs:218` `DebugUtils.IsNUnitRunning` — chưa được đánh giá
-
-**`BlockAllOperations(string)`**
-
-- `Database/RealmAccess.cs:1383` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:1394` `hasInitialisedOnce` — chưa được đánh giá
-- `Database/RealmAccess.cs:1419` `Compact()` — chưa được đánh giá
-- `Database/RealmAccess.cs:1424` `timeSpent > 5000` — chưa được đánh giá
-- `Database/RealmAccess.cs:1477` `syncContext == null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1484` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:1503` `updateRealmReestablished.Wait(10000)` — chưa được đánh giá
-
-**`CreateBackup(string)`**
-
-- `Database/RealmAccess.cs:1346` `realmRetrievalLock.CurrentCount != 0` — chưa được đánh giá
-
-**`Dispose()`**
-
-- `Database/RealmAccess.cs:1515` `pendingAsyncOperations.Wait(10000)` — chưa được đánh giá
-- `Database/RealmAccess.cs:1520` `isDisposed` — chưa được đánh giá
-
-**`RegisterCustomSubscription(Func<Realm, IDisposable?>)`**
-
-- `Database/RealmAccess.cs:724` `updateThreadSyncContext == null` — chưa được đánh giá
-- `Database/RealmAccess.cs:729` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:738` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:745` `customSubscriptionsResetMap.TryGetValue(action, out var unsubscriptionAction)` — chưa được đánh giá
-
-**`Run(Action<Realm>)`**
-
-- `Database/RealmAccess.cs:473` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`Run(Func<Realm, T>)`**
-
-- `Database/RealmAccess.cs:456` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`RunAsync(Func<Realm, T>, CancellationToken)`**
-
-- `Database/RealmAccess.cs:495` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:499` `pendingAsyncOperations.TryAddCount()` — chưa được đánh giá
-
-**`SubscribeToPropertyChanged(Func<Realm, TModel?>, Expression<Func<TModel, TProperty>>, Action<TProperty>)`**
-
-- `Database/RealmAccess.cs:683` `model == null` — chưa được đánh giá
-- `Database/RealmAccess.cs:695` `args.PropertyName == propertyName` — chưa được đánh giá
-- `Database/RealmAccess.cs:702` `expression is LambdaExpression lambda` — chưa được đánh giá
-- `Database/RealmAccess.cs:705` `lambda.Body is MemberExpression memberExpression` — chưa được đánh giá
-- `Database/RealmAccess.cs:710` `memberExpression.Expression != lambda.Parameters[0]` — chưa được đánh giá
-
-**`Write(Action<Realm>)`**
-
-- `Database/RealmAccess.cs:536` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`Write(Func<Realm, T>)`**
-
-- `Database/RealmAccess.cs:516` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`WriteAsync(Action<Realm>)`**
-
-- `Database/RealmAccess.cs:560` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:564` `pendingAsyncOperations.TryAddCount()` — chưa được đánh giá
-
-**`WriteAsync(Func<Realm, T>)`**
-
-- `Database/RealmAccess.cs:596` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:600` `pendingAsyncOperations.TryAddCount()` — chưa được đánh giá
-
-**`applyFilenameSchemaSuffix(string)`**
-
-- `Database/RealmAccess.cs:240` `storage.Exists(filename)` — chưa được đánh giá
-- `Database/RealmAccess.cs:244` `i >= 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:248` `storage.Exists(previousFilename)` — chưa được đánh giá
-- `Database/RealmAccess.cs:256` `storage.Exists(originalFilename)` — chưa được đánh giá
-
-**`applyMigrationsForVersion(Migration, ulong)`**
-
-- `Database/RealmAccess.cs:857` `migration.OldRealm.Schema.TryFindObjectSchema(className, out _)` — chưa được đánh giá
-- `Database/RealmAccess.cs:865` `i < itemCount` — chưa được đánh giá
-- `Database/RealmAccess.cs:884` `increaseSpeedBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:884` `increaseSpeedBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Control, InputKey.Plus })` — chưa được đánh giá
-- `Database/RealmAccess.cs:888` `decreaseSpeedBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:888` `decreaseSpeedBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Control, InputKey.Minus })` — chưa được đánh giá
-- `Database/RealmAccess.cs:899` `migration.OldRealm.Schema.TryFindObjectSchema(metadataClassName, out _)` — chưa được đánh giá
-- `Database/RealmAccess.cs:907` `i < metadataCount` — chưa được đánh giá
-- `Database/RealmAccess.cs:924` `migration.OldRealm.Schema.TryFindObjectSchema(rulesetSettingClassName, out _)` — chưa được đánh giá
-- `Database/RealmAccess.cs:930` `i < newSettings.Count` — chưa được đánh giá
-- `Database/RealmAccess.cs:938` `string.IsNullOrEmpty(rulesetName)` — chưa được đánh giá
-- `Database/RealmAccess.cs:950` `migration.OldRealm.Schema.TryFindObjectSchema(keyBindingClassName, out _)` — chưa được đánh giá
-- `Database/RealmAccess.cs:956` `i < newKeyBindings.Count` — chưa được đánh giá
-- `Database/RealmAccess.cs:967` `string.IsNullOrEmpty(rulesetName)` — chưa được đánh giá
-- `Database/RealmAccess.cs:995` `legacyCollectionImporter.GetAvailableCount(storage).GetResultSafely() > 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:1028` `version < LegacyScoreEncoder.FIRST_LAZER_VERSION` — chưa được đánh giá
-- `Database/RealmAccess.cs:1049` `score.IsLegacyScore` — chưa được đánh giá
-- `Database/RealmAccess.cs:1049` `score.Ruleset.IsLegacyRuleset()` — chưa được đánh giá
-- `Database/RealmAccess.cs:1068` `score.IsLegacyScore` — chưa được đánh giá
-- `Database/RealmAccess.cs:1068` `score.Ruleset.IsLegacyRuleset()` — chưa được đánh giá
-- `Database/RealmAccess.cs:1093` `legacyMods.HasFlag(LegacyMods.ScoreV2)` — chưa được đánh giá
-- `Database/RealmAccess.cs:1093` `score.APIMods.Any(mod => mod.Acronym == @"SV2")` — chưa được đánh giá
-- `Database/RealmAccess.cs:1111` `toggleChatBind != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1111` `toggleChatBind.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Tab })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1126` `catchDashBindings.All(kb => kb.KeyCombination.Equals(new KeyCombination(InputKey.Shift)))` — chưa được đánh giá
-- `Database/RealmAccess.cs:1149` `countCleared > 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:1162` `score.OnlineID > 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:1181` `b.TotalObjectCount == 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:1181` `b.EndTimeObjectCount == 0` — chưa được đánh giá
-- `Database/RealmAccess.cs:1207` `columns <= 10` — chưa được đánh giá
-- `Database/RealmAccess.cs:1219` `dual` — chưa được đánh giá
-- `Database/RealmAccess.cs:1232` `dual` — chưa được đánh giá
-- `Database/RealmAccess.cs:1232` `column < columns * (dual ? 2 : 1)` — chưa được đánh giá
-- `Database/RealmAccess.cs:1234` `columns % 2 == 1` — chưa được đánh giá
-- `Database/RealmAccess.cs:1234` `column % columns == columns / 2` — chưa được đánh giá
-- `Database/RealmAccess.cs:1244` `oldKeyBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1260` `toggleFpsBind != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1260` `toggleFpsBind.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Shift, InputKey.Control, InputKey.F })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1272` `nextBeatSnapBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1272` `nextBeatSnapBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Shift, InputKey.Control, InputKey.MouseWheelLeft })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1276` `previousBeatSnapBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1276` `previousBeatSnapBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Shift, InputKey.Control, InputKey.MouseWheelRight })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1288` `nextBeatSnapBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1288` `nextBeatSnapBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Control, InputKey.MouseWheelDown })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1292` `previousBeatSnapBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1292` `previousBeatSnapBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.Control, InputKey.MouseWheelUp })` — chưa được đánh giá
-- `Database/RealmAccess.cs:1303` `existingBinding != null` — chưa được đánh giá
-- `Database/RealmAccess.cs:1303` `existingBinding.KeyCombination.Keys.SequenceEqual(new[] { InputKey.MouseRight })` — chưa được đánh giá
-
-**`attemptRecoverFromFile(string)`**
-
-- `Database/RealmAccess.cs:281` `realm.All<ScoreInfo>().Any()` — chưa được đánh giá
-
-**`createBackup(string)`**
-
-- `Database/RealmAccess.cs:1361` `source == null` — chưa được đánh giá
-
-**`ensureUpdateRealm()`**
-
-- `Database/RealmAccess.cs:173` `isSendingNotificationResetEvents` — chưa được đánh giá
-- `Database/RealmAccess.cs:176` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmAccess.cs:179` `updateRealm == null` — chưa được đánh giá
-
-**`getConfiguration(string?)`**
-
-- `Database/RealmAccess.cs:818` `Directory.Exists(tempPathLocation)` — chưa được đánh giá
-
-**`getRealmInstance()`**
-
-- `Database/RealmAccess.cs:786` `currentThreadHasRealmRetrievalLock.Value` — chưa được đánh giá
-- `Database/RealmAccess.cs:805` `tookSemaphoreLock` — chưa được đánh giá
-
-**`onMigration(Migration, ulong)`**
-
-- `Database/RealmAccess.cs:831` `i <= schema_version` — chưa được đánh giá
-
-**`prepareFirstRealmAccess()`**
-
-- `Database/RealmAccess.cs:326` `storage.Exists(newerVersionFilename)` — chưa được đánh giá
-- `Database/RealmAccess.cs:338` `fi.Exists` — chưa được đánh giá
-- `Database/RealmAccess.cs:351` `e.Message.StartsWith(@"Provided schema version", StringComparison.Ordinal)` — chưa được đánh giá
-- `Database/RealmAccess.cs:356` `storage.Exists(newerVersionFilename)` — chưa được đánh giá
-- `Database/RealmAccess.cs:363` `e.Message.StartsWith("SetEndOfFile() failed", StringComparison.Ordinal)` — chưa được đánh giá
-- `Database/RealmAccess.cs:368` `storage.Exists(Filename)` — chưa được đánh giá
-
-**`registerSubscription(Func<Realm, IDisposable?>)`**
-
-- `Database/RealmAccess.cs:770` `customSubscriptionsResetMap.TryGetValue(action, out var found)` — chưa được đánh giá
-- `Database/RealmAccess.cs:770` `found == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmArchiveModelImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeginExternalEditing(TModel)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `CanReuseExisting(TModel, TModel)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `CheckForExisting(TModel, Realm)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ComputeHash(TModel)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Import(ImportTask, ImportParameters, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Import(ProgressNotification, ImportTask[], ImportParameters)` | 9 | 0/18 | 0 | 9 | 0.0% |
-| `ImportModel(TModel, ArchiveReader?, ImportParameters, CancellationToken)` | 12 | 0/24 | 0 | 12 | 0.0% |
-| `LogForModel(TModel?, string, Exception?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `UndeleteForReuse(TModel)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `computeHashFast(ArchiveReader)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `getShortenedFilenames(ArchiveReader)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `importFromArchive(ArchiveReader, ImportParameters, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `pauseIfNecessaryAsync(ImportParameters, ProgressNotification, CancellationToken)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BeginExternalEditing(TModel)`**
-
-- `Database/RealmArchiveModelImporter.cs:206` `Directory.Exists(mountedPath)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:229` `FilesystemSanityCheckHelpers.IsSubDirectory(parent: mountedPath, child: destinationDirectory)` — chưa được đánh giá
-
-**`CanReuseExisting(TModel, TModel)`**
-
-- `Database/RealmArchiveModelImporter.cs:607` `getIDs(existing.Files).SequenceEqual(getIDs(import.Files))` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:608` `getFilenames(existing.Files).SequenceEqual(getFilenames(import.Files))` — chưa được đánh giá
-
-**`CheckForExisting(TModel, Realm)`**
-
-- `Database/RealmArchiveModelImporter.cs:586` `string.IsNullOrEmpty(model.Hash)` — chưa được đánh giá
-
-**`ComputeHash(TModel)`**
-
-- `Database/RealmArchiveModelImporter.cs:497` `hashable.Length > 0` — chưa được đánh giá
-
-**`Import(ImportTask, ImportParameters, CancellationToken)`**
-
-- `Database/RealmArchiveModelImporter.cs:268` `import != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:268` `ShouldDeleteArchive(task.Path)` — chưa được đánh giá
-
-**`Import(ProgressNotification, ImportTask[], ImportParameters)`**
-
-- `Database/RealmArchiveModelImporter.cs:103` `tasks.Length == 0` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:137` `model != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:149` `cancelled.CancellationToken == notification.CancellationToken` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:162` `imported.Count == 0` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:164` `notification.CancellationToken.IsCancellationRequested` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:176` `tasks.Length > imported.Count` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:178` `imported.Count > 1` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:183` `imported.Count > 0` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:183` `PresentImport != null` — chưa được đánh giá
-
-**`ImportModel(TModel, ArchiveReader?, ImportParameters, CancellationToken)`**
-
-- `Database/RealmArchiveModelImporter.cs:330` `parameters.Batch` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:330` `archive != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:337` `existing != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:343` `CanSkipImport(existing, item)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:344` `getFilenames(existing.Files).SequenceEqual(getShortenedFilenames(archive).Select(p => p.shortened).Order())` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:345` `checkAllFilesExist(existing)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:369` `archive != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:375` `FilesystemSanityCheckHelpers.IncursPathTraversalRisk(filenames.shortened)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:389` `file.File.IsManaged` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:412` `existing != null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:414` `CanReuseExisting(existing, item)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:443` `e is TaskCanceledException` — chưa được đánh giá
-
-**`LogForModel(TModel?, string, Exception?)`**
-
-- `Database/RealmArchiveModelImporter.cs:465` `model == null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:465` `model.IsValid` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:465` `string.IsNullOrEmpty(model.Hash)` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:472` `e != null` — chưa được đánh giá
-
-**`UndeleteForReuse(TModel)`**
-
-- `Database/RealmArchiveModelImporter.cs:619` `existing.DeletePending` — chưa được đánh giá
-
-**`computeHashFast(ArchiveReader)`**
-
-- `Database/RealmArchiveModelImporter.cs:513` `hashable.Length > 0` — chưa được đánh giá
-
-**`getShortenedFilenames(ArchiveReader)`**
-
-- `Database/RealmArchiveModelImporter.cs:522` `prefix.EndsWith('/')` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:522` `prefix.EndsWith('\\')` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:534` `seenFilenames.Add(shortened)` — chưa được đánh giá
-
-**`importFromArchive(ArchiveReader, ImportParameters, CancellationToken)`**
-
-- `Database/RealmArchiveModelImporter.cs:298` `model == null` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:314` `parameters.Batch` — chưa được đánh giá
-
-**`pauseIfNecessaryAsync(ImportParameters, ProgressNotification, CancellationToken)`**
-
-- `Database/RealmArchiveModelImporter.cs:635` `PauseImports` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:635` `importParameters.ImportImmediately` — chưa được đánh giá
-- `Database/RealmArchiveModelImporter.cs:645` `PauseImports` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmDetachedBeatmapStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Update()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `beatmapSetsChanged(IRealmCollection<BeatmapSetInfo>, ChangeSet?)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Update()`**
-
-- `Database/RealmDetachedBeatmapStore.cs:165` `loaded.IsSet` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:168` `pendingOperations.Count == 0` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:174` `pendingOperations.TryDequeue(out var op)` — chưa được đánh giá
-
-**`beatmapSetsChanged(IRealmCollection<BeatmapSetInfo>, ChangeSet?)`**
-
-- `Database/RealmDetachedBeatmapStore.cs:45` `changes == null` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:47` `sender is RealmResetEmptySet<BeatmapSetInfo>` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:102` `changes.InsertedIndices.Length == 1` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:102` `changes.DeletedIndices.Length == 1` — chưa được đánh giá
-- `Database/RealmDetachedBeatmapStore.cs:115` `deletedSet.OnlineID == insertedSet.OnlineID` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `FindWithRefresh(Realm, Guid)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `HasCollectionChanges(ChangeSet)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Write(Realm, Action<Realm>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Write(Realm, Func<Realm, T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`FindWithRefresh(Realm, Guid)`**
-
-- `Database/RealmExtensions.cs:30` `found == null` — chưa được đánh giá
-
-**`HasCollectionChanges(ChangeSet)`**
-
-- `Database/RealmExtensions.cs:106` `changes.InsertedIndices.Length > 0` — chưa được đánh giá
-- `Database/RealmExtensions.cs:106` `changes.DeletedIndices.Length > 0` — chưa được đánh giá
-- `Database/RealmExtensions.cs:106` `changes.Moves.Length > 0` — chưa được đánh giá
-
-**`Write(Realm, Action<Realm>)`**
-
-- `Database/RealmExtensions.cs:57` `realm.IsInTransaction` — chưa được đánh giá
-
-**`Write(Realm, Func<Realm, T>)`**
-
-- `Database/RealmExtensions.cs:84` `realm.IsInTransaction` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmFileStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Add(Stream, Realm, bool, bool)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `checkFileExistsAndMatchesHash(RealmFile)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `copyToStore(RealmFile, Stream, bool)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Add(Stream, Realm, bool, bool)`**
-
-- `Database/RealmFileStore.cs:52` `checkFileExistsAndMatchesHash(file)` — chưa được đánh giá
-- `Database/RealmFileStore.cs:55` `addToRealm` — chưa được đánh giá
-- `Database/RealmFileStore.cs:55` `file.IsManaged` — chưa được đánh giá
-
-**`checkFileExistsAndMatchesHash(RealmFile)`**
-
-- `Database/RealmFileStore.cs:83` `Storage.Exists(path)` — chưa được đánh giá
-
-**`copyToStore(RealmFile, Stream, bool)`**
-
-- `Database/RealmFileStore.cs:63` `data is FileStream fs` — chưa được đánh giá
-- `Database/RealmFileStore.cs:63` `preferHardLinks` — chưa được đánh giá
-- `Database/RealmFileStore.cs:66` `HardLinkHelper.TryCreateHardLink(Storage.GetFullPath(file.GetStoragePath(), true), fs.Name)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmLive
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `PerformRead(Action<T>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `PerformRead(Func<T, TReturn>)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `PerformWrite(Action<T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Value.get` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ensureDataIsFromUpdateThread()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`PerformRead(Action<T>)`**
-
-- `Database/RealmLive.cs:50` `IsManaged` — chưa được đánh giá
-- `Database/RealmLive.cs:58` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`PerformRead(Func<T, TReturn>)`**
-
-- `Database/RealmLive.cs:76` `IsManaged` — chưa được đánh giá
-- `Database/RealmLive.cs:79` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Database/RealmLive.cs:90` `returnData is RealmObjectBase realmObject` — chưa được đánh giá
-- `Database/RealmLive.cs:90` `realmObject.IsManaged` — chưa được đánh giá
-
-**`PerformWrite(Action<T>)`**
-
-- `Database/RealmLive.cs:103` `IsManaged` — chưa được đánh giá
-
-**`Value.get`**
-
-- `Database/RealmLive.cs:122` `IsManaged` — chưa được đánh giá
-- `Database/RealmLive.cs:125` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-
-**`ensureDataIsFromUpdateThread()`**
-
-- `Database/RealmLive.cs:137` `dataIsFromUpdateThread` — chưa được đánh giá
-- `Database/RealmLive.cs:137` `data.Realm.AsNonNull().IsClosed` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmLiveUnmanaged
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(T)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(T)`**
-
-- `Database/RealmLiveUnmanaged.cs:28` `data.IsManaged` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmObjectExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Detach(T)` | 2 | 1/4 | 0 | 1 | 25.0% |
-| `QueryAsyncWithNotifications(IList<T>, NotificationCallbackDelegate<T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `QueryAsyncWithNotifications(IQueryable<T>, NotificationCallbackDelegate<T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `QueryAsyncWithNotifications(IRealmCollection<T>, NotificationCallbackDelegate<T>)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `applyCommonConfiguration(IMapperConfigurationExpression)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `mapper (field initializer)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `write_mapper (field initializer)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Detach(T)`**
-
-- `Database/RealmObjectExtensions.cs:217` `item.IsManaged` — thiếu `true`
-- `Database/RealmObjectExtensions.cs:220` `item is BeatmapSetInfo` — chưa được đánh giá
-
-**`QueryAsyncWithNotifications(IList<T>, NotificationCallbackDelegate<T>)`**
-
-- `Database/RealmObjectExtensions.cs:370` `list is IRealmCollection<T> realmCollection` — chưa được đánh giá
-
-**`QueryAsyncWithNotifications(IQueryable<T>, NotificationCallbackDelegate<T>)`**
-
-- `Database/RealmObjectExtensions.cs:343` `list is IRealmCollection<T> realmCollection` — chưa được đánh giá
-
-**`QueryAsyncWithNotifications(IRealmCollection<T>, NotificationCallbackDelegate<T>)`**
-
-- `Database/RealmObjectExtensions.cs:299` `RealmAccess.CurrentThreadSubscriptionsAllowed` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:305` `initial` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:311` `changes != null` — chưa được đánh giá
-
-**`applyCommonConfiguration(IMapperConfigurationExpression)`**
-
-- `Database/RealmObjectExtensions.cs:168` `m.DestinationMember.Has<IgnoredAttribute>()` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:168` `m.DestinationMember.Has<BacklinkAttribute>()` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:168` `m.DestinationMember.Has<IgnoreDataMemberAttribute>()` — chưa được đánh giá
-
-**`mapper (field initializer)`**
-
-- `Database/RealmObjectExtensions.cs:121` `i < d.BeatmapSet?.Beatmaps.Count` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:123` `d.BeatmapSet.Beatmaps[i].Equals(d)` — chưa được đánh giá
-
-**`write_mapper (field initializer)`**
-
-- `Database/RealmObjectExtensions.cs:64` `existingBeatmap != null` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:67` `d.Beatmaps.Contains(existingBeatmap)` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:96` `m.DestinationMember.Has<IgnoredAttribute>()` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:96` `m.DestinationMember.Has<BacklinkAttribute>()` — chưa được đánh giá
-- `Database/RealmObjectExtensions.cs:96` `m.DestinationMember.Has<IgnoreDataMemberAttribute>()` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.RealmResetEmptySet
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Contains(object?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `IndexOf(object?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Contains(object?)`**
-
-- `Database/RealmResetEmptySet.cs:34` `item != null` — chưa được đánh giá
-- `Database/RealmResetEmptySet.cs:34` `emptySet.Contains((T)item)` — chưa được đánh giá
-
-**`IndexOf(object?)`**
-
-- `Database/RealmResetEmptySet.cs:33` `item == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Database.StandardisedScoreMigrationTools
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ComputeAccuracy(IReadOnlyDictionary<HitResult, int>, IReadOnlyDictionary<HitResult, int>, ScoreProcessor)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `PopulateFromReplay(ScoreInfo, RealmFileStore, Action<SerializationReader>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `UpdateToLatestScoreMultipliers(ScoreInfo, IBeatmapDifficultyInfo)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `UpdateToLatestScoring(ScoreInfo, WorkingBeatmap)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `convertFromLegacyTotalScore(ScoreInfo, Ruleset, LegacyBeatmapConversionDifficultyInfo, LegacyScoreAttributes)` | 11 | 8/22 | 0 | 3 | 36.4% |
-| `convertFromLegacyTotalScore(ScoreInfo, Ruleset, WorkingBeatmap)` | 4 | 7/8 | 3 | 0 | 87.5% |
-| `estimateComboProportionForCatch(int, int, int)` | 10 | 0/20 | 0 | 10 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`PopulateFromReplay(ScoreInfo, RealmFileStore, Action<SerializationReader>)`**
-
-- `Database/StandardisedScoreMigrationTools.cs:504` `replayFilename == null` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:511` `stream == null` — chưa được đánh giá
-
-**`convertFromLegacyTotalScore(ScoreInfo, Ruleset, LegacyBeatmapConversionDifficultyInfo, LegacyScoreAttributes)`**
-
-- `Database/StandardisedScoreMigrationTools.cs:135` `score.IsLegacyScore` — thiếu `false`
-- `Database/StandardisedScoreMigrationTools.cs:140` `ruleset is not ILegacyRuleset legacyRuleset` — thiếu `true`
-- `Database/StandardisedScoreMigrationTools.cs:153` `maximumLegacyComboScore + maximumLegacyBonusScore > 0` — thiếu `true`
-- `Database/StandardisedScoreMigrationTools.cs:164` `legacyModMultiplier == 0` — thiếu `true`
-- `Database/StandardisedScoreMigrationTools.cs:179` `score.MaxCombo == 0` — thiếu `true`
-- `Database/StandardisedScoreMigrationTools.cs:179` `score.Accuracy == 0` — thiếu `true`
-- `Database/StandardisedScoreMigrationTools.cs:191` `maximumLegacyComboScore + maximumLegacyBonusScore == 0` — thiếu `false`
-- `Database/StandardisedScoreMigrationTools.cs:263` `remainingCountOfObjectsGivingCombo > 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:317` `fruitTinyScaleDivisor == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:325` `score.MaximumStatistics.GetValueOrDefault(HitResult.SmallTickHit) == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:346` `convertedTotalScoreWithoutMods < 0` — thiếu `true`
-
-**`convertFromLegacyTotalScore(ScoreInfo, Ruleset, WorkingBeatmap)`**
-
-- `Database/StandardisedScoreMigrationTools.cs:105` `ruleset is not ILegacyRuleset legacyRuleset` — thiếu `true`
-
-**`estimateComboProportionForCatch(int, int, int)`**
-
-- `Database/StandardisedScoreMigrationTools.cs:372` `beatmapMaxCombo == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:375` `scoreMaxCombo == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:378` `beatmapMaxCombo == scoreMaxCombo` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:388` `assumedLengthOfRemainingCombos > 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:395` `remainingCombo > 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:406` `estimatedBestCaseTotal == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:412` `maxCombo == 0` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:417` `maxCombo <= 2` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:423` `maxCombo <= 200` — chưa được đánh giá
-- `Database/StandardisedScoreMigrationTools.cs:432` `lengthOfComboAfterMiss >= 200` — chưa được đánh giá
 
 </details>
 
@@ -6038,18 +3753,9 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `IsLegacyRuleset(IRulesetInfo)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `MatchesOnlineID(IScoreInfo?, IScoreInfo?)` | 5 | 10/10 | 5 | 0 | 100.0% |
-| `matchesOnlineID(IHasOnlineID<int>?, IHasOnlineID<int>?)` | 4 | 8/8 | 4 | 0 | 100.0% |
-| `matchesOnlineID(IHasOnlineID<long>?, IHasOnlineID<long>?)` | 4 | 7/8 | 3 | 0 | 87.5% |
 
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`matchesOnlineID(IHasOnlineID<long>?, IHasOnlineID<long>?)`**
-
-- `Extensions/ModelExtensions.cs:139` `other.OnlineID < 0` — thiếu `true`
-
-</details>
+_Mọi điều kiện đã phủ đủ cả true và false._
 
 ### osu.Game.Extensions.NumberFormattingExtensions
 
@@ -6170,25 +3876,10 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Graphics.OnlineAssetCachingStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string)`**
-
-- `Graphics/OnlineAssetCachingStore.cs:46` `string.IsNullOrWhiteSpace(url)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Graphics.OsuColour
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `ForRoomStatus(Room)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `ForStarDifficultyText(double)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `ForegroundTextColourFor(Color4)` | 1 | 2/2 | 1 | 0 | 100.0% |
 
@@ -6214,20 +3905,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Graphics/OsuFont.cs:158` `typeface != null` — thiếu `false`
 - `Graphics/OsuFont.cs:159` `weight != null` — thiếu `false`
-
-</details>
-
-### osu.Game.Graphics.OsuIcon.OsuIconStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string?, char)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string?, char)`**
-
-- `Graphics/OsuIcon.cs:745` `fontName == FONT_NAME` — chưa được đánh giá
 
 </details>
 
@@ -6277,28 +3954,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Graphics/ParticleSpewer.cs:38` `Active.Value` — chưa được đánh giá
 - `Graphics/ParticleSpewer.cs:38` `(lastParticleAdded + maxDuration) > Time.Current` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.ParticleSpewer.ParticleSpewerDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Blit(IRenderer)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `createDrawRect(Vector2, float)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Blit(IRenderer)`**
-
-- `Graphics/ParticleSpewer.cs:156` `p.Duration == 0` — chưa được đánh giá
-- `Graphics/ParticleSpewer.cs:163` `timeSinceStart < 0` — chưa được đánh giá
-- `Graphics/ParticleSpewer.cs:166` `alpha <= 0` — chưa được đánh giá
-
-**`createDrawRect(Vector2, float)`**
-
-- `Graphics/ParticleSpewer.cs:192` `relativePositionAxes.HasFlag(Axes.X)` — chưa được đánh giá
-- `Graphics/ParticleSpewer.cs:194` `relativePositionAxes.HasFlag(Axes.Y)` — chưa được đánh giá
 
 </details>
 
@@ -6446,43 +4101,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Graphics.Backgrounds.SeasonalBackgroundLoader
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadNextBackground()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `fetchSeasonalBackgrounds()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `isInSeason` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `load(OsuConfigManager, SessionStatics)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `shouldShowSeasonal.get` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadNextBackground()`**
-
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:69` `shouldShowSeasonal` — chưa được đánh giá
-
-**`fetchSeasonalBackgrounds()`**
-
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:54` `seasonalBackgrounds.Value != null` — chưa được đánh giá
-
-**`isInSeason`**
-
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:94` `seasonalBackgrounds.Value != null` — chưa được đánh giá
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:94` `DateTimeOffset.Now < seasonalBackgrounds.Value.EndDate` — chưa được đánh giá
-
-**`load(OsuConfigManager, SessionStatics)`**
-
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:45` `shouldShowSeasonal` — chưa được đánh giá
-
-**`shouldShowSeasonal.get`**
-
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:84` `seasonalBackgroundMode.Value == SeasonalBackgroundMode.Never` — chưa được đánh giá
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:87` `seasonalBackgroundMode.Value == SeasonalBackgroundMode.Sometimes` — chưa được đánh giá
-- `Graphics/Backgrounds/SeasonalBackgroundLoader.cs:87` `isInSeason` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Graphics.Backgrounds.SkinBackground
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -6551,23 +4169,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Graphics.Backgrounds.Triangles.TrianglesDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `getClampedQuad(Axes, Vector2, Vector2)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`getClampedQuad(Axes, Vector2, Vector2)`**
-
-- `Graphics/Backgrounds/Triangles.cs:359` `clampAxes == Axes.X` — chưa được đánh giá
-- `Graphics/Backgrounds/Triangles.cs:359` `clampAxes == Axes.Both` — chưa được đánh giá
-- `Graphics/Backgrounds/Triangles.cs:365` `clampAxes == Axes.Y` — chưa được đánh giá
-- `Graphics/Backgrounds/Triangles.cs:365` `clampAxes == Axes.Both` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Graphics.Backgrounds.TrianglesV2
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -6603,29 +4204,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`createTriangle(bool)`**
 
 - `Graphics/Backgrounds/TrianglesV2.cs:160` `randomY` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.Backgrounds.TrianglesV2.TrianglesDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `getClampedQuad(Axes, Vector2, Vector2)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Graphics/Backgrounds/TrianglesV2.cs:244` `Source.AimCount == 0` — chưa được đánh giá
-- `Graphics/Backgrounds/TrianglesV2.cs:244` `thickness == 0` — chưa được đánh giá
-
-**`getClampedQuad(Axes, Vector2, Vector2)`**
-
-- `Graphics/Backgrounds/TrianglesV2.cs:289` `clampAxes == Axes.X` — chưa được đánh giá
-- `Graphics/Backgrounds/TrianglesV2.cs:289` `clampAxes == Axes.Both` — chưa được đánh giá
-- `Graphics/Backgrounds/TrianglesV2.cs:295` `clampAxes == Axes.Y` — chưa được đánh giá
-- `Graphics/Backgrounds/TrianglesV2.cs:295` `clampAxes == Axes.Both` — chưa được đánh giá
 
 </details>
 
@@ -7903,37 +5481,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Blit(IRenderer)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Blit(IRenderer)`**
-
-- `Graphics/Sprites/LogoAnimation.cs:93` `DrawRectangle.Width == 0` — chưa được đánh giá
-- `Graphics/Sprites/LogoAnimation.cs:93` `DrawRectangle.Height == 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode.LogoAnimationVertex
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(LogoAnimationVertex)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(LogoAnimationVertex)`**
-
-- `Graphics/Sprites/LogoAnimation.cs:135` `Position.Equals(other.Position)` — chưa được đánh giá
-- `Graphics/Sprites/LogoAnimation.cs:136` `TexturePosition.Equals(other.TexturePosition)` — chưa được đánh giá
-- `Graphics/Sprites/LogoAnimation.cs:137` `Colour.Equals(other.Colour)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Graphics.Sprites.TruncatingSpriteText
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -7987,26 +5534,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Graphics/UserInterface/BarGraph.cs:52` `value.Any()` — chưa được đánh giá
 - `Graphics/UserInterface/BarGraph.cs:61` `maxLength == 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.UserInterface.BarGraph.BarGraphDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Graphics/UserInterface/BarGraph.cs:143` `i < lengths.Count` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:145` `direction == BarDirection.TopToBottom` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:145` `direction == BarDirection.BottomToTop` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:146` `direction == BarDirection.LeftToRight` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:146` `direction == BarDirection.RightToLeft` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:148` `barHeight == 0` — chưa được đánh giá
-- `Graphics/UserInterface/BarGraph.cs:148` `barWidth == 0` — chưa được đánh giá
 
 </details>
 
@@ -8449,56 +5976,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Graphics.UserInterface.HoverClickSounds
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `OnClick(ClickEvent)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PlayClickSample()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`OnClick(ClickEvent)`**
-
-- `Graphics/UserInterface/HoverClickSounds.cs:51` `buttons.Contains(e.Button)` — chưa được đánh giá
-
-**`PlayClickSample()`**
-
-- `Graphics/UserInterface/HoverClickSounds.cs:58` `Enabled.Value` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.UserInterface.HoverSampleDebounceComponent
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `OnHover(HoverEvent)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`OnHover(HoverEvent)`**
-
-- `Graphics/UserInterface/HoverSampleDebounceComponent.cs:33` `e.HasAnyButtonPressed` — chưa được đánh giá
-- `Graphics/UserInterface/HoverSampleDebounceComponent.cs:36` `lastPlaybackTime.Value.HasValue` — chưa được đánh giá
-- `Graphics/UserInterface/HoverSampleDebounceComponent.cs:36` `Time.Current - lastPlaybackTime.Value >= OsuGameBase.SAMPLE_DEBOUNCE_TIME` — chưa được đánh giá
-- `Graphics/UserInterface/HoverSampleDebounceComponent.cs:38` `enoughTimePassedSinceLastPlayback` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.UserInterface.HoverSounds
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `PlayHoverSample()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`PlayHoverSample()`**
-
-- `Graphics/UserInterface/HoverSounds.cs:42` `Enabled.Value` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Graphics.UserInterface.LineGraph
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -8900,22 +6377,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Graphics/UserInterface/OsuMenu.cs:90` `Direction == Direction.Vertical` — chưa được đánh giá
 - `Graphics/UserInterface/OsuMenu.cs:94` `newSize.Y > 0` — chưa được đánh giá
 - `Graphics/UserInterface/OsuMenu.cs:103` `newSize.X > 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.UserInterface.OsuMenuSamples
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `resolvePlayback()` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`resolvePlayback()`**
-
-- `Graphics/UserInterface/OsuMenuSamples.cs:60` `triggerSubOpen` — chưa được đánh giá
-- `Graphics/UserInterface/OsuMenuSamples.cs:62` `triggerOpen` — chưa được đánh giá
-- `Graphics/UserInterface/OsuMenuSamples.cs:64` `triggerClose` — chưa được đánh giá
 
 </details>
 
@@ -9473,20 +6934,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`StartSegment(int, float)`**
 
 - `Graphics/UserInterface/SegmentedGraph.cs:274` `pendingSegments[tier] != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentedGraphDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `getSegmentColour(SegmentInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`getSegmentColour(SegmentInfo)`**
-
-- `Graphics/UserInterface/SegmentedGraph.cs:254` `segment.Tier >= 0` — chưa được đánh giá
 
 </details>
 
@@ -10705,64 +8152,15 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.IPC.WebSocketChannel
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SendAsync(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Start(CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StopAsync(CancellationToken)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `readWriteLoop()` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `IPC/WebSocketChannel.cs:161` `isDisposed` — chưa được đánh giá
-
-**`SendAsync(string)`**
-
-- `IPC/WebSocketChannel.cs:134` `readWriteTask == null` — chưa được đánh giá
-
-**`Start(CancellationToken)`**
-
-- `IPC/WebSocketChannel.cs:42` `readWriteTask?.Status >= TaskStatus.Running` — chưa được đánh giá
-
-**`StopAsync(CancellationToken)`**
-
-- `IPC/WebSocketChannel.cs:147` `isDisposed` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:152` `readWriteTask != null` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:155` `stoppingToken.IsCancellationRequested` — chưa được đánh giá
-
-**`readWriteLoop()`**
-
-- `IPC/WebSocketChannel.cs:52` `token.IsCancellationRequested` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:75` `webSocket.State > WebSocketState.Open` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:77` `webSocket.State == WebSocketState.CloseReceived` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:94` `result.MessageType == WebSocketMessageType.Binary` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:103` `currentBufferPosition >= max_message_size` — chưa được đánh giá
-- `IPC/WebSocketChannel.cs:110` `result.EndOfMessage` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.IPC.WebSocketServer
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
 | `IsRunning` | 2 | 0/4 | 0 | 2 | 0.0% |
 | `SendAsync(int, string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StartAsync(CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StopAsync(CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `handleRequests()` | 3 | 0/6 | 0 | 3 | 0.0% |
 | `onChannelClosed(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
 
 <details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `IPC/WebSocketServer.cs:263` `isDisposed` — chưa được đánh giá
 
 **`IsRunning`**
 
@@ -10773,41 +8171,9 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `IPC/WebSocketServer.cs:197` `channels.TryGetValue(clientId, out var channel)` — chưa được đánh giá
 
-**`StartAsync(CancellationToken)`**
-
-- `IPC/WebSocketServer.cs:98` `listener != null` — chưa được đánh giá
-
-**`StopAsync(CancellationToken)`**
-
-- `IPC/WebSocketServer.cs:219` `isDisposed` — chưa được đánh giá
-- `IPC/WebSocketServer.cs:228` `handleRequestTask != null` — chưa được đánh giá
-
-**`handleRequests()`**
-
-- `IPC/WebSocketServer.cs:113` `runningTokenSource.IsCancellationRequested` — chưa được đánh giá
-- `IPC/WebSocketServer.cs:144` `runningTokenSource.IsCancellationRequested` — chưa được đánh giá
-- `IPC/WebSocketServer.cs:152` `request.IsWebSocketRequest` — chưa được đánh giá
-
 **`onChannelClosed(int)`**
 
 - `IPC/WebSocketServer.cs:186` `channels.TryRemove(channelId, out var channel)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Input.ConfineMouseTracker
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `updateConfineMode()` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`updateConfineMode()`**
-
-- `Input/ConfineMouseTracker.cs:49` `frameworkConfineMode.Disabled` — chưa được đánh giá
-- `Input/ConfineMouseTracker.cs:53` `frameworkWindowMode.Value == WindowMode.Fullscreen` — chưa được đánh giá
-- `Input/ConfineMouseTracker.cs:53` `frameworkMinimiseOnFocusLossInFullscreen.Value` — chưa được đánh giá
-- `Input/ConfineMouseTracker.cs:66` `localUserPlaying.Value == LocalUserPlayingState.Playing` — chưa được đánh giá
 
 </details>
 
@@ -10828,73 +8194,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Input/IdleTracker.cs:57` `TimeSpentIdle > timeToIdle` — chưa được đánh giá
 - `Input/IdleTracker.cs:57` `AllowIdle` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Input.RealmKeyBindingStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CheckValidForGameplay(KeyCombination)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ClearDuplicateBindings(IEnumerable<IKeyBinding>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetBindingsStringFor(GlobalAction)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetReadableKeyCombinationsFor(GlobalAction)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetReadableKeyCombinationsFor(string, int, int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `insertDefaults(Realm, List<RealmKeyBinding>, IEnumerable<IKeyBinding>, string?, int?)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CheckValidForGameplay(KeyCombination)`**
-
-- `Input/RealmKeyBindingStore.cs:168` `combination.Keys.Contains(key)` — chưa được đánh giá
-
-**`ClearDuplicateBindings(IEnumerable<IKeyBinding>)`**
-
-- `Input/RealmKeyBindingStore.cs:189` `group.Select(kb => kb.Action).Distinct().Count() <= 1` — chưa được đánh giá
-
-**`GetBindingsStringFor(GlobalAction)`**
-
-- `Input/RealmKeyBindingStore.cs:35` `combinations.Count == 0` — chưa được đánh giá
-
-**`GetReadableKeyCombinationsFor(GlobalAction)`**
-
-- `Input/RealmKeyBindingStore.cs:57` `str.Length > 0` — chưa được đánh giá
-
-**`GetReadableKeyCombinationsFor(string, int, int)`**
-
-- `Input/RealmKeyBindingStore.cs:83` `str.Length > 0` — chưa được đánh giá
-
-**`insertDefaults(Realm, List<RealmKeyBinding>, IEnumerable<IKeyBinding>, string?, int?)`**
-
-- `Input/RealmKeyBindingStore.cs:126` `k.RulesetName == rulesetName` — chưa được đánh giá
-- `Input/RealmKeyBindingStore.cs:127` `k.Variant == variant` — chưa được đánh giá
-- `Input/RealmKeyBindingStore.cs:128` `k.ActionInt == (int)defaultsForAction.Key` — chưa được đánh giá
-- `Input/RealmKeyBindingStore.cs:133` `defaultsCount > existingCount` — chưa được đánh giá
-- `Input/RealmKeyBindingStore.cs:138` `defaultsCount < existingCount` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Input.TouchInputInterceptor
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Handle(UIEvent)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `debugToggleTouchInputActive()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Handle(UIEvent)`**
-
-- `Input/TouchInputInterceptor.cs:41` `e.CurrentState.Mouse.LastSource is not ISourcedFromTouch` — chưa được đánh giá
-- `Input/TouchInputInterceptor.cs:43` `touchInputWasActive` — chưa được đánh giá
-- `Input/TouchInputInterceptor.cs:51` `touchInputWasActive` — chưa được đánh giá
-- `Input/TouchInputInterceptor.cs:57` `keyDown.Key == Key.T` — chưa được đánh giá
-- `Input/TouchInputInterceptor.cs:57` `keyDown.ControlPressed` — chưa được đánh giá
-- `Input/TouchInputInterceptor.cs:57` `keyDown.ShiftPressed` — chưa được đánh giá
-
-**`debugToggleTouchInputActive()`**
-
-- `Input/TouchInputInterceptor.cs:68` `touchInputActive.Value` — chưa được đánh giá
 
 </details>
 
@@ -10979,187 +8278,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Models.RealmUser
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CountryCode.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Equals(RealmUser?)` | 4 | 8/8 | 4 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.BeatmapDownloadTracker
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LoadComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `attachDownload(ArchiveDownloadRequest<IBeatmapSetInfo>?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `downloadBegan(ArchiveDownloadRequest<IBeatmapSetInfo>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `downloadFailed(ArchiveDownloadRequest<IBeatmapSetInfo>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/BeatmapDownloadTracker.cs:131` `Downloader != null` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Online/BeatmapDownloadTracker.cs:34` `Downloader == null` — chưa được đánh giá
-- `Online/BeatmapDownloadTracker.cs:48` `items.Any()` — chưa được đánh giá
-
-**`attachDownload(ArchiveDownloadRequest<IBeatmapSetInfo>?)`**
-
-- `Online/BeatmapDownloadTracker.cs:81` `attachedRequest != null` — chưa được đánh giá
-- `Online/BeatmapDownloadTracker.cs:90` `attachedRequest != null` — chưa được đánh giá
-- `Online/BeatmapDownloadTracker.cs:92` `attachedRequest.Progress == 1` — chưa được đánh giá
-- `Online/BeatmapDownloadTracker.cs:109` `State.Value == DownloadState.Downloading` — chưa được đánh giá
-
-**`downloadBegan(ArchiveDownloadRequest<IBeatmapSetInfo>)`**
-
-- `Online/BeatmapDownloadTracker.cs:69` `checkEquality(request.Model, TrackedItem)` — chưa được đánh giá
-
-**`downloadFailed(ArchiveDownloadRequest<IBeatmapSetInfo>)`**
-
-- `Online/BeatmapDownloadTracker.cs:75` `checkEquality(request.Model, TrackedItem)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.FriendPresenceNotifier
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Update()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `alertOfflineUsers()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `alertOnlineUsers()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `markUserOffline(APIUser)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `markUserOfflineDebounced(APIUser)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `markUserOnline(APIUser)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `onFriendPresenceChanged(object?, NotifyDictionaryChangedEventArgs<int, UserPresence>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `onFriendsChanged(object?, NotifyCollectionChangedEventArgs)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Update()`**
-
-- `Online/FriendPresenceNotifier.cs:106` `notifyOnFriendPresenceChange.Value` — chưa được đánh giá
-
-**`alertOfflineUsers()`**
-
-- `Online/FriendPresenceNotifier.cs:235` `nextOfflineAlertTime == null` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:235` `Time.Current < nextOfflineAlertTime` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:241` `offlineAlertQueue.Count == 1` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:243` `offlineAlertQueue.Count > 1` — chưa được đánh giá
-
-**`alertOnlineUsers()`**
-
-- `Online/FriendPresenceNotifier.cs:218` `nextOnlineAlertTime == null` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:218` `Time.Current < nextOnlineAlertTime` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:224` `onlineAlertQueue.Count == 1` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:226` `onlineAlertQueue.Count > 1` — chưa được đánh giá
-
-**`markUserOffline(APIUser)`**
-
-- `Online/FriendPresenceNotifier.cs:209` `onlineAlertQueue.Remove(user)` — chưa được đánh giá
-
-**`markUserOfflineDebounced(APIUser)`**
-
-- `Online/FriendPresenceNotifier.cs:197` `pendingOfflineUsers.Remove(user)` — chưa được đánh giá
-
-**`markUserOnline(APIUser)`**
-
-- `Online/FriendPresenceNotifier.cs:176` `pendingOfflineUsers.Remove(user)` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:179` `offlineAlertQueue.Remove(user)` — chưa được đánh giá
-
-**`onFriendPresenceChanged(object?, NotifyDictionaryChangedEventArgs<int, UserPresence>)`**
-
-- `Online/FriendPresenceNotifier.cs:152` `friend?.TargetUser is APIUser user` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:163` `friend?.TargetUser is APIUser user` — chưa được đánh giá
-
-**`onFriendsChanged(object?, NotifyCollectionChangedEventArgs)`**
-
-- `Online/FriendPresenceNotifier.cs:120` `friend.TargetUser is not APIUser user` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:123` `friendPresences.TryGetValue(friend.TargetID, out _)` — chưa được đánh giá
-- `Online/FriendPresenceNotifier.cs:132` `friend.TargetUser is not APIUser user` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.HubClientConnector
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BuildConnectionAsync(CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BuildConnectionAsync(CancellationToken)`**
-
-- `Online/HubClientConnector.cs:59` `RuntimeInfo.OS != RuntimeInfo.Platform.iOS` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.LocalUserStatisticsProvider
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `RefetchStatistics(RulesetInfo, Action<UserStatisticsUpdate>?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `initialiseStatistics()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`RefetchStatistics(RulesetInfo, Action<UserStatisticsUpdate>?)`**
-
-- `Online/LocalUserStatisticsProvider.cs:77` `ruleset.IsLegacyRuleset()` — chưa được đánh giá
-
-**`initialiseStatistics()`**
-
-- `Online/LocalUserStatisticsProvider.cs:68` `api.LocalUser.Value == null` — chưa được đánh giá
-- `Online/LocalUserStatisticsProvider.cs:68` `api.LocalUser.Value.Id <= 1` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.OnlineStatusNotifier
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `LoadComplete()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `notifyAboutForcedDisconnection()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `notifyAboutForcedDisconnection(SocketMessage)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `notifyApiDisconnection()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/OnlineStatusNotifier.cs:164` `notificationsClient.IsNotNull()` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:167` `spectatorClient.IsNotNull()` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:170` `multiplayerClient.IsNotNull()` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:173` `metadataClient.IsNotNull()` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Online/OnlineStatusNotifier.cs:86` `getCurrentScreen() is OnlinePlayScreen` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:94` `connected.NewValue` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:100` `multiplayerClient.Room != null` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:106` `connected.NewValue` — chưa được đánh giá
-
-**`notifyAboutForcedDisconnection()`**
-
-- `Online/OnlineStatusNotifier.cs:136` `userNotified` — chưa được đánh giá
-
-**`notifyAboutForcedDisconnection(SocketMessage)`**
-
-- `Online/OnlineStatusNotifier.cs:148` `obj.Event != @"logout"` — chưa được đánh giá
-- `Online/OnlineStatusNotifier.cs:150` `userNotified` — chưa được đánh giá
-
-**`notifyApiDisconnection()`**
-
-- `Online/OnlineStatusNotifier.cs:124` `userNotified` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.OnlineViewContainer
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -11171,51 +8289,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`load(IAPIProvider)`**
 
 - `Online/OnlineViewContainer.cs:53` `string.IsNullOrEmpty(placeholderMessage)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.PersistentEndpointClientConnector
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Start()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ToString()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `connect()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `disconnect(bool)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `onConnectionClosed(Exception?, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/PersistentEndpointClientConnector.cs:220` `isDisposed` — chưa được đánh giá
-
-**`Start()`**
-
-- `Online/PersistentEndpointClientConnector.cs:56` `started` — chưa được đánh giá
-
-**`ToString()`**
-
-- `Online/PersistentEndpointClientConnector.cs:214` `IsConnected.Value` — chưa được đánh giá
-
-**`connect()`**
-
-- `Online/PersistentEndpointClientConnector.cs:91` `await connectionLock.WaitAsync(10000).ConfigureAwait(false)` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:96` `apiState.Value == APIState.RequiresSecondFactorAuth` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:96` `apiState.Value == APIState.Online` — chưa được đánh giá
-
-**`disconnect(bool)`**
-
-- `Online/PersistentEndpointClientConnector.cs:185` `takeLock` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:187` `await connectionLock.WaitAsync(10000).ConfigureAwait(false)` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:193` `CurrentConnection != null` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:201` `takeLock` — chưa được đánh giá
-
-**`onConnectionClosed(Exception?, CancellationToken)`**
-
-- `Online/PersistentEndpointClientConnector.cs:169` `ex != null` — chưa được đánh giá
-- `Online/PersistentEndpointClientConnector.cs:175` `hasBeenCancelled` — chưa được đánh giá
 
 </details>
 
@@ -11244,93 +8317,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`scheduleNextPoll()`**
 
 - `Online/PollingComponent.cs:123` `lastTimePolled.HasValue` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.ScoreDownloadTracker
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LoadComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `attachDownload(ArchiveDownloadRequest<IScoreInfo>?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `downloadBegan(ArchiveDownloadRequest<IScoreInfo>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `downloadFailed(ArchiveDownloadRequest<IScoreInfo>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/ScoreDownloadTracker.cs:136` `Downloader != null` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Online/ScoreDownloadTracker.cs:35` `Downloader == null` — chưa được đánh giá
-- `Online/ScoreDownloadTracker.cs:60` `items.Any()` — chưa được đánh giá
-
-**`attachDownload(ArchiveDownloadRequest<IScoreInfo>?)`**
-
-- `Online/ScoreDownloadTracker.cs:87` `attachedRequest != null` — chưa được đánh giá
-- `Online/ScoreDownloadTracker.cs:96` `attachedRequest != null` — chưa được đánh giá
-- `Online/ScoreDownloadTracker.cs:98` `attachedRequest.Progress == 1` — chưa được đánh giá
-
-**`downloadBegan(ArchiveDownloadRequest<IScoreInfo>)`**
-
-- `Online/ScoreDownloadTracker.cs:75` `checkEquality(request.Model, TrackedItem)` — chưa được đánh giá
-
-**`downloadFailed(ArchiveDownloadRequest<IScoreInfo>)`**
-
-- `Online/ScoreDownloadTracker.cs:81` `checkEquality(request.Model, TrackedItem)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.SignalRUnionWorkaroundResolver
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetFormatter()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetFormatter()`**
-
-- `Online/SignalRUnionWorkaroundResolver.cs:43` `formatter_map.TryGetValue(typeof(T), out var formatter)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.TrustedDomainOnlineStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetLookupUrl(string)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.UserStatisticsWatcher
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RegisterForStatisticsUpdateAfter(ScoreInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `userScoreProcessed(int, long)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/UserStatisticsWatcher.cs:81` `spectatorClient.IsNotNull()` — chưa được đánh giá
-
-**`RegisterForStatisticsUpdateAfter(ScoreInfo)`**
-
-- `Online/UserStatisticsWatcher.cs:54` `api.IsLoggedIn` — chưa được đánh giá
-- `Online/UserStatisticsWatcher.cs:57` `score.Ruleset.IsLegacyRuleset()` — chưa được đánh giá
-- `Online/UserStatisticsWatcher.cs:57` `score.OnlineID <= 0` — chưa được đánh giá
-
-**`userScoreProcessed(int, long)`**
-
-- `Online/UserStatisticsWatcher.cs:66` `userId != api.LocalUser.Value?.OnlineID` — chưa được đánh giá
-- `Online/UserStatisticsWatcher.cs:69` `watchedScores.Remove(scoreId, out var scoreInfo)` — chưa được đánh giá
-- `Online/UserStatisticsWatcher.cs:74` `u.OldStatistics != null` — chưa được đánh giá
 
 </details>
 
@@ -11451,20 +8437,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.API.APIDownloadRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `TriggerSuccess(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`TriggerSuccess(string)`**
-
-- `Online/API/APIDownloadRequest.cs:46` `this.filename != null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.API.APIMessagesRequest
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -11479,213 +8451,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.API.APIMod
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Mod)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Equals(APIMod?)` | 4 | 8/8 | 4 | 0 | 100.0% |
-| `ToMod(Ruleset)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `ToString()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.APIMod.ModSettingsEqualityComparer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(KeyValuePair<string, object>, KeyValuePair<string, object>)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.APIRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AttachAPI(IAPIProvider)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `Fail(Exception)` | 5 | 5/10 | 2 | 2 | 50.0% |
-| `Perform()` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `PostProcess()` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `TriggerFailure(Exception)` | 1 | 1/2 | 0 | 0 | 50.0% |
-| `TriggerSuccess()` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `TriggerSuccess(T)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Fail(Exception)`**
-
-- `Online/API/APIRequest.cs:219` `string.IsNullOrEmpty(responseString)` — thiếu `false`
-- `Online/API/APIRequest.cs:219` `responseString.Contains(@"""error""")` — chưa được đánh giá
-- `Online/API/APIRequest.cs:225` `error != null` — chưa được đánh giá
-
-**`Perform()`**
-
-- `Online/API/APIRequest.cs:123` `API == null` — chưa được đánh giá
-- `Online/API/APIRequest.cs:131` `isFailing` — chưa được đánh giá
-- `Online/API/APIRequest.cs:140` `string.IsNullOrEmpty(API.AccessToken)` — chưa được đánh giá
-- `Online/API/APIRequest.cs:143` `isFailing` — chưa được đánh giá
-- `Online/API/APIRequest.cs:156` `isFailing` — chưa được đánh giá
-- `Online/API/APIRequest.cs:160` `isFailing` — chưa được đánh giá
-
-**`PostProcess()`**
-
-- `Online/API/APIRequest.cs:45` `WebRequest != null` — thiếu `true`
-
-**`TriggerFailure(Exception)`**
-
-- `Online/API/APIRequest.cs:193` `CompletionState != APIRequestCompletionState.Waiting` — thiếu `true`
-
-</details>
-
-### osu.Game.Online.API.DummyAPIAccess
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AuthenticateSecondFactor(string)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Login(string, string)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Queue(APIRequest)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AuthenticateSecondFactor(string)`**
-
-- `Online/API/DummyAPIAccess.cs:155` `request.RequiredVerificationMethod != null` — chưa được đánh giá
-- `Online/API/DummyAPIAccess.cs:172` `HandleRequest?.Invoke(request) != true` — chưa được đánh giá
-- `Online/API/DummyAPIAccess.cs:176` `request.CompletionState == APIRequestCompletionState.Completed` — chưa được đánh giá
-
-**`Login(string, string)`**
-
-- `Online/API/DummyAPIAccess.cs:115` `stayConnectingNextLogin` — chưa được đánh giá
-- `Online/API/DummyAPIAccess.cs:121` `shouldFailNextLogin` — chưa được đánh giá
-- `Online/API/DummyAPIAccess.cs:137` `SessionVerificationMethod != null` — chưa được đánh giá
-
-**`Queue(APIRequest)`**
-
-- `Online/API/DummyAPIAccess.cs:82` `HandleRequest?.Invoke(request) != true` — chưa được đánh giá
-- `Online/API/DummyAPIAccess.cs:85` `request is ChatAckRequest ack` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.LocalUserState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `SetPlaceholderLocalUser(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateBlocks()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateFavouriteBeatmapSets()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateFriends()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `syncSettingsFromWeb(APIMe)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `syncSettingsToWeb()` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`SetPlaceholderLocalUser(string)`**
-
-- `Online/API/LocalUserState.cs:65` `localUser.IsDefault` — chưa được đánh giá
-
-**`UpdateBlocks()`**
-
-- `Online/API/LocalUserState.cs:188` `api.IsLoggedIn` — chưa được đánh giá
-
-**`UpdateFavouriteBeatmapSets()`**
-
-- `Online/API/LocalUserState.cs:212` `api.IsLoggedIn` — chưa được đánh giá
-
-**`UpdateFriends()`**
-
-- `Online/API/LocalUserState.cs:167` `api.IsLoggedIn` — chưa được đánh giá
-
-**`syncSettingsFromWeb(APIMe)`**
-
-- `Online/API/LocalUserState.cs:114` `me.LastVisit == null` — chưa được đánh giá
-
-**`syncSettingsToWeb()`**
-
-- `Online/API/LocalUserState.cs:126` `api.IsLoggedIn` — chưa được đánh giá
-- `Online/API/LocalUserState.cs:126` `populatingSettings` — chưa được đánh giá
-- `Online/API/LocalUserState.cs:138` `api.IsLoggedIn` — chưa được đánh giá
-- `Online/API/LocalUserState.cs:138` `me.MatchesOnlineID(localUser.Value)` — chưa được đánh giá
-- `Online/API/LocalUserState.cs:145` `api.IsLoggedIn` — chưa được đánh giá
-- `Online/API/LocalUserState.cs:149` `localUser.Value is APIMe oldMe` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.ModSettingsDictionaryFormatter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Deserialize(MessagePackReader, MessagePackSerializerOptions)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Serialize(MessagePackWriter, Dictionary<string, object>?, MessagePackSerializerOptions)` | 1 | 1/2 | 0 | 0 | 50.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Serialize(MessagePackWriter, Dictionary<string, object>?, MessagePackSerializerOptions)`**
-
-- `Online/API/ModSettingsDictionaryFormatter.cs:17` `value == null` — thiếu `true`
-
-</details>
-
-### osu.Game.Online.API.OAuth
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AuthenticateWithLogin(string, string)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `RequestAccessToken()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `TokenString.set` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ensureAccessToken()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AuthenticateWithLogin(string, string)`**
-
-- `Online/API/OAuth.cs:43` `string.IsNullOrEmpty(username)` — chưa được đánh giá
-- `Online/API/OAuth.cs:44` `string.IsNullOrEmpty(password)` — chưa được đánh giá
-- `Online/API/OAuth.cs:70` `error != null` — chưa được đánh giá
-
-**`RequestAccessToken()`**
-
-- `Online/API/OAuth.cs:148` `ensureAccessToken()` — chưa được đánh giá
-
-**`TokenString.set`**
-
-- `Online/API/OAuth.cs:27` `string.IsNullOrEmpty(value)` — chưa được đánh giá
-
-**`ensureAccessToken()`**
-
-- `Online/API/OAuth.cs:130` `accessTokenValid` — chưa được đánh giá
-- `Online/API/OAuth.cs:133` `string.IsNullOrEmpty(Token.Value?.RefreshToken)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.OAuth.OAuthError
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `UserDisplayableError` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`UserDisplayableError`**
-
-- `Online/API/OAuth.cs:219` `string.IsNullOrEmpty(Hint)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.OAuthToken
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `IsValid` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`IsValid`**
-
-- `Online/API/OAuthToken.cs:28` `string.IsNullOrEmpty(AccessToken)` — chưa được đánh giá
-- `Online/API/OAuthToken.cs:28` `ExpiresIn > 30` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.API.Requests.ChatAckRequest
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -11694,342 +8459,11 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
-### osu.Game.Online.API.Requests.CommentPostRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.CommentVoteRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateWebRequest()`**
-
-- `Online/API/Requests/CommentVoteRequest.cs:24` `action == CommentVoteAction.Vote` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.DownloadBeatmapSetRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Target` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Target`**
-
-- `Online/API/Requests/DownloadBeatmapSetRequest.cs:28` `noVideo` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.API.Requests.GetBeatmapRequest
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | `CreateWebRequest()` | 3 | 6/6 | 3 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.GetBeatmapSetRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `PostProcess()` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Target` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.GetBeatmapsRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(int[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(int[])`**
-
-- `Online/API/Requests/GetBeatmapsRequest.cs:17` `beatmapIds.Length > max_ids_per_request` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.GetCommentsRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.GetNewsRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.GetScoresRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(IBeatmapInfo, IRulesetInfo, BeatmapLeaderboardScope, IEnumerable<IMod>?)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `Equals(GetScoresRequest?)` | 6 | 12/12 | 6 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.GetUpdatesRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateWebRequest()`**
-
-- `Online/API/Requests/GetUpdatesRequest.cs:26` `channel != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.GetUserRankingsRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateWebRequest()`**
-
-- `Online/API/Requests/GetUserRankingsRequest.cs:27` `countryCode != CountryCode.Unknown` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.GetUserScoresRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateWebRequest()`**
-
-- `Online/API/Requests/GetUserScoresRequest.cs:31` `ruleset != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.GetUsersRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(int[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(int[])`**
-
-- `Online/API/Requests/GetUsersRequest.cs:22` `userIds.Length > MAX_IDS_PER_REQUEST` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.LookupUsersRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(int[], int?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Target` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.PatchBeatmapPackageRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Uri.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.PutBeatmapSetRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Uri.get` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Uri.get`**
-
-- `Online/API/Requests/PutBeatmapSetRequest.cs:25` `API!.Endpoints.BeatmapSubmissionServiceUrl == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.ReplaceBeatmapPackageRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Uri.get` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Uri.get`**
-
-- `Online/API/Requests/ReplaceBeatmapPackageRequest.cs:17` `API!.Endpoints.BeatmapSubmissionServiceUrl == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.SearchBeatmapSetsRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 13 | 26/26 | 13 | 0 | 100.0% |
-| `directionString` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.VerifySessionRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(string)`**
-
-- `Online/API/Requests/VerifySessionRequest.cs:22` `string.IsNullOrEmpty(response)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.Responses.APIBeatmap
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(IBeatmapInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `GetTopUserTags(bool)` | 6 | 12/12 | 6 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.Responses.APIBeatmap.APIRuleset
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CompareTo(IRulesetInfo?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Equals(IRulesetInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.Responses.APIBeatmapSet
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(IBeatmapSetInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `author.set` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.Responses.APIKudosuHistory
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `action.set` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`action.set`**
-
-- `Online/API/Requests/Responses/APIKudosuHistory.cs:57` `split.Length > 1` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.Responses.APIMenuContent
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(APIMenuContent?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Online/API/Requests/Responses/APIMenuContent.cs:25` `Equals(content)` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.API.Requests.Responses.APIMenuImage
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(APIMenuImage?)` | 6 | 12/12 | 6 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `IsCurrent` | 4 | 8/8 | 4 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Online/API/Requests/Responses/APIMenuImage.cs:47` `Equals(content)` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.API.Requests.Responses.APIUpdateStream
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Colour` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Colour`**
-
-- `Online/API/Requests/Responses/APIUpdateStream.cs:47` `KNOWN_STREAMS.TryGetValue(Name, out var colour)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.API.Requests.Responses.APIUser
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CountryCode.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Statistics.set` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.Responses.CommentBundle
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Users.set` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.API.Requests.Responses.SoloScoreInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeatmapSet.set` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `ToScoreInfo(Mod[], IBeatmapInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Chat.Channel
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AddNewMessages(Message[])` | 4 | 8/8 | 4 | 0 | 100.0% |
-| `RemoveMessagesFromUser(int)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `ReplaceMessage(LocalEchoMessage, Message)` | 4 | 8/8 | 4 | 0 | 100.0% |
-| `purgeOldMessages()` | 1 | 2/2 | 1 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
@@ -12183,21 +8617,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.Chat.ClosedChannel
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Matches(Channel)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Matches(Channel)`**
-
-- `Online/Chat/ChannelManager.cs:847` `channel.Type != Type` — chưa được đánh giá
-- `Online/Chat/ChannelManager.cs:849` `Type == ChannelType.PM` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.Chat.DrawableLinkCompiler
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -12226,114 +8645,17 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.Chat.ExternalLinkOpener
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `OpenUrlExternally(string, LinkWarnMode)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`OpenUrlExternally(string, LinkWarnMode)`**
-
-- `Online/Chat/ExternalLinkOpener.cs:50` `url.StartsWith('/')` — chưa được đánh giá
-- `Online/Chat/ExternalLinkOpener.cs:60` `url.CheckIsValidUrl()` — chưa được đánh giá
-- `Online/Chat/ExternalLinkOpener.cs:75` `externalLinkWarning.Value` — chưa được đánh giá
-- `Online/Chat/ExternalLinkOpener.cs:75` `isTrustedDomain` — chưa được đánh giá
-- `Online/Chat/ExternalLinkOpener.cs:90` `dialogOverlay != null` — chưa được đánh giá
-- `Online/Chat/ExternalLinkOpener.cs:90` `shouldWarn` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Chat.Link
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CompareTo(Link?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Overlaps(int, int)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Chat.Message
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CompareTo(Message)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `Equals(Message)` | 4 | 8/8 | 4 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
 ### osu.Game.Online.Chat.MessageFormatter
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| `GetLinkDetails(string)` | 11 | 22/22 | 11 | 0 | 100.0% |
-| `getUserLink(string)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `handleAdvanced(Regex, MessageFormatterResult, int)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `handleMatches(Regex, string, string, MessageFormatterResult, int, LinkAction?, char[]?)` | 5 | 9/10 | 4 | 0 | 90.0% |
 | `regex_timeout (field initializer)` | 1 | 1/2 | 0 | 0 | 50.0% |
 
 <details><summary>Điều kiện còn thiếu</summary>
 
-**`handleMatches(Regex, string, string, MessageFormatterResult, int, LinkAction?, char[]?)`**
-
-- `Online/Chat/MessageFormatter.cs:103` `linkText.Length == 0` — thiếu `true`
-
 **`regex_timeout (field initializer)`**
 
 - `Online/Chat/MessageFormatter.cs:20` `DebugUtils.IsNUnitRunning` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.Chat.MessageNotifier
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `checkForMentions(Channel, Message)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `checkForPMs(Channel, Message)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `checkNewMessages(IEnumerable<Message>)` | 10 | 0/20 | 0 | 10 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`checkForMentions(Channel, Message)`**
-
-- `Online/Chat/MessageNotifier.cs:141` `notifyOnUsername.Value` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:145` `match.Success` — chưa được đánh giá
-
-**`checkForPMs(Channel, Message)`**
-
-- `Online/Chat/MessageNotifier.cs:132` `notifyOnPrivateMessage.Value` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:132` `channel.Type != ChannelType.PM` — chưa được đánh giá
-
-**`checkNewMessages(IEnumerable<Message>)`**
-
-- `Online/Chat/MessageNotifier.cs:94` `messages.Any()` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:97` `c.Id > 0` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:97` `c.Id == messages.First().ChannelId` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:99` `channel == null` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:103` `chatOverlay.IsPresent` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:103` `channelManager.CurrentChannel.Value == channel` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:103` `host.IsActive.Value` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:109` `message.Id <= channel.LastReadId` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:113` `message.Sender.Id == localUser.Value.Id` — chưa được đánh giá
-- `Online/Chat/MessageNotifier.cs:117` `checkForPMs(channel, message)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Chat.NowPlayingCommand
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Online/Chat/NowPlayingCommand.cs:98` `beatmapOnlineID > 0` — chưa được đánh giá
-- `Online/Chat/NowPlayingCommand.cs:103` `userActivity.Value is not UserActivity.InGame` — chưa được đánh giá
-- `Online/Chat/NowPlayingCommand.cs:110` `userActivity.Value is not UserActivity.InGame` — chưa được đánh giá
-- `Online/Chat/NowPlayingCommand.cs:112` `selectedMods.Value.Count == 0` — chưa được đánh giá
 
 </details>
 
@@ -12375,57 +8697,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`OnKeyDown(KeyDownEvent)`**
 
 - `Online/Chat/StandAloneChatDisplay.cs:142` `HoldFocus` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Chat.WatchCommand
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Online/Chat/WatchCommand.cs:44` `e.InnerException?.Message == @"NotFound"` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Chat.WebSocketChatClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `RequestPresence()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `attemptToStartChat()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `handleMessages(List<Message>?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onConnectedChanged(ValueChangedEvent<bool>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onMessageReceived(SocketMessage)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`RequestPresence()`**
-
-- `Online/Chat/WebSocketChatClient.cs:83` `updates.Presence != null` — chưa được đánh giá
-
-**`attemptToStartChat()`**
-
-- `Online/Chat/WebSocketChatClient.cs:60` `chatStartCancellationSource.IsCancellationRequested` — chưa được đánh giá
-
-**`handleMessages(List<Message>?)`**
-
-- `Online/Chat/WebSocketChatClient.cs:173` `messages == null` — chưa được đánh giá
-
-**`onConnectedChanged(ValueChangedEvent<bool>)`**
-
-- `Online/Chat/WebSocketChatClient.cs:43` `connected.NewValue` — chưa được đánh giá
-
-**`onMessageReceived(SocketMessage)`**
-
-- `Online/Chat/WebSocketChatClient.cs:126` `channelsMap.TryGetValue(msg.ChannelId, out Channel? channel)` — chưa được đánh giá
-- `Online/Chat/WebSocketChatClient.cs:126` `channel.Joined.Value` — chưa được đánh giá
-- `Online/Chat/WebSocketChatClient.cs:126` `messageData.Messages.TrueForAll(msg => channelsMap.TryGetValue(msg.ChannelId, out Channel? channel) && channel.Joined.Value)` — chưa được đánh giá
-- `Online/Chat/WebSocketChatClient.cs:135` `channelsMap.TryGetValue(msg.ChannelId, out Channel? channel)` — chưa được đánh giá
 
 </details>
 
@@ -12482,46 +8753,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`updateScoresDrawables()`**
 
 - `Online/Leaderboards/Leaderboard.cs:269` `scores.Any()` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Leaderboards.LeaderboardManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `FetchWithCriteria(LeaderboardCriteria, bool)` | 20 | 0/40 | 0 | 20 | 0.0% |
-| `localScoresChanged(IRealmCollection<ScoreInfo>, ChangeSet?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`FetchWithCriteria(LeaderboardCriteria, bool)`**
-
-- `Online/Leaderboards/LeaderboardManager.cs:55` `ThreadSafety.IsUpdateThread` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:58` `forceRefresh` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:58` `CurrentCriteria?.Equals(newCriteria) == true` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:58` `scores.Value?.FailState == null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:66` `newCriteria.Beatmap == null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:66` `newCriteria.Ruleset == null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:87` `newCriteria.Sorting != LeaderboardSortMode.Score` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:90` `api.IsLoggedIn` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:96` `newCriteria.Ruleset.IsLegacyRuleset()` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:102` `newCriteria.Beatmap.OnlineID <= 0` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:102` `newCriteria.Beatmap.Status <= BeatmapOnlineStatus.Pending` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:108` `newCriteria.Scope.RequiresSupporter(newCriteria.ExactMods != null)` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:108` `api.LocalUser.Value.IsSupporter` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:114` `newCriteria.Scope == BeatmapLeaderboardScope.Team` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:114` `api.LocalUser.Value.Team == null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:122` `newCriteria.ExactMods != null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:124` `newCriteria.ExactMods.Any()` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:134` `inFlightOnlineRequest != null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:134` `newRequest.Equals(inFlightOnlineRequest)` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:157` `ex is not OperationCanceledException` — chưa được đánh giá
-
-**`localScoresChanged(IRealmCollection<ScoreInfo>, ChangeSet?)`**
-
-- `Online/Leaderboards/LeaderboardManager.cs:173` `changes?.HasCollectionChanges() == false` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:178` `CurrentCriteria.ExactMods != null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:180` `CurrentCriteria.ExactMods.Any()` — chưa được đánh giá
 
 </details>
 
@@ -12604,23 +8835,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.Leaderboards.LeaderboardScores
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AllScores.get` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AllScores.get`**
-
-- `Online/Leaderboards/LeaderboardManager.cs:255` `UserScore != null` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:255` `topScore.Equals(UserScore)` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:255` `topScore.MatchesOnlineID(UserScore)` — chưa được đánh giá
-- `Online/Leaderboards/LeaderboardManager.cs:255` `TopScores.All(topScore => !topScore.Equals(UserScore) && !topScore.MatchesOnlineID(UserScore))` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.Leaderboards.UpdateableRank
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -12654,556 +8868,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.Matchmaking.MatchmakingPool
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(MatchmakingPool?)` | 5 | 10/10 | 5 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Online/Matchmaking/MatchmakingPool.cs:62` `Equals(other)` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.Metadata.MetadataClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeginWatchingUserPresence()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `EndWatchingUserPresence()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetPresence(int)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `MultiplayerRoomScoreSet(MultiplayerRoomScoreSetEvent)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BeginWatchingUserPresence()`**
-
-- `Online/Metadata/MetadataClient.cs:113` `Interlocked.Increment(ref userPresenceWatchCount) == 1` — chưa được đánh giá
-
-**`EndWatchingUserPresence()`**
-
-- `Online/Metadata/MetadataClient.cs:121` `Interlocked.Decrement(ref userPresenceWatchCount) == 0` — chưa được đánh giá
-
-**`GetPresence(int)`**
-
-- `Online/Metadata/MetadataClient.cs:84` `userId == api.LocalUser.Value.OnlineID` — chưa được đánh giá
-- `Online/Metadata/MetadataClient.cs:87` `FriendPresences.TryGetValue(userId, out UserPresence presence)` — chưa được đánh giá
-- `Online/Metadata/MetadataClient.cs:90` `UserPresences.TryGetValue(userId, out presence)` — chưa được đánh giá
-
-**`MultiplayerRoomScoreSet(MultiplayerRoomScoreSetEvent)`**
-
-- `Online/Metadata/MetadataClient.cs:178` `MultiplayerRoomScoreSet != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Metadata.MetadataClient.UserPresenceWatchToken
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `Online/Metadata/MetadataClient.cs:148` `isDisposed` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Metadata.OnlineMetadataClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeatmapSetsUpdated(BeatmapUpdates)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `BeginWatchingMultiplayerRoom(long)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `BeginWatchingUserPresenceInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `DisconnectInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `EndWatchingMultiplayerRoom(long)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `EndWatchingUserPresenceInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `FriendPresenceUpdated(int, UserPresence?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetChangesSince(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LoadComplete()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Reconnect()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RefreshFriends()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateActivity(UserActivity?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateStatus(UserStatus?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserPresenceUpdated(int, UserPresence?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `isConnectedChanged(ValueChangedEvent<bool>)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `load(OsuConfigManager, SessionStatics)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BeatmapSetsUpdated(BeatmapUpdates)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:171` `catchingUp` — chưa được đánh giá
-
-**`BeginWatchingMultiplayerRoom(long)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:274` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`BeginWatchingUserPresenceInternal()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:209` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`DisconnectInternal()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:320` `connector != null` — chưa được đánh giá
-
-**`EndWatchingMultiplayerRoom(long)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:287` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`EndWatchingUserPresenceInternal()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:220` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`FriendPresenceUpdated(int, UserPresence?)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:257` `presence?.Status != null` — chưa được đánh giá
-
-**`GetChangesSince(int)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:179` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:92` `localUser.Value is not GuestUser` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:98` `localUser.Value is not GuestUser` — chưa được đánh giá
-
-**`Reconnect()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:314` `connector != null` — chưa được đánh giá
-
-**`RefreshFriends()`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:299` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`UpdateActivity(UserActivity?)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:191` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`UpdateStatus(UserStatus?)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:200` `connector?.IsConnected.Value != true` — chưa được đánh giá
-
-**`UserPresenceUpdated(int, UserPresence?)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:236` `presence?.Status != null` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:238` `userId == api.LocalUser.Value.OnlineID` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:244` `userId == api.LocalUser.Value.OnlineID` — chưa được đánh giá
-
-**`isConnectedChanged(ValueChangedEvent<bool>)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:107` `connected.NewValue` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:121` `IsWatchingUserPresence` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:124` `localUser.Value is not GuestUser` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:130` `lastQueueId.Value >= 0` — chưa được đánh giá
-- `Online/Metadata/OnlineMetadataClient.cs:145` `catchUpChanges.BeatmapSetIDs.Length == 0` — chưa được đánh giá
-
-**`load(OsuConfigManager, SessionStatics)`**
-
-- `Online/Metadata/OnlineMetadataClient.cs:61` `connector != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Multiplayer.MultiplayerClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ChangeSettings(Optional<string>, Optional<string>, Optional<MatchType>, Optional<QueueMode>, Optional<TimeSpan>, Optional<bool>, Optional<byte?>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CreateRoom(Room)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetCardWithPlaylistItem(RankedPlayCardItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Invited(int, long, string)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `IsHost.get` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `JoinRoom(Room, string?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `MatchEvent(MatchServerEvent)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchUserStateChanged(int, MatchUserState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PlaylistItemChanged(MultiplayerPlaylistItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PopulateUsers(IEnumerable<MultiplayerRoomUser>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ToggleReady()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ToggleSpectate()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserBeatmapAvailabilityChanged(int, BeatmapAvailability)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserJoined(MultiplayerRoomUser)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserKicked(MultiplayerRoomUser)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `UserModsChanged(int, IEnumerable<APIMod>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserStateChanged(int, MultiplayerUserState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserStyleChanged(int, int?, int?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserVotedToSkipIntro(int, bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `handleRoomRequest(Action)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `postServerShuttingDownNotification()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `runOnUpdateThreadAsync(Action, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `setupJoinedRoom(Room, MultiplayerRoom, CancellationToken)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `updateUserPlayingState(int, MultiplayerUserState)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ChangeSettings(Optional<string>, Optional<string>, Optional<MatchType>, Optional<QueueMode>, Optional<TimeSpan>, Optional<bool>, Optional<byte?>)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:410` `Room == null` — chưa được đánh giá
-
-**`CreateRoom(Room)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:239` `Room != null` — chưa được đánh giá
-
-**`GetCardWithPlaylistItem(RankedPlayCardItem)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:1201` `cardsWithPlaylistItems.TryGetValue(card, out var existing)` — chưa được đánh giá
-
-**`Invited(int, long, string)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:610` `apiUser == null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:610` `apiRoom == null` — chưa được đánh giá
-
-**`IsHost.get`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:191` `localUser != null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:191` `Room?.Host != null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:191` `localUser.Equals(Room.Host)` — chưa được đánh giá
-
-**`JoinRoom(Room, string?)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:260` `Room != null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:263` `room.RoomID == null` — chưa được đánh giá
-
-**`MatchEvent(MatchServerEvent)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:751` `countdown != null` — chưa được đánh giá
-
-**`MatchUserStateChanged(int, MatchUserState)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:703` `user == null` — chưa được đánh giá
-
-**`PlaylistItemChanged(MultiplayerPlaylistItem)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:929` `pi.ID == item.ID` — chưa được đánh giá
-
-**`PopulateUsers(IEnumerable<MultiplayerRoomUser>)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:980` `request.Response == null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:987` `users.TryGetValue(multiplayerUser.UserID, out var user)` — chưa được đánh giá
-
-**`ToggleReady()`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:433` `localUser == null` — chưa được đánh giá
-
-**`ToggleSpectate()`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:459` `localUser == null` — chưa được đánh giá
-
-**`UserBeatmapAvailabilityChanged(int, BeatmapAvailability)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:786` `user == null` — chưa được đánh giá
-
-**`UserJoined(MultiplayerRoomUser)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:555` `Room.Users.Any(existing => existing.UserID == user.UserID)` — chưa được đánh giá
-
-**`UserKicked(MultiplayerRoomUser)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:577` `LocalUser == null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:580` `user.Equals(LocalUser)` — chưa được đánh giá
-
-**`UserModsChanged(int, IEnumerable<APIMod>)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:829` `user == null` — chưa được đánh giá
-
-**`UserStateChanged(int, MultiplayerUserState)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:681` `user == null` — chưa được đánh giá
-
-**`UserStyleChanged(int, int?, int?)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:807` `user == null` — chưa được đánh giá
-
-**`UserVotedToSkipIntro(int, bool)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:947` `user == null` — chưa được đánh giá
-
-**`handleRoomRequest(Action)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:1069` `Room == null` — chưa được đánh giá
-
-**`load()`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:219` `connected.NewValue` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:221` `Room != null` — chưa được đánh giá
-
-**`postServerShuttingDownNotification()`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:771` `countdown == null` — chưa được đánh giá
-
-**`runOnUpdateThreadAsync(Action, CancellationToken)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:1045` `cancellationToken.IsCancellationRequested` — chưa được đánh giá
-
-**`setupJoinedRoom(Room, MultiplayerRoom, CancellationToken)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:286` `joinedRoom.Host != null` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:298` `pendingRequests.TryDequeue(out Action? action)` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:317` `pendingRequests.TryDequeue(out Action? action)` — chưa được đánh giá
-
-**`updateUserPlayingState(int, MultiplayerUserState)`**
-
-- `Online/Multiplayer/MultiplayerClient.cs:1028` `state >= MultiplayerUserState.WaitingForLoad` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:1028` `state <= MultiplayerUserState.FinishedPlay` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:1030` `isPlaying == wasPlaying` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClient.cs:1033` `isPlaying` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Multiplayer.MultiplayerClientExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `FireAndForget(Task, Action?, Action<Exception>?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `GetHubExceptionMessage(Exception)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ReconnectWhenReady(IStatefulUserHubClient, IBindable<bool>, Func<bool>, Func<Task>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`FireAndForget(Task, Action?, Action<Exception>?)`**
-
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:21` `t.IsFaulted` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:30` `SentryLogger.IsLocalUserConnectivityException(exception)` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:33` `exception.GetHubExceptionMessage() is string message` — chưa được đánh giá
-
-**`GetHubExceptionMessage(Exception)`**
-
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:87` `exception is HubException hubException` — chưa được đánh giá
-
-**`ReconnectWhenReady(IStatefulUserHubClient, IBindable<bool>, Func<bool>, Func<Task>)`**
-
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:71` `readyFunction()` — chưa được đánh giá
-- `Online/Multiplayer/MultiplayerClientExtensions.cs:78` `didReconnect` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Multiplayer.MultiplayerRoom
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Room)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `CanAddPlaylistItems(MultiplayerRoomUser)` | 3 | 6/6 | 3 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MultiplayerRoomExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetCurrentItem(MultiplayerRoom)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MultiplayerRoomSettings
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(MultiplayerRoomSettings?)` | 10 | 20/20 | 10 | 0 | 100.0% |
-| `ToString()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MultiplayerRoomUser
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(MultiplayerRoomUser?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.OnlineMultiplayerClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AbortGameplay()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `AbortMatch()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `AddPlaylistItem(MultiplayerPlaylistItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ChangeBeatmapAvailability(BeatmapAvailability)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ChangeSettings(MultiplayerRoomSettings)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ChangeState(MultiplayerUserState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ChangeUserMods(IEnumerable<APIMod>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ChangeUserStyle(int?, int?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CreateRoomInternal(MultiplayerRoom)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `DiscardCards(RankedPlayCardItem[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `DisconnectInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `EditPlaylistItem(MultiplayerPlaylistItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetMatchmakingPoolsOfType(MatchmakingPoolType)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `InvitePlayer(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `JoinRoomInternal(long, string?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `KickUser(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LeaveRoomInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingAcceptDuel(MatchmakingAcceptDuelRequest)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingAcceptInvitation()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingDeclineInvitation()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingIssueDuel(MatchmakingIssueDuelRequest)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingJoinLobbyWithParams(MatchmakingJoinLobbyRequest)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingJoinQueue(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingLeaveLobby()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingLeaveQueue()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingSkipToNextStage()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `MatchmakingToggleSelection(long)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PlayCard(RankedPlayCardItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Reconnect()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RemovePlaylistItem(long)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SendMatchRequest(MatchUserRequest)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StartMatch()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `TransferHost(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `VoteToSkipIntro()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load(IAPIProvider)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AbortGameplay()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:281` `IsConnected.Value` — chưa được đánh giá
-
-**`AbortMatch()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:291` `IsConnected.Value` — chưa được đánh giá
-
-**`AddPlaylistItem(MultiplayerPlaylistItem)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:301` `IsConnected.Value` — chưa được đánh giá
-
-**`ChangeBeatmapAvailability(BeatmapAvailability)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:231` `IsConnected.Value` — chưa được đánh giá
-
-**`ChangeSettings(MultiplayerRoomSettings)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:211` `IsConnected.Value` — chưa được đánh giá
-
-**`ChangeState(MultiplayerUserState)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:221` `IsConnected.Value` — chưa được đánh giá
-
-**`ChangeUserMods(IEnumerable<APIMod>)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:251` `IsConnected.Value` — chưa được đánh giá
-
-**`ChangeUserStyle(int?, int?)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:241` `IsConnected.Value` — chưa được đánh giá
-
-**`CreateRoomInternal(MultiplayerRoom)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:105` `IsConnected.Value` — chưa được đánh giá
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:116` `exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE` — chưa được đánh giá
-
-**`DiscardCards(RankedPlayCardItem[])`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:341` `IsConnected.Value` — chưa được đánh giá
-
-**`DisconnectInternal()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:472` `connector != null` — chưa được đánh giá
-
-**`EditPlaylistItem(MultiplayerPlaylistItem)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:311` `IsConnected.Value` — chưa được đánh giá
-
-**`GetMatchmakingPoolsOfType(MatchmakingPoolType)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:361` `IsConnected.Value` — chưa được đánh giá
-
-**`InvitePlayer(int)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:165` `IsConnected.Value` — chưa được đánh giá
-
-**`JoinRoomInternal(long, string?)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:130` `IsConnected.Value` — chưa được đánh giá
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:141` `exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE` — chưa được đánh giá
-
-**`KickUser(int)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:201` `IsConnected.Value` — chưa được đánh giá
-
-**`LeaveRoomInternal()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:155` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingAcceptDuel(MatchmakingAcceptDuelRequest)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:424` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingAcceptInvitation()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:406` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingDeclineInvitation()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:433` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingIssueDuel(MatchmakingIssueDuelRequest)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:415` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingJoinLobbyWithParams(MatchmakingJoinLobbyRequest)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:370` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingJoinQueue(int)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:388` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingLeaveLobby()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:379` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingLeaveQueue()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:397` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingSkipToNextStage()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:451` `IsConnected.Value` — chưa được đánh giá
-
-**`MatchmakingToggleSelection(long)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:442` `IsConnected.Value` — chưa được đánh giá
-
-**`PlayCard(RankedPlayCardItem)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:351` `IsConnected.Value` — chưa được đánh giá
-
-**`Reconnect()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:466` `connector != null` — chưa được đánh giá
-
-**`RemovePlaylistItem(long)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:321` `IsConnected.Value` — chưa được đánh giá
-
-**`SendMatchRequest(MatchUserRequest)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:261` `IsConnected.Value` — chưa được đánh giá
-
-**`StartMatch()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:271` `IsConnected.Value` — chưa được đánh giá
-
-**`TransferHost(int)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:191` `IsConnected.Value` — chưa được đánh giá
-
-**`VoteToSkipIntro()`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:331` `IsConnected.Value` — chưa được đánh giá
-
-**`load(IAPIProvider)`**
-
-- `Online/Multiplayer/OnlineMultiplayerClient.cs:50` `connector != null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Online.Multiplayer.ServerShutdownNotification
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -13218,150 +8882,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Online.Multiplayer.StandardMatchRoomState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Create(byte?)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoomState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `RecordScores(SoloScoreInfo[], int[])` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoundList
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetOrAdd(int)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserComparer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Compare(MatchmakingUser?, MatchmakingUser?)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `compareRoundPlacements(MatchmakingUser, MatchmakingUser)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserList
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetOrAdd(int)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayCardItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(RankedPlayCardItem?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Online/Multiplayer/MatchTypes/RankedPlay/RankedPlayCardItem.cs:24` `Equals(other)` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayDamageInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(RankedPlayDamageInfo?)` | 8 | 16/16 | 8 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayRoomState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ActiveUser` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `WinningUser` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Multiplayer.MatchTypes.TeamVersus.TeamVersusRoomState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateDefault(byte?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateDefault(byte?)`**
-
-- `Online/Multiplayer/MatchTypes/TeamVersus/TeamVersusRoomState.cs:23` `maxParticipants == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Notifications.WebSocket.DummyNotificationsClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `SendAsync(SocketMessage, CancellationToken?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`SendAsync(SocketMessage, CancellationToken?)`**
-
-- `Online/Notifications/WebSocket/DummyNotificationsClient.cs:21` `HandleMessage?.Invoke(message) != true` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `SendAsync(SocketMessage, CancellationToken?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `runReadLoop(CancellationToken)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`SendAsync(SocketMessage, CancellationToken?)`**
-
-- `Online/Notifications/WebSocket/WebSocketNotificationsClient.cs:102` `socket.State != WebSocketState.Open` — chưa được đánh giá
-
-**`runReadLoop(CancellationToken)`**
-
-- `Online/Notifications/WebSocket/WebSocketNotificationsClient.cs:44` `cancellationToken.IsCancellationRequested` — chưa được đánh giá
-- `Online/Notifications/WebSocket/WebSocketNotificationsClient.cs:55` `result.EndOfMessage` — chưa được đánh giá
-- `Online/Notifications/WebSocket/WebSocketNotificationsClient.cs:62` `message.Error != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClientConnector
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `SendAsync(SocketMessage, CancellationToken?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`SendAsync(SocketMessage, CancellationToken?)`**
-
-- `Online/Notifications/WebSocket/WebSocketNotificationsClientConnector.cs:50` `CurrentConnection is not WebSocketNotificationsClient webSocketClient` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Rooms.BeatmapAvailability
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(BeatmapAvailability)` | 3 | 6/6 | 3 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
 ### osu.Game.Online.Rooms.GetRoomsRequest
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -13375,284 +8895,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | `CreateWebRequest()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Rooms.JoinRoomRequest
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateWebRequest()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Rooms.MultiplayerPlaylistItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(MultiplayerPlaylistItem?)` | 13 | 26/26 | 13 | 0 | 100.0% |
-| `Equals(object?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Online/Rooms/MultiplayerPlaylistItem.cs:139` `Equals(other)` — thiếu `false`
-
-</details>
-
-### osu.Game.Online.Rooms.MultiplayerScore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateScoreInfo(ScoreManager, RulesetStore, BeatmapInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateScoreInfo(ScoreManager, RulesetStore, BeatmapInfo)`**
-
-- `Online/Rooms/MultiplayerScore.cs:89` `ruleset == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Rooms.PlaylistExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetCurrentItem(IReadOnlyCollection<PlaylistItem>)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `GetTotalDuration(IReadOnlyList<PlaylistItem>, RulesetStore)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetTotalDuration(IReadOnlyList<PlaylistItem>, RulesetStore)`**
-
-- `Online/Rooms/PlaylistExtensions.cs:49` `p.RequiredMods.Length > 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Rooms.PlaylistItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(PlaylistItem?)` | 8 | 16/16 | 8 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Rooms.Room
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(MultiplayerRoom)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Duration.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Duration.set` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `SetField(T, T, string)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `SetList(IReadOnlyList<T>, IReadOnlyList<T>, string)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Rooms.RoomExtensions
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetOnlineURL(Room, IAPIProvider)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Spectator.OnlineSpectatorClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeginPlayingInternal(long?, SpectatorState)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `DisconnectInternal()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `EndPlayingInternal(long?, SpectatedUserState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Reconnect()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SendFramesInternal(long?, FrameDataBundle)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `StopWatchingUserInternal(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `WatchUserInternal(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load(IAPIProvider)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BeginPlayingInternal(long?, SpectatorState)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:58` `IsConnected.Value` — chưa được đánh giá
-- `Online/Spectator/OnlineSpectatorClient.cs:70` `exception.GetHubExceptionMessage() == HubClientConnector.SERVER_SHUTDOWN_MESSAGE` — chưa được đánh giá
-
-**`DisconnectInternal()`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:134` `connector != null` — chưa được đánh giá
-
-**`EndPlayingInternal(long?, SpectatedUserState)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:98` `IsConnected.Value` — chưa được đánh giá
-
-**`Reconnect()`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:128` `connector != null` — chưa được đánh giá
-
-**`SendFramesInternal(long?, FrameDataBundle)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:88` `IsConnected.Value` — chưa được đánh giá
-
-**`StopWatchingUserInternal(int)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:118` `IsConnected.Value` — chưa được đánh giá
-
-**`WatchUserInternal(int)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:108` `IsConnected.Value` — chưa được đánh giá
-
-**`load(IAPIProvider)`**
-
-- `Online/Spectator/OnlineSpectatorClient.cs:36` `connector != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Spectator.SpectatorClient
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `BeginPlaying(long?, GameplayState, Score)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `EndPlaying(long?, GameplayState)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `HandleFrame(ReplayFrame)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `ServerShuttingDown()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `StopWatchingUser(int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Update()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `UserBeganPlaying(int, SpectatorState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserFinishedPlaying(int, SpectatorState)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserSentFrames(int, FrameDataBundle)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UserStartedWatching(SpectatorUser[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `WatchUser(int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `purgePendingFrames()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `sendNextBundleIfRequired()` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`BeginPlaying(long?, GameplayState, Score)`**
-
-- `Online/Spectator/SpectatorClient.cs:206` `isPlaying` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:222` `success` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:226` `IsConnected.Value` — chưa được đánh giá
-
-**`EndPlaying(long?, GameplayState)`**
-
-- `Online/Spectator/SpectatorClient.cs:276` `isPlaying` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:279` `pendingFrames.Count > 0` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:286` `state.HasPassed` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:288` `state.HasFailed` — chưa được đánh giá
-
-**`HandleFrame(ReplayFrame)`**
-
-- `Online/Spectator/SpectatorClient.cs:244` `isPlaying` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:246` `IsConnected.Value` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:251` `frame is IConvertibleReplayFrame convertible` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:260` `pendingFrames.LastOrDefault()?.IsEquivalentTo(convertedFrame) == true` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:266` `pendingFrames.Count > max_pending_frames` — chưa được đánh giá
-
-**`ServerShuttingDown()`**
-
-- `Online/Spectator/SpectatorClient.cs:453` `isPlaying` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:453` `watchedUsersRefCounts.Count == 0` — chưa được đánh giá
-
-**`StopWatchingUser(int)`**
-
-- `Online/Spectator/SpectatorClient.cs:336` `watchedUsersRefCounts.TryGetValue(userId, out int watchers)` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:336` `watchers > 1` — chưa được đánh giá
-
-**`Update()`**
-
-- `Online/Spectator/SpectatorClient.cs:366` `pendingFrames.Count > 0` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:366` `Time.Current - lastPurgeTime > TIME_BETWEEN_SENDS` — chưa được đánh giá
-
-**`UserBeganPlaying(int, SpectatorState)`**
-
-- `Online/Spectator/SpectatorClient.cs:138` `watchedUsersRefCounts.ContainsKey(userId)` — chưa được đánh giá
-
-**`UserFinishedPlaying(int, SpectatorState)`**
-
-- `Online/Spectator/SpectatorClient.cs:151` `watchedUsersRefCounts.ContainsKey(userId)` — chưa được đánh giá
-
-**`UserSentFrames(int, FrameDataBundle)`**
-
-- `Online/Spectator/SpectatorClient.cs:162` `data.Frames.Count > 0` — chưa được đánh giá
-
-**`UserStartedWatching(SpectatorUser[])`**
-
-- `Online/Spectator/SpectatorClient.cs:183` `watchingUsers.Contains(user)` — chưa được đánh giá
-
-**`WatchUser(int)`**
-
-- `Online/Spectator/SpectatorClient.cs:321` `watchedUsersRefCounts.TryAdd(userId, 1)` — chưa được đánh giá
-
-**`load()`**
-
-- `Online/Spectator/SpectatorClient.cs:108` `connected.NewValue` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:117` `i < watchers` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:122` `isPlaying` — chưa được đánh giá
-
-**`purgePendingFrames()`**
-
-- `Online/Spectator/SpectatorClient.cs:372` `pendingFrames.Count == 0` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:375` `isPlaying` — chưa được đánh giá
-
-**`sendNextBundleIfRequired()`**
-
-- `Online/Spectator/SpectatorClient.cs:403` `lastSend?.IsCompleted == false` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:406` `pendingFrameBundles.TryPeek(out var bundle)` — chưa được đánh giá
-- `Online/Spectator/SpectatorClient.cs:421` `wasSuccessful` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Spectator.SpectatorScoreProcessor
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateScore()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `onNewFrames(int, FrameDataBundle)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `onSpectatorStatesChanged(object?, NotifyDictionaryChangedEventArgs<int, SpectatorState>)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Online/Spectator/SpectatorScoreProcessor.cs:173` `spectatorClient.IsNotNull()` — chưa được đánh giá
-
-**`UpdateScore()`**
-
-- `Online/Spectator/SpectatorScoreProcessor.cs:144` `scoreInfo == null` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:144` `replayFrames.Count == 0` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:150` `frameIndex < 0` — chưa được đánh giá
-
-**`onNewFrames(int, FrameDataBundle)`**
-
-- `Online/Spectator/SpectatorScoreProcessor.cs:129` `incomingUserId != userId` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:134` `scoreInfo == null` — chưa được đánh giá
-
-**`onSpectatorStatesChanged(object?, NotifyDictionaryChangedEventArgs<int, SpectatorState>)`**
-
-- `Online/Spectator/SpectatorScoreProcessor.cs:102` `spectatorStates.TryGetValue(userId, out var userState)` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:102` `userState.BeatmapID == null` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:102` `userState.RulesetID == null` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:110` `scoreInfo != null` — chưa được đánh giá
-- `Online/Spectator/SpectatorScoreProcessor.cs:114` `rulesetInfo == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Online.Spectator.SpectatorState
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(SpectatorState)` | 6 | 12/12 | 6 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Online.Spectator.SpectatorUser
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(SpectatorUser?)` | 2 | 4/4 | 2 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
@@ -17198,25 +12440,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Overlays/Dashboard/CurrentlyOnline/RealtimeUserList.cs:141` `user == null` — chưa được đánh giá
 - `Overlays/Dashboard/CurrentlyOnline/RealtimeUserList.cs:146` `presence == null` — chưa được đánh giá
 - `Overlays/Dashboard/CurrentlyOnline/RealtimeUserList.cs:149` `userPanels.TryGetValue(user.Id, out _)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList.UserWithRankLookupCache
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateRequest(IEnumerable<int>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateRequest(IEnumerable<int>)`**
-
-- `Overlays/Dashboard/CurrentlyOnline/RealtimeUserList.cs:262` `ruleset.Value?.OnlineID >= 0` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Overlays/Dashboard/CurrentlyOnline/RealtimeUserList.cs:257` `ruleset.OldValue?.OnlineID != ruleset.NewValue?.OnlineID` — chưa được đánh giá
 
 </details>
 
@@ -21448,35 +16671,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Overlays.SkinEditor.SkinEditorChangeHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Drawable)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ApplyStateChange(byte[], byte[])` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `WriteCurrentStateToStream(MemoryStream)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Drawable)`**
-
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:33` `firstTarget == null` — chưa được đánh giá
-
-**`ApplyStateChange(byte[], byte[])`**
-
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:52` `firstTarget == null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:57` `deserializedContent == null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:70` `componentsPerTypeLookup.TryGetValue(lookup, out Queue<Drawable>? componentsOfSameType)` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:76` `i >= 0` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:83` `componentsPerTypeLookup.TryGetValue(lookup, out Queue<Drawable>? componentsOfSameType)` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:90` `componentsOfSameType.TryDequeue(out Drawable? component)` — chưa được đánh giá
-
-**`WriteCurrentStateToStream(MemoryStream)`**
-
-- `Overlays/SkinEditor/SkinEditorChangeHandler.cs:42` `firstTarget == null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Overlays.SkinEditor.SkinEditorOverlay
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -21650,72 +16844,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Overlays/SkinEditor/SkinSelectionHandler.cs:68` `c.Item.UsesFixedAnchor` — chưa được đánh giá
 - `Overlays/SkinEditor/SkinSelectionHandler.cs:68` `((Drawable)c.Item).Anchor == fixedAnchor.Anchor` — chưa được đánh giá
 - `Overlays/SkinEditor/SkinSelectionHandler.cs:71` `originMenu != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Overlays.SkinEditor.SkinSelectionRotationHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Begin()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Commit()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Update(float, Vector2?)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Begin()`**
-
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:54` `objectsInRotation != null` — chưa được đánh giá
-
-**`Commit()`**
-
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:94` `objectsInRotation == null` — chưa được đánh giá
-
-**`Update(float, Vector2?)`**
-
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:69` `objectsInRotation == null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:72` `originalRotations != null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:72` `originalPositions != null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:72` `DefaultOrigin != null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:74` `objectsInRotation.Length == 1` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionRotationHandler.cs:74` `origin == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Overlays.SkinEditor.SkinSelectionScaleHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Begin()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Commit()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Update(Vector2, Vector2?, Axes, float)` | 14 | 0/28 | 0 | 14 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Begin()`**
-
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:63` `objectsInScale != null` — chưa được đánh giá
-
-**`Commit()`**
-
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:152` `objectsInScale == null` — chưa được đánh giá
-
-**`Update(Vector2, Vector2?, Axes, float)`**
-
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:78` `objectsInScale == null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:81` `defaultOrigin != null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:81` `OriginalSurroundingQuad != null` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:85` `adjustAxis == Axes.Y` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:85` `allSelectedSupportManualSizing(Axes.Y)` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:86` `adjustAxis == Axes.X` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:86` `allSelectedSupportManualSizing(Axes.X)` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:90` `OriginalSurroundingQuad.Value.Width == 0` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:90` `OriginalSurroundingQuad.Value.Height == 0` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:94` `adjustAxis == Axes.Both` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:107` `flippedX != isFlippedX` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:113` `flippedY != isFlippedY` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:119` `toFlip != Axes.None` — chưa được đánh giá
-- `Overlays/SkinEditor/SkinSelectionScaleHandler.cs:130` `Precision.AlmostEquals(MathF.Abs(b.Rotation) % 180, 90)` — chưa được đánh giá
 
 </details>
 
@@ -22298,39 +17426,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
-### osu.Game.Rulesets.RealmRulesetStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `TryDisableCustomRulesetsCausing(Exception)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `informUserAboutBrokenRulesets()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `prepareDetachedRulesets()` | 8 | 0/16 | 0 | 8 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`TryDisableCustomRulesetsCausing(Exception)`**
-
-- `Rulesets/RealmRulesetStore.cs:180` `declaringAssembly == null` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:183` `UserRulesetAssemblies.Contains(declaringAssembly)` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:188` `File.Exists(sourceLocation)` — chưa được đánh giá
-
-**`informUserAboutBrokenRulesets()`**
-
-- `Rulesets/RealmRulesetStore.cs:161` `RulesetStorage == null` — chưa được đánh giá
-
-**`prepareDetachedRulesets()`**
-
-- `Rulesets/RealmRulesetStore.cs:47` `realm.All<RulesetInfo>().FirstOrDefault(rr => rr.OnlineID == r.RulesetInfo.OnlineID) == null` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:54` `rulesets.FirstOrDefault(ri => ri.InstantiationInfo.Equals(r.RulesetInfo.InstantiationInfo, StringComparison.Ordinal)) == null` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:58` `existingSameShortName != null` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:79` `resolvedType == null` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:90` `checkRulesetUpToDate(instance)` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:96` `r.OnlineID != instanceInfo.OnlineID` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:99` `r.OnlineID > 0` — chưa được đánh giá
-- `Rulesets/RealmRulesetStore.cs:99` `rulesets.Any(otherRuleset => otherRuleset.ShortName != r.ShortName && otherRuleset.OnlineID == r.OnlineID)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Ruleset
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -22339,61 +17434,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `GetHitResultsForDisplay()` | 2 | 4/4 | 2 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Rulesets.RulesetConfigCache
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfigFor(Ruleset)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfigFor(Ruleset)`**
-
-- `Rulesets/RulesetConfigCache.cs:45` `IsLoaded` — chưa được đánh giá
-- `Rulesets/RulesetConfigCache.cs:48` `configCache.TryGetValue(ruleset.RulesetInfo.ShortName, out var config)` — chưa được đánh giá
-
-**`LoadComplete()`**
-
-- `Rulesets/RulesetConfigCache.cs:36` `string.IsNullOrEmpty(ruleset.ShortName)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.RulesetInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CompareTo(IRulesetInfo?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `CompareTo(RulesetInfo?)` | 4 | 2/8 | 0 | 2 | 25.0% |
-| `CreateInstance()` | 3 | 3/6 | 0 | 0 | 50.0% |
-| `Equals(IRulesetInfo?)` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `Equals(RulesetInfo?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CompareTo(IRulesetInfo?)`**
-
-- `Rulesets/RulesetInfo.cs:70` `other is RulesetInfo ruleset` — chưa được đánh giá
-
-**`CompareTo(RulesetInfo?)`**
-
-- `Rulesets/RulesetInfo.cs:56` `OnlineID >= 0` — thiếu `false`
-- `Rulesets/RulesetInfo.cs:56` `other?.OnlineID >= 0` — thiếu `false`
-- `Rulesets/RulesetInfo.cs:60` `OnlineID >= 0` — chưa được đánh giá
-- `Rulesets/RulesetInfo.cs:62` `other?.OnlineID >= 0` — chưa được đánh giá
-
-**`CreateInstance()`**
-
-- `Rulesets/RulesetInfo.cs:99` `Available` — thiếu `false`
-- `Rulesets/RulesetInfo.cs:104` `type == null` — thiếu `true`
-- `Rulesets/RulesetInfo.cs:109` `ruleset == null` — thiếu `true`
-
-**`Equals(IRulesetInfo?)`**
-
-- `Rulesets/RulesetInfo.cs:52` `other is RulesetInfo r` — thiếu `false`
-
-</details>
 
 ### osu.Game.Rulesets.RulesetSelector
 
@@ -22407,69 +17447,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Rulesets/RulesetSelector.cs:27` `ruleset.IsLegacyRuleset()` — chưa được đánh giá
 - `Rulesets/RulesetSelector.cs:27` `LegacyOnly` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.RulesetStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Storage?)` | 2 | 2/4 | 0 | 0 | 50.0% |
-| `addRuleset(Assembly)` | 4 | 6/8 | 2 | 0 | 75.0% |
-| `loadFromAppDomain()` | 3 | 4/6 | 1 | 0 | 66.7% |
-| `loadRulesetFromFile(string)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `loadUserRulesets(Storage)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `resolveRulesetDependencyAssembly(object?, ResolveEventArgs)` | 2 | 2/4 | 0 | 0 | 50.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Storage?)`**
-
-- `Rulesets/RulesetStore.cs:38` `RuntimeInfo.StartupDirectory.IsNotNull()` — thiếu `false`
-- `Rulesets/RulesetStore.cs:47` `RulesetStorage != null` — thiếu `true`
-
-**`addRuleset(Assembly)`**
-
-- `Rulesets/RulesetStore.cs:155` `LoadedAssemblies.ContainsKey(assembly)` — thiếu `true`
-- `Rulesets/RulesetStore.cs:160` `LoadedAssemblies.Any(a => a.Key.FullName == assembly.FullName)` — thiếu `true`
-
-**`loadFromAppDomain()`**
-
-- `Rulesets/RulesetStore.cs:95` `rulesetName == null` — thiếu `true`
-- `Rulesets/RulesetStore.cs:98` `rulesetName.Contains(@"Tests")` — thiếu `true`
-
-**`loadUserRulesets(Storage)`**
-
-- `Rulesets/RulesetStore.cs:112` `assembly != null` — chưa được đánh giá
-
-**`resolveRulesetDependencyAssembly(object?, ResolveEventArgs)`**
-
-- `Rulesets/RulesetStore.cs:77` `name == null` — thiếu `true`
-- `Rulesets/RulesetStore.cs:83` `domainAssembly != null` — thiếu `false`
-
-</details>
-
-### osu.Game.Rulesets.Configuration.RulesetConfigManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `AddBindable(TLookup, Bindable<TBindable>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PerformLoad()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PerformSave()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`AddBindable(TLookup, Bindable<TBindable>)`**
-
-- `Rulesets/Configuration/RulesetConfigManager.cs:85` `setting != null` — chưa được đánh giá
-
-**`PerformLoad()`**
-
-- `Rulesets/Configuration/RulesetConfigManager.cs:44` `realm != null` — chưa được đánh giá
-
-**`PerformSave()`**
-
-- `Rulesets/Configuration/RulesetConfigManager.cs:63` `changed.Any()` — chưa được đánh giá
 
 </details>
 
@@ -23864,20 +18841,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Mods.ModFlashlight.Flashlight.FlashlightDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Rulesets/Mods/ModFlashlight.cs:297` `quadBatch == null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Mods.ModFlashlight.PlayfieldDrawInfoTracker
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -24000,14 +18963,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Rulesets/Mods/ModPerfect.cs:35` `result.AffectsCombo()` — chưa được đánh giá
 
 </details>
-
-### osu.Game.Rulesets.Mods.ModPreset
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Mods.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
 
 ### osu.Game.Rulesets.Mods.ModRateAdjust
 
@@ -24788,7 +19743,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 |---|---|---|---|---|---|
 | `ApplyResult(JudgementResult)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `Reset(bool)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `ResetFromReplayFrame(ReplayFrame)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `SimulateAutoplay(IBeatmap)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `Update()` | 3 | 0/6 | 0 | 3 | 0.0% |
 
@@ -24835,7 +19789,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `MaximumStatistics.get` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `RankFromScore(double, IReadOnlyDictionary<HitResult, int>)` | 5 | 10/10 | 5 | 0 | 100.0% |
 | `Reset(bool)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `ResetFromReplayFrame(ReplayFrame)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `RevertResultInternal(JudgementResult)` | 7 | 12/14 | 5 | 0 | 85.7% |
 | `updateRank()` | 1 | 1/2 | 0 | 0 | 50.0% |
 | `updateScore()` | 5 | 10/10 | 5 | 0 | 100.0% |
@@ -24946,34 +19899,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Rulesets/UI/DrawableRulesetDependencies.cs:101` `SampleStore.IsNotNull()` — chưa được đánh giá
 - `Rulesets/UI/DrawableRulesetDependencies.cs:102` `TextureStore.IsNotNull()` — chưa được đánh giá
 - `Rulesets/UI/DrawableRulesetDependencies.cs:103` `ShaderManager.IsNotNull()` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackSampleStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `Rulesets/UI/DrawableRulesetDependencies.cs:172` `primary.IsNotNull()` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackTextureStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Rulesets/UI/DrawableRulesetDependencies.cs:197` `primary.IsNotNull()` — chưa được đánh giá
 
 </details>
 
@@ -25536,152 +20461,11 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Scoring.LegacyDatabasedScore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(ScoreInfo, RulesetStore, BeatmapManager, IResourceStore<byte[]>)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(ScoreInfo, RulesetStore, BeatmapManager, IResourceStore<byte[]>)`**
-
-- `Scoring/LegacyDatabasedScore.cs:24` `replayFilename == null` — chưa được đánh giá
-- `Scoring/LegacyDatabasedScore.cs:29` `stream == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Scoring.ScoreImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateModel(ArchiveReader, ImportParameters)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Populate(ScoreInfo, ArchiveReader?, Realm, CancellationToken)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `PostImport(ScoreInfo, Realm, ImportParameters)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `lookupUserById(int)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `lookupUserByName(string)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `populateUserDetails(ScoreInfo)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateModel(ArchiveReader, ImportParameters)`**
-
-- `Scoring/ScoreImporter.cs:58` `parameters.Batch` — chưa được đánh giá
-
-**`Populate(ScoreInfo, ArchiveReader?, Realm, CancellationToken)`**
-
-- `Scoring/ScoreImporter.cs:83` `model.BeatmapInfo.IsManaged` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:86` `model.Ruleset.IsManaged` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:94` `ModUtils.CheckCompatibleSet(model.Mods)` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:97` `string.IsNullOrEmpty(model.StatisticsJson)` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:100` `string.IsNullOrEmpty(model.MaximumStatisticsJson)` — chưa được đánh giá
-
-**`PostImport(ScoreInfo, Realm, ImportParameters)`**
-
-- `Scoring/ScoreImporter.cs:124` `api.IsLoggedIn` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:124` `api.LocalUser.Value.OnlineID == model.UserID` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:124` `model.BeatmapInfo.LastPlayed == null` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:124` `model.Date > model.BeatmapInfo.LastPlayed` — chưa được đánh giá
-
-**`lookupUserById(int)`**
-
-- `Scoring/ScoreImporter.cs:151` `idLookupCache.TryGetValue(id, out var existing)` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:160` `userRequest.Response is APIUser user` — chưa được đánh giá
-
-**`lookupUserByName(string)`**
-
-- `Scoring/ScoreImporter.cs:182` `usernameLookupCache.TryGetValue(username, out var existing)` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:191` `userRequest.Response is APIUser user` — chưa được đánh giá
-
-**`populateUserDetails(ScoreInfo)`**
-
-- `Scoring/ScoreImporter.cs:134` `model.RealmUser.OnlineID == APIUser.SYSTEM_USER_ID` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:137` `model.RealmUser.OnlineID > 1` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:143` `model.OnlineID < 0` — chưa được đánh giá
-- `Scoring/ScoreImporter.cs:143` `model.LegacyOnlineID <= 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Scoring.ScoreInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `APIMods.get` | 3 | 5/6 | 2 | 0 | 83.3% |
-| `GetStatisticsForDisplay()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `MaximumStatistics.get` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `Mods.get` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `Statistics.get` | 2 | 3/4 | 1 | 0 | 75.0% |
-| `updateModsJson()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`APIMods.get`**
-
-- `Scoring/ScoreInfo.cs:333` `string.IsNullOrEmpty(ModsJson)` — thiếu `false`
-
-**`GetStatisticsForDisplay()`**
-
-- `Scoring/ScoreInfo.cs:377` `MaximumStatistics.TryGetValue(r.result, out int count)` — chưa được đánh giá
-- `Scoring/ScoreInfo.cs:377` `count > 0` — chưa được đánh giá
-
-**`MaximumStatistics.get`**
-
-- `Scoring/ScoreInfo.cs:294` `string.IsNullOrEmpty(MaximumStatisticsJson)` — thiếu `false`
-
-**`Statistics.get`**
-
-- `Scoring/ScoreInfo.cs:276` `string.IsNullOrEmpty(StatisticsJson)` — thiếu `false`
-
-</details>
-
-### osu.Game.Scoring.ScoreManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Delete(Expression<Func<ScoreInfo, bool>>?, bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Export(ScoreInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetScore(IScoreInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `getDatabasedScoreInfo(IScoreInfo)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Delete(Expression<Func<ScoreInfo, bool>>?, bool)`**
-
-- `Scoring/ScoreManager.cs:176` `filter != null` — chưa được đánh giá
-
-**`Export(ScoreInfo)`**
-
-- `Scoring/ScoreManager.cs:219` `databasedScoreInfo == null` — chưa được đánh giá
-
-**`GetScore(IScoreInfo)`**
-
-- `Scoring/ScoreManager.cs:74` `databasedScoreInfo == null` — chưa được đánh giá
-
-**`getDatabasedScoreInfo(IScoreInfo)`**
-
-- `Scoring/ScoreManager.cs:91` `originalScoreInfo is ScoreInfo scoreInfo` — chưa được đánh giá
-- `Scoring/ScoreManager.cs:93` `scoreInfo.IsManaged` — chưa được đánh giá
-- `Scoring/ScoreManager.cs:96` `string.IsNullOrEmpty(scoreInfo.Hash)` — chưa được đánh giá
-- `Scoring/ScoreManager.cs:100` `originalScoreInfo.OnlineID > 0` — chưa được đánh giá
-- `Scoring/ScoreManager.cs:103` `originalScoreInfo.LegacyOnlineID > 0` — chưa được đánh giá
-- `Scoring/ScoreManager.cs:106` `databasedScoreInfo == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Scoring.Legacy.LegacyReplaySoloScoreInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `FromScore(ScoreInfo)` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
 ### osu.Game.Scoring.Legacy.LegacyScoreDecoder
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | `Parse(Stream)` | 14 | 25/28 | 11 | 0 | 89.3% |
-| `PopulateMaximumStatistics(ScoreInfo, WorkingBeatmap)` | 3 | 6/6 | 3 | 0 | 100.0% |
 | `convertFrame(LegacyReplayFrame, ReplayFrame)` | 1 | 1/2 | 0 | 0 | 50.0% |
 | `readCompressedData(byte[], Action<StreamReader>)` | 3 | 4/6 | 1 | 0 | 66.7% |
 | `readLegacyReplay(Replay, StreamReader)` | 15 | 27/30 | 12 | 0 | 90.0% |
@@ -26394,122 +21178,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Edit.EditorBeatmap
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(IBeatmap, ISkin, Storyboard, BeatmapInfo)` | 1 | 1/2 | 0 | 0 | 50.0% |
-| `ConvertControlPoints(ControlPointInfo)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `PerformOnSelection(Action<HitObject>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Remove(HitObject)` | 1 | 1/2 | 0 | 0 | 50.0% |
-| `SnapAllHitObjectsToCurrentDivisor()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Update()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateState()` | 3 | 5/6 | 2 | 0 | 83.3% |
-| `findInsertionIndex(IReadOnlyList<HitObject>, double)` | 2 | 3/4 | 1 | 0 | 75.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(IBeatmap, ISkin, Storyboard, BeatmapInfo)`**
-
-- `Screens/Edit/EditorBeatmap.cs:108` `beatmapSkin is LegacyBeatmapSkin skin` — thiếu `true`
-
-**`PerformOnSelection(Action<HitObject>)`**
-
-- `Screens/Edit/EditorBeatmap.cs:335` `SelectedHitObjects.Count == 0` — chưa được đánh giá
-
-**`Remove(HitObject)`**
-
-- `Screens/Edit/EditorBeatmap.cs:423` `index == -1` — thiếu `true`
-
-**`SnapAllHitObjectsToCurrentDivisor()`**
-
-- `Screens/Edit/EditorBeatmap.cs:556` `HitObjects.Count == 0` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmap.cs:579` `oldDuration > 0` — chưa được đánh giá
-
-**`Update()`**
-
-- `Screens/Edit/EditorBeatmap.cs:472` `batchPendingUpdates.Count > 0` — chưa được đánh giá
-
-**`UpdateState()`**
-
-- `Screens/Edit/EditorBeatmap.cs:480` `batchPendingUpdates.Count == 0` — thiếu `false`
-
-**`findInsertionIndex(IReadOnlyList<HitObject>, double)`**
-
-- `Screens/Edit/EditorBeatmap.cs:542` `list[i].StartTime > startTime` — thiếu `true`
-
-</details>
-
-### osu.Game.Screens.Edit.EditorBeatmapProcessor
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `autoGenerateBreaks()` | 11 | 21/22 | 10 | 0 | 95.5% |
-| `ensureNewComboAfterBreaks()` | 6 | 11/12 | 5 | 0 | 91.7% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`autoGenerateBreaks()`**
-
-- `Screens/Edit/EditorBeatmapProcessor.cs:88` `nextObject is IHasTimePreempt hasTimePreempt` — thiếu `false`
-
-**`ensureNewComboAfterBreaks()`**
-
-- `Screens/Edit/EditorBeatmapProcessor.cs:119` `hitObject is not IHasComboInformation hasCombo` — thiếu `true`
-
-</details>
-
-### osu.Game.Screens.Edit.EditorBeatmapSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(EditorBeatmap, LegacyBeatmapSkin)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetAvailableSampleSets()` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `updateColours()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(EditorBeatmap, LegacyBeatmapSkin)`**
-
-- `Screens/Edit/EditorBeatmapSkin.cs:51` `Skin.Configuration.ComboColours is IReadOnlyList<Color4> comboColours` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:57` `i < comboColours.Count` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:63` `skin.BeatmapSetResources != null` — chưa được đánh giá
-
-**`Dispose()`**
-
-- `Screens/Edit/EditorBeatmapSkin.cs:157` `Skin.BeatmapSetResources != null` — chưa được đánh giá
-
-**`GetAvailableSampleSets()`**
-
-- `Screens/Edit/EditorBeatmapSkin.cs:121` `Skin.Samples != null` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:127` `sample.StartsWith(possiblePrefix, StringComparison.Ordinal)` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:133` `string.IsNullOrEmpty(indexString)` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:135` `int.TryParse(indexString, out int parsed)` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:135` `parsed >= 2` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:138` `index.HasValue` — chưa được đánh giá
-- `Screens/Edit/EditorBeatmapSkin.cs:142` `sampleSets.TryGetValue(index.Value, out sampleSet)` — chưa được đánh giá
-
-**`updateColours()`**
-
-- `Screens/Edit/EditorBeatmapSkin.cs:81` `i < ComboColours.Count` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Edit.EditorBeatmapSkin.SampleSet
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `FindSampleIfExists(string, string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`FindSampleIfExists(string, string)`**
-
-- `Screens/Edit/EditorBeatmapSkin.cs:103` `SampleSetIndex > 1` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Edit.EditorChangeHandler
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -26676,42 +21344,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`openDirectory()`**
 
 - `Screens/Edit/ExternalEditScreen.cs:187` `EditOperation == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Edit.LegacyEditorBeatmapPatcher
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `findChangedIndices(DiffResult, LegacyDecoder<Beatmap>.Section, List<int>, List<int>)` | 10 | 14/20 | 4 | 0 | 70.0% |
-| `processBookmarks(Func<IBeatmap>)` | 3 | 5/6 | 2 | 0 | 83.3% |
-| `processBreaks(Func<IBeatmap>)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `processHitObjectLocalData(Func<IBeatmap>)` | 5 | 1/10 | 0 | 4 | 10.0% |
-| `processHitObjects(DiffResult, Func<IBeatmap>)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `processTimingPoints(Func<IBeatmap>)` | 2 | 4/4 | 2 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`findChangedIndices(DiffResult, LegacyDecoder<Beatmap>.Section, List<int>, List<int>)`**
-
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:187` `oldSectionStartIndex == -1` — thiếu `true`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:191` `oldSectionEndIndex == -1` — thiếu `false`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:195` `newSectionStartIndex == -1` — thiếu `true`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:199` `newSectionEndIndex == -1` — thiếu `false`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:209` `objectIndex >= oldSectionEndIndex` — thiếu `true`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:220` `objectIndex >= newSectionEndIndex` — thiếu `true`
-
-**`processBookmarks(Func<IBeatmap>)`**
-
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:119` `idx < 0` — thiếu `false`
-
-**`processHitObjectLocalData(Func<IBeatmap>)`**
-
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:159` `ReferenceEquals(oldObject, newObject)` — thiếu `false`
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:162` `oldObject is IHasSliderVelocity oldWithVelocity` — chưa được đánh giá
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:162` `newObject is IHasSliderVelocity newWithVelocity` — chưa được đánh giá
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:167` `oldObject is IHasRepeats oldWithRepeats` — chưa được đánh giá
-- `Screens/Edit/LegacyEditorBeatmapPatcher.cs:167` `newObject is IHasRepeats newWithRepeats` — chưa được đánh giá
 
 </details>
 
@@ -27355,25 +21987,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Edit.Compose.HitObjectUsageEventBuffer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onHitObjectUsageBegan(HitObject)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `Screens/Edit/Compose/HitObjectUsageEventBuffer.cs:78` `playfield != null` — chưa được đánh giá
-
-**`onHitObjectUsageBegan(HitObject)`**
-
-- `Screens/Edit/Compose/HitObjectUsageEventBuffer.cs:61` `usageFinishedHitObjects.Remove(hitObject)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -27984,84 +22597,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Edit.Compose.Components.PlacementStateManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CopyStateFromPreviousObject()` | 11 | 0/22 | 0 | 11 | 0.0% |
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `additionBankChanged(HitObject, string, TernaryState)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `bankChanged(HitObject, string, TernaryState)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `getPreviousHitObject()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `sampleChanged(HitObject, string, TernaryState)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `updatePlacementNewCombo()` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `updatePlacementSamples()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CopyStateFromPreviousObject()`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:173` `hitObject is IHasComboInformation comboInformation` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:176` `automaticBankAssignment` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:176` `lastHitNormal != null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:178` `s.Name == HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:181` `s.Name == HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:183` `lastHitNormal != null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:192` `automaticAdditionBankAssignment` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:195` `s.Name != HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:198` `hitObject is IHasRepeats hasRepeats` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:201` `i < hasRepeats.NodeSamples.Count` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:205` `PerformBeatmapUpdates` — chưa được đánh giá
-
-**`Dispose(bool)`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:214` `composer != null` — chưa được đánh giá
-
-**`additionBankChanged(HitObject, string, TernaryState)`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:138` `bankName == HitObjectComposer.HIT_BANK_AUTO` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:141` `automaticAdditionBankAssignment` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:144` `state == TernaryState.True` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:146` `s.Name != HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:148` `PerformBeatmapUpdates` — chưa được đánh giá
-
-**`bankChanged(HitObject, string, TernaryState)`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:121` `bankName == HitObjectComposer.HIT_BANK_AUTO` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:124` `automaticBankAssignment` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:127` `state == TernaryState.True` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:129` `s.Name == HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:131` `PerformBeatmapUpdates` — chưa được đánh giá
-
-**`getPreviousHitObject()`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:155` `hitObjects.Length == 0` — chưa được đánh giá
-
-**`load()`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:38` `composer != null` — chưa được đánh giá
-
-**`sampleChanged(HitObject, string, TernaryState)`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:105` `existingSample != null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:110` `existingSample == null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:115` `PerformBeatmapUpdates` — chưa được đánh giá
-
-**`updatePlacementNewCombo()`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:53` `composer == null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:58` `i < hitObjects.Length` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:62` `hitObject is not IHasComboInformation withCombo` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:65` `comboStarter == null` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:73` `PerformBeatmapUpdates` — chưa được đánh giá
-
-**`updatePlacementSamples()`**
-
-- `Screens/Edit/Compose/Components/PlacementStateManager.cs:80` `composer == null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Edit.Compose.Components.PositionSnapGrid
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -28428,22 +22963,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Screens/Edit/Compose/Components/SelectionHandler.cs:350` `count > 0` — chưa được đánh giá
 - `Screens/Edit/Compose/Components/SelectionHandler.cs:351` `count > 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Edit.Compose.Components.Timeline.CentreMarker.VerticalTriangles.VerticalTrianglesDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Blit(IRenderer)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Blit(IRenderer)`**
-
-- `Screens/Edit/Compose/Components/Timeline/CentreMarker.cs:103` `triangleScreenSpaceHeight == 0` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/Timeline/CentreMarker.cs:103` `DrawRectangle.Width == 0` — chưa được đánh giá
-- `Screens/Edit/Compose/Components/Timeline/CentreMarker.cs:103` `DrawRectangle.Height == 0` — chưa được đánh giá
 
 </details>
 
@@ -29698,24 +24217,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Edit.Submission.SubmissionBeatmapExporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `MutateBeatmap(BeatmapSetInfo, IBeatmap)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`MutateBeatmap(BeatmapSetInfo, IBeatmap)`**
-
-- `Screens/Edit/Submission/SubmissionBeatmapExporter.cs:30` `beatmapSetId != null` — chưa được đánh giá
-- `Screens/Edit/Submission/SubmissionBeatmapExporter.cs:30` `allocatedBeatmapIds != null` — chưa được đánh giá
-- `Screens/Edit/Submission/SubmissionBeatmapExporter.cs:35` `allocatedBeatmapIds.Contains(playableBeatmap.BeatmapInfo.OnlineID)` — chưa được đánh giá
-- `Screens/Edit/Submission/SubmissionBeatmapExporter.cs:41` `playableBeatmap.BeatmapInfo.OnlineID > 0` — chưa được đánh giá
-- `Screens/Edit/Submission/SubmissionBeatmapExporter.cs:44` `allocatedBeatmapIds.Count == 0` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Edit.Submission.SubmissionStageProgress
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -30075,21 +24576,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Edit/Timing/MetronomeDisplay.cs:415` `IsBeatSyncedWithTrack` — chưa được đánh giá
 - `Screens/Edit/Timing/MetronomeDisplay.cs:415` `EnableClicking` — chưa được đánh giá
 - `Screens/Edit/Timing/MetronomeDisplay.cs:418` `beatIndex % timingPoint.TimeSignature.Numerator == 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Edit.Timing.RepeatingButtonBehaviour
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `beginRepeat()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`beginRepeat()`**
-
-- `Screens/Edit/Timing/RepeatingButtonBehaviour.cs:74` `IsHovered` — chưa được đánh giá
-- `Screens/Edit/Timing/RepeatingButtonBehaviour.cs:81` `channel != null` — chưa được đánh giá
 
 </details>
 
@@ -30614,25 +25100,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Footer.ScreenStackFooter.ScreenStackTracker
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onParentScreenChanged(IScreen, IScreen)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose()`**
-
-- `Screens/Footer/ScreenStackFooter.cs:213` `subScreenTracker != null` — chưa được đánh giá
-
-**`onParentScreenChanged(IScreen, IScreen)`**
-
-- `Screens/Footer/ScreenStackFooter.cs:194` `newScreen is IHasSubScreenStack newStack` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Import.FileImportScreen
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -31116,22 +25583,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Menu/LogoVisualisation.cs:109` `beatSyncProvider.CheckIsKiaiTime()` — chưa được đánh giá
 - `Screens/Menu/LogoVisualisation.cs:111` `i < bars_per_visualiser` — chưa được đánh giá
 - `Screens/Menu/LogoVisualisation.cs:115` `targetAmplitude > frequencyAmplitudes[i]` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Menu.LogoVisualisation.VisualisationDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Screens/Menu/LogoVisualisation.cs:207` `j < visualiser_rounds` — chưa được đánh giá
-- `Screens/Menu/LogoVisualisation.cs:209` `i < bars_per_visualiser` — chưa được đánh giá
-- `Screens/Menu/LogoVisualisation.cs:211` `audioData[i] < amplitude_dead_zone` — chưa được đánh giá
 
 </details>
 
@@ -33974,65 +28425,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `IssueDuel(MatchmakingPool, int)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RejoinQueue()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `SearchInBackground()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SearchInForeground()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `closeNotification()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onMatchmakingDuelIssued(MatchmakingDuelIssuedParams)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onRoomUpdated()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `postNotification()` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:239` `client.IsNotNull()` — chưa được đánh giá
-
-**`IssueDuel(MatchmakingPool, int)`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:99` `client.Room?.Settings.MatchType.IsMatchmakingType() == true` — chưa được đánh giá
-
-**`RejoinQueue()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:129` `lastDuelUser != null` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:129` `lastDuelPool != null` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:131` `SelectedPool.Value != null` — chưa được đánh giá
-
-**`SearchInBackground()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:140` `isBackgrounded` — chưa được đánh giá
-
-**`SearchInForeground()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:152` `isBackgrounded` — chưa được đánh giá
-
-**`closeNotification()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:227` `backgroundNotification == null` — chưa được đánh giá
-
-**`onMatchmakingDuelIssued(MatchmakingDuelIssuedParams)`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:200` `user == null` — chưa được đánh giá
-
-**`onRoomUpdated()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:161` `client.Room == null` — chưa được đánh giá
-
-**`postNotification()`**
-
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:210` `backgroundNotification?.State == ProgressNotificationState.Active` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:210` `backgroundNotification?.State == ProgressNotificationState.Queued` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:216` `isBackgrounded` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/Queue/QueueController.cs:219` `CurrentState.Value != ScreenQueue.MatchmakingScreenState.Queueing` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController.BackgroundQueueNotification
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -34543,52 +28935,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayCardWithPlaylistItem
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(RankedPlayCardWithPlaylistItem?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Equals(object?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(RankedPlayCardWithPlaylistItem?)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayCardWithPlaylistItem.cs:27` `other != null` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayCardWithPlaylistItem.cs:27` `Card.Equals(other.Card)` — chưa được đánh giá
-
-**`Equals(object?)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayCardWithPlaylistItem.cs:30` `obj is RankedPlayCardWithPlaylistItem other` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayCardWithPlaylistItem.cs:30` `Equals(other)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayMatchInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `onCardAdded(int, RankedPlayCardWithPlaylistItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onCardRemoved(int, RankedPlayCardWithPlaylistItem)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `onMatchRoomStateChanged(MatchRoomState)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`onCardAdded(int, RankedPlayCardWithPlaylistItem)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayMatchInfo.cs:136` `userId == player.Id` — chưa được đánh giá
-
-**`onCardRemoved(int, RankedPlayCardWithPlaylistItem)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayMatchInfo.cs:150` `userId == player.Id` — chưa được đánh giá
-
-**`onMatchRoomStateChanged(MatchRoomState)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayMatchInfo.cs:118` `state is not RankedPlayRoomState roomState` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/RankedPlayMatchInfo.cs:127` `userId == player.Id` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayScreen
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -34923,37 +29269,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`load(CardColours)`**
 
 - `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.AttributeListing.cs:128` `string.IsNullOrEmpty(attribute.ValueFormat)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.CardColours
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Border` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `OnPrimary` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `PrimaryWithContrastToBackground` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `getColour(float, float, bool)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Border`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:35` `beatmap.StarRating > 8.0` — chưa được đánh giá
-
-**`OnPrimary`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:23` `beatmap.StarRating >= OsuColour.STAR_DIFFICULTY_DEFINED_COLOUR_CUTOFF` — chưa được đánh giá
-
-**`PrimaryWithContrastToBackground`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:38` `beatmap.StarRating >= OsuColour.STAR_DIFFICULTY_DEFINED_COLOUR_CUTOFF` — chưa được đánh giá
-
-**`getColour(float, float, bool)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:45` `beatmap.StarRating >= OsuColour.STAR_DIFFICULTY_DEFINED_COLOUR_CUTOFF` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:47` `isAccent` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Card/RankedPlayCardContent.Colours.cs:56` `Math.Abs(hue - 0.16f) < 0.1f` — chưa được đánh giá
 
 </details>
 
@@ -35434,55 +29749,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandOfCards.HandCard.cs:178` `updateMovement` — chưa được đánh giá
 - `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandOfCards.HandCard.cs:185` `CardDragged` — chưa được đánh giá
 - `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandOfCards.HandCard.cs:192` `CardHoveredOrDragged` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayPlayer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `onMatchEvent(MatchServerEvent)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`onMatchEvent(MatchServerEvent)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayPlayer.cs:43` `e is not RankedPlayCardHandReplayEvent replayEvent` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayPlayer.cs:43` `replayEvent.UserId != userId` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayPlayer.cs:48` `queuedFrames >= MaxQueuedFrames` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayPlayer.cs:53` `lastPlayback != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayRecorder
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Flush(RankedPlayCardHandReplayFrame[])` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `compress(IReadOnlyList<RankedPlayCardHandReplayFrame>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `recordFrame()` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `tryFlush()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Flush(RankedPlayCardHandReplayFrame[])`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:108` `frames.Length == 0` — chưa được đánh giá
-
-**`compress(IReadOnlyList<RankedPlayCardHandReplayFrame>)`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:90` `frames.Count == 0` — chưa được đánh giá
-
-**`recordFrame()`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:58` `hasChanges` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:58` `buffer.Count >= MaxBufferSize` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:61` `lastFrameTime != null` — chưa được đánh giá
-
-**`tryFlush()`**
-
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:75` `buffer.Count == 0` — chưa được đánh giá
-- `Screens/OnlinePlay/Matchmaking/RankedPlay/Hand/HandReplayRecorder.cs:81` `frames.Length > 0` — chưa được đánh giá
 
 </details>
 
@@ -37110,46 +31376,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 _Mọi điều kiện đã phủ đủ cả true và false._
 
-### osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorSyncManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Update()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `attemptStart()` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `updateMasterState()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `updatePlayerCatchup()` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Update()`**
-
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:87` `attemptStart()` — chưa được đánh giá
-
-**`attemptStart()`**
-
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:105` `hasStarted` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:108` `playerClocks.Count == 0` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:113` `readyCount == playerClocks.Count` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:116` `readyCount > 0` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:120` `Time.Current - firstStartAttemptTime > MAXIMUM_START_DELAY` — chưa được đánh giá
-
-**`updateMasterState()`**
-
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:182` `playerClocks.Count == 0` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:182` `playerClocks.Any(s => !s.IsCatchingUp)` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:184` `masterState == newState` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:193` `hasStarted` — chưa được đánh giá
-
-**`updatePlayerCatchup()`**
-
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:138` `i < playerClocks.Count` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:148` `timeDelta < -SYNC_TARGET` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:160` `clock.IsCatchingUp` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:163` `timeDelta <= SYNC_TARGET` — chưa được đánh giá
-- `Screens/OnlinePlay/Multiplayer/Spectate/SpectatorSyncManager.cs:169` `timeDelta > MAX_SYNC_OFFSET` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.OnlinePlay.Playlists.AddPlaylistToCollectionButton
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -38545,27 +32771,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Play.PlayerTouchInputDetector
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `updateState()` | 8 | 0/16 | 0 | 8 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`updateState()`**
-
-- `Screens/Play/PlayerTouchInputDetector.cs:37` `touchActive.Value` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:40` `gameplayState.HasPassed` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:40` `gameplayState.HasFailed` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:40` `gameplayState.HasQuit` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:43` `gameplayState.Score.ScoreInfo.Mods.OfType<ModTouchDevice>().Any()` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:46` `isBreakTime.Value` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:50` `touchDeviceMod == null` — chưa được đánh giá
-- `Screens/Play/PlayerTouchInputDetector.cs:55` `ModUtils.CheckCompatibleSet(candidateMods, out _)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Play.ReplayFailIndicator
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -38687,20 +32892,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Play/SaveFailedScoreButton.cs:78` `player != null` — chưa được đánh giá
 - `Screens/Play/SaveFailedScoreButton.cs:81` `importedScore != null` — chưa được đánh giá
 - `Screens/Play/SaveFailedScoreButton.cs:99` `importFailedScore != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.ScreenSuspensionHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Screens/Play/ScreenSuspensionHandler.cs:40` `paused.NewValue` — chưa được đánh giá
 
 </details>
 
@@ -39175,22 +33366,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`load(TextureStore)`**
 
 - `Screens/Play/HUD/ArgonCounterTextComponent.cs:163` `i < 10` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText.GlyphStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string?, char)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string?, char)`**
-
-- `Screens/Play/HUD/ArgonCounterTextComponent.cs:187` `fontName != this.fontName` — chưa được đánh giá
-- `Screens/Play/HUD/ArgonCounterTextComponent.cs:190` `cache.TryGetValue(character, out var cached)` — chưa được đánh giá
-- `Screens/Play/HUD/ArgonCounterTextComponent.cs:198` `texture != null` — chưa được đánh giá
 
 </details>
 
@@ -40284,36 +34459,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar.ArgonBarPathDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Screens/Play/HUD/ArgonHealthDisplayParts/ArgonHealthDisplayBar.cs:136` `pathRadius == 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.HUD.ClicksPerSecond.ClicksPerSecondController
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Update()` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Update()`**
-
-- `Screens/Play/HUD/ClicksPerSecond/ClicksPerSecondController.cs:41` `i >= 0` — chưa được đánh giá
-- `Screens/Play/HUD/ClicksPerSecond/ClicksPerSecondController.cs:44` `timestamps[i] > latestValidTime` — chưa được đánh giá
-- `Screens/Play/HUD/ClicksPerSecond/ClicksPerSecondController.cs:50` `timestamps[i] >= earliestTimeValid` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Play.HUD.HitErrorMeters.BarHitErrorMeter
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -40419,27 +34564,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCountController
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `updateAllCountsFromReplayFrame()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `updateCount(JudgementResult, bool)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`updateAllCountsFromReplayFrame()`**
-
-- `Screens/Play/HUD/JudgementCounter/JudgementCountController.cs:64` `hasUpdatedCountsFromReplayFrame` — chưa được đánh giá
-- `Screens/Play/HUD/JudgementCounter/JudgementCountController.cs:69` `results.TryGetValue(kvp.Key, out var count)` — chưa được đánh giá
-
-**`updateCount(JudgementResult, bool)`**
-
-- `Screens/Play/HUD/JudgementCounter/JudgementCountController.cs:80` `results.TryGetValue(judgement.Type, out var count)` — chưa được đánh giá
-- `Screens/Play/HUD/JudgementCounter/JudgementCountController.cs:83` `revert` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounter
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -40475,36 +34599,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Play/HUD/JudgementCounter/JudgementCounterDisplay.cs:81` `shouldShow(i, counter)` — chưa được đánh giá
 - `Screens/Play/HUD/JudgementCounter/JudgementCounterDisplay.cs:89` `index == 0` — chưa được đánh giá
 - `Screens/Play/HUD/JudgementCounter/JudgementCounterDisplay.cs:89` `ShowMaxJudgement.Value` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.Leaderboards.GameplayLeaderboardScore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(GameplayState, bool, ComboDisplayMode)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `.ctor(IUser, SpectatorScoreProcessor, bool, ComboDisplayMode)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `.ctor(MultiplayerScore, bool, ComboDisplayMode)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `.ctor(ScoreInfo, bool, ComboDisplayMode)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(GameplayState, bool, ComboDisplayMode)`**
-
-- `Screens/Play/Leaderboards/GameplayLeaderboardScore.cs:100` `comboMode == ComboDisplayMode.Current` — chưa được đánh giá
-
-**`.ctor(IUser, SpectatorScoreProcessor, bool, ComboDisplayMode)`**
-
-- `Screens/Play/Leaderboards/GameplayLeaderboardScore.cs:110` `comboMode == ComboDisplayMode.Current` — chưa được đánh giá
-
-**`.ctor(MultiplayerScore, bool, ComboDisplayMode)`**
-
-- `Screens/Play/Leaderboards/GameplayLeaderboardScore.cs:132` `comboMode == ComboDisplayMode.Highest` — chưa được đánh giá
-
-**`.ctor(ScoreInfo, bool, ComboDisplayMode)`**
-
-- `Screens/Play/Leaderboards/GameplayLeaderboardScore.cs:120` `comboMode == ComboDisplayMode.Current` — chưa được đánh giá
-- `Screens/Play/Leaderboards/GameplayLeaderboardScore.cs:121` `scoreInfo.OnlineID > 0` — chưa được đánh giá
 
 </details>
 
@@ -40564,67 +34658,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Play/Leaderboards/MultiplayerLeaderboardProvider.cs:155` `HasTeams` — chưa được đánh giá
 - `Screens/Play/Leaderboards/MultiplayerLeaderboardProvider.cs:162` `u.Team == null` — chưa được đánh giá
 - `Screens/Play/Leaderboards/MultiplayerLeaderboardProvider.cs:165` `TeamScores.TryGetValue(u.Team.Value, out var team)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.Leaderboards.PlaylistsGameplayLeaderboardProvider
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `load(IAPIProvider, GameplayState?)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `sort()` | 9 | 0/18 | 0 | 9 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`load(IAPIProvider, GameplayState?)`**
-
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:43` `response != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:47` `i < response.Scores.Count` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:54` `response.UserScore != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:54` `response.Scores.All(s => s.ID != response.UserScore.ID)` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:58` `gameplayState != null` — chưa được đánh giá
-
-**`sort()`**
-
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:78` `sorting.IsValid` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:88` `i < orderedByScore.Count` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:98` `isPartial` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:105` `score.Tracked` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:107` `i > 0` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:108` `i < orderedByScore.Count - 1` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:112` `previousScorePosition != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:112` `nextScorePosition != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/PlaylistsGameplayLeaderboardProvider.cs:112` `previousScorePosition + 1 == nextScorePosition` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Play.Leaderboards.SoloGameplayLeaderboardProvider
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `LoadComplete()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `sort()` | 9 | 0/18 | 0 | 9 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`LoadComplete()`**
-
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:35` `globalScores == null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:35` `globalScores.IsPartial` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:39` `globalScores != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:47` `gameplayState != null` — chưa được đánh giá
-
-**`sort()`**
-
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:67` `sorting.IsValid` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:77` `i < orderedByScore.Count` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:87` `isPartial` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:94` `score.Tracked` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:96` `i > 0` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:97` `i < orderedByScore.Count - 1` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:101` `previousScorePosition != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:101` `nextScorePosition != null` — chưa được đánh giá
-- `Screens/Play/Leaderboards/SoloGameplayLeaderboardProvider.cs:101` `previousScorePosition + 1 == nextScorePosition` — chưa được đánh giá
 
 </details>
 
@@ -41125,20 +35158,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Ranking/SoloResultsScreen.cs:141` `previousScorePosition != null` — chưa được đánh giá
 - `Screens/Ranking/SoloResultsScreen.cs:141` `nextScorePosition != null` — chưa được đánh giá
 - `Screens/Ranking/SoloResultsScreen.cs:141` `previousScorePosition + 1 == nextScorePosition` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Ranking.UserTag
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(APITag)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(APITag)`**
-
-- `Screens/Ranking/UserTag.cs:28` `splitName.Length > 1` — chưa được đánh giá
 
 </details>
 
@@ -42200,7 +36219,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `defineGroupByDate(DateTimeOffset)` | 6 | 12/12 | 6 | 0 | 100.0% |
 | `defineGroupByFavourites(BeatmapInfo, HashSet<int>)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `defineGroupByLength(double)` | 3 | 6/6 | 3 | 0 | 100.0% |
-| `defineGroupByOwnMaps(BeatmapInfo, int?, string?)` | 3 | 6/6 | 3 | 0 | 100.0% |
 | `defineGroupByRankAchieved(BeatmapInfo, IReadOnlyDictionary<Guid, ScoreRank>)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `defineGroupByRankedDate(DateTimeOffset?)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `defineGroupBySource(string)` | 1 | 2/2 | 1 | 0 | 100.0% |
@@ -42622,20 +36640,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Screens/Select/BeatmapMetadataWedge.FailRetryDisplay.cs:114` `i < displayedData.Length` — chưa được đánh giá
 - `Screens/Select/BeatmapMetadataWedge.FailRetryDisplay.cs:122` `changed` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable.GraphDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Draw(IRenderer)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Draw(IRenderer)`**
-
-- `Screens/Select/BeatmapMetadataWedge.FailRetryDisplay.cs:169` `i < displayedData.Length` — chưa được đánh giá
 
 </details>
 
@@ -43461,30 +37465,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Select.ModSpeedHotkeyHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ChangeSpeed(double, IEnumerable<Mod>)` | 11 | 0/22 | 0 | 11 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ChangeSpeed(double, IEnumerable<Mod>)`**
-
-- `Screens/Select/ModSpeedHotkeyHandler.cs:52` `Precision.AlmostEquals(targetSpeed, 1, 0.005)` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:61` `lastActiveRateAdjustMod is ModDaycore` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:61` `lastActiveRateAdjustMod is ModNightcore` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:63` `targetSpeed < 1` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:69` `targetSpeed < 1` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:74` `targetMod == null` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:78` `lastActiveRateAdjustMod != null` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:82` `sourceProperty.Name == nameof(ModRateAdjust.SpeedChange)` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:87` `targetProperty == null` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:93` `targetBindable.GetType() != sourceBindable.GetType()` — chưa được đánh giá
-- `Screens/Select/ModSpeedHotkeyHandler.cs:104` `ModUtils.CheckCompatibleSet(intendedMods)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Select.NoResultsPlaceholder
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -44006,32 +37986,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Screens.Select.RealmPopulatingOnlineLookupSource
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetBeatmapSetAsync(int, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `updateRealmBeatmapSet(Realm, APIBeatmapSet)` | 8 | 0/16 | 0 | 8 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetBeatmapSetAsync(int, CancellationToken)`**
-
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:57` `token.IsCancellationRequested` — chưa được đánh giá
-
-**`updateRealmBeatmapSet(Realm, APIBeatmapSet)`**
-
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:86` `dbBeatmapSet.Status != onlineBeatmapSet.Status` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:86` `dbBeatmapSet.Status != BeatmapOnlineStatus.LocallyModified` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:91` `onlineBeatmaps.TryGetValue(dbBeatmap.OnlineID, out var onlineBeatmap)` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:94` `dbBeatmap.OnlineMD5Hash != onlineBeatmap.MD5Hash` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:97` `dbBeatmap.LastOnlineUpdate != onlineBeatmap.LastUpdated` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:100` `dbBeatmap.MatchesOnlineVersion` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:100` `dbBeatmap.Status != onlineBeatmap.Status` — chưa được đánh giá
-- `Screens/Select/RealmPopulatingOnlineLookupSource.cs:107` `userTags.SetEquals(dbBeatmap.Metadata.UserTags)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Screens.Select.SoloSongSelect
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -44295,26 +38249,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Screens/Select/SongSelect.cs:828` `CarouselItemsPresented` — chưa được đánh giá
 - `Screens/Select/SongSelect.cs:828` `checkBeatmapValidForSelection(Beatmap.Value.BeatmapInfo)` — chưa được đánh giá
 - `Screens/Select/SongSelect.cs:831` `carousel.VisuallyFocusSelected` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Screens.Select.SongSelectTouchInputDetector
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `updateState()` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`updateState()`**
-
-- `Screens/Select/SongSelectTouchInputDetector.cs:45` `mods.Disabled` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:50` `touchDeviceMod == null` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:55` `touchActive.Value` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:55` `touchDeviceModEnabled` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:59` `ModUtils.CheckCompatibleSet(candidateMods, out _)` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:65` `touchActive.Value` — chưa được đánh giá
-- `Screens/Select/SongSelectTouchInputDetector.cs:65` `touchDeviceModEnabled` — chưa được đánh giá
 
 </details>
 
@@ -44716,51 +38650,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.ArgonProSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/ArgonProSkin.cs:32` `sample != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.ArgonSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 13 | 0/26 | 0 | 13 | 0.0% |
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/ArgonSkin.cs:94` `(lookup as SkinnableSprite.SpriteComponentLookup)?.LookupName == @"lighting"` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:110` `containerLookup.Ruleset != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:124` `comboCounter != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:132` `hitError != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:138` `hitError2 != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:182` `health != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:194` `healthLine != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:205` `score != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:211` `accuracy != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:219` `performancePoints != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:219` `accuracy != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:226` `songProgress != null` — chưa được đánh giá
-- `Skinning/ArgonSkin.cs:236` `keyCounter != null` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/ArgonSkin.cs:84` `sample != null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Skinning.BeatmapSkinProvidingContainer
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -44800,22 +38689,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.GlobalSkinnableContainerLookup
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(GlobalSkinnableContainerLookup?)` | 5 | 10/10 | 5 | 0 | 100.0% |
-| `Equals(object?)` | 3 | 5/6 | 2 | 0 | 83.3% |
-| `ToString()` | 1 | 2/2 | 1 | 0 | 100.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Equals(object?)`**
-
-- `Skinning/GlobalSkinnableContainerLookup.cs:49` `ReferenceEquals(null, obj)` — thiếu `true`
-
-</details>
-
 ### osu.Game.Skinning.ISerialisableDrawable
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -44828,33 +38701,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Skinning/ISerialisableDrawable.cs:39` `source is IBindable sourceBindable` — thiếu `true`
 - `Skinning/ISerialisableDrawable.cs:47` `target is IParseable parseable` — thiếu `false`
-
-</details>
-
-### osu.Game.Skinning.LegacyBeatmapSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetSample(ISampleInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `createRealmBackedStore(BeatmapInfo, IStorageResourceProvider?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/LegacyBeatmapSkin.cs:54` `lookup is GlobalSkinnableContainerLookup containerLookup` — chưa được đánh giá
-- `Skinning/LegacyBeatmapSkin.cs:61` `this.HasFont(LegacyFont.Score)` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/LegacyBeatmapSkin.cs:94` `sampleInfo is HitSampleInfo hitSampleInfo` — chưa được đánh giá
-- `Skinning/LegacyBeatmapSkin.cs:94` `hitSampleInfo.UseBeatmapSamples` — chưa được đánh giá
-
-**`createRealmBackedStore(BeatmapInfo, IStorageResourceProvider?)`**
-
-- `Skinning/LegacyBeatmapSkin.cs:45` `resources == null` — chưa được đánh giá
-- `Skinning/LegacyBeatmapSkin.cs:45` `beatmapInfo.BeatmapSet == null` — chưa được đánh giá
 
 </details>
 
@@ -45187,98 +39033,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.LegacySkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetComboColour(IHasComboColours, int, IHasComboInformation)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetConfig(TLookup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 11 | 0/22 | 0 | 11 | 0.0% |
-| `GetSample(ISampleInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetTexture(string, WrapMode, WrapMode)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `genericLookup(TLookup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `getCustomColour(IHasCustomColours, string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `getLegacyLookupNames(HitSampleInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `getManiaImage(LegacyManiaSkinConfiguration, string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `legacySettingLookup(SkinConfiguration.LegacySetting)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `lookupForMania(LegacyManiaSkinConfigurationLookup)` | 10 | 0/20 | 0 | 10 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetComboColour(IHasComboColours, int, IHasComboInformation)`**
-
-- `Skinning/LegacySkin.cs:325` `colour.HasValue` — chưa được đánh giá
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/LegacySkin.cs:98` `comboColours != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:116` `AllowManiaConfigLookups` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:120` `result != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:137` `wasHit` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/LegacySkin.cs:388` `containerLookup.Ruleset != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:399` `combo != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:408` `spectatorList != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:415` `leaderboard != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:422` `hitError != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:444` `score != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:444` `accuracy != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:451` `songProgress != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:451` `accuracy != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:481` `getJudgementAnimation(resultComponent.Component) != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:488` `particle != null` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/LegacySkin.cs:590` `sampleInfo is HitSampleInfo hitSample` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:601` `sample != null` — chưa được đánh giá
-
-**`GetTexture(string, WrapMode, WrapMode)`**
-
-- `Skinning/LegacySkin.cs:564` `AllowHighResolutionSprites` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:575` `texture != null` — chưa được đánh giá
-
-**`genericLookup(TLookup)`**
-
-- `Skinning/LegacySkin.cs:356` `Configuration.ConfigDictionary.TryGetValue(lookup.ToString() ?? string.Empty, out string? val)` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:360` `typeof(TValue) == typeof(bool)` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:362` `bool.TryParse(val, out bool boolVal)` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:368` `val != null` — chưa được đánh giá
-
-**`getCustomColour(IHasCustomColours, string)`**
-
-- `Skinning/LegacySkin.cs:329` `source.CustomColours.TryGetValue(lookup, out var col)` — chưa được đánh giá
-
-**`getLegacyLookupNames(HitSampleInfo)`**
-
-- `Skinning/LegacySkin.cs:614` `string.IsNullOrEmpty(hitSample.Suffix)` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:621` `UseCustomSampleBanks` — chưa được đánh giá
-
-**`getManiaImage(LegacyManiaSkinConfiguration, string)`**
-
-- `Skinning/LegacySkin.cs:332` `source.ImageLookups.TryGetValue(lookup, out string? image)` — chưa được đánh giá
-
-**`legacySettingLookup(SkinConfiguration.LegacySetting)`**
-
-- `Skinning/LegacySkin.cs:343` `Configuration.CustomColours.TryGetValue(@"InputOverlayText", out var colour)` — chưa được đánh giá
-
-**`lookupForMania(LegacyManiaSkinConfigurationLookup)`**
-
-- `Skinning/LegacySkin.cs:143` `ManiaConfigurations.TryGetValue(maniaLookup.TotalColumns, out var existing)` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:154` `width <= 0` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:204` `existing.NoteBodyStyle != null` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:207` `GetConfig<SkinConfiguration.LegacySetting, decimal>(SkinConfiguration.LegacySetting.Version)?.Value < 2.5m` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:270` `maniaLookup.ColumnIndex == 0` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:277` `maniaLookup.ColumnIndex == existing.ColumnSpacing.Length` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:293` `GetConfig<SkinConfiguration.LegacySetting, decimal>(SkinConfiguration.LegacySetting.Version)?.Value < 2.5m` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:296` `existing.ExplosionWidth[maniaLookup.ColumnIndex.Value] != 0` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:304` `GetConfig<SkinConfiguration.LegacySetting, decimal>(SkinConfiguration.LegacySetting.Version)?.Value < 2.5m` — chưa được đánh giá
-- `Skinning/LegacySkin.cs:307` `existing.HoldNoteLightWidth[maniaLookup.ColumnIndex.Value] != 0` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Skinning.LegacySkinDecoder
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -45286,46 +39040,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `ParseLine(SkinConfiguration, Section, string, bool)` | 4 | 8/8 | 4 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Skinning.LegacySkinEncoder
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Encode(TextWriter)` | 9 | 0/18 | 0 | 9 | 0.0% |
-| `colourToString(Color4?, bool)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `writeGenericColour(TextWriter, Dictionary<string, Color4>, string, Color4?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `writeValue(TextWriter, string, string?, string?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Encode(TextWriter)`**
-
-- `Skinning/LegacySkinEncoder.cs:53` `skin.Configuration.IsLatestVersion` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:58` `i < LegacyDecoder<SkinConfiguration>.MAX_COMBO_COLOUR_COUNT` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:60` `i < skin.Configuration.CustomComboColours.Count` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:110` `maniaConfig.ShowJudgementLine` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:122` `maniaConfig.UpsideDown` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:124` `maniaConfig.SeparateScore` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:125` `maniaConfig.KeysUnderNotes` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:126` `maniaConfig.SplitStages` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:145` `i < keys` — chưa được đánh giá
-
-**`colourToString(Color4?, bool)`**
-
-- `Skinning/LegacySkinEncoder.cs:184` `colour == null` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:187` `allowTransparency` — chưa được đánh giá
-
-**`writeGenericColour(TextWriter, Dictionary<string, Color4>, string, Color4?)`**
-
-- `Skinning/LegacySkinEncoder.cs:178` `dictionary.TryGetValue(key, out var col)` — chưa được đánh giá
-
-**`writeValue(TextWriter, string, string?, string?)`**
-
-- `Skinning/LegacySkinEncoder.cs:155` `value != null` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:155` `defaultValue == null` — chưa được đánh giá
-- `Skinning/LegacySkinEncoder.cs:155` `value != defaultValue` — chưa được đánh giá
-
-</details>
 
 ### osu.Game.Skinning.LegacySkinExtensions
 
@@ -45386,22 +39100,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.LegacySkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetSample(ISampleInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/LegacySkinTransformer.cs:28` `sampleInfo is ConvertHitObjectParser.LegacyHitSampleInfo legacySample` — chưa được đánh giá
-- `Skinning/LegacySkinTransformer.cs:32` `legacySample.IsLayered` — chưa được đánh giá
-- `Skinning/LegacySkinTransformer.cs:32` `playLayeredHitSounds?.Value == false` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Skinning.LegacySongProgress
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -45427,76 +39125,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`load(ISkinSource)`**
 
 - `Skinning/LegacySpriteText.cs:62` `i < 10` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.LegacySpriteText.LegacyGlyphStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string?, char)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string?, char)`**
-
-- `Skinning/LegacySpriteText.cs:87` `fontName != this.fontName` — chưa được đánh giá
-- `Skinning/LegacySpriteText.cs:90` `cache.TryGetValue(character, out var cached)` — chưa được đánh giá
-- `Skinning/LegacySpriteText.cs:99` `texture != null` — chưa được đánh giá
-- `Skinning/LegacySpriteText.cs:101` `maxSize != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.LegacyTextureLoaderStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetAsync(string, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `shouldConvertToGrayscale(string)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string)`**
-
-- `Skinning/LegacyTextureLoaderStore.cs:29` `textureUpload == null` — chưa được đánh giá
-- `Skinning/LegacyTextureLoaderStore.cs:32` `shouldConvertToGrayscale(name)` — chưa được đánh giá
-
-**`GetAsync(string, CancellationToken)`**
-
-- `Skinning/LegacyTextureLoaderStore.cs:41` `textureUpload == null` — chưa được đánh giá
-- `Skinning/LegacyTextureLoaderStore.cs:44` `shouldConvertToGrayscale(name)` — chưa được đánh giá
-
-**`shouldConvertToGrayscale(string)`**
-
-- `Skinning/LegacyTextureLoaderStore.cs:64` `name.Equals(grayscaleSprite, StringComparison.OrdinalIgnoreCase)` — chưa được đánh giá
-- `Skinning/LegacyTextureLoaderStore.cs:65` `name.Equals($@"{grayscaleSprite}@2x", StringComparison.OrdinalIgnoreCase)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.MaxDimensionLimitedTextureLoaderStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetAsync(string, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `limitTextureUploadSize(TextureUpload)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string)`**
-
-- `Skinning/MaxDimensionLimitedTextureLoaderStore.cs:35` `textureUpload == null` — chưa được đánh giá
-
-**`GetAsync(string, CancellationToken)`**
-
-- `Skinning/MaxDimensionLimitedTextureLoaderStore.cs:44` `textureStore == null` — chưa được đánh giá
-- `Skinning/MaxDimensionLimitedTextureLoaderStore.cs:49` `textureUpload == null` — chưa được đánh giá
-
-**`limitTextureUploadSize(TextureUpload)`**
-
-- `Skinning/MaxDimensionLimitedTextureLoaderStore.cs:62` `textureUpload.Height > max_supported_texture_size` — chưa được đánh giá
-- `Skinning/MaxDimensionLimitedTextureLoaderStore.cs:62` `textureUpload.Width > max_supported_texture_size` — chưa được đánh giá
 
 </details>
 
@@ -45565,49 +39193,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.RealmBackedResourceStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetFilenames(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetFilenames(string)`**
-
-- `Skinning/RealmBackedResourceStore.cs:53` `path != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.ResourceStoreBackedSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/ResourceStoreBackedSkin.cs:39` `sample != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.RetroSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetTexture(string, WrapMode, WrapMode)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetTexture(string, WrapMode, WrapMode)`**
-
-- `Skinning/RetroSkin.cs:66` `componentName.StartsWith("taiko-hit", StringComparison.Ordinal)` — chưa được đánh giá
-- `Skinning/RetroSkin.cs:70` `componentName == "taiko-slider-fail"` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Skinning.RulesetSkinProvidingContainer
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -45665,75 +39250,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Skinning.Skin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(SkinInfo, IStorageResourceProvider?, IResourceStore<byte[]>?, string)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `LogLookupDebug(object, object, LookupDebugType, string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `RecycleSamples()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateDrawableTarget(SkinnableContainer)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `applyMigration(SkinLayoutInfo, GlobalSkinnableContainers, int)` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `isValidDrawable(SerialisedDrawableInfo)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `parseLayoutInfo(string, GlobalSkinnableContainers)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(SkinInfo, IStorageResourceProvider?, IResourceStore<byte[]>?, string)`**
-
-- `Skinning/Skin.cs:81` `resources != null` — chưa được đánh giá
-- `Skinning/Skin.cs:97` `fallbackStore != null` — chưa được đánh giá
-- `Skinning/Skin.cs:102` `configurationStream != null` — chưa được đánh giá
-- `Skinning/Skin.cs:126` `bytes == null` — chưa được đánh giá
-- `Skinning/Skin.cs:134` `layoutInfo == null` — chưa được đánh giá
-
-**`Dispose(bool)`**
-
-- `Skinning/Skin.cs:352` `isDisposed` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Skin.cs:214` `LayoutInfos.TryGetValue(containerLookup.Lookup, out var layoutInfo)` — chưa được đánh giá
-- `Skinning/Skin.cs:215` `layoutInfo.TryGetDrawableInfo(containerLookup.Ruleset, out var drawableInfos)` — chưa được đánh giá
-
-**`LogLookupDebug(object, object, LookupDebugType, string)`**
-
-- `Skinning/Skin.cs:392` `nested_level.Value == 0` — chưa được đánh giá
-
-**`RecycleSamples()`**
-
-- `Skinning/Skin.cs:158` `samples != null` — chưa được đánh giá
-
-**`UpdateDrawableTarget(SkinnableContainer)`**
-
-- `Skinning/Skin.cs:194` `LayoutInfos.TryGetValue(targetContainer.Lookup.Lookup, out var layoutInfo)` — chưa được đánh giá
-
-**`applyMigration(SkinLayoutInfo, GlobalSkinnableContainers, int)`**
-
-- `Skinning/Skin.cs:305` `target != GlobalSkinnableContainers.MainHUDComponents` — chưa được đánh giá
-- `Skinning/Skin.cs:306` `layout.TryGetDrawableInfo(null, out var globalHUDComponents)` — chưa được đánh giá
-- `Skinning/Skin.cs:307` `resources == null` — chưa được đánh giá
-- `Skinning/Skin.cs:311` `c.Type.Name == nameof(LegacyDefaultComboCounter)` — chưa được đánh giá
-- `Skinning/Skin.cs:312` `c.Type.Name == nameof(DefaultComboCounter)` — chưa được đánh giá
-- `Skinning/Skin.cs:313` `c.Type.Name == nameof(ArgonComboCounter)` — chưa được đánh giá
-- `Skinning/Skin.cs:321` `layout.TryGetDrawableInfo(ruleset, out var rulesetHUDComponents)` — chưa được đánh giá
-
-**`isValidDrawable(SerialisedDrawableInfo)`**
-
-- `Skinning/Skin.cs:285` `typeof(ISerialisableDrawable).IsAssignableFrom(di.Type)` — chưa được đánh giá
-- `Skinning/Skin.cs:290` `isValidDrawable(child)` — chưa được đánh giá
-
-**`parseLayoutInfo(string, GlobalSkinnableContainers)`**
-
-- `Skinning/Skin.cs:254` `layout == null` — chưa được đánh giá
-- `Skinning/Skin.cs:257` `deserializedContent == null` — chưa được đánh giá
-- `Skinning/Skin.cs:266` `i <= SkinLayoutInfo.LATEST_VERSION` — chưa được đánh giá
-- `Skinning/Skin.cs:275` `isValidDrawable(di)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Skinning.SkinConfiguration
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -45741,145 +39257,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `ComboColours.get` | 2 | 4/4 | 2 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Skinning.SkinImporter
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ImportAsUpdate(ProgressNotification, ImportTask, SkinInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Populate(SkinInfo, ArchiveReader?, Realm, CancellationToken)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Save(Skin)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `UpdateSkinIniMetadata(SkinInfo, Realm)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `checkSkinIniMetadata(SkinInfo, Realm)` | 6 | 0/12 | 0 | 6 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ImportAsUpdate(ProgressNotification, ImportTask, SkinInfo)`**
-
-- `Skinning/SkinImporter.cs:74` `File.Exists(skinIniPath)` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:81` `string.IsNullOrEmpty(decodedSkinIni.SkinInfo.Name)` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:84` `string.IsNullOrEmpty(decodedSkinIni.SkinInfo.Creator)` — chưa được đánh giá
-
-**`Populate(SkinInfo, ArchiveReader?, Realm, CancellationToken)`**
-
-- `Skinning/SkinImporter.cs:97` `skinInfoFile != null` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:106` `deserialisedSkinInfo != null` — chưa được đánh giá
-
-**`Save(Skin)`**
-
-- `Skinning/SkinImporter.cs:231` `oldFile != null` — chưa được đánh giá
-
-**`UpdateSkinIniMetadata(SkinInfo, Realm)`**
-
-- `Skinning/SkinImporter.cs:187` `existingFile == null` — chưa được đánh giá
-
-**`checkSkinIniMetadata(SkinInfo, Realm)`**
-
-- `Skinning/SkinImporter.cs:141` `isImport` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:143` `string.IsNullOrEmpty(skinIniSourcedName)` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:144` `string.IsNullOrEmpty(skinIniSourcedCreator)` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:149` `archiveName != item.Name` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:152` `archiveName != item.GetDisplayString().GetValidFilename()` — chưa được đánh giá
-- `Skinning/SkinImporter.cs:159` `skinIniSourcedName != item.Name` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.SkinInfo
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `CreateInstance(IStorageResourceProvider)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `Equals(SkinInfo?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `ToString()` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`CreateInstance(IStorageResourceProvider)`**
-
-- `Skinning/SkinInfo.cs:45` `string.IsNullOrEmpty(InstantiationInfo)` — chưa được đánh giá
-- `Skinning/SkinInfo.cs:50` `type == null` — chưa được đánh giá
-
-**`Equals(SkinInfo?)`**
-
-- `Skinning/SkinInfo.cs:81` `ReferenceEquals(this, other)` — chưa được đánh giá
-- `Skinning/SkinInfo.cs:82` `other == null` — chưa được đánh giá
-
-**`ToString()`**
-
-- `Skinning/SkinInfo.cs:89` `string.IsNullOrEmpty(Creator)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.SkinManager
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(Storage, RealmAccess, GameHost, IResourceStore<byte[]>, AudioManager, Scheduler)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `AllSources.get` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `Delete(Expression<Func<SkinInfo, bool>>, bool)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `EnsureMutableSkin()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `FindProvider(Func<ISkin, bool>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Save(Skin)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SelectRandomSkin()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `SetSkinFromConfiguration(string)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `cycleSkins(int)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `lookupWithFallback(Func<ISkin, T>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(Storage, RealmAccess, GameHost, IResourceStore<byte[]>, AudioManager, Scheduler)`**
-
-- `Skinning/SkinManager.cs:115` `r.Find<SkinInfo>(skin.SkinInfo.ID) == null` — chưa được đánh giá
-- `Skinning/SkinManager.cs:128` `skin.NewValue.SkinInfo.Equals(CurrentSkinInfo.Value)` — chưa được đánh giá
-
-**`AllSources.get`**
-
-- `Skinning/SkinManager.cs:339` `CurrentSkin.Value is LegacySkin` — chưa được đánh giá
-- `Skinning/SkinManager.cs:339` `CurrentSkin.Value != DefaultClassicSkin` — chưa được đánh giá
-- `Skinning/SkinManager.cs:342` `CurrentSkin.Value != trianglesSkin` — chưa được đánh giá
-
-**`Delete(Expression<Func<SkinInfo, bool>>, bool)`**
-
-- `Skinning/SkinManager.cs:415` `filter != null` — chưa được đánh giá
-- `Skinning/SkinManager.cs:421` `items.Any(s => s.ID == currentUserSkin)` — chưa được đánh giá
-
-**`EnsureMutableSkin()`**
-
-- `Skinning/SkinManager.cs:252` `s.Protected` — chưa được đánh giá
-- `Skinning/SkinManager.cs:273` `result != null` — chưa được đánh giá
-
-**`FindProvider(Func<ISkin, bool>)`**
-
-- `Skinning/SkinManager.cs:322` `lookupFunction(source)` — chưa được đánh giá
-
-**`Save(Skin)`**
-
-- `Skinning/SkinManager.cs:292` `skin.SkinInfo.IsManaged` — chưa được đánh giá
-
-**`SelectRandomSkin()`**
-
-- `Skinning/SkinManager.cs:177` `CurrentSkinInfo.Disabled` — chưa được đánh giá
-- `Skinning/SkinManager.cs:188` `randomChoices.Length == 0` — chưa được đánh giá
-
-**`SetSkinFromConfiguration(string)`**
-
-- `Skinning/SkinManager.cs:441` `Guid.TryParse(guidString, out var guid)` — chưa được đánh giá
-- `Skinning/SkinManager.cs:444` `skinInfo == null` — chưa được đánh giá
-- `Skinning/SkinManager.cs:446` `guid == SkinInfo.CLASSIC_SKIN` — chưa được đánh giá
-- `Skinning/SkinManager.cs:449` `guid == SkinInfo.RETRO_SKIN` — chưa được đánh giá
-
-**`cycleSkins(int)`**
-
-- `Skinning/SkinManager.cs:205` `CurrentSkinInfo.Disabled` — chưa được đánh giá
-- `Skinning/SkinManager.cs:213` `i < 0` — chưa được đánh giá
-- `Skinning/SkinManager.cs:213` `direction < 0` — chưa được đánh giá
-- `Skinning/SkinManager.cs:219` `skins[i].ID == SkinInfo.RANDOM_SKIN` — chưa được đánh giá
-
-**`lookupWithFallback(Func<ISkin, T>)`**
-
-- `Skinning/SkinManager.cs:356` `lookupFunction(source) is T skinSourced` — chưa được đánh giá
-
-</details>
 
 ### osu.Game.Skinning.SkinProvidingContainer
 
@@ -45945,36 +39322,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Skinning/SkinProvidingContainer.cs:202` `skin.skin is ISkinSource source` — chưa được đánh giá
 - `Skinning/SkinProvidingContainer.cs:213` `skin.skin is ISkinSource source` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.SkinProvidingContainer.DisableableSkinSource
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetTexture(string, WrapMode, WrapMode)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/SkinProvidingContainer.cs:298` `provider.AllowColourLookup` — chưa được đánh giá
-- `Skinning/SkinProvidingContainer.cs:304` `provider.AllowConfigurationLookup` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/SkinProvidingContainer.cs:263` `provider.AllowDrawableLookup(lookup)` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/SkinProvidingContainer.cs:279` `provider.AllowSampleLookup(sampleInfo)` — chưa được đánh giá
-
-**`GetTexture(string, WrapMode, WrapMode)`**
-
-- `Skinning/SkinProvidingContainer.cs:271` `provider.AllowTextureLookup(componentName)` — chưa được đánh giá
 
 </details>
 
@@ -46155,35 +39502,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Skinning/SkinnableSpriteText.cs:32` `text == value` — chưa được đánh giá
 - `Skinning/SkinnableSpriteText.cs:37` `Drawable is IHasText textDrawable` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Skinning.TrianglesSkin
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 11 | 0/22 | 0 | 11 | 0.0% |
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/TrianglesSkin.cs:66` `(lookup as SkinnableSprite.SpriteComponentLookup)?.LookupName == @"lighting"` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:91` `containerLookup.Ruleset != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:102` `spectatorList != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:111` `hitError != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:117` `hitError2 != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:149` `score != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:156` `ppCounter != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:163` `accuracy != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:169` `combo != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:177` `songProgress != null` — chưa được đánh giá
-- `Skinning/TrianglesSkin.cs:177` `keyCounter != null` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/TrianglesSkin.cs:56` `sample != null` — chưa được đánh giá
 
 </details>
 
@@ -46468,30 +39786,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Storyboards.Drawables.DrawableStoryboard.StoryboardResourceLookupStore
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Get(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetAsync(string, CancellationToken)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetStream(string)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Get(string)`**
-
-- `Storyboards/Drawables/DrawableStoryboard.cs:162` `string.IsNullOrEmpty(storagePath)` — chưa được đánh giá
-
-**`GetAsync(string, CancellationToken)`**
-
-- `Storyboards/Drawables/DrawableStoryboard.cs:171` `string.IsNullOrEmpty(storagePath)` — chưa được đánh giá
-
-**`GetStream(string)`**
-
-- `Storyboards/Drawables/DrawableStoryboard.cs:180` `string.IsNullOrEmpty(storagePath)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Storyboards.Drawables.DrawableStoryboardAnimation
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -46719,83 +40013,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Storyboards/Drawables/DrawableStoryboardVideo.cs:118` `vectorScale == value` — chưa được đánh giá
 - `Storyboards/Drawables/DrawableStoryboardVideo.cs:121` `Validation.IsFinite(value)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Storyboards.Drawables.StoryboardTriggerController
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `bindHitObjectHit(TDrawable, StoryboardTriggerGroup)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `bindHitSample(TDrawable, StoryboardTriggerGroup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `bindPassing(TDrawable, StoryboardTriggerGroup, bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `load(GameplayState?)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `playTrigger(TDrawable, StoryboardTriggerGroup)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`bindHitObjectHit(TDrawable, StoryboardTriggerGroup)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:82` `val.NewValue.IsNotNull()` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:82` `val.NewValue.IsHit` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:82` `val.NewValue.Type.IsScorable()` — chưa được đánh giá
-
-**`bindHitSample(TDrawable, StoryboardTriggerGroup)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:91` `HitSampleTriggerDefinition.TryParse(triggerGroup.TriggerName, out var definition)` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:96` `val.NewValue == null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:99` `triggerGroup.ActiveAt(drawable.Time.Current)` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:102` `definition.Value.Matches(val.NewValue.OfType<HitSampleInfo>())` — chưa được đánh giá
-
-**`bindPassing(TDrawable, StoryboardTriggerGroup, bool)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:71` `val.NewValue != passing` — chưa được đánh giá
-
-**`load(GameplayState?)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:36` `gameplayState != null` — chưa được đánh giá
-
-**`playTrigger(TDrawable, StoryboardTriggerGroup)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:220` `triggerGroup.ActiveAt(drawable.Time.Current)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Storyboards.Drawables.StoryboardTriggerController.HitSampleTriggerDefinition
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Matches(IEnumerable<HitSampleInfo>)` | 11 | 0/22 | 0 | 11 | 0.0% |
-| `TryParse(string, HitSampleTriggerDefinition?)` | 10 | 0/20 | 0 | 10 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Matches(IEnumerable<HitSampleInfo>)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:193` `hitSampleInfo.Name == HitSampleInfo.HIT_NORMAL` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:195` `NormalBank != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:195` `hitSampleInfo.Bank != NormalBank` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:200` `AdditionName != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:200` `hitSampleInfo.Name == AdditionName` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:203` `AdditionBank != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:203` `hitSampleInfo.Bank == AdditionBank` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:207` `Suffix != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:207` `string.Equals(Suffix, hitSampleInfo.Suffix, StringComparison.OrdinalIgnoreCase)` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:211` `foundAddition` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:211` `additionBankCorrect` — chưa được đánh giá
-
-**`TryParse(string, HitSampleTriggerDefinition?)`**
-
-- `Storyboards/Drawables/StoryboardTriggerController.cs:127` `match.Success` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:133` `match.Groups[@"name"].Success` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:134` `match.Groups[@"bank1"].Success` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:135` `match.Groups[@"bank2"].Success` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:136` `match.Groups[@"suffix"].Success` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:139` `bank1 != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:139` `bank2 == null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:139` `name != null` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:157` `bank1IsAddition` — chưa được đánh giá
-- `Storyboards/Drawables/StoryboardTriggerController.cs:158` `bank1IsAddition` — chưa được đánh giá
 
 </details>
 
@@ -48012,14 +41229,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Users.IUser
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Equals(IUser?)` | 3 | 6/6 | 3 | 0 | 100.0% |
-
-_Mọi điều kiện đã phủ đủ cả true và false._
-
 ### osu.Game.Users.UserActivity.EditingBeatmap
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -48527,12 +41736,8 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `CheckCompatibleSetAndAllowed(IEnumerable<Mod>, IEnumerable<Type>)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `CheckModsBelongToRuleset(Ruleset, IEnumerable<Mod>)` | 2 | 4/4 | 2 | 0 | 100.0% |
 | `CheckValidForGameplay(IEnumerable<Mod>, List<Mod>?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `CheckValidRequiredModsForMultiplayer(IEnumerable<Mod>, bool, List<Mod>?)` | 2 | 4/4 | 2 | 0 | 100.0% |
-| `EnumerateUserSelectableFreeMods(MatchType, IEnumerable<APIMod>, IEnumerable<APIMod>, bool, Ruleset)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `FlattenMod(Mod)` | 1 | 2/2 | 1 | 0 | 100.0% |
 | `FormatScoreMultiplier(double)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `InstantiateValidModsForRuleset(Ruleset, IEnumerable<APIMod>, List<Mod>)` | 1 | 2/2 | 1 | 0 | 100.0% |
-| `IsValidModForMatch(Mod, bool, MatchType, bool)` | 7 | 14/14 | 7 | 0 | 100.0% |
 | `checkValid(IEnumerable<Mod>, Predicate<Mod>, List<Mod>?)` | 1 | 2/2 | 1 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
@@ -48578,43 +41783,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 | `IsInAny(double, Period?)` | 9 | 18/18 | 9 | 0 | 100.0% |
 
 _Mọi điều kiện đã phủ đủ cả true và false._
-
-### osu.Game.Utils.SentryLogger
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `.ctor(OsuGame, Storage?)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `AttachUser(IBindable<APIUser>)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `processLogEntry(LogEntry)` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `shouldSubmitException(Exception)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`.ctor(OsuGame, Storage?)`**
-
-- `Utils/SentryLogger.cs:50` `Environment.GetEnvironmentVariable("OSU_DISABLE_ERROR_REPORTING") == "1"` — chưa được đánh giá
-- `Utils/SentryLogger.cs:53` `DebugUtils.IsNUnitRunning` — chưa được đánh giá
-- `Utils/SentryLogger.cs:56` `game.IsDeployedBuild` — chưa được đánh giá
-- `Utils/SentryLogger.cs:56` `game.CreateEndpoints().WebsiteUrl.EndsWith(@".ppy.sh", StringComparison.Ordinal)` — chưa được đánh giá
-
-**`AttachUser(IBindable<APIUser>)`**
-
-- `Utils/SentryLogger.cs:80` `sentrySession == null` — chưa được đánh giá
-
-**`processLogEntry(LogEntry)`**
-
-- `Utils/SentryLogger.cs:98` `entry.Level < LogLevel.Verbose` — chưa được đánh giá
-- `Utils/SentryLogger.cs:102` `exception != null` — chưa được đánh giá
-- `Utils/SentryLogger.cs:104` `shouldSubmitException(exception)` — chưa được đánh giá
-- `Utils/SentryLogger.cs:113` `wasUnobserved` — chưa được đánh giá
-- `Utils/SentryLogger.cs:119` `wasUnhandled` — chưa được đánh giá
-
-**`shouldSubmitException(Exception)`**
-
-- `Utils/SentryLogger.cs:246` `IsLocalUserConnectivityException(exception)` — chưa được đánh giá
-- `Utils/SentryLogger.cs:254` `ignored_io_exception_hresults.Contains(ioe.HResult)` — chưa được đánh giá
-
-</details>
 
 ### osu.Game.Utils.TernaryStateUtils
 

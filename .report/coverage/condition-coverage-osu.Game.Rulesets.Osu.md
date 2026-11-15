@@ -1,6 +1,6 @@
 # Condition coverage — osu.Game.Rulesets.Osu
 
-Tổng: 1722 | 870/3444 | 373 | 1225 | 25.3%
+Tổng: 1617 | 870/3234 | 373 | 1120 | 26.9%
 
 ## Namespace
 
@@ -15,7 +15,7 @@ Tổng: 1722 | 870/3444 | 373 | 1225 | 25.3%
 | osu.Game.Rulesets.Osu.Difficulty.Preprocessing | 27 | 50/54 | 23 | 0 | 92.6% |
 | osu.Game.Rulesets.Osu.Difficulty.Skills | 38 | 70/76 | 32 | 0 | 92.1% |
 | osu.Game.Rulesets.Osu.Difficulty.Utils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Edit | 257 | 0/514 | 0 | 257 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit | 204 | 0/408 | 0 | 204 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Blueprints | 19 | 0/38 | 0 | 19 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.Components | 4 | 0/8 | 0 | 4 | 0.0% |
@@ -31,18 +31,18 @@ Tổng: 1722 | 870/3444 | 373 | 1225 | 25.3%
 | osu.Game.Rulesets.Osu.Replays | 60 | 14/120 | 5 | 51 | 11.7% |
 | osu.Game.Rulesets.Osu.Scoring | 22 | 41/44 | 20 | 1 | 93.2% |
 | osu.Game.Rulesets.Osu.Skinning | 40 | 0/80 | 0 | 40 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon | 43 | 0/86 | 0 | 43 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default | 54 | 0/108 | 0 | 54 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy | 102 | 0/204 | 0 | 102 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon | 39 | 0/78 | 0 | 39 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default | 46 | 0/92 | 0 | 46 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy | 69 | 0/138 | 0 | 69 | 0.0% |
 | osu.Game.Rulesets.Osu.Statistics | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Rulesets.Osu.UI | 76 | 2/152 | 0 | 74 | 1.3% |
-| osu.Game.Rulesets.Osu.UI.Cursor | 30 | 0/60 | 0 | 30 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor | 23 | 0/46 | 0 | 23 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.ReplayAnalysis | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Osu.Utils | 29 | 58/58 | 29 | 0 | 100.0% |
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 37, Database/Online: 0, DI: 61, TestInfra: 0). Còn lại: 556 | 810/1112 | 350 | 96 | 72.8%
+Loại 1061 điều kiện phụ thuộc ngoài (UI: 1018, Input: 43, Host/IO: 0, TestInfra: 0). Còn lại: 556 | 810/1112 | 350 | 96 | 72.8%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -102,8 +102,6 @@ Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 3
 | osu.Game.Rulesets.Osu.Edit.OsuHitObjectComposer _(loại)_ | 47 | 0/94 | 0 | 47 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuHitObjectInspector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSelectionHandler _(loại)_ | 38 | 0/76 | 0 | 38 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSelectionRotationHandler _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSelectionScaleHandler _(loại)_ | 42 | 0/84 | 0 | 42 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup.ExpandableSliderVelocityAdjustmentControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.PolygonGenerationPopover _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
@@ -219,7 +217,6 @@ Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 3
 | osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerProgressArc _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerRingArc _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerTicks _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.OsuArgonSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.CirclePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.DefaultFollowCircle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.DefaultReverseArrow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -231,7 +228,6 @@ Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 3
 | osu.Game.Rulesets.Osu.Skinning.Default.KiaiFlash _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.MainCirclePiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.SpinnerRotationTracker _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerSpmCalculator _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.SpinnerTicks _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.TrianglesPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursor _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -247,7 +243,6 @@ Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 3
 | osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderBody.LegacyDrawableSliderPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderHeadHitCircle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySpinner _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.OsuLegacySkinTransformer _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
 | osu.Game.Rulesets.Osu.Statistics.AccuracyHeatmap _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.DrawableOsuRuleset _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.LegacyHitPolicy _(loại)_ | 9 | 1/18 | 0 | 8 | 5.6% |
@@ -262,7 +257,6 @@ Loại 1166 điều kiện phụ thuộc ngoài (UI: 1025, Input: 43, Host/IO: 3
 | osu.Game.Rulesets.Osu.UI.Cursor.CursorRippleVisualiser _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TexturedTrailVertex _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TrailDrawNode _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.Cursor.OsuCursor _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.Cursor.OsuCursorContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Osu.UI.ReplayAnalysis.ClickMarker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1141,133 +1135,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Edit/OsuSelectionHandler.cs:135` `nudgeMovementActive` — chưa được đánh giá
 - `Edit/OsuSelectionHandler.cs:143` `firstBlueprint == null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Osu.Edit.OsuSelectionRotationHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Begin()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Commit()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Update(float, Vector2?)` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `updateState()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Begin()`**
-
-- `Edit/OsuSelectionRotationHandler.cs:55` `OperationInProgress.Value` — chưa được đánh giá
-
-**`Commit()`**
-
-- `Edit/OsuSelectionRotationHandler.cs:95` `OperationInProgress.Value` — chưa được đánh giá
-
-**`Update(float, Vector2?)`**
-
-- `Edit/OsuSelectionRotationHandler.cs:72` `OperationInProgress.Value` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:75` `objectsInRotation != null` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:75` `originalPositions != null` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:75` `originalPathControlPointPositions != null` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:75` `DefaultOrigin != null` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:83` `ho is IHasPath withPath` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:87` `i < withPath.Path.ControlPoints.Count` — chưa được đánh giá
-
-**`updateState()`**
-
-- `Edit/OsuSelectionRotationHandler.cs:44` `quad.Width > 0` — chưa được đánh giá
-- `Edit/OsuSelectionRotationHandler.cs:44` `quad.Height > 0` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Osu.Edit.OsuSelectionScaleHandler
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Begin()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `ClampScaleToPlayfieldBounds(Vector2, Vector2?, Axes, float)` | 13 | 0/26 | 0 | 13 | 0.0% |
-| `Commit()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `Update(Vector2, Vector2?, Axes, float)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `hitObjectUpdated(HitObject)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `isQuadInBounds(Quad)` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `moveSelectionInBounds()` | 4 | 0/8 | 0 | 4 | 0.0% |
-| `scaleSlider(Slider, Vector2, Vector2, OriginalHitObjectState, float)` | 7 | 0/14 | 0 | 7 | 0.0% |
-| `updateState()` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Begin()`**
-
-- `Edit/OsuSelectionScaleHandler.cs:87` `OperationInProgress.Value` — chưa được đánh giá
-
-**`ClampScaleToPlayfieldBounds(Vector2, Vector2?, Axes, float)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:221` `objectsInScale == null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:221` `adjustAxis == Axes.None` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:224` `defaultOrigin != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:224` `OriginalSurroundingQuad != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:226` `objectsInScale.Count == 1` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:226` `objectsInScale.First().Key is Slider slider` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:235` `axisRotation == 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:285` `s.X < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:288` `s.Y < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:304` `p.X < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:306` `p.Y < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:311` `Precision.AlmostEquals(p.X, 0)` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:313` `Precision.AlmostEquals(p.Y, 0)` — chưa được đánh giá
-
-**`Commit()`**
-
-- `Edit/OsuSelectionScaleHandler.cs:132` `OperationInProgress.Value` — chưa được đánh giá
-
-**`Dispose(bool)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:358` `editorBeatmap.IsNotNull()` — chưa được đánh giá
-
-**`Update(Vector2, Vector2?, Axes, float)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:102` `OperationInProgress.Value` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:105` `objectsInScale != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:105` `defaultOrigin != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:105` `OriginalSurroundingQuad != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:113` `objectsInScale.Count == 1` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:113` `objectsInScale.First().Key is Slider slider` — chưa được đánh giá
-
-**`hitObjectUpdated(HitObject)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:66` `selectedMovableObjects.Contains(hitObject)` — chưa được đánh giá
-
-**`isQuadInBounds(Quad)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:204` `quad.TopLeft.X >= 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:204` `quad.BottomRight.X <= OsuPlayfield.BASE_SIZE.X` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:205` `quad.TopLeft.Y >= 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:205` `quad.BottomRight.Y <= OsuPlayfield.BASE_SIZE.Y` — chưa được đánh giá
-
-**`moveSelectionInBounds()`**
-
-- `Edit/OsuSelectionScaleHandler.cs:326` `quad.TopLeft.X < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:328` `quad.TopLeft.Y < 0` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:331` `quad.BottomRight.X > OsuPlayfield.BASE_SIZE.X` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:333` `quad.BottomRight.Y > OsuPlayfield.BASE_SIZE.Y` — chưa được đánh giá
-
-**`scaleSlider(Slider, Vector2, Vector2, OriginalHitObjectState, float)`**
-
-- `Edit/OsuSelectionScaleHandler.cs:169` `originalInfo.PathControlPointPositions != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:169` `originalInfo.PathControlPointTypes != null` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:174` `i < slider.Path.ControlPoints.Count` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:190` `xInBounds` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:190` `yInBounds` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:190` `slider.Path.HasValidLengthForPlacement` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:193` `i < slider.Path.ControlPoints.Count` — chưa được đánh giá
-
-**`updateState()`**
-
-- `Edit/OsuSelectionScaleHandler.cs:76` `CanScaleX.Value` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:76` `CanScaleY.Value` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:78` `selectedMovableObjects.Count() == 1` — chưa được đánh giá
-- `Edit/OsuSelectionScaleHandler.cs:78` `selectedMovableObjects.First() is Slider` — chưa được đánh giá
 
 </details>
 
@@ -4187,23 +4054,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Osu.Skinning.Argon.OsuArgonSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Argon/OsuArgonSkinTransformer.cs:27` `isPro` — chưa được đánh giá
-- `Skinning/Argon/OsuArgonSkinTransformer.cs:27` `result == HitResult.Great` — chưa được đánh giá
-- `Skinning/Argon/OsuArgonSkinTransformer.cs:27` `result == HitResult.Perfect` — chưa được đánh giá
-- `Skinning/Argon/OsuArgonSkinTransformer.cs:57` `isPro` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Osu.Skinning.Default.CirclePiece
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -4456,31 +4306,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `Skinning/Default/SpinnerRotationTracker.cs:76` `Tracking` — chưa được đánh giá
 - `Skinning/Default/SpinnerRotationTracker.cs:82` `IsSpinnableTime` — chưa được đánh giá
 - `Skinning/Default/SpinnerRotationTracker.cs:82` `Math.Abs(currentRotation - Rotation) > 10f` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Osu.Skinning.Default.SpinnerSpmCalculator
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Dispose(bool)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `SetRotation(float)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Dispose(bool)`**
-
-- `Skinning/Default/SpinnerSpmCalculator.cs:70` `drawableSpinner.IsNotNull()` — chưa được đánh giá
-
-**`SetRotation(float)`**
-
-- `Skinning/Default/SpinnerSpmCalculator.cs:40` `records.Count > 0` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:40` `Time.Current < lastRecord.Time` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:44` `records.Count > 0` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:44` `Precision.AlmostEquals(Time.Current, lastRecord.Time)` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:47` `records.Count > 0` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:50` `records.Count > 0` — chưa được đánh giá
-- `Skinning/Default/SpinnerSpmCalculator.cs:50` `Time.Current - records.Peek().Time > spm_count_duration` — chưa được đánh giá
 
 </details>
 
@@ -4854,60 +4679,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Osu.Skinning.Legacy.OsuLegacySkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 30 | 0/60 | 0 | 30 | 0.0% |
-| `IsProvidingLegacyResources` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:312` `hasHitCircle.Value` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:53` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:57` `IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:68` `keyCounter != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:83` `combo != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:92` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:102` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:109` `hitError != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:137` `getSliderPointTexture(resultComponent.Component) is Texture texture` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:145` `resultComponent.Component == HitResult.LargeTickMiss` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:145` `getSliderPointTexture(resultComponent.Component == HitResult.LargeTickMiss ? HitResult.LargeTickHit : HitResult.SliderTailHit) != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:158` `GetConfig<SkinConfiguration.LegacySetting, decimal>(SkinConfiguration.LegacySetting.Version)?.Value < 2m` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:160` `result == HitResult.LargeTickHit` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:177` `followCircleContent != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:183` `GetTexture("sliderb") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:183` `GetTexture("sliderb0") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:189` `hasHitCircle.Value` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:195` `hasHitCircle.Value` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:201` `hasHitCircle.Value` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:207` `hasHitCircle.Value` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:213` `hasHitCircle.Value` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:219` `GetTexture("cursor") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:225` `GetTexture("cursortrail") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:231` `GetTexture("cursor-ripple") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:253` `GetTexture("star2") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:259` `GetTexture("cursor-smoke") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:265` `this.HasFont(LegacyFont.HitCircle)` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:279` `GetTexture("spinner-top") != null` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:279` `hasBackground` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:281` `hasBackground` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:287` `GetTexture(@"approachcircle") != null` — chưa được đánh giá
-
-**`IsProvidingLegacyResources`**
-
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:20` `base.IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/OsuLegacySkinTransformer.cs:20` `hasHitCircle.Value` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Osu.Statistics.AccuracyHeatmap
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -5267,30 +5038,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 - `UI/Cursor/CursorTrail.cs:426` `TexturePosition.Equals(other.TexturePosition)` — chưa được đánh giá
 - `UI/Cursor/CursorTrail.cs:427` `Colour.Equals(other.Colour)` — chưa được đánh giá
 - `UI/Cursor/CursorTrail.cs:428` `Time.Equals(other.Time)` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TrailDrawNode
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `ApplyState()` | 5 | 0/10 | 0 | 5 | 0.0% |
-| `Draw(IRenderer)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`ApplyState()`**
-
-- `UI/Cursor/CursorTrail.cs:268` `Source.AllowPartRotation` — chưa được đánh giá
-- `UI/Cursor/CursorTrail.cs:273` `Source.TrailOrigin.HasFlag(Anchor.x1)` — chưa được đánh giá
-- `UI/Cursor/CursorTrail.cs:275` `Source.TrailOrigin.HasFlag(Anchor.x2)` — chưa được đánh giá
-- `UI/Cursor/CursorTrail.cs:278` `Source.TrailOrigin.HasFlag(Anchor.y1)` — chưa được đánh giá
-- `UI/Cursor/CursorTrail.cs:280` `Source.TrailOrigin.HasFlag(Anchor.y2)` — chưa được đánh giá
-
-**`Draw(IRenderer)`**
-
-- `UI/Cursor/CursorTrail.cs:315` `part.InvalidationID == -1` — chưa được đánh giá
-- `UI/Cursor/CursorTrail.cs:318` `time - part.Time >= 1` — chưa được đánh giá
 
 </details>
 

@@ -1,6 +1,6 @@
 # Condition coverage — osu.Game.Tournament
 
-Tổng: 381 | 47/762 | 22 | 356 | 6.2%
+Tổng: 361 | 47/722 | 22 | 336 | 6.5%
 
 ## Namespace
 
@@ -8,11 +8,10 @@ Tổng: 381 | 47/762 | 22 | 356 | 6.2%
 |---|---|---|---|---|---|
 | osu.Game.Tournament | 51 | 9/102 | 3 | 45 | 8.8% |
 | osu.Game.Tournament.Components | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Tournament.IPC | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Tournament.Models | 20 | 38/40 | 19 | 1 | 95.0% |
 | osu.Game.Tournament.Screens | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Tournament.Screens.Drawings | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components | 34 | 0/68 | 0 | 34 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.Tournament.Screens.Editors | 21 | 0/42 | 0 | 21 | 0.0% |
 | osu.Game.Tournament.Screens.Editors.Components | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Tournament.Screens.Gameplay | 13 | 0/26 | 0 | 13 | 0.0% |
@@ -27,7 +26,7 @@ Tổng: 381 | 47/762 | 22 | 356 | 6.2%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 356 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 6, Database/Online: 0, DI: 15, TestInfra: 0). Còn lại: 25 | 47/50 | 22 | 0 | 94.0%
+Loại 336 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 1, TestInfra: 0). Còn lại: 25 | 47/50 | 22 | 0 | 94.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -56,7 +55,6 @@ Loại 356 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 6, D
 | osu.Game.Tournament.Components.TournamentMatchChatDisplay.MatchMessage _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Tournament.Components.TournamentModIcon _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Tournament.Components.TourneyVideo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.IPC.FileBasedIPC _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Tournament.Models.StableInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Tournament.Models.TournamentBeatmap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Tournament.Models.TournamentMatch | 11 | 22/22 | 11 | 0 | 100.0% |
@@ -68,7 +66,6 @@ Loại 356 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 6, D
 | osu.Game.Tournament.Screens.Drawings.Components.GroupContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
 | osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer.ScrollingTeam _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.StorageBackedTeamList _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer.VisualiserLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Tournament.Screens.Editors.LadderEditorScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -489,58 +486,6 @@ Loại 356 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 6, D
 
 </details>
 
-### osu.Game.Tournament.IPC.FileBasedIPC
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `SetIPCLocation(string?)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `findFromDotFolder()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `findFromEnvVar()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `findFromLocalAppData()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `findFromRegistry()` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `initialiseIPCStorage(string?)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `ipcFileExistsInDirectory(string?)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`SetIPCLocation(string?)`**
-
-- `IPC/FileBasedIPC.cs:174` `path == null` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:174` `ipcFileExistsInDirectory(path)` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:178` `newStorage == null` — chưa được đánh giá
-
-**`findFromDotFolder()`**
-
-- `IPC/FileBasedIPC.cs:238` `ipcFileExistsInDirectory(stableInstallPath)` — chưa được đánh giá
-
-**`findFromEnvVar()`**
-
-- `IPC/FileBasedIPC.cs:212` `ipcFileExistsInDirectory(stableInstallPath)` — chưa được đánh giá
-
-**`findFromLocalAppData()`**
-
-- `IPC/FileBasedIPC.cs:227` `ipcFileExistsInDirectory(stableInstallPath)` — chưa được đánh giá
-
-**`findFromRegistry()`**
-
-- `IPC/FileBasedIPC.cs:257` `ipcFileExistsInDirectory(stableInstallPath)` — chưa được đánh giá
-
-**`initialiseIPCStorage(string?)`**
-
-- `IPC/FileBasedIPC.cs:60` `string.IsNullOrEmpty(path)` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:70` `IPCStorage.Exists(file_ipc_filename)` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:82` `lastBeatmapId != beatmapId` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:90` `existing != null` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:97` `lastBeatmapId == beatmapId` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:102` `lastBeatmapId == beatmapId` — chưa được đánh giá
-
-**`ipcFileExistsInDirectory(string?)`**
-
-- `IPC/FileBasedIPC.cs:192` `p != null` — chưa được đánh giá
-- `IPC/FileBasedIPC.cs:192` `File.Exists(Path.Combine(p, "ipc.txt"))` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Tournament.Models.StableInfo
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -749,24 +694,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`Selected.set`**
 
 - `Screens/Drawings/Components/ScrollingTeamContainer.cs:329` `selected` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Tournament.Screens.Drawings.Components.StorageBackedTeamList
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `Teams.get` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`Teams.get`**
-
-- `Screens/Drawings/Components/StorageBackedTeamList.cs:30` `storage.Exists(teams_filename)` — chưa được đánh giá
-- `Screens/Drawings/Components/StorageBackedTeamList.cs:38` `sr.Peek() != -1` — chưa được đánh giá
-- `Screens/Drawings/Components/StorageBackedTeamList.cs:42` `string.IsNullOrEmpty(line)` — chưa được đánh giá
-- `Screens/Drawings/Components/StorageBackedTeamList.cs:48` `split.Length < 2` — chưa được đánh giá
-- `Screens/Drawings/Components/StorageBackedTeamList.cs:57` `split.Length >= 3` — chưa được đánh giá
 
 </details>
 

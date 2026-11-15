@@ -245,7 +245,7 @@ public sealed class ConditionRewriter : CSharpSyntaxRewriter
             // Loại thêm: type không dựng/kiểm thử được bằng CFT thuần nếu thiếu thứ ngoài.
             if (reason.Length == 0 && isRealmBacked(t)) reason = "Database/Online";
             if (reason.Length == 0 && declaresDi(t)) reason = "DI";
-            if (reason.Length == 0) reason = constructorReason(t);
+            if (reason.Length == 0) reason = constructorReason(t) is { Length: > 0 } c ? "~" + c : "";
         }
 
         return typeSelfCache[t] = reason;

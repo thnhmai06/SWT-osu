@@ -1,6 +1,6 @@
 # Condition coverage — osu.Game.Rulesets.Taiko
 
-Tổng: 576 | 459/1152 | 219 | 336 | 39.8%
+Tổng: 539 | 459/1078 | 219 | 299 | 42.6%
 
 ## Namespace
 
@@ -25,14 +25,14 @@ Tổng: 576 | 459/1152 | 219 | 336 | 39.8%
 | osu.Game.Rulesets.Taiko.Objects.Drawables | 69 | 0/138 | 0 | 69 | 0.0% |
 | osu.Game.Rulesets.Taiko.Replays | 24 | 22/48 | 11 | 13 | 45.8% |
 | osu.Game.Rulesets.Taiko.Scoring | 12 | 22/24 | 10 | 0 | 91.7% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon | 45 | 0/90 | 0 | 45 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy | 70 | 0/140 | 0 | 70 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon | 38 | 0/76 | 0 | 38 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default | 27 | 0/54 | 0 | 27 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy | 45 | 0/90 | 0 | 45 | 0.0% |
 | osu.Game.Rulesets.Taiko.UI | 66 | 0/132 | 0 | 66 | 0.0% |
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 318 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 37, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 258 | 459/516 | 219 | 18 | 89.0%
+Loại 281 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 0, TestInfra: 0). Còn lại: 258 | 459/516 | 219 | 18 | 89.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -121,7 +121,6 @@ Loại 318 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 37, 
 | osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonTickPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.TaikoArgonSkinTransformer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.CirclePiece _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultBarLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -130,7 +129,6 @@ Loại 318 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 37, 
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultKiaiHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.DefaultSwell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.TaikoTrianglesSkinTransformer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Default.TickPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyCirclePiece _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyDrumRoll _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -143,7 +141,6 @@ Loại 318 điều kiện phụ thuộc ngoài (UI: 281, Input: 0, Host/IO: 37, 
 | osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller.ScrollerSprite _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacyPlayfieldBackgroundRight _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacySkinTransformer _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
 | osu.Game.Rulesets.Taiko.UI.DrawableTaikoMascot _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Rulesets.Taiko.UI.DrawableTaikoRuleset _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Taiko.UI.DrumRollHitContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
@@ -1216,26 +1213,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Taiko.Skinning.Argon.TaikoArgonSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 7 | 0/14 | 0 | 7 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:27` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:41` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:50` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:57` `hitError != null` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:63` `hitError2 != null` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:100` `Skin is ArgonProSkin` — chưa được đánh giá
-- `Skinning/Argon/TaikoArgonSkinTransformer.cs:100` `resultComponent.Component >= HitResult.Great` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -1399,24 +1376,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `Skinning/Default/DefaultSwell.cs:154` `drawableHitObject is DrawableSwell` — chưa được đánh giá
 - `Skinning/Default/DefaultSwell.cs:161` `state == ArmedState.Idle` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Taiko.Skinning.Default.TaikoTrianglesSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 5 | 0/10 | 0 | 5 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Default/TaikoTrianglesSkinTransformer.cs:28` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Default/TaikoTrianglesSkinTransformer.cs:41` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Default/TaikoTrianglesSkinTransformer.cs:49` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Default/TaikoTrianglesSkinTransformer.cs:58` `hitError != null` — chưa được đánh giá
-- `Skinning/Default/TaikoTrianglesSkinTransformer.cs:64` `hitError2 != null` — chưa được đánh giá
 
 </details>
 
@@ -1676,52 +1635,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`Update()`**
 
 - `Skinning/Legacy/TaikoLegacyPlayfieldBackgroundRight.cs:49` `isKiaiActive` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacySkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 21 | 0/42 | 0 | 21 | 0.0% |
-| `GetSample(ISampleInfo)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `IsProvidingLegacyResources` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:41` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:45` `IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:60` `combo != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:69` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:78` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:85` `hitError != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:108` `hasExplosion.Value` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:119` `GetTexture("taiko-roll-middle") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:125` `GetTexture("taiko-roll-middle") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:131` `hasBarLeft` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:141` `hasHitCircle` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:150` `GetTexture("spinner-circle") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:156` `GetTexture("taikobigcircle") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:162` `GetTexture("taiko-bar-right") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:169` `GetTexture("taiko-bar-right") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:175` `GetTexture("taiko-barline") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:182` `missSprite != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:192` `hitSprite != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:204` `hasExplosion.Value` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:210` `GetTexture("taiko-slider") != null` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:219` `GetTexture("taiko-glow") != null` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:252` `sampleInfo is HitSampleInfo hitSampleInfo` — chưa được đánh giá
-
-**`IsProvidingLegacyResources`**
-
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:21` `base.IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:21` `hasHitCircle` — chưa được đánh giá
-- `Skinning/Legacy/TaikoLegacySkinTransformer.cs:21` `hasBarLeft` — chưa được đánh giá
 
 </details>
 

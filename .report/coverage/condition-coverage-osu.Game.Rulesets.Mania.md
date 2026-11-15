@@ -1,6 +1,6 @@
 # Condition coverage — osu.Game.Rulesets.Mania
 
-Tổng: 714 | 654/1428 | 298 | 358 | 45.8%
+Tổng: 679 | 654/1358 | 298 | 323 | 48.2%
 
 ## Namespace
 
@@ -27,15 +27,15 @@ Tổng: 714 | 654/1428 | 298 | 358 | 45.8%
 | osu.Game.Rulesets.Mania.Objects.Drawables | 56 | 0/112 | 0 | 56 | 0.0% |
 | osu.Game.Rulesets.Mania.Replays | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring | 32 | 57/64 | 25 | 0 | 89.1% |
-| osu.Game.Rulesets.Mania.Skinning.Argon | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy | 94 | 0/188 | 0 | 94 | 0.0% |
-| osu.Game.Rulesets.Mania.UI | 61 | 0/122 | 0 | 61 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy | 76 | 0/152 | 0 | 76 | 0.0% |
+| osu.Game.Rulesets.Mania.UI | 56 | 0/112 | 0 | 56 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.Components | 10 | 0/20 | 0 | 10 | 0.0% |
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 344 điều kiện phụ thuộc ngoài (UI: 308, Input: 6, Host/IO: 30, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 370 | 644/740 | 294 | 20 | 87.0%
+Loại 309 điều kiện phụ thuộc ngoài (UI: 303, Input: 6, Host/IO: 0, TestInfra: 0). Còn lại: 370 | 644/740 | 294 | 20 | 87.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -135,12 +135,10 @@ Loại 344 điều kiện phụ thuộc ngoài (UI: 308, Input: 6, Host/IO: 30, 
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonKeyArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonManiaComboCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Argon.ArgonNotePiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ManiaArgonSkinTransformer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBarLine _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece.ForegroundPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Default.DefaultNotePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.ManiaTrianglesSkinTransformer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Legacy.HitTargetInsetContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyBodyPiece _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyColumnBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
@@ -156,8 +154,6 @@ Loại 344 điều kiện phụ thuộc ngoài (UI: 308, Input: 6, Host/IO: 30, 
 | osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground.ColumnBackground _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageForeground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaClassicSkinTransformer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaLegacySkinTransformer _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.Column _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.ColumnFlow _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.DefaultHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -167,7 +163,6 @@ Loại 344 điều kiện phụ thuộc ngoài (UI: 308, Input: 6, Host/IO: 30, 
 | osu.Game.Rulesets.Mania.UI.ManiaPlayfieldAdjustmentContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea.ColumnInputReceptor _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.OrderedHitPolicy _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.PlayfieldCoveringWrapper _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.Stage _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.Components.ColumnHitObjectArea _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1523,36 +1518,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Mania.Skinning.Argon.ManiaArgonSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 6 | 0/12 | 0 | 6 | 0.0% |
-| `getColourForLayout(int, StageDefinition)` | 1 | 0/2 | 0 | 1 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:152` `lookup is ManiaSkinConfigurationLookup maniaLookup` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:170` `isSpecialColumn` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:36` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:52` `combo != null` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:62` `hitError != null` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:68` `hitError2 != null` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:96` `Skin is ArgonProSkin` — chưa được đánh giá
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:96` `resultComponent.Component >= HitResult.Great` — chưa được đánh giá
-
-**`getColourForLayout(int, StageDefinition)`**
-
-- `Skinning/Argon/ManiaArgonSkinTransformer.cs:361` `stage.IsSpecialColumn(columnIndex)` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Mania.Skinning.Default.DefaultBarLine
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -1618,22 +1583,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`onDirectionChanged(ValueChangedEvent<ScrollingDirection>)`**
 
 - `Skinning/Default/DefaultNotePiece.cs:67` `direction.NewValue == ScrollingDirection.Up` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Mania.Skinning.Default.ManiaTrianglesSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 3 | 0/6 | 0 | 3 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Default/ManiaTrianglesSkinTransformer.cs:29` `lookup is ManiaSkinConfigurationLookup maniaLookup` — chưa được đánh giá
-- `Skinning/Default/ManiaTrianglesSkinTransformer.cs:40` `stage.IsSpecialColumn(columnInStage)` — chưa được đánh giá
-- `Skinning/Default/ManiaTrianglesSkinTransformer.cs:44` `distanceToEdge % 2 == 0` — chưa được đánh giá
 
 </details>
 
@@ -2000,66 +1949,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaClassicSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Legacy/ManiaClassicSkinTransformer.cs:20` `lookup is ManiaSkinConfigurationLookup maniaLookup` — chưa được đánh giá
-- `Skinning/Legacy/ManiaClassicSkinTransformer.cs:24` `baseLookup != null` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaLegacySkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 8 | 0/16 | 0 | 8 | 0.0% |
-| `GetSample(ISampleInfo)` | 3 | 0/6 | 0 | 3 | 0.0% |
-| `IsProvidingLegacyResources` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `getResult(HitResult)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:222` `lookup is ManiaSkinConfigurationLookup maniaLookup` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:90` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:94` `IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:107` `combo != null` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:114` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:121` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:128` `hitError != null` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:151` `isLegacySkin.Value` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:151` `hasKeyTexture.Value` — chưa được đánh giá
-
-**`GetSample(ISampleInfo)`**
-
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:214` `sampleInfo is ConvertHitObjectParser.LegacyHitSampleInfo legacySample` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:214` `legacySample.IsLayered` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:214` `isBeatmapConverted` — chưa được đánh giá
-
-**`IsProvidingLegacyResources`**
-
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:27` `base.IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:27` `hasKeyTexture.Value` — chưa được đánh giá
-
-**`getResult(HitResult)`**
-
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:201` `hit_result_mapping.TryGetValue(result, out var value)` — chưa được đánh giá
-- `Skinning/Legacy/ManiaLegacySkinTransformer.cs:208` `animation == null` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Mania.UI.Column
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -2292,32 +2181,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 - `UI/ManiaTouchInputArea.cs:181` `press == isPressed` — chưa được đánh giá
 - `UI/ManiaTouchInputArea.cs:186` `press` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Mania.UI.OrderedHitPolicy
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `HandleHit(DrawableHitObject)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `IsHittable(DrawableHitObject, double)` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `enumerateHitObjectsUpTo(double)` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`HandleHit(DrawableHitObject)`**
-
-- `UI/OrderedHitPolicy.cs:48` `obj.Judged` — chưa được đánh giá
-
-**`IsHittable(DrawableHitObject, double)`**
-
-- `UI/OrderedHitPolicy.cs:37` `nextObject == null` — chưa được đánh giá
-- `UI/OrderedHitPolicy.cs:37` `time < nextObject.HitObject.StartTime` — chưa được đánh giá
-
-**`enumerateHitObjectsUpTo(double)`**
-
-- `UI/OrderedHitPolicy.cs:59` `obj.HitObject.GetEndTime() >= targetTime` — chưa được đánh giá
-- `UI/OrderedHitPolicy.cs:66` `nestedObj.HitObject.GetEndTime() >= targetTime` — chưa được đánh giá
 
 </details>
 

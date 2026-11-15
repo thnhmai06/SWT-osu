@@ -1,6 +1,6 @@
 # Condition coverage — osu.Game.Rulesets.Catch
 
-Tổng: 472 | 353/944 | 167 | 286 | 37.4%
+Tổng: 442 | 353/884 | 167 | 256 | 39.9%
 
 ## Namespace
 
@@ -20,14 +20,14 @@ Tổng: 472 | 353/944 | 167 | 286 | 37.4%
 | osu.Game.Rulesets.Catch.Objects.Drawables | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Catch.Replays | 24 | 46/48 | 22 | 0 | 95.8% |
 | osu.Game.Rulesets.Catch.Scoring | 18 | 33/36 | 15 | 0 | 91.7% |
-| osu.Game.Rulesets.Catch.Skinning.Argon | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy | 30 | 0/60 | 0 | 30 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Argon | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Default | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Legacy | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Catch.UI | 72 | 0/144 | 0 | 72 | 0.0% |
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 314 điều kiện phụ thuộc ngoài (UI: 284, Input: 0, Host/IO: 30, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 158 | 300/316 | 143 | 1 | 94.9%
+Loại 284 điều kiện phụ thuộc ngoài (UI: 284, Input: 0, Host/IO: 0, TestInfra: 0). Còn lại: 158 | 300/316 | 143 | 1 | 94.9%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
@@ -103,11 +103,8 @@ Loại 314 điều kiện phụ thuộc ngoài (UI: 284, Input: 0, Host/IO: 30, 
 | osu.Game.Rulesets.Catch.Skinning.Argon.ArgonDropletPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Argon.ArgonFruitPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Argon.ArgonHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Argon.CatchArgonSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Default.CatchHitObjectPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default.CatchTrianglesSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Default.PulpFormation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy.CatchLegacySkinTransformer _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchComboCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchHitObjectPiece _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -1169,23 +1166,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 
 </details>
 
-### osu.Game.Rulesets.Catch.Skinning.Argon.CatchArgonSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Argon/CatchArgonSkinTransformer.cs:25` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Argon/CatchArgonSkinTransformer.cs:43` `comboCounter != null` — chưa được đánh giá
-- `Skinning/Argon/CatchArgonSkinTransformer.cs:51` `hitError is ColourHitErrorMeter colourHitError` — chưa được đánh giá
-- `Skinning/Argon/CatchArgonSkinTransformer.cs:60` `hitError2 is ColourHitErrorMeter colourHitError2` — chưa được đánh giá
-
-</details>
-
 ### osu.Game.Rulesets.Catch.Skinning.Default.CatchHitObjectPiece
 
 | Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
@@ -1197,23 +1177,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`LoadComplete()`**
 
 - `Skinning/Default/CatchHitObjectPiece.cs:43` `hyper.NewValue` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Catch.Skinning.Default.CatchTrianglesSkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetDrawableComponent(ISkinComponentLookup)` | 4 | 0/8 | 0 | 4 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Default/CatchTrianglesSkinTransformer.cs:28` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Default/CatchTrianglesSkinTransformer.cs:47` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Default/CatchTrianglesSkinTransformer.cs:56` `hitError is ColourHitErrorMeter colourHitError` — chưa được đánh giá
-- `Skinning/Default/CatchTrianglesSkinTransformer.cs:65` `hitError2 is ColourHitErrorMeter colourHitError2` — chưa được đánh giá
 
 </details>
 
@@ -1233,57 +1196,6 @@ _Mọi điều kiện đã phủ đủ cả true và false._
 **`Clear()`**
 
 - `Skinning/Default/PulpFormation.cs:38` `i < pulpsInUse` — chưa được đánh giá
-
-</details>
-
-### osu.Game.Rulesets.Catch.Skinning.Legacy.CatchLegacySkinTransformer
-
-| Method | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
-|---|---|---|---|---|---|
-| `GetConfig(TLookup)` | 1 | 0/2 | 0 | 1 | 0.0% |
-| `GetDrawableComponent(ISkinComponentLookup)` | 15 | 0/30 | 0 | 15 | 0.0% |
-| `IsProvidingLegacyResources` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `hasNewStyleCatcherSprite()` | 2 | 0/4 | 0 | 2 | 0.0% |
-| `hasOldStyleCatcherSprite()` | 2 | 0/4 | 0 | 2 | 0.0% |
-
-<details><summary>Điều kiện còn thiếu</summary>
-
-**`GetConfig(TLookup)`**
-
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:174` `result == null` — chưa được đánh giá
-
-**`GetDrawableComponent(ISkinComponentLookup)`**
-
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:37` `containerLookup.Ruleset == null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:41` `IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:56` `keyCounter != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:64` `spectatorList != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:71` `leaderboard != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:78` `hitError is ColourHitErrorMeter colourHitError` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:109` `hasPear` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:115` `GetTexture("fruit-bananas") != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:121` `GetTexture("fruit-drop") != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:129` `version < 2.3m` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:131` `hasOldStyleCatcherSprite()` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:135` `hasNewStyleCatcherSprite()` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:141` `providesComboCounter` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:147` `hasOldStyleCatcherSprite()` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:147` `hasNewStyleCatcherSprite()` — chưa được đánh giá
-
-**`IsProvidingLegacyResources`**
-
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:17` `base.IsProvidingLegacyResources` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:17` `hasPear` — chưa được đánh giá
-
-**`hasNewStyleCatcherSprite()`**
-
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:165` `GetTexture(@"fruit-catcher-idle") != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:166` `GetTexture(@"fruit-catcher-idle-0") != null` — chưa được đánh giá
-
-**`hasOldStyleCatcherSprite()`**
-
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:161` `GetTexture(@"fruit-ryuuta") != null` — chưa được đánh giá
-- `Skinning/Legacy/CatchLegacySkinTransformer.cs:162` `GetTexture(@"fruit-ryuuta-0") != null` — chưa được đánh giá
 
 </details>
 
