@@ -36,16 +36,18 @@ mã nguồn ──(Roslyn rewriter)──▶ mã có probe ──build + chạy 
 ### Chỉ tính logic thuần (loại code phụ thuộc ngoài)
 
 Mỗi điều kiện được gắn nhãn `Exclusion` khi instrument. Điều kiện bị loại nếu nằm trong code phụ thuộc vào thứ ngoài chính nó, nên không kiểm tra được bằng unit test thuần (không cần game host, input thật, UI…).
-Việc loại làm theo **member**; type tự là UI/Input/Host/TestInfra thì loại cả type. Thứ tự ưu tiên:
+Việc loại làm theo **member**; type tự là UI/Input/Host/TestInfra/Realm/DI hoặc không dựng được thì loại cả type. Thứ tự ưu tiên:
 
 | Nhóm | Nhận diện (Roslyn, tự động) |
 |---|---|
 | TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |
 | UI | type dẫn xuất từ `osu.Framework.Graphics.Drawable` mà **không** qua `Component` (`Component` kế thừa `Drawable` nhưng không hiển thị, vd. `EditorBeatmap`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |
-| Host/IO | type kế thừa `osu.Framework.Game`/`Platform.*`; hoặc member dùng `osu.Framework.Platform/IO/Audio/Threading`, texture/shader/render, `osu.Game.Skinning/Audio/IO` |
+| Host/IO | type kế thừa `osu.Framework.Game`/`Platform.*`; hoặc member dùng `osu.Framework.Platform/IO/Audio/Threading`, texture/shader/render, `osu.Game.Skinning/IO` |
 | Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |
 | Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |
-| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]`, hoặc dùng symbol có `[Resolved]` |
+| DI | **type** có member `[Resolved]`/`[BackgroundDependencyLoader]` (cần DI container mới dựng được) → loại cả type; hoặc member có `[Cached]`/dùng symbol có `[Resolved]`; hoặc mọi constructor đều đòi tham số là type DI |
+| Database/Online (mở rộng) | type dẫn xuất từ `Realms.*` (`RealmObject`) → loại cả type |
+| Host/IO (mở rộng) | type mà **mọi** constructor tường minh đều đòi tham số là thứ ngoài (vd. `Storage`, `IAPIProvider`) → loại cả type. Type static, không có constructor tường minh, hoặc có ít nhất một constructor nhận tham số thuần/interface nội bộ thì vẫn tính |
 
 Báo cáo có bảng **"chỉ tính logic thuần"** ở cấp solution (số điều kiện loại theo từng nhóm, coverage phần logic thuần so với toàn bộ) và ở cấp namespace của từng project; bảng type đánh dấu `_(loại)_`.
 Các bảng còn lại vẫn tính toàn bộ để đối chiếu.

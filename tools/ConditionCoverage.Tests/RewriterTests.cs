@@ -161,8 +161,8 @@ public class RewriterTests
                           {
                               public bool Pure(bool x, bool y) => x && y;
                               public bool UsesHost(osu.Framework.Platform.Storage s, bool y) => s.Exists && y;
-                              [osu.Framework.Allocation.Resolved] public bool Injected(bool x, bool y) => x || y;
                           }
+                          public class Injected { [osu.Framework.Allocation.Resolved] public bool Dep; public bool Pure(bool x, bool y) => x || y; }
                       }
                       """);
 
@@ -173,6 +173,36 @@ public class RewriterTests
         Assert.That(reason("NonVisual", "D"), Is.Empty, "Component không hiển thị là logic thuần");
         Assert.That(reason("Mixed", "Pure"), Is.Empty);
         Assert.That(reason("Mixed", "UsesHost"), Is.EqualTo("Host/IO"));
-        Assert.That(reason("Mixed", "Injected"), Is.EqualTo("DI"));
+        Assert.That(reason("Injected", "Pure"), Is.EqualTo("DI"), "type có member [Resolved] bị loại cả type");
+    }
+
+    [Test]
+    public void TypesNeedingDiRealmOrExternalConstructorArgsAreExcluded()
+    {
+        var b = build("""
+                      namespace Realms { public class RealmObject { } }
+                      namespace osu.Framework.Platform { public class Storage { } }
+                      namespace osu.Framework.Allocation { public class ResolvedAttribute : System.Attribute { } }
+                      namespace Game
+                      {
+                          public class WithDi { [osu.Framework.Allocation.Resolved] int x; public bool M(bool a, bool b) => a && b; }
+                          public class Stored : Realms.RealmObject { public bool M(bool a, bool b) => a && b; }
+                          public class NeedsStorage { public NeedsStorage(osu.Framework.Platform.Storage s) { } public bool M(bool a, bool b) => a && b; }
+                          public class Constructible { public Constructible(int n) { } public bool M(bool a, bool b) => a && b; }
+                          public class OneEasyCtor { public OneEasyCtor(osu.Framework.Platform.Storage s) { } public OneEasyCtor() { } public bool M(bool a, bool b) => a && b; }
+                          public static class Util { public static bool M(bool a, bool b) => a && b; }
+                          public class NeedsDiType { public NeedsDiType(WithDi d) { } public bool M(bool a, bool b) => a && b; }
+                      }
+                      """);
+
+        string reason(string type) => b.Registry.Conditions.First(c => c.Type == type).Exclusion;
+
+        Assert.That(reason("WithDi"), Is.EqualTo("DI"));
+        Assert.That(reason("Stored"), Is.EqualTo("Database/Online"));
+        Assert.That(reason("NeedsStorage"), Is.EqualTo("Host/IO"));
+        Assert.That(reason("NeedsDiType"), Is.EqualTo("DI"));
+        Assert.That(reason("Constructible"), Is.Empty);
+        Assert.That(reason("OneEasyCtor"), Is.Empty, "có ctor không cần thứ ngoài thì dựng được");
+        Assert.That(reason("Util"), Is.Empty);
     }
 }

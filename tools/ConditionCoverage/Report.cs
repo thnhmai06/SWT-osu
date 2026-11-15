@@ -100,12 +100,14 @@ public static class Report
         sb.AppendLine("|---|---|");
         sb.AppendLine("| TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |");
         sb.AppendLine("| UI | type dẫn xuất từ `Drawable` (không qua `Component`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |");
-        sb.AppendLine("| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|Audio|IO` |");
+        sb.AppendLine("| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|IO` |");
         sb.AppendLine("| Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |");
         sb.AppendLine("| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |");
-        sb.AppendLine("| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]` hoặc dùng symbol có `[Resolved]` |");
+        sb.AppendLine("| DI | **type** có member `[Resolved]`/`[BackgroundDependencyLoader]` (cần DI container mới dựng được) → loại cả type; hoặc member có `[Cached]` hoặc dùng symbol có `[Resolved]`; hoặc mọi constructor đều đòi tham số là type DI |");
+        sb.AppendLine("| Database/Online (mở rộng) | type dẫn xuất từ `Realms.*` (`RealmObject`) → loại cả type |");
+        sb.AppendLine("| Host/IO (mở rộng) | type mà **mọi** constructor tường minh đều đòi tham số là thứ ngoài (vd. `Storage`, `IAPIProvider`) → loại cả type. Type static, type không có constructor tường minh, hoặc có ít nhất một constructor nhận tham số thuần/interface nội bộ thì vẫn tính |");
         sb.AppendLine();
-        sb.AppendLine("Việc loại làm theo **member** (không loại cả type nếu chỉ một số member phụ thuộc ngoài). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột \"toàn bộ\" để đối chiếu.");
+        sb.AppendLine("Việc loại làm theo **member**; riêng các trường hợp ghi \"loại cả type\" thì loại toàn bộ type (vì type đó không dựng/kiểm thử được bằng control-flow test thuần). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột \"toàn bộ\" để đối chiếu.");
         sb.AppendLine();
         sb.AppendLine("| Project | Tổng điều kiện | UI | Input | Host/IO | Database/Online | DI | TestInfra | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |");
         sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");

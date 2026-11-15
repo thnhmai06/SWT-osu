@@ -10,17 +10,16 @@ Tổng: 12 | 24/24 | 12 | 0 | 100.0%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 2 điều kiện phụ thuộc ngoài (UI: 1, Input: 0, Host/IO: 1, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 10 | 20/20 | 10 | 0 | 100.0%
+Loại 12 điều kiện phụ thuộc ngoài (UI: 0, Input: 0, Host/IO: 0, Database/Online: 0, DI: 12, TestInfra: 0). Còn lại: 0 | 0/0 | 0 | 0 | 0.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Screens.Edit | 10 | 20/20 | 10 | 0 | 100.0% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Screens.Edit.EditorBeatmap | 12 | 24/24 | 12 | 0 | 100.0% |
+| osu.Game.Screens.Edit.EditorBeatmap _(loại)_ | 12 | 24/24 | 12 | 0 | 100.0% |
 
 ## Method
 
