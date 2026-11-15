@@ -14,5 +14,5 @@ Loại trừ (giống cả 4 cấp): assembly `*.Tests`, `osu.Framework*`, `osu.
 
 ## Ghi chú
 - `branches-covered/branches-valid` cộng từ các `<line branch="True" condition-coverage="x% (c/v)">` trong method (khớp `branch-rate` ở mức method/class của file). Cobertura của Coverlet chỉ có thuộc tính `branch-rate` ở package, giá trị trong file hơi khác (do Coverlet gộp class) nên liệt kê kèm.
-- Script tạo báo cáo: `.report/coverage/branch-coverage.py`.
+- Script tạo báo cáo: `tools/branch_coverage_report.py`.
 - Assembly `osu.Game` bị Coverlet đo kèm (tham chiếu bởi project test) nhưng nằm ngoài phạm vi cấp này.
