@@ -2,6 +2,7 @@
 """Tạo báo cáo branch coverage (markdown) từ coverage.cobertura.xml của Coverlet.
 
 Dùng: branch_coverage_report.py <cobertura.xml> <method|class|project|solution> <tên> [<tên mục tiêu phụ>]
+  Nhiều file cobertura (phân cách bằng dấu phẩy): gộp rồi in tổng theo package + tổng solution.
   method   : <tên> = tên method (ví dụ applyMigrationsForVersion)
   class    : <tên> = tên class (ví dụ EditorBeatmap); gộp cả nested/closure class
   project  : <tên> = tên package/assembly (ví dụ osu.Game.Rulesets.Osu)
@@ -31,8 +32,35 @@ def fmt(name, c, v):
 HEAD = "| Đối tượng | branches-covered | branches-valid | branch-rate | % |\n|---|---|---|---|---|"
 
 
+def merged_packages(paths):
+    """Gộp nhiều file Cobertura (mỗi project test một file): mỗi line lấy số branch phủ lớn nhất giữa các lần chạy."""
+    best = {}
+    for path in paths:
+        for p in ET.parse(path).getroot().findall(".//package"):
+            for cl in p.iter("class"):
+                for m in cl.iter("method"):
+                    for ln in m.iter("line"):
+                        mm = re.search(r"\((\d+)/(\d+)\)", ln.get("condition-coverage", ""))
+                        if ln.get("branch") == "True" and mm:
+                            k = (p.get("name"), cl.get("name"), m.get("name"), m.get("signature"), ln.get("number"))
+                            c, v = best.get(k, (0, 0))
+                            best[k] = (max(c, int(mm[1])), int(mm[2]))
+    pk = {}
+    for k, (c, v) in best.items():
+        a, b = pk.get(k[0], (0, 0))
+        pk[k[0]] = (a + c, b + v)
+    return pk
+
+
 def main():
     path, level, name = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
+    if "," in path:
+        tot = merged_packages(path.split(","))
+        print(HEAD)
+        for n, (c, v) in sorted(tot.items()):
+            print(fmt(n, c, v))
+        print(fmt("**Tổng solution**", sum(c for c, _ in tot.values()), sum(v for _, v in tot.values())))
+        return
     root = ET.parse(path).getroot()
     pk = root.findall(".//package")
     rows = []
