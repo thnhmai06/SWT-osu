@@ -8,19 +8,18 @@ Tổng: 48 | 95/96 | 47 | 0 | 99.0%
 |---|---|---|---|---|---|
 | osu.Game.Database | 48 | 95/96 | 47 | 0 | 99.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 0 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 48 | 95/96 | 47 | 0 | 99.0%
+Loại 48 điều kiện phụ thuộc ngoài (UI: 0, Input: 0, Host/IO: 0, Database/Online: 48, DI: 0, TestInfra: 0). Còn lại: 0 | 0/0 | 0 | 0 | 0.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Database | 48 | 95/96 | 47 | 0 | 99.0% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Database.RealmAccess | 48 | 95/96 | 47 | 0 | 99.0% |
+| osu.Game.Database.RealmAccess _(loại)_ | 48 | 95/96 | 47 | 0 | 99.0% |
 
 ## Method
 

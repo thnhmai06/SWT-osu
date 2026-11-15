@@ -16,11 +16,22 @@
 | [osu.Game](condition-coverage-osu.Game.md) | 48 | 95/96 | 47 | 0 | 99.0% |
 | **Tổng** | 48 | 95/96 | 47 | 0 | 99.0% |
 
-## Solution — sau khi loại bỏ code UI framework
+## Solution — chỉ tính logic thuần (loại code phụ thuộc ngoài)
 
-Loại các điều kiện nằm trong type dẫn xuất từ `osu.Framework.Graphics.Drawable` (Drawable/Container/Screen/Overlay/Blueprint/HUD…, **không** tính type qua `Component` vì đó là logic không hiển thị), vì chúng cần scene graph, game host, GL/audio nên không unit test thuần được. Phần còn lại là code logic. Lưu ý: phần này vẫn còn code không phải UI nhưng khó unit test (skin transformer, truy cập Realm/mạng, cần game host); chúng chưa bị loại nên coverage của phần logic có thể thấp hơn thực tế.
+Logic thuần = điều kiện nằm trong code **không phụ thuộc** vào thứ ngoài code đó (không cần UI, input thật, game host, IO/audio/texture, database/online, hay DI của framework). Bị loại, theo thứ tự ưu tiên:
 
-| Project | Tổng điều kiện | Điều kiện UI (loại) | Điều kiện logic còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic) | Condition coverage (toàn bộ) |
-|---|---|---|---|---|---|---|---|---|
-| [osu.Game](condition-coverage-osu.Game.md) | 48 | 0 | 48 | 95/96 | 47 | 0 | 99.0% | 99.0% |
-| **Tổng** | 48 | 0 | 48 | 95/96 | 47 | 0 | 99.0% | 99.0% |
+| Nhóm loại | Nhận diện (tự động bằng Roslyn) |
+|---|---|
+| TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |
+| UI | type dẫn xuất từ `Drawable` (không qua `Component`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |
+| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|Audio|IO` |
+| Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |
+| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |
+| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]` hoặc dùng symbol có `[Resolved]` |
+
+Việc loại làm theo **member** (không loại cả type nếu chỉ một số member phụ thuộc ngoài). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột "toàn bộ" để đối chiếu.
+
+| Project | Tổng điều kiện | UI | Input | Host/IO | Database/Online | DI | TestInfra | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| [osu.Game](condition-coverage-osu.Game.md) | 48 | 0 | 0 | 0 | 48 | 0 | 0 | 0 | 0/0 | 0 | 0 | 0.0% | 99.0% |
+| **Tổng** | 48 | 0 | 0 | 0 | 48 | 0 | 0 | 0 | 0/0 | 0 | 0 | 0.0% | 99.0% |
