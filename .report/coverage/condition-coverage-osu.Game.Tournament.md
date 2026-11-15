@@ -25,88 +25,87 @@ Tổng: 381 | 47/762 | 22 | 356 | 6.2%
 | osu.Game.Tournament.Screens.TeamIntro | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Tournament.Screens.TeamWin | 6 | 0/12 | 0 | 6 | 0.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 335 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 46 | 47/92 | 22 | 21 | 51.1%
+Loại 350 điều kiện phụ thuộc ngoài (UI: 335, Input: 0, Host/IO: 15, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 31 | 47/62 | 22 | 6 | 75.8%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Tournament | 6 | 9/12 | 3 | 0 | 75.0% |
-| osu.Game.Tournament.IPC | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Tournament.Models | 20 | 38/40 | 19 | 1 | 95.0% |
-| osu.Game.Tournament.Screens.Drawings.Components | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.IPC | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Models | 19 | 38/38 | 19 | 0 | 100.0% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Tournament.JsonPointConverter | 6 | 9/12 | 3 | 0 | 75.0% |
-| osu.Game.Tournament.SaveChangesOverlay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.TournamentGame _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.TournamentGameBase _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Tournament.TournamentSceneManager _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.TournamentSceneManager.ScreenButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tournament.Components.DrawableTeamFlag _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Components.DrawableTeamSeed _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Components.DrawableTeamTitle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Components.DrawableTournamentHeaderText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Components.DrawableTournamentTeam _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Components.SongBar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.Components.SongBar.DiffPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.Components.TournamentBeatmapPanel _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Tournament.Components.TournamentMatchChatDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Tournament.Components.TournamentMatchChatDisplay.MatchMessage _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.Components.TournamentModIcon _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Components.TourneyVideo _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.SaveChangesOverlay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.TournamentGame _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.TournamentGameBase _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Tournament.TournamentSceneManager _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.TournamentSceneManager.ScreenButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.Components.DrawableTeamFlag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Components.DrawableTeamSeed _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Components.DrawableTeamTitle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Components.DrawableTournamentHeaderText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Components.DrawableTournamentTeam _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Components.SongBar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.Components.SongBar.DiffPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.Components.TournamentBeatmapPanel _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Components.TournamentMatchChatDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Components.TournamentMatchChatDisplay.MatchMessage _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.Components.TournamentModIcon _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Components.TourneyVideo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Tournament.IPC.FileBasedIPC | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Tournament.Models.StableInfo | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Models.StableInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Tournament.Models.TournamentBeatmap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Tournament.Models.TournamentMatch | 11 | 22/22 | 11 | 0 | 100.0% |
 | osu.Game.Tournament.Models.TournamentTeam | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Tournament.Models.TournamentTeam.LastYearPlacingConverter | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Tournament.Screens.TournamentMatchScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.DrawingsScreen _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.Group _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.GroupContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer.ScrollingTeam _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.StorageBackedTeamList | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer.VisualiserLine _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.LadderEditorScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.LadderEditorScreen.JoinVisualiser _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.RoundEditorScreen.RoundRow.RoundBeatmapEditor.RoundBeatmapRow _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.SeedingEditorScreen.SeedingResultRow.SeedingBeatmapEditor.SeedingBeatmapRow _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.TeamEditorScreen.TeamRow _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.TeamEditorScreen.TeamRow.PlayerEditor.PlayerRow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.TournamentEditorScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.Components.DeleteRoundDialog _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Editors.Components.DeleteTeamDialog _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Gameplay.GameplayScreen _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Tournament.Screens.Gameplay.Components.MatchHeader _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Tournament.Screens.Gameplay.Components.TeamDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tournament.Screens.Gameplay.Components.TeamScore _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Gameplay.Components.TeamScoreDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.LadderScreen _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.Components.DrawableMatchTeam _(UI)_ | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.Components.DrawableTournamentMatch _(UI)_ | 49 | 0/98 | 0 | 49 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.Components.DrawableTournamentRound _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.Components.LadderEditorSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Ladder.Components.ProgressionPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.MapPool.MapPoolScreen _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Tournament.Screens.Schedule.ScheduleScreen _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Tournament.Screens.Schedule.ScheduleScreen.ScheduleMatch _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tournament.Screens.Schedule.ScheduleScreen.ScheduleMatchDate _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Setup.ActionableInfo _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Setup.ResolutionSelector _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.Setup.SetupScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.Setup.StablePathSelectScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.LeftInfo _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.RightInfo _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.RightInfo.ModRow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.TeamIntro.TeamIntroScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tournament.Screens.TeamWin.TeamWinScreen _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Screens.TournamentMatchScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.DrawingsScreen _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.Group _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.GroupContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.ScrollingTeamContainer.ScrollingTeam _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.StorageBackedTeamList _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.Screens.Drawings.Components.VisualiserContainer.VisualiserLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.LadderEditorScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.LadderEditorScreen.JoinVisualiser _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.RoundEditorScreen.RoundRow.RoundBeatmapEditor.RoundBeatmapRow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.SeedingEditorScreen.SeedingResultRow.SeedingBeatmapEditor.SeedingBeatmapRow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.TeamEditorScreen.TeamRow _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.TeamEditorScreen.TeamRow.PlayerEditor.PlayerRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.TournamentEditorScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.Components.DeleteRoundDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Editors.Components.DeleteTeamDialog _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Gameplay.GameplayScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Tournament.Screens.Gameplay.Components.MatchHeader _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Tournament.Screens.Gameplay.Components.TeamDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.Screens.Gameplay.Components.TeamScore _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Gameplay.Components.TeamScoreDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.LadderScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.Components.DrawableMatchTeam _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.Components.DrawableTournamentMatch _(loại)_ | 49 | 0/98 | 0 | 49 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.Components.DrawableTournamentRound _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.Components.LadderEditorSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Ladder.Components.ProgressionPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.MapPool.MapPoolScreen _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Tournament.Screens.Schedule.ScheduleScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Tournament.Screens.Schedule.ScheduleScreen.ScheduleMatch _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tournament.Screens.Schedule.ScheduleScreen.ScheduleMatchDate _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Setup.ActionableInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Setup.ResolutionSelector _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.Setup.SetupScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.Setup.StablePathSelectScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.LeftInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.RightInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.TeamIntro.SeedingScreen.RightInfo.ModRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.TeamIntro.TeamIntroScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tournament.Screens.TeamWin.TeamWinScreen _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 
 ## Method
 

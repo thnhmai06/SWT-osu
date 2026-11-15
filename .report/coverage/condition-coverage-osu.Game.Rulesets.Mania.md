@@ -33,16 +33,16 @@ Tổng: 714 | 654/1428 | 298 | 358 | 45.8%
 | osu.Game.Rulesets.Mania.UI | 61 | 0/122 | 0 | 61 | 0.0% |
 | osu.Game.Rulesets.Mania.UI.Components | 10 | 0/20 | 0 | 10 | 0.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 302 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 412 | 654/824 | 298 | 56 | 79.4%
+Loại 389 điều kiện phụ thuộc ngoài (UI: 324, Input: 6, Host/IO: 59, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 325 | 579/650 | 267 | 13 | 89.1%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Rulesets.Mania | 52 | 102/104 | 50 | 0 | 98.1% |
+| osu.Game.Rulesets.Mania | 46 | 92/92 | 46 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps | 25 | 50/50 | 25 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps.Patterns | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Beatmaps.Patterns.Legacy | 171 | 269/342 | 115 | 17 | 78.7% |
+| osu.Game.Rulesets.Mania.Beatmaps.Patterns.Legacy | 127 | 208/254 | 90 | 9 | 81.9% |
 | osu.Game.Rulesets.Mania.Configuration | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Difficulty | 12 | 24/24 | 12 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Difficulty.Evaluators | 10 | 19/20 | 9 | 0 | 95.0% |
@@ -51,25 +51,21 @@ Loại 302 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Mania.Edit.Checks | 12 | 21/24 | 10 | 1 | 87.5% |
 | osu.Game.Rulesets.Mania.Judgements | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.MathUtils | 22 | 41/44 | 19 | 0 | 93.2% |
-| osu.Game.Rulesets.Mania.Mods | 13 | 20/26 | 9 | 2 | 76.9% |
-| osu.Game.Rulesets.Mania.Objects | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.Mods | 11 | 18/22 | 8 | 1 | 81.8% |
 | osu.Game.Rulesets.Mania.Replays | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring | 32 | 57/64 | 25 | 0 | 89.1% |
-| osu.Game.Rulesets.Mania.Skinning.Argon | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Rulesets.Mania.UI | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon | 1 | 0/2 | 0 | 1 | 0.0% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Rulesets.Mania.DualStageVariantGenerator | 1 | 1/2 | 0 | 0 | 50.0% |
+| osu.Game.Rulesets.Mania.DualStageVariantGenerator _(loại)_ | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Rulesets.Mania.ManiaFilterCriteria | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.ManiaRuleset | 33 | 66/66 | 33 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.ManiaSettingsSubsection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.SingleStageVariantGenerator | 1 | 1/2 | 0 | 0 | 50.0% |
-| osu.Game.Rulesets.Mania.VariantMappingGenerator | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.ManiaSettingsSubsection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.SingleStageVariantGenerator _(loại)_ | 1 | 1/2 | 0 | 0 | 50.0% |
+| osu.Game.Rulesets.Mania.VariantMappingGenerator _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps.ManiaBeatmap | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps.ManiaBeatmapConverter | 21 | 42/42 | 21 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Beatmaps.StageDefinition | 3 | 6/6 | 3 | 0 | 100.0% |
@@ -87,98 +83,98 @@ Loại 302 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Mania.Difficulty.Evaluators.OverallStrainEvaluator | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Rulesets.Mania.Difficulty.Preprocessing.ManiaDifficultyHitObject | 6 | 10/12 | 4 | 0 | 83.3% |
 | osu.Game.Rulesets.Mania.Difficulty.Skills.Strain | 1 | 1/2 | 0 | 0 | 50.0% |
-| osu.Game.Rulesets.Mania.Edit.DrawableManiaEditorRuleset _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.EditorColumn _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.ManiaBlueprintContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.ManiaHitObjectComposer _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.ManiaSelectionHandler _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.HoldNotePlacementBlueprint _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.HoldNoteSelectionBlueprint _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.ManiaPlacementBlueprint _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.NotePlacementBlueprint _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.NoteSelectionBlueprint _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.Components.EditHoldNoteEndPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Edit.Blueprints.Components.EditNotePiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.DrawableManiaEditorRuleset _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.EditorColumn _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.ManiaBlueprintContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.ManiaHitObjectComposer _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.ManiaSelectionHandler _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.HoldNotePlacementBlueprint _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.HoldNoteSelectionBlueprint _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.ManiaPlacementBlueprint _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.NotePlacementBlueprint _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.NoteSelectionBlueprint _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.Components.EditHoldNoteEndPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Blueprints.Components.EditNotePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Edit.Checks.CheckKeyCount | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mania.Edit.Checks.CheckManiaAbnormalDifficultySettings | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Edit.Checks.CheckManiaConcurrentObjects | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Rulesets.Mania.Edit.Setup.ManiaDifficultySection _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Mania.Edit.Setup.ManiaDifficultySection _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Rulesets.Mania.Judgements.HoldNoteJudgementResult | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.MathUtils.LegacySortHelper | 22 | 41/44 | 19 | 0 | 93.2% |
 | osu.Game.Rulesets.Mania.Mods.ManiaKeyMod | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModDualStages | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModFlashlight.ManiaFlashlight _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModHidden | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModHidden.LegacyPlayfieldCover _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModFlashlight.ManiaFlashlight _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModHidden _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModHidden.LegacyPlayfieldCover _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModHoldOff | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModInvert | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModInvert _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModNoRelease | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Mods.ManiaModNoRelease.NoReleaseDrawableHoldNoteTail _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Mods.ManiaModNoRelease.NoReleaseDrawableHoldNoteTail _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mania.Mods.ManiaModPerfect | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Rulesets.Mania.Objects.HoldNote | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNote _(UI)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteBody _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteHead _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteTail _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableManiaHitObject _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableNote _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.HoldNote _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNote _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteBody _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteHead _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableHoldNoteTail _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableManiaHitObject _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Objects.Drawables.DrawableNote _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Mania.Replays.ManiaAutoGenerator | 9 | 18/18 | 9 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Replays.ManiaReplayFrame | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring.ManiaHitWindows | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring.ManiaScoreMultiplierCalculator | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Rulesets.Mania.Scoring.ManiaScoreProcessor | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Rulesets.Mania.Scoring.ManiaScoreProcessor.JudgementOrderComparer | 10 | 14/20 | 4 | 0 | 70.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonColumnBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHitExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHitTarget _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldBodyPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldNoteHittingLayer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldNoteTailPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonJudgementPiece _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonKeyArea _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonManiaComboCounter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonNotePiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonColumnBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHitTarget _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldBodyPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldNoteHittingLayer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonHoldNoteTailPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonJudgementPiece _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonKeyArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonManiaComboCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Argon.ArgonNotePiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mania.Skinning.Argon.ManiaArgonSkinTransformer | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBarLine _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece.ForegroundPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.DefaultNotePiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Default.ManiaTrianglesSkinTransformer | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.HitTargetInsetContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyBodyPiece _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyColumnBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHitExplosion _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHitTarget _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHoldNoteHeadPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHoldNoteTailPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyKeyArea _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaColumnElement _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaComboCounter _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaJudgementPiece _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyNotePiece _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground.ColumnBackground _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageForeground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaClassicSkinTransformer | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaLegacySkinTransformer | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Column _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.ColumnFlow _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.DefaultHitExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.DefaultManiaJudgementPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.DrawableManiaRuleset _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.ManiaPlayfield _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.ManiaPlayfieldAdjustmentContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea.ColumnInputReceptor _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.OrderedHitPolicy | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.PlayfieldCoveringWrapper _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Stage _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Components.ColumnHitObjectArea _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Components.DefaultColumnBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Components.DefaultHitTarget _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Components.DefaultKeyArea _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mania.UI.Components.HitPositionPaddedContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBarLine _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default.DefaultBodyPiece.ForegroundPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default.DefaultNotePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Default.ManiaTrianglesSkinTransformer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.HitTargetInsetContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyBodyPiece _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyColumnBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHitExplosion _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHitTarget _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHoldNoteHeadPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyHoldNoteTailPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyKeyArea _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaColumnElement _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaComboCounter _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyManiaJudgementPiece _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyNotePiece _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageBackground.ColumnBackground _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.LegacyStageForeground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaClassicSkinTransformer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.Skinning.Legacy.ManiaLegacySkinTransformer _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Column _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.ColumnFlow _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.DefaultHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.DefaultManiaJudgementPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.DrawableManiaRuleset _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.ManiaPlayfield _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.ManiaPlayfieldAdjustmentContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.ManiaTouchInputArea.ColumnInputReceptor _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.OrderedHitPolicy _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.PlayfieldCoveringWrapper _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Stage _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Components.ColumnHitObjectArea _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Components.DefaultColumnBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Components.DefaultHitTarget _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Components.DefaultKeyArea _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mania.UI.Components.HitPositionPaddedContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 
 ## Method
 

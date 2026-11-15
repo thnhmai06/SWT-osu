@@ -143,10 +143,12 @@ public class RewriterTests
     }
 
     [Test]
-    public void ConditionsInDrawableDerivedTypesAreFlaggedAsUiFramework()
+    public void ExternalDependenciesAreExcludedFromPureLogic()
     {
         var b = build("""
                       namespace osu.Framework.Graphics { public class Drawable { } public class Component : Drawable { } }
+                      namespace osu.Framework.Platform { public class Storage { public bool Exists; } }
+                      namespace osu.Framework.Allocation { public class ResolvedAttribute : System.Attribute { } }
                       namespace Game
                       {
                           public class Box : osu.Framework.Graphics.Drawable
@@ -154,12 +156,23 @@ public class RewriterTests
                               public bool A(bool x, bool y) => x && y;
                               public class Inner { public bool B(bool x, bool y) => x || y; }
                           }
-                          public class Logic { public bool C(bool x, bool y) => x && y; }
                           public class NonVisual : osu.Framework.Graphics.Component { public bool D(bool x, bool y) => x && y; }
+                          public class Mixed
+                          {
+                              public bool Pure(bool x, bool y) => x && y;
+                              public bool UsesHost(osu.Framework.Platform.Storage s, bool y) => s.Exists && y;
+                              [osu.Framework.Allocation.Resolved] public bool Injected(bool x, bool y) => x || y;
+                          }
                       }
                       """);
 
-        Assert.That(b.Registry.Conditions.Where(c => c.Type == "Box" || c.Type == "Box.Inner").All(c => c.UiFramework), Is.True);
-        Assert.That(b.Registry.Conditions.Where(c => c.Type is "Logic" or "NonVisual").Any(c => c.UiFramework), Is.False);
+        string reason(string type, string member) => b.Registry.Conditions.First(c => c.Type == type && c.Member.StartsWith(member)).Exclusion;
+
+        Assert.That(reason("Box", "A"), Is.EqualTo("UI"));
+        Assert.That(reason("Box.Inner", "B"), Is.EqualTo("UI"));
+        Assert.That(reason("NonVisual", "D"), Is.Empty, "Component không hiển thị là logic thuần");
+        Assert.That(reason("Mixed", "Pure"), Is.Empty);
+        Assert.That(reason("Mixed", "UsesHost"), Is.EqualTo("Host/IO"));
+        Assert.That(reason("Mixed", "Injected"), Is.EqualTo("DI"));
     }
 }

@@ -40,14 +40,14 @@ Tổng: 1722 | 870/3444 | 373 | 1225 | 25.3%
 | osu.Game.Rulesets.Osu.UI.ReplayAnalysis | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Osu.Utils | 29 | 58/58 | 29 | 0 | 100.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 883 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 839 | 870/1678 | 373 | 342 | 51.8%
+Loại 1147 điều kiện phụ thuộc ngoài (UI: 1082, Input: 43, Host/IO: 11, Database/Online: 0, DI: 11, TestInfra: 0). Còn lại: 575 | 801/1150 | 347 | 121 | 69.7%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Rulesets.Osu | 22 | 22/44 | 2 | 2 | 50.0% |
-| osu.Game.Rulesets.Osu.Beatmaps | 43 | 61/86 | 28 | 10 | 70.9% |
+| osu.Game.Rulesets.Osu | 20 | 22/40 | 2 | 0 | 55.0% |
+| osu.Game.Rulesets.Osu.Beatmaps | 42 | 59/84 | 27 | 10 | 70.2% |
 | osu.Game.Rulesets.Osu.Difficulty | 80 | 126/160 | 50 | 4 | 78.8% |
 | osu.Game.Rulesets.Osu.Difficulty.Evaluators | 31 | 49/62 | 20 | 2 | 79.0% |
 | osu.Game.Rulesets.Osu.Difficulty.Evaluators.Aim | 43 | 79/86 | 36 | 0 | 91.9% |
@@ -55,28 +55,25 @@ Loại 883 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Osu.Difficulty.Preprocessing | 27 | 50/54 | 23 | 0 | 92.6% |
 | osu.Game.Rulesets.Osu.Difficulty.Skills | 38 | 70/76 | 32 | 0 | 92.1% |
 | osu.Game.Rulesets.Osu.Difficulty.Utils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Edit | 54 | 0/108 | 0 | 54 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit | 20 | 0/40 | 0 | 20 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks | 51 | 101/102 | 50 | 0 | 99.0% |
-| osu.Game.Rulesets.Osu.Mods | 167 | 99/334 | 39 | 107 | 29.6% |
-| osu.Game.Rulesets.Osu.Objects | 16 | 29/32 | 13 | 0 | 90.6% |
-| osu.Game.Rulesets.Osu.Objects.Drawables | 48 | 13/96 | 6 | 41 | 13.5% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.Connections | 6 | 10/12 | 4 | 0 | 83.3% |
+| osu.Game.Rulesets.Osu.Mods | 56 | 63/112 | 28 | 21 | 56.3% |
+| osu.Game.Rulesets.Osu.Objects | 14 | 25/28 | 11 | 0 | 89.3% |
+| osu.Game.Rulesets.Osu.Objects.Drawables | 7 | 13/14 | 6 | 0 | 92.9% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.Connections | 2 | 3/4 | 1 | 0 | 75.0% |
 | osu.Game.Rulesets.Osu.Replays | 60 | 14/120 | 5 | 51 | 11.7% |
 | osu.Game.Rulesets.Osu.Scoring | 22 | 41/44 | 20 | 1 | 93.2% |
-| osu.Game.Rulesets.Osu.Skinning.Argon | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Rulesets.Osu.UI | 22 | 2/44 | 0 | 20 | 4.5% |
-| osu.Game.Rulesets.Osu.Utils | 29 | 58/58 | 29 | 0 | 100.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.Utils | 20 | 40/40 | 20 | 0 | 100.0% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.Rulesets.Osu.OsuInputManager _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.OsuInputManager.OsuKeyBindingContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.OsuInputManager _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.OsuInputManager.OsuKeyBindingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.OsuRuleset | 22 | 22/44 | 2 | 2 | 50.0% |
-| osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapConverter | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapConverter _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Beatmaps.OsuBeatmapProcessor | 42 | 59/84 | 27 | 10 | 70.2% |
 | osu.Game.Rulesets.Osu.Difficulty.OsuDifficultyAttributes | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Difficulty.OsuDifficultyCalculator | 7 | 14/14 | 7 | 0 | 100.0% |
@@ -97,78 +94,78 @@ Loại 883 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Osu.Difficulty.Skills.Reading | 9 | 16/18 | 7 | 0 | 88.9% |
 | osu.Game.Rulesets.Osu.Difficulty.Skills.Speed | 8 | 14/16 | 6 | 0 | 87.5% |
 | osu.Game.Rulesets.Osu.Difficulty.Utils.LegacyScoreUtils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Edit.DrawableOsuEditorRuleset.OsuEditorPlayfield _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.FreehandSliderToolboxGroup _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.GenerateToolboxGroup _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuBlueprintContainer _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuDistanceSnapProvider | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuGridToolboxGroup _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuGridToolboxGroup.OutlineTriangle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuHitObjectComposer _(UI)_ | 47 | 0/94 | 0 | 47 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuHitObjectInspector _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSelectionHandler _(UI)_ | 38 | 0/76 | 0 | 38 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.DrawableOsuEditorRuleset.OsuEditorPlayfield _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.FreehandSliderToolboxGroup _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.GenerateToolboxGroup _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuBlueprintContainer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuDistanceSnapProvider _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuGridToolboxGroup _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuGridToolboxGroup.OutlineTriangle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuHitObjectComposer _(loại)_ | 47 | 0/94 | 0 | 47 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuHitObjectInspector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuSelectionHandler _(loại)_ | 38 | 0/76 | 0 | 38 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSelectionRotationHandler | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.OsuSelectionScaleHandler | 42 | 0/84 | 0 | 42 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup.ExpandableSliderVelocityAdjustmentControl _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.PolygonGenerationPopover _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.PreciseMovementPopover _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.PreciseRotationPopover _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.PreciseScalePopover _(UI)_ | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.TransformToolboxGroup _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.GridPlacementBlueprint _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.OsuSelectionBlueprint _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.HitCirclePlacementBlueprint _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.HitCircleSelectionBlueprint _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.Components.HitCircleOverlapMarker _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderCircleOverlay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderEndDragMarker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderPlacementBlueprint _(UI)_ | 62 | 0/124 | 0 | 62 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderSelectionBlueprint _(UI)_ | 73 | 0/146 | 0 | 73 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.PathControlPointPiece _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.PathControlPointVisualiser _(UI)_ | 62 | 0/124 | 0 | 62 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.SliderBodyPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Edit.Blueprints.Spinners.SpinnerPlacementBlueprint _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.OsuSliderVelocityToolboxGroup.ExpandableSliderVelocityAdjustmentControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.PolygonGenerationPopover _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.PreciseMovementPopover _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.PreciseRotationPopover _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.PreciseScalePopover _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.TransformToolboxGroup _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.GridPlacementBlueprint _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.OsuSelectionBlueprint _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.HitCirclePlacementBlueprint _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.HitCircleSelectionBlueprint _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.HitCircles.Components.HitCircleOverlapMarker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderCircleOverlay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderEndDragMarker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderPlacementBlueprint _(loại)_ | 62 | 0/124 | 0 | 62 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.SliderSelectionBlueprint _(loại)_ | 73 | 0/146 | 0 | 73 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.PathControlPointPiece _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.PathControlPointVisualiser _(loại)_ | 62 | 0/124 | 0 | 62 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Sliders.Components.SliderBodyPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Edit.Blueprints.Spinners.SpinnerPlacementBlueprint _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckLowDiffOverlaps | 13 | 25/26 | 12 | 0 | 96.2% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckOffscreenObjects | 8 | 16/16 | 8 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckOsuAbnormalDifficultySettings | 8 | 16/16 | 8 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckTimeDistanceEquality | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckTooShortSliders | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Edit.Checks.CheckTooShortSpinners | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.HUD.AimErrorMeter _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.HUD.AimErrorMeter.HitPositionMarker _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.InputBlockingMod | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModApproachDifferent | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModAutopilot | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModBlinds.DrawableOsuBlinds _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModBloom | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModBubbles | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModBubbles.BubbleDrawable _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.HUD.AimErrorMeter _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.HUD.AimErrorMeter.HitPositionMarker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.InputBlockingMod _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModApproachDifferent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModAutopilot _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModBlinds.DrawableOsuBlinds _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModBloom _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModBubbles _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModBubbles.BubbleDrawable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModClassic | 9 | 2/18 | 1 | 8 | 11.1% |
-| osu.Game.Rulesets.Osu.Mods.OsuModDepth | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModDepth _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModDifficultyAdjust | 9 | 17/18 | 8 | 0 | 94.4% |
-| osu.Game.Rulesets.Osu.Mods.OsuModDifficultyAdjust.ApproachRateSettingsControl.ApproachRateSlider _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModFlashlight | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModFlashlight.OsuFlashlight _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModDifficultyAdjust.ApproachRateSettingsControl.ApproachRateSlider _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModFlashlight _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModFlashlight.OsuFlashlight _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModFreezeFrame | 5 | 8/10 | 4 | 1 | 80.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModHidden | 10 | 6/20 | 3 | 7 | 30.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModMagnetised | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModNoScope | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModObjectScaleTween | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModMagnetised _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModNoScope _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModObjectScaleTween _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModRandom | 20 | 27/40 | 11 | 4 | 67.5% |
-| osu.Game.Rulesets.Osu.Mods.OsuModRelax | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModRelax.LegacyReplayPressHandler | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModRelax.PressHandler | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModRepel | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModRelax _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModRelax.LegacyReplayPressHandler _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModRelax.PressHandler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModRepel _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModSingleTap | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModSpinIn | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Mods.OsuModSpunOut | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModSpinIn _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModSpunOut _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModStrictTracking | 8 | 0/16 | 0 | 8 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModSuddenDeath | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModSynesthesia | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Mods.OsuModTargetPractice | 38 | 35/76 | 10 | 13 | 46.1% |
 | osu.Game.Rulesets.Osu.Mods.OsuModTraceable | 3 | 4/6 | 2 | 1 | 66.7% |
-| osu.Game.Rulesets.Osu.Mods.OsuModWiggle | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Mods.OsuModWiggle _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Osu.Objects.OsuHitObject | 5 | 9/10 | 4 | 0 | 90.0% |
 | osu.Game.Rulesets.Osu.Objects.Slider | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Objects.SliderEndCircle | 1 | 2/2 | 1 | 0 | 100.0% |
@@ -176,25 +173,25 @@ Loại 883 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Osu.Objects.SliderTailCircle | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Rulesets.Osu.Objects.SliderTick | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Objects.Spinner | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableHitCircle _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableHitCircle.HitReceptor _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuHitObject _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuJudgement _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuJudgement.OsuJudgementPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSlider _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderBall _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderHead _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderRepeat _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderTail _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSpinner _(UI)_ | 28 | 0/56 | 0 | 28 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSpinnerTick _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.SkinnableLighting _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.SliderInputManager | 41 | 0/82 | 0 | 41 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableHitCircle _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableHitCircle.HitReceptor _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuHitObject _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuJudgement _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableOsuJudgement.OsuJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSlider _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderBall _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderHead _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderRepeat _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSliderTail _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSpinner _(loại)_ | 28 | 0/56 | 0 | 28 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.DrawableSpinnerTick _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.SkinnableLighting _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.SliderInputManager _(loại)_ | 41 | 0/82 | 0 | 41 | 0.0% |
 | osu.Game.Rulesets.Osu.Objects.Drawables.SpinnerSpinHistory | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Objects.Drawables.SpinnerSpinHistory.CompletedSpin | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.Connections.FollowPointConnection _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.Connections.FollowPointConnection _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Osu.Objects.Drawables.Connections.FollowPointLifetimeEntry | 6 | 10/12 | 4 | 0 | 83.3% |
-| osu.Game.Rulesets.Osu.Objects.Drawables.Connections.FollowPointRenderer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Objects.Drawables.Connections.FollowPointRenderer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Replays.OsuAutoGenerator | 47 | 0/94 | 0 | 47 | 0.0% |
 | osu.Game.Rulesets.Osu.Replays.OsuAutoGeneratorBase | 3 | 5/6 | 2 | 0 | 83.3% |
 | osu.Game.Rulesets.Osu.Replays.OsuReplayFrame | 10 | 9/20 | 3 | 4 | 45.0% |
@@ -203,75 +200,75 @@ Loại 883 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Osu.Scoring.OsuScoreMultiplierCalculatorV1 | 5 | 7/10 | 3 | 1 | 70.0% |
 | osu.Game.Rulesets.Osu.Scoring.OsuScoreMultiplierCalculatorV2 | 8 | 16/16 | 8 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Scoring.OsuScoreProcessor | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Osu.Skinning.FollowCircle _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SliderBody _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SliderBody.DefaultDrawableSliderPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SmokeSegment _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokeDrawNode _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokePoint.LowerBoundComparer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokePoint.UpperBoundComparer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.SnakingSliderBody _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonFollowCircle _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonJudgementPiece _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonMainCirclePiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonMainCirclePiece.FlashPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonReverseArrow _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSliderBall _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSliderBody.DrawableSliderPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinner _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerDisc _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerProgressArc _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerRingArc _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerTicks _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Argon.OsuArgonSkinTransformer | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.CirclePiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DefaultFollowCircle _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DefaultReverseArrow _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSliderBall _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSpinner _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSpinnerDisc _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.DrawableSliderPath _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.ExplodePiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.KiaiFlash _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.MainCirclePiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerRotationTracker _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.FollowCircle _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SliderBody _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SliderBody.DefaultDrawableSliderPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SmokeSegment _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokeDrawNode _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokePoint.LowerBoundComparer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SmokeSegment.SmokePoint.UpperBoundComparer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.SnakingSliderBody _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonFollowCircle _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonJudgementPiece _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonMainCirclePiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonMainCirclePiece.FlashPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonReverseArrow _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSliderBall _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSliderBody.DrawableSliderPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinner _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerDisc _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerProgressArc _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerRingArc _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.ArgonSpinnerTicks _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Argon.OsuArgonSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.CirclePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DefaultFollowCircle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DefaultReverseArrow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSliderBall _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSpinner _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DefaultSpinnerDisc _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.DrawableSliderPath _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.ExplodePiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.KiaiFlash _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.MainCirclePiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerRotationTracker _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Osu.Skinning.Default.SpinnerSpmCalculator | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerTicks _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Default.TrianglesPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursor _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorParticles _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorParticles.LegacyCursorParticleSpewer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorTrail _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyFollowCircle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyMainCirclePiece _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyNewStyleSpinner _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyOldStyleSpinner _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyReverseArrow _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderBall _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderBody.LegacyDrawableSliderPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderHeadHitCircle _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySpinner _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.Skinning.Legacy.OsuLegacySkinTransformer | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Rulesets.Osu.Statistics.AccuracyHeatmap _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.DrawableOsuRuleset _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.LegacyHitPolicy | 9 | 1/18 | 0 | 8 | 5.6% |
-| osu.Game.Rulesets.Osu.UI.OsuPlayfield _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.OsuPlayfieldAdjustmentContainer.ScalingContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.OsuResumeOverlay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.OsuResumeOverlay.OsuClickToResumeCursor _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.OsuTouchInputMapper _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.ReplayAnalysisOverlay _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.SmokeContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.StartTimeOrderedHitPolicy | 13 | 1/26 | 0 | 12 | 3.8% |
-| osu.Game.Rulesets.Osu.UI.Cursor.CursorRippleVisualiser _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TexturedTrailVertex _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TrailDrawNode _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.OsuCursor _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.Cursor.OsuCursorContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.ReplayAnalysis.ClickMarker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Osu.UI.ReplayAnalysis.FrameMarker _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.SpinnerTicks _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Default.TrianglesPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursor _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorParticles _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorParticles.LegacyCursorParticleSpewer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyCursorTrail _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyFollowCircle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyMainCirclePiece _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyNewStyleSpinner _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyOldStyleSpinner _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacyReverseArrow _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderBall _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderBody.LegacyDrawableSliderPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySliderHeadHitCircle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.LegacySpinner _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.Skinning.Legacy.OsuLegacySkinTransformer _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Rulesets.Osu.Statistics.AccuracyHeatmap _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.DrawableOsuRuleset _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.LegacyHitPolicy _(loại)_ | 9 | 1/18 | 0 | 8 | 5.6% |
+| osu.Game.Rulesets.Osu.UI.OsuPlayfield _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.OsuPlayfieldAdjustmentContainer.ScalingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.OsuResumeOverlay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.OsuResumeOverlay.OsuClickToResumeCursor _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.OsuTouchInputMapper _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.ReplayAnalysisOverlay _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.SmokeContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.StartTimeOrderedHitPolicy _(loại)_ | 13 | 1/26 | 0 | 12 | 3.8% |
+| osu.Game.Rulesets.Osu.UI.Cursor.CursorRippleVisualiser _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TexturedTrailVertex _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor.CursorTrail.TrailDrawNode _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor.OsuCursor _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.Cursor.OsuCursorContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.ReplayAnalysis.ClickMarker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Osu.UI.ReplayAnalysis.FrameMarker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Osu.Utils.OsuHitObjectGenerationUtils | 28 | 56/56 | 28 | 0 | 100.0% |
 | osu.Game.Rulesets.Osu.Utils.OsuHitObjectGenerationUtils.WorkingObject | 1 | 2/2 | 1 | 0 | 100.0% |
 

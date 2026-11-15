@@ -25,26 +25,23 @@ Tổng: 472 | 353/944 | 167 | 286 | 37.4%
 | osu.Game.Rulesets.Catch.Skinning.Legacy | 30 | 0/60 | 0 | 30 | 0.0% |
 | osu.Game.Rulesets.Catch.UI | 72 | 0/144 | 0 | 72 | 0.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 244 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 228 | 353/456 | 167 | 42 | 77.4%
+Loại 321 điều kiện phụ thuộc ngoài (UI: 307, Input: 0, Host/IO: 14, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 151 | 286/302 | 136 | 1 | 94.7%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Rulesets.Catch | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Beatmaps | 28 | 51/56 | 24 | 1 | 91.1% |
-| osu.Game.Rulesets.Catch.Difficulty | 23 | 44/46 | 21 | 0 | 95.7% |
+| osu.Game.Rulesets.Catch.Beatmaps | 12 | 23/24 | 11 | 0 | 95.8% |
+| osu.Game.Rulesets.Catch.Difficulty | 20 | 39/40 | 19 | 0 | 97.5% |
 | osu.Game.Rulesets.Catch.Difficulty.Evaluators | 17 | 29/34 | 12 | 0 | 85.3% |
 | osu.Game.Rulesets.Catch.Difficulty.Preprocessing | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Edit | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Edit | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Edit.Checks | 15 | 30/30 | 15 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Mods | 21 | 19/42 | 9 | 11 | 45.2% |
-| osu.Game.Rulesets.Catch.Objects | 34 | 65/68 | 31 | 0 | 95.6% |
-| osu.Game.Rulesets.Catch.Replays | 24 | 46/48 | 22 | 0 | 95.8% |
+| osu.Game.Rulesets.Catch.Mods | 11 | 19/22 | 9 | 1 | 86.4% |
+| osu.Game.Rulesets.Catch.Objects | 27 | 51/54 | 24 | 0 | 94.4% |
+| osu.Game.Rulesets.Catch.Replays | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Scoring | 18 | 33/36 | 15 | 0 | 91.7% |
-| osu.Game.Rulesets.Catch.Skinning.Argon | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy | 22 | 0/44 | 0 | 22 | 0.0% |
 
 ## Type
 
@@ -59,70 +56,70 @@ Loại 244 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Catch.Difficulty.CatchPerformanceCalculator | 12 | 23/24 | 11 | 0 | 95.8% |
 | osu.Game.Rulesets.Catch.Difficulty.Evaluators.MovementEvaluator | 17 | 29/34 | 12 | 0 | 85.3% |
 | osu.Game.Rulesets.Catch.Difficulty.Preprocessing.CatchDifficultyHitObject | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchBlueprintContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchDistanceSnapGrid _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchHitObjectComposer _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchHitObjectInspector _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchHitObjectUtils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Edit.CatchSelectionHandler _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.DrawableCatchEditorRuleset _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchBlueprintContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchDistanceSnapGrid _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchHitObjectComposer _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchHitObjectInspector _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchHitObjectUtils _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Edit.CatchSelectionHandler _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.DrawableCatchEditorRuleset _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Catch.Edit.PositionRange | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.BananaShowerPlacementBlueprint _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.FruitPlacementBlueprint _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.FruitSelectionBlueprint _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.JuiceStreamPlacementBlueprint _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.JuiceStreamSelectionBlueprint _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.EditablePath _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.NestedOutlineContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.PlacementEditablePath _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.ScrollingPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.SelectionEditablePath _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.TimeSpanOutline _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.VertexPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.BananaShowerPlacementBlueprint _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.FruitPlacementBlueprint _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.FruitSelectionBlueprint _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.JuiceStreamPlacementBlueprint _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.JuiceStreamSelectionBlueprint _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.EditablePath _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.NestedOutlineContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.PlacementEditablePath _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.ScrollingPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.SelectionEditablePath _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.TimeSpanOutline _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Edit.Blueprints.Components.VertexPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Catch.Edit.Checks.CheckBananaShowerGap | 9 | 18/18 | 9 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Edit.Checks.CheckCatchAbnormalDifficultySettings | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Mods.CatchModDifficultyAdjust | 10 | 19/20 | 9 | 0 | 95.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModFlashlight.CatchFlashlight _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModHidden | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModMovingFast | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModMovingFast.InvertDashInputHelper _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModNoScope | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Mods.CatchModRelax | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModFlashlight.CatchFlashlight _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModHidden _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModMovingFast _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModMovingFast.InvertDashInputHelper _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModNoScope _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Mods.CatchModRelax _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Catch.Mods.CatchModSynesthesia | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Catch.Objects.Banana.BananaHitSampleInfo | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Rulesets.Catch.Objects.BananaShower | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Objects.BananaShower _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Objects.CatchHitObject | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Objects.JuiceStream | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Rulesets.Catch.Objects.JuiceStream _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Objects.JuiceStreamPath | 20 | 38/40 | 18 | 0 | 95.0% |
 | osu.Game.Rulesets.Catch.Objects.JuiceStreamPathVertex | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Objects.Drawables.DrawableBanana _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Objects.Drawables.DrawableCatchHitObject _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Objects.Drawables.NestedFruitContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Replays.CatchAutoGenerator | 10 | 18/20 | 8 | 0 | 90.0% |
+| osu.Game.Rulesets.Catch.Objects.Drawables.DrawableBanana _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Objects.Drawables.DrawableCatchHitObject _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Catch.Objects.Drawables.NestedFruitContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Replays.CatchAutoGenerator _(loại)_ | 10 | 18/20 | 8 | 0 | 90.0% |
 | osu.Game.Rulesets.Catch.Replays.CatchReplayFrame | 14 | 28/28 | 14 | 0 | 100.0% |
 | osu.Game.Rulesets.Catch.Scoring.CatchHealthProcessor | 5 | 9/10 | 4 | 0 | 90.0% |
 | osu.Game.Rulesets.Catch.Scoring.CatchScoreMultiplierCalculator | 6 | 10/12 | 4 | 0 | 83.3% |
 | osu.Game.Rulesets.Catch.Scoring.CatchScoreProcessor | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonDropletPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonFruitPiece _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonHitExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Argon.CatchArgonSkinTransformer | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default.CatchHitObjectPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default.CatchTrianglesSkinTransformer | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Default.PulpFormation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy.CatchLegacySkinTransformer | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchComboCounter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchHitObjectPiece _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyHitExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatchComboDisplay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatchPlayfieldAdjustmentContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatchTouchInputMapper _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatchTouchInputMapper.InputArea _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.Catcher _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatcherArea _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.CatcherTrailDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.DrawableCatchRuleset _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Catch.UI.HitExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonDropletPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonFruitPiece _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Argon.ArgonHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Argon.CatchArgonSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Default.CatchHitObjectPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Default.CatchTrianglesSkinTransformer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Default.PulpFormation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Legacy.CatchLegacySkinTransformer _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchComboCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyCatchHitObjectPiece _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Catch.Skinning.Legacy.LegacyHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatchComboDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatchPlayfieldAdjustmentContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatchTouchInputMapper _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatchTouchInputMapper.InputArea _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.Catcher _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatcherArea _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.CatcherTrailDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.DrawableCatchRuleset _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Catch.UI.HitExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 
 ## Method
 

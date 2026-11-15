@@ -33,12 +33,25 @@ mã nguồn ──(Roslyn rewriter)──▶ mã có probe ──build + chạy 
 | Toán hạng kiểu `bool?` / `dynamic` | Không phải `System.Boolean` |
 | Toán tử `&&`/`||` do người dùng định nghĩa | Hai vế không phải `bool` |
 
-### Loại bỏ code UI framework
+### Chỉ tính logic thuần (loại code phụ thuộc ngoài)
 
-Mỗi điều kiện được gắn cờ `UiFramework` khi instrument: điều kiện nằm trong (hoặc lồng trong) type dẫn xuất từ `osu.Framework.Graphics.Drawable`
-(Drawable, Container, Screen, Overlay, Blueprint, HUD…), **trừ** type đi qua `Component` (`Component` kế thừa `Drawable` nhưng không hiển thị, ví dụ `EditorBeatmap`). Đây là code cần scene graph, game host, GL/audio nên không viết unit test thuần được.
-Báo cáo có thêm bảng **"sau khi loại bỏ code UI framework"** ở cấp solution (so sánh coverage toàn bộ và coverage phần logic) và ở cấp namespace của từng project;
-bảng type đánh dấu `_(UI)_` cho type bị loại. Giới hạn: code không phải UI nhưng khó unit test (skin transformer, Realm, mạng, cần game host) chưa bị loại. Các bảng còn lại vẫn tính toàn bộ để đối chiếu.
+Mỗi điều kiện được gắn nhãn `Exclusion` khi instrument. Điều kiện bị loại nếu nằm trong code phụ thuộc vào thứ ngoài chính nó, nên không kiểm tra được bằng unit test thuần (không cần game host, input thật, UI…).
+Việc loại làm theo **member**; type tự là UI/Input/Host/TestInfra thì loại cả type. Thứ tự ưu tiên:
+
+| Nhóm | Nhận diện (Roslyn, tự động) |
+|---|---|
+| TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |
+| UI | type dẫn xuất từ `osu.Framework.Graphics.Drawable` mà **không** qua `Component` (`Component` kế thừa `Drawable` nhưng không hiển thị, vd. `EditorBeatmap`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |
+| Host/IO | type kế thừa `osu.Framework.Game`/`Platform.*`; hoặc member dùng `osu.Framework.Platform/IO/Audio/Threading`, texture/shader/render, `osu.Game.Skinning/Audio/IO` |
+| Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |
+| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |
+| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]`, hoặc dùng symbol có `[Resolved]` |
+
+Báo cáo có bảng **"chỉ tính logic thuần"** ở cấp solution (số điều kiện loại theo từng nhóm, coverage phần logic thuần so với toàn bộ) và ở cấp namespace của từng project; bảng type đánh dấu `_(loại)_`.
+Các bảng còn lại vẫn tính toàn bộ để đối chiếu.
+
+Giới hạn: đây là heuristic dựa trên *kiểu được tham chiếu trong member*, không phân tích luồng dữ liệu. Member gọi gián tiếp phụ thuộc ngoài qua method khác, mà bản thân không nhắc tới type ngoài, vẫn được coi là thuần.
+Nếu chính target đo phụ thuộc ngoài (vd. method làm việc trên Realm) thì logic thuần của target là 0 điều kiện; cột "toàn bộ" dùng để đối chiếu.
 
 ## 3. Cách dùng
 

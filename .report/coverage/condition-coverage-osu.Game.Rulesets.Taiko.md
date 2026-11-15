@@ -30,14 +30,14 @@ Tổng: 576 | 459/1152 | 219 | 336 | 39.8%
 | osu.Game.Rulesets.Taiko.Skinning.Legacy | 70 | 0/140 | 0 | 70 | 0.0% |
 | osu.Game.Rulesets.Taiko.UI | 66 | 0/132 | 0 | 66 | 0.0% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 264 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 312 | 459/624 | 219 | 72 | 73.6%
+Loại 333 điều kiện phụ thuộc ngoài (UI: 314, Input: 0, Host/IO: 19, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 243 | 439/486 | 209 | 13 | 90.3%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
 | osu.Game.Rulesets.Taiko | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Beatmaps | 15 | 30/30 | 15 | 0 | 100.0% |
+| osu.Game.Rulesets.Taiko.Beatmaps | 11 | 22/22 | 11 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Difficulty | 59 | 113/118 | 54 | 0 | 95.8% |
 | osu.Game.Rulesets.Taiko.Difficulty.Evaluators | 31 | 56/62 | 25 | 0 | 90.3% |
 | osu.Game.Rulesets.Taiko.Difficulty.Preprocessing | 1 | 2/2 | 1 | 0 | 100.0% |
@@ -48,13 +48,10 @@ Loại 264 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Taiko.Difficulty.Skills | 5 | 9/10 | 4 | 0 | 90.0% |
 | osu.Game.Rulesets.Taiko.Difficulty.Utils | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Rulesets.Taiko.Edit.Checks | 8 | 14/16 | 6 | 0 | 87.5% |
-| osu.Game.Rulesets.Taiko.Mods | 40 | 45/80 | 22 | 17 | 56.3% |
-| osu.Game.Rulesets.Taiko.Objects | 13 | 25/26 | 12 | 0 | 96.2% |
+| osu.Game.Rulesets.Taiko.Mods | 23 | 45/46 | 22 | 0 | 97.8% |
+| osu.Game.Rulesets.Taiko.Objects | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Rulesets.Taiko.Replays | 24 | 22/48 | 11 | 13 | 45.8% |
 | osu.Game.Rulesets.Taiko.Scoring | 12 | 22/24 | 10 | 0 | 91.7% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy | 25 | 0/50 | 0 | 25 | 0.0% |
 
 ## Type
 
@@ -79,86 +76,86 @@ Loại 264 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphi
 | osu.Game.Rulesets.Taiko.Difficulty.Skills.Stamina | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Difficulty.Utils.DeltaTimeNormaliser | 4 | 7/8 | 3 | 0 | 87.5% |
 | osu.Game.Rulesets.Taiko.Difficulty.Utils.IntervalGroupingUtils | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Edit.DrawableTaikoEditorRuleset _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Edit.TaikoBlueprintContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Edit.TaikoHitObjectComposer _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Taiko.Edit.TaikoSelectionHandler _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Edit.Blueprints.HitPlacementBlueprint _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Edit.Blueprints.TaikoSpanPlacementBlueprint _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.DrawableTaikoEditorRuleset _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.TaikoBlueprintContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.TaikoHitObjectComposer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.TaikoSelectionHandler _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.Blueprints.HitPlacementBlueprint _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Edit.Blueprints.TaikoSpanPlacementBlueprint _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Rulesets.Taiko.Edit.Checks.CheckTaikoAbnormalDifficultySettings | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Edit.Checks.CheckTaikoInconsistentSkipBarLine | 4 | 6/8 | 2 | 0 | 75.0% |
-| osu.Game.Rulesets.Taiko.Mods.TaikoModClassic | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Mods.TaikoModClassic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Taiko.Mods.TaikoModDifficultyAdjust | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Rulesets.Taiko.Mods.TaikoModFlashlight.TaikoFlashlight _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Mods.TaikoModHidden | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Mods.TaikoModFlashlight.TaikoFlashlight _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Mods.TaikoModHidden _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Taiko.Mods.TaikoModRandom | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Mods.TaikoModSimplifiedRhythm | 13 | 26/26 | 13 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Mods.TaikoModSingleTap | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Rulesets.Taiko.Mods.TaikoModSingleTap _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Rulesets.Taiko.Mods.TaikoModSwap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Objects.DrumRoll | 3 | 5/6 | 2 | 0 | 83.3% |
 | osu.Game.Rulesets.Taiko.Objects.Hit | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Objects.Swell | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Objects.TaikoStrongableHitObject | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRoll _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRoll.StrongNestedHit _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRollTick _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRollTick.StrongNestedHit _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableHit _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableHit.StrongNestedHit _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableStrongNestedHit _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableSwell _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableSwellTick _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableTaikoHitObject _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRoll _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRoll.StrongNestedHit _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRollTick _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableDrumRollTick.StrongNestedHit _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableHit _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableHit.StrongNestedHit _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableStrongNestedHit _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableSwell _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableSwellTick _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Objects.Drawables.DrawableTaikoHitObject _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Rulesets.Taiko.Replays.TaikoAutoGenerator | 13 | 0/26 | 0 | 13 | 0.0% |
 | osu.Game.Rulesets.Taiko.Replays.TaikoReplayFrame | 11 | 22/22 | 11 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Scoring.TaikoHealthProcessor | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Taiko.Scoring.TaikoScoreMultiplierCalculator | 6 | 10/12 | 4 | 0 | 83.3% |
 | osu.Game.Rulesets.Taiko.Scoring.TaikoScoreProcessor | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonBarLine _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonCirclePiece _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonDrumSampleTriggerSource _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonFlourishTriggerSource _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonHitExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonInputDrum.TaikoHalfDrum _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonTickPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.TaikoArgonSkinTransformer | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.CirclePiece _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultBarLine _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultHitExplosion _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultInputDrum.TaikoHalfDrum _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultJudgementPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultKiaiHitExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultSwell _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.TaikoTrianglesSkinTransformer | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Default.TickPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyCirclePiece _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyDrumRoll _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyHit _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyHitExplosion _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyInputDrum _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyInputDrum.LegacyHalfDrum _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyKiaiGlow _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacySwell _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller.ScrollerSprite _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacyPlayfieldBackgroundRight _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacySkinTransformer | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrawableTaikoMascot _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrawableTaikoRuleset _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrumRollHitContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrumSamplePlayer _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrumSampleTriggerSource _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrumTouchInputArea _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.DrumTouchInputArea.DrumSegment _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.HitExplosion _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation.ClearMascotTextureAnimation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation.ManualMascotTextureAnimation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.TaikoPlayfield _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.Taiko.UI.TaikoPlayfieldAdjustmentContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonBarLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonCirclePiece _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonDrumSampleTriggerSource _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonFlourishTriggerSource _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonHitExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonInputDrum.TaikoHalfDrum _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonJudgementPiece.RingExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.ArgonTickPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.TaikoArgonSkinTransformer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Argon.VolumeAwareHitSampleInfo _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.CirclePiece _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultBarLine _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultHitExplosion _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultInputDrum.TaikoHalfDrum _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultKiaiHitExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.DefaultSwell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.TaikoTrianglesSkinTransformer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Default.TickPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyCirclePiece _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyDrumRoll _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyHit _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyHitExplosion _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyInputDrum _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyInputDrum.LegacyHalfDrum _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyKiaiGlow _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacySwell _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.LegacyTaikoScroller.ScrollerSprite _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacyPlayfieldBackgroundRight _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Taiko.Skinning.Legacy.TaikoLegacySkinTransformer _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrawableTaikoMascot _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrawableTaikoRuleset _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrumRollHitContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrumSamplePlayer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrumSampleTriggerSource _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrumTouchInputArea _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.DrumTouchInputArea.DrumSegment _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.HitExplosion _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation.ClearMascotTextureAnimation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.TaikoMascotAnimation.ManualMascotTextureAnimation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.TaikoPlayfield _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.Taiko.UI.TaikoPlayfieldAdjustmentContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 
 ## Method
 

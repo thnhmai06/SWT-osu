@@ -9,6 +9,7 @@ public static class Report
     private sealed record Hit(string Assembly, ConditionInfo Cond, long T, long F)
     {
         public int Outcomes => (T > 0 ? 1 : 0) + (F > 0 ? 1 : 0);
+        public bool Excluded => Cond.Exclusion.Length > 0;
     }
 
     private readonly record struct Agg(int Conditions, int Outcomes, int Full, int Unreached)
@@ -91,12 +92,23 @@ public static class Report
             sb.AppendLine($"| [{g.Key}](condition-coverage-{g.Key}.md) | {Agg.Of(g).Row()} |");
         sb.AppendLine($"| **Tổng** | {Agg.Of(all).Row()} |");
         sb.AppendLine();
-        sb.AppendLine("## Solution — sau khi loại bỏ code UI framework");
+        sb.AppendLine("## Solution — chỉ tính logic thuần (loại code phụ thuộc ngoài)");
         sb.AppendLine();
-        sb.AppendLine("Loại các điều kiện nằm trong type dẫn xuất từ `osu.Framework.Graphics.Drawable` (Drawable/Container/Screen/Overlay/Blueprint/HUD…, **không** tính type qua `Component` vì đó là logic không hiển thị), vì chúng cần scene graph, game host, GL/audio nên không unit test thuần được. Phần còn lại là code logic. Lưu ý: phần này vẫn còn code không phải UI nhưng khó unit test (skin transformer, truy cập Realm/mạng, cần game host); chúng chưa bị loại nên coverage của phần logic có thể thấp hơn thực tế.");
+        sb.AppendLine("Logic thuần = điều kiện nằm trong code **không phụ thuộc** vào thứ ngoài code đó (không cần UI, input thật, game host, IO/audio/texture, database/online, hay DI của framework). Bị loại, theo thứ tự ưu tiên:");
         sb.AppendLine();
-        sb.AppendLine("| Project | Tổng điều kiện | Điều kiện UI (loại) | Điều kiện logic còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic) | Condition coverage (toàn bộ) |");
-        sb.AppendLine("|---|---|---|---|---|---|---|---|---|");
+        sb.AppendLine("| Nhóm loại | Nhận diện (tự động bằng Roslyn) |");
+        sb.AppendLine("|---|---|");
+        sb.AppendLine("| TestInfra | type trong namespace `osu.Game.Tests` (scaffold test nằm trong osu.Game) |");
+        sb.AppendLine("| UI | type dẫn xuất từ `Drawable` (không qua `Component`); hoặc member tham chiếu type dẫn xuất từ `Drawable` (không qua `Component`) |");
+        sb.AppendLine("| Host/IO | type kế thừa `osu.Framework.Game`/`Platform`; hoặc member dùng `osu.Framework.Platform|IO|Audio|Threading`, texture/shader/render, `osu.Game.Skinning|Audio|IO` |");
+        sb.AppendLine("| Input | type kế thừa/triển khai `osu.Framework.Input.*`; hoặc member dùng `osu.Framework.Input`, `osu.Game.Input` |");
+        sb.AppendLine("| Database/Online | member dùng `Realms`, `osu.Game.Database`, `osu.Game.Online`, `System.Net` |");
+        sb.AppendLine("| DI | member có `[Resolved]`/`[BackgroundDependencyLoader]`/`[Cached]` hoặc dùng symbol có `[Resolved]` |");
+        sb.AppendLine();
+        sb.AppendLine("Việc loại làm theo **member** (không loại cả type nếu chỉ một số member phụ thuộc ngoài). Đây là heuristic dựa trên kiểu được tham chiếu, không phải phân tích luồng dữ liệu: member gọi gián tiếp qua method khác vẫn được coi là thuần nếu bản thân nó không nhắc tới type ngoài. Nếu cả target đo (vd. method dùng Realm) phụ thuộc ngoài thì phần logic thuần của target là 0 điều kiện; xem cột \"toàn bộ\" để đối chiếu.");
+        sb.AppendLine();
+        sb.AppendLine("| Project | Tổng điều kiện | UI | Input | Host/IO | Database/Online | DI | TestInfra | Logic thuần còn lại | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage (logic thuần) | Condition coverage (toàn bộ) |");
+        sb.AppendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
         foreach (var g in all.GroupBy(h => h.Assembly).OrderBy(g => g.Key))
             sb.AppendLine(Compare($"[{g.Key}](condition-coverage-{g.Key}.md)", g));
         sb.AppendLine(Compare("**Tổng**", all));
@@ -109,12 +121,14 @@ public static class Report
         Console.WriteLine($"TOTAL conditions={total.Conditions} outcomes={total.Outcomes}/{2 * total.Conditions} full={total.Full} unreached={total.Unreached} coverage={total.Percent:0.0}%");
     }
 
+    private static readonly string[] reasons = ["UI", "Input", "Host/IO", "Database/Online", "DI", "TestInfra"];
+
     private static string Compare(string name, IEnumerable<Hit> hits)
     {
         var list = hits.ToList();
-        var logic = Agg.Of(list.Where(h => !h.Cond.UiFramework));
-        var ui = list.Count(h => h.Cond.UiFramework);
-        return $"| {name} | {list.Count} | {ui} | {logic.Conditions} | {logic.Outcomes}/{2 * logic.Conditions} | {logic.Full} | {logic.Unreached} | {logic.Percent:0.0}% | {Agg.Of(list).Percent:0.0}% |";
+        var logic = Agg.Of(list.Where(h => !h.Excluded));
+        string byReason = string.Join(" | ", reasons.Select(r => list.Count(h => h.Cond.Exclusion == r)));
+        return $"| {name} | {list.Count} | {byReason} | {logic.Conditions} | {logic.Outcomes}/{2 * logic.Conditions} | {logic.Full} | {logic.Unreached} | {logic.Percent:0.0}% | {Agg.Of(list).Percent:0.0}% |";
     }
 
     private static string esc(string s) => "`" + s.Replace("`", "'") + "`";
@@ -135,11 +149,12 @@ public static class Report
         foreach (var g in hits.GroupBy(h => h.Cond.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
             sb.AppendLine($"| {cell(g.Key)} | {Agg.Of(g).Row()} |");
 
-        var logicHits = hits.Where(h => !h.Cond.UiFramework).ToList();
+        var logicHits = hits.Where(h => !h.Excluded).ToList();
         sb.AppendLine();
-        sb.AppendLine("## Namespace — sau khi loại bỏ code UI framework");
+        sb.AppendLine("## Namespace — chỉ tính logic thuần");
         sb.AppendLine();
-        sb.AppendLine($"Loại {hits.Count - logicHits.Count} điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: {Agg.Of(logicHits).Row()}");
+        string excl = string.Join(", ", reasons.Select(r => $"{r}: {hits.Count(h => h.Cond.Exclusion == r)}"));
+        sb.AppendLine($"Loại {hits.Count - logicHits.Count} điều kiện phụ thuộc ngoài ({excl}). Còn lại: {Agg.Of(logicHits).Row()}");
         sb.AppendLine();
         sb.AppendLine("| Namespace |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
@@ -152,7 +167,7 @@ public static class Report
         sb.AppendLine("| Type |" + header[1..]);
         sb.AppendLine("|---|---|---|---|---|---|");
         foreach (var g in hits.GroupBy(h => (h.Cond.Namespace, h.Cond.Type)).OrderBy(g => g.Key.Namespace, StringComparer.Ordinal).ThenBy(g => g.Key.Type, StringComparer.Ordinal))
-            sb.AppendLine($"| {cell(g.Key.Namespace + "." + g.Key.Type)}{(g.All(h => h.Cond.UiFramework) ? " _(UI)_" : "")} | {Agg.Of(g).Row()} |");
+            sb.AppendLine($"| {cell(g.Key.Namespace + "." + g.Key.Type)}{(g.All(h => h.Excluded) ? " _(loại)_" : "")} | {Agg.Of(g).Row()} |");
 
         sb.AppendLine();
         sb.AppendLine("## Method");

@@ -222,146 +222,101 @@ Tổng: 12721 | 3801/25442 | 1776 | 10696 | 14.9%
 | osu.Game.Users.Drawables | 31 | 0/62 | 0 | 31 | 0.0% |
 | osu.Game.Utils | 125 | 214/250 | 104 | 15 | 85.6% |
 
-## Namespace — sau khi loại bỏ code UI framework
+## Namespace — chỉ tính logic thuần
 
-Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graphics.Drawable`, không qua `Component`). Còn lại: 3922 | 3797/7844 | 1774 | 1899 | 48.4%
+Loại 11136 điều kiện phụ thuộc ngoài (UI: 8947, Input: 144, Host/IO: 668, Database/Online: 1066, DI: 99, TestInfra: 212). Còn lại: 1585 | 2557/3170 | 1190 | 218 | 80.7%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Audio | 24 | 22/48 | 10 | 12 | 45.8% |
-| osu.Game.Audio.Effects | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps | 264 | 121/528 | 52 | 195 | 22.9% |
-| osu.Game.Beatmaps.ControlPoints | 63 | 92/126 | 38 | 9 | 73.0% |
+| osu.Game.Beatmaps | 125 | 98/250 | 41 | 68 | 39.2% |
+| osu.Game.Beatmaps.ControlPoints | 62 | 91/124 | 38 | 9 | 73.4% |
 | osu.Game.Beatmaps.Drawables | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Formats | 208 | 394/416 | 186 | 0 | 94.7% |
+| osu.Game.Beatmaps.Formats | 143 | 270/286 | 127 | 0 | 94.4% |
 | osu.Game.Beatmaps.Legacy | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Beatmaps.Timing | 12 | 13/24 | 3 | 2 | 54.2% |
-| osu.Game.Collections | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Configuration | 25 | 14/50 | 7 | 18 | 28.0% |
-| osu.Game.Database | 405 | 42/810 | 16 | 379 | 5.2% |
-| osu.Game.Extensions | 48 | 87/96 | 42 | 3 | 90.6% |
-| osu.Game.Graphics | 42 | 57/84 | 27 | 12 | 67.9% |
-| osu.Game.Graphics.Backgrounds | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Beatmaps.Timing | 10 | 13/20 | 3 | 0 | 65.0% |
+| osu.Game.Configuration | 7 | 14/14 | 7 | 0 | 100.0% |
+| osu.Game.Extensions | 35 | 68/70 | 33 | 0 | 97.1% |
+| osu.Game.Graphics | 28 | 53/56 | 25 | 0 | 94.6% |
 | osu.Game.Graphics.Carousel | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Graphics.Containers.Markdown | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Graphics.OpenGL.Vertices | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.IO | 38 | 46/76 | 21 | 13 | 60.5% |
-| osu.Game.IO.Archives | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.IO.Legacy | 24 | 48/48 | 24 | 0 | 100.0% |
-| osu.Game.IO.Serialization.Converters | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.IPC | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Input | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Input.Bindings | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Input.Handlers | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterface | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.IO.Legacy | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.IPC | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Localisation | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Models | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online | 73 | 4/146 | 2 | 71 | 2.7% |
-| osu.Game.Online.API | 62 | 42/124 | 19 | 39 | 33.9% |
-| osu.Game.Online.API.Requests | 47 | 74/94 | 37 | 10 | 78.7% |
-| osu.Game.Online.API.Requests.Responses | 39 | 72/78 | 35 | 2 | 92.3% |
-| osu.Game.Online.Chat | 75 | 78/150 | 38 | 35 | 52.0% |
-| osu.Game.Online.Leaderboards | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Online.Matchmaking | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Online.Metadata | 30 | 0/60 | 0 | 30 | 0.0% |
-| osu.Game.Online.Multiplayer | 102 | 44/204 | 22 | 80 | 21.6% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay | 14 | 27/28 | 13 | 0 | 96.4% |
-| osu.Game.Online.Multiplayer.MatchTypes.TeamVersus | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Rooms | 41 | 77/82 | 38 | 2 | 93.9% |
-| osu.Game.Online.Spectator | 59 | 16/118 | 8 | 51 | 13.6% |
+| osu.Game.Models | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Online.Chat | 1 | 1/2 | 0 | 0 | 50.0% |
 | osu.Game.Overlays.Mods | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Overlays.Mods.Input | 15 | 30/30 | 15 | 0 | 100.0% |
-| osu.Game.Overlays.Music | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.SkinEditor | 32 | 0/64 | 0 | 32 | 0.0% |
 | osu.Game.Replays.Legacy | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Rulesets | 44 | 36/88 | 11 | 19 | 40.9% |
-| osu.Game.Rulesets.Configuration | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets | 29 | 34/58 | 11 | 6 | 58.6% |
 | osu.Game.Rulesets.Difficulty | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Difficulty.Skills | 19 | 37/38 | 18 | 0 | 97.4% |
 | osu.Game.Rulesets.Difficulty.Utils | 10 | 20/20 | 10 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit | 36 | 8/72 | 4 | 32 | 11.1% |
-| osu.Game.Rulesets.Edit.Checks | 176 | 284/352 | 134 | 26 | 80.7% |
-| osu.Game.Rulesets.Edit.Checks.Components | 5 | 7/10 | 3 | 1 | 70.0% |
+| osu.Game.Rulesets.Edit | 9 | 8/18 | 4 | 5 | 44.4% |
+| osu.Game.Rulesets.Edit.Checks | 120 | 225/240 | 108 | 3 | 93.8% |
+| osu.Game.Rulesets.Edit.Checks.Components | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Judgements | 2 | 1/4 | 0 | 1 | 25.0% |
-| osu.Game.Rulesets.Mods | 102 | 107/204 | 51 | 46 | 52.5% |
-| osu.Game.Rulesets.Objects | 132 | 241/264 | 111 | 2 | 91.3% |
-| osu.Game.Rulesets.Objects.Legacy | 92 | 164/184 | 76 | 4 | 89.1% |
+| osu.Game.Rulesets.Mods | 86 | 101/172 | 48 | 33 | 58.7% |
+| osu.Game.Rulesets.Objects | 127 | 231/254 | 106 | 2 | 90.9% |
+| osu.Game.Rulesets.Objects.Legacy | 46 | 80/92 | 38 | 4 | 87.0% |
 | osu.Game.Rulesets.Objects.Pooling | 8 | 15/16 | 7 | 0 | 93.8% |
-| osu.Game.Rulesets.Objects.Types | 11 | 10/22 | 4 | 5 | 45.5% |
-| osu.Game.Rulesets.Replays | 26 | 47/52 | 21 | 0 | 90.4% |
-| osu.Game.Rulesets.Scoring | 134 | 249/268 | 121 | 6 | 92.9% |
-| osu.Game.Rulesets.UI | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Rulesets.Objects.Types | 8 | 5/16 | 2 | 5 | 31.3% |
+| osu.Game.Rulesets.Replays | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Rulesets.Scoring | 129 | 245/258 | 119 | 3 | 95.0% |
 | osu.Game.Rulesets.UI.Scrolling.Algorithms | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Scoring | 40 | 15/80 | 6 | 31 | 18.8% |
-| osu.Game.Scoring.Legacy | 45 | 80/90 | 35 | 0 | 88.9% |
+| osu.Game.Scoring | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Scoring.Legacy | 27 | 47/54 | 20 | 0 | 87.0% |
 | osu.Game.Screens | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit | 100 | 127/200 | 56 | 29 | 63.5% |
+| osu.Game.Screens.Edit | 80 | 126/160 | 56 | 10 | 78.8% |
 | osu.Game.Screens.Edit.Components.Menus | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components | 35 | 4/70 | 2 | 33 | 5.7% |
-| osu.Game.Screens.Edit.Submission | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Timing | 7 | 10/14 | 5 | 2 | 71.4% |
-| osu.Game.Screens.OnlinePlay | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 19 | 8/38 | 4 | 15 | 21.1% |
-| osu.Game.Screens.Play | 19 | 8/38 | 4 | 15 | 21.1% |
-| osu.Game.Screens.Play.HUD | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Play.HUD.ClicksPerSecond | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Screens.Ranking | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select | 252 | 423/504 | 199 | 28 | 83.9% |
-| osu.Game.Skinning | 228 | 75/456 | 35 | 188 | 16.4% |
-| osu.Game.Storyboards | 20 | 37/40 | 18 | 1 | 92.5% |
-| osu.Game.Storyboards.Commands | 12 | 10/24 | 5 | 7 | 41.7% |
-| osu.Game.Storyboards.Drawables | 31 | 0/62 | 0 | 31 | 0.0% |
-| osu.Game.Tests | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Tests.Beatmaps | 13 | 2/26 | 1 | 12 | 7.7% |
-| osu.Game.Tests.Visual | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Visual.Metadata | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Tests.Visual.Multiplayer | 45 | 0/90 | 0 | 45 | 0.0% |
-| osu.Game.Tests.Visual.OnlinePlay | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Tests.Visual.Spectator | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Users | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Utils | 125 | 214/250 | 104 | 15 | 85.6% |
+| osu.Game.Screens.Edit.Compose.Components | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Screens.Edit.Timing | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Screens.OnlinePlay | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate | 9 | 8/18 | 4 | 5 | 44.4% |
+| osu.Game.Screens.Play | 5 | 8/10 | 4 | 1 | 80.0% |
+| osu.Game.Screens.Play.HUD | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.JudgementCounter | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Screens.Select | 210 | 394/420 | 185 | 1 | 93.8% |
+| osu.Game.Storyboards | 19 | 37/38 | 18 | 0 | 97.4% |
+| osu.Game.Storyboards.Commands | 11 | 10/22 | 5 | 6 | 45.5% |
+| osu.Game.Users | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Utils | 102 | 192/204 | 93 | 3 | 94.1% |
 
 ## Type
 
 | Type | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
-| osu.Game.OsuGame _(UI)_ | 131 | 0/262 | 0 | 131 | 0.0% |
-| osu.Game.OsuGameBase _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.PerformFromMenuRunner | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Audio.HitSampleInfo | 8 | 15/16 | 7 | 0 | 93.8% |
-| osu.Game.Audio.PreviewTrack | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Audio.PreviewTrackManager | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Audio.PreviewTrackManager.TrackManagerPreviewTrack | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Audio.SampleInfo | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Audio.SamplePlaybackHelper | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Audio.Effects.AudioFilter | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps.APIBeatmapMetadataSource | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.OsuGame _(loại)_ | 131 | 0/262 | 0 | 131 | 0.0% |
+| osu.Game.OsuGameBase _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.PerformFromMenuRunner _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Audio.HitSampleInfo _(loại)_ | 8 | 15/16 | 7 | 0 | 93.8% |
+| osu.Game.Audio.PreviewTrack _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Audio.PreviewTrackManager _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Audio.PreviewTrackManager.TrackManagerPreviewTrack _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Audio.SampleInfo _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
+| osu.Game.Audio.SamplePlaybackHelper _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Audio.Effects.AudioFilter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Beatmaps.APIBeatmapMetadataSource _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.Beatmap | 5 | 8/10 | 3 | 0 | 80.0% |
 | osu.Game.Beatmaps.BeatmapConverter | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapDifficultyCache | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Beatmaps.BeatmapDifficultyCache _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Beatmaps.BeatmapDifficultyCache.DifficultyCacheLookup | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapExtensions | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Beatmaps.BeatmapImporter | 32 | 0/64 | 0 | 32 | 0.0% |
+| osu.Game.Beatmaps.BeatmapImporter _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
 | osu.Game.Beatmaps.BeatmapInfo | 16 | 6/32 | 2 | 12 | 18.8% |
 | osu.Game.Beatmaps.BeatmapInfoExtensions | 10 | 20/20 | 10 | 0 | 100.0% |
-| osu.Game.Beatmaps.BeatmapManager | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Beatmaps.BeatmapManager _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
 | osu.Game.Beatmaps.BeatmapMetadataInfoExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
-| osu.Game.Beatmaps.BeatmapOnlineChangeIngest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.BeatmapPanelBackgroundTextureLoaderStore | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Beatmaps.BeatmapOnlineChangeIngest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.BeatmapPanelBackgroundTextureLoaderStore _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapSetInfo | 8 | 5/16 | 2 | 5 | 31.3% |
-| osu.Game.Beatmaps.BeatmapSetInfoExtensions | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Beatmaps.BeatmapSetInfoExtensions _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Beatmaps.BeatmapSetOnlineStatusExtensions | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Beatmaps.BeatmapUpdater | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.BeatmapUpdater _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.BeatmapUpdaterMetadataLookup | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Beatmaps.DifficultyRecommender | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Beatmaps.FlatWorkingBeatmap | 1 | 0/2 | 0 | 1 | 0.0% |
@@ -381,40 +336,40 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Beatmaps.ControlPoints.EffectControlPoint | 8 | 11/16 | 3 | 0 | 68.8% |
 | osu.Game.Beatmaps.ControlPoints.SampleControlPoint | 9 | 11/18 | 4 | 2 | 61.1% |
 | osu.Game.Beatmaps.ControlPoints.TimingControlPoint | 6 | 8/12 | 2 | 0 | 66.7% |
-| osu.Game.Beatmaps.Drawables.BeatmapBackgroundSprite _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.BeatmapDownloadButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Beatmaps.Drawables.BeatmapSetOnlineStatusPill _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Beatmaps.Drawables.BundledBeatmapDownloader _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.DifficultyIcon _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Beatmaps.Drawables.DifficultyIconTooltip _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.BeatmapBackgroundSprite _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.BeatmapDownloadButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Beatmaps.Drawables.BeatmapSetOnlineStatusPill _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Beatmaps.Drawables.BundledBeatmapDownloader _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.DifficultyIcon _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Beatmaps.Drawables.DifficultyIconTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Beatmaps.Drawables.DifficultyIconTooltipContent | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.DifficultySpectrumDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.DifficultySpectrumDisplay.RulesetDifficultyGroup _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps.Drawables.OnlineBeatmapSetCover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.StarRatingDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Beatmaps.Drawables.UpdateableBeatmapBackgroundSprite _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.UpdateableOnlineBeatmapSetCover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCard _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardContent _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardContentBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardDifficultyList _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardDownloadProgressBar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardExtra _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardExtraInfoRow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardNano _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardNormal _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardThumbnail _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.CollapsibleButtonContainer _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.ExpandedContentScrollContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Buttons.BeatmapCardIconButton _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Buttons.DownloadButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Buttons.FavouriteButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Buttons.GoToBeatmapButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Buttons.PlayButton _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Statistics.BeatmapCardDateStatistic _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Statistics.FavouritesStatistic _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Statistics.HypesStatistic _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Beatmaps.Drawables.Cards.Statistics.NominationsStatistic _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Beatmaps.Drawables.DifficultySpectrumDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.DifficultySpectrumDisplay.RulesetDifficultyGroup _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Beatmaps.Drawables.OnlineBeatmapSetCover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.StarRatingDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Beatmaps.Drawables.UpdateableBeatmapBackgroundSprite _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.UpdateableOnlineBeatmapSetCover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCard _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardContent _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardContentBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardDifficultyList _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardDownloadProgressBar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardExtra _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardExtraInfoRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardNano _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardNormal _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.BeatmapCardThumbnail _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.CollapsibleButtonContainer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.ExpandedContentScrollContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Buttons.BeatmapCardIconButton _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Buttons.DownloadButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Buttons.FavouriteButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Buttons.GoToBeatmapButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Buttons.PlayButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Statistics.BeatmapCardDateStatistic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Statistics.FavouritesStatistic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Statistics.HypesStatistic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Beatmaps.Drawables.Cards.Statistics.NominationsStatistic _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Beatmaps.Formats.Decoder | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Beatmaps.Formats.LegacyBeatmapDecoder | 34 | 67/68 | 33 | 0 | 98.5% |
 | osu.Game.Beatmaps.Formats.LegacyBeatmapEncoder | 72 | 138/144 | 66 | 0 | 95.8% |
@@ -427,51 +382,51 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Beatmaps.Legacy.LegacyControlPointInfo | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Beatmaps.Timing.BreakPeriod | 10 | 10/20 | 2 | 2 | 50.0% |
 | osu.Game.Beatmaps.Timing.TimeSignature | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Collections.CollectionFilterMenuItem | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Collections.CollectionToggleMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Collections.DrawableCollectionList _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Collections.DrawableCollectionList.Flow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Collections.DrawableCollectionListItem _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Collections.DrawableCollectionListItem.DeleteButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Collections.DrawableCollectionListItem.ItemContent _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Collections.DrawableCollectionListItem.ItemTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Collections.ManageCollectionsDialog.NewCollectionEntryItem _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Configuration.MigrateNewAudioDialog _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Configuration.OsuConfigManager | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Configuration.SessionAverageHitErrorTracker | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Collections.CollectionFilterMenuItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Collections.CollectionToggleMenuItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Collections.DrawableCollectionList _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Collections.DrawableCollectionList.Flow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Collections.DrawableCollectionListItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Collections.DrawableCollectionListItem.DeleteButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Collections.DrawableCollectionListItem.ItemContent _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Collections.DrawableCollectionListItem.ItemTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Collections.ManageCollectionsDialog.NewCollectionEntryItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Configuration.MigrateNewAudioDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Configuration.OsuConfigManager _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Configuration.SessionAverageHitErrorTracker _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Configuration.SettingSourceAttribute | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Configuration.SettingSourceExtensions | 6 | 4/12 | 2 | 4 | 33.3% |
-| osu.Game.Database.BackgroundDataStoreProcessor | 56 | 0/112 | 0 | 56 | 0.0% |
-| osu.Game.Database.ExternalEditOperation | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.ImportTask | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.Database.LegacyArchiveExporter | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Database.LegacyBeatmapExporter | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Database.LegacyBeatmapImporter | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.LegacyCollectionImporter | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Database.LegacyExporter | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.LegacyImportManager | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Database.LegacyModelImporter | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.LegacyScoreExporter | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.LegacyScoreImporter | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.Live | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Database.MemoryCachingComponent | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Database.MemoryCachingComponent.MemoryCachingStatistics | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.MissingBeatmapNotification _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Database.ModelDownloader | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Database.ModelManager | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Database.OnlineLookupCache | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Database.RealmAccess | 100 | 0/200 | 0 | 100 | 0.0% |
-| osu.Game.Database.RealmArchiveModelImporter | 43 | 0/86 | 0 | 43 | 0.0% |
-| osu.Game.Database.RealmDetachedBeatmapStore | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Database.RealmExtensions | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Database.RealmFileStore | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Database.RealmLive | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Database.RealmLiveUnmanaged | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Database.RealmObjectExtensions | 17 | 1/34 | 0 | 16 | 2.9% |
-| osu.Game.Database.RealmResetEmptySet | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Database.StandardisedScoreMigrationTools | 33 | 27/66 | 9 | 15 | 40.9% |
+| osu.Game.Database.BackgroundDataStoreProcessor _(loại)_ | 56 | 0/112 | 0 | 56 | 0.0% |
+| osu.Game.Database.ExternalEditOperation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Database.ImportTask _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
+| osu.Game.Database.LegacyArchiveExporter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Database.LegacyBeatmapExporter _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Database.LegacyBeatmapImporter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Database.LegacyCollectionImporter _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Database.LegacyExporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.LegacyImportManager _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
+| osu.Game.Database.LegacyModelImporter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Database.LegacyScoreExporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.LegacyScoreImporter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.Live _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Database.MemoryCachingComponent _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Database.MemoryCachingComponent.MemoryCachingStatistics _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.MissingBeatmapNotification _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Database.ModelDownloader _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Database.ModelManager _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Database.OnlineLookupCache _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Database.RealmAccess _(loại)_ | 100 | 0/200 | 0 | 100 | 0.0% |
+| osu.Game.Database.RealmArchiveModelImporter _(loại)_ | 43 | 0/86 | 0 | 43 | 0.0% |
+| osu.Game.Database.RealmDetachedBeatmapStore _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Database.RealmExtensions _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Database.RealmFileStore _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Database.RealmLive _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Database.RealmLiveUnmanaged _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Database.RealmObjectExtensions _(loại)_ | 17 | 1/34 | 0 | 16 | 2.9% |
+| osu.Game.Database.RealmResetEmptySet _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Database.StandardisedScoreMigrationTools _(loại)_ | 33 | 27/66 | 9 | 15 | 40.9% |
 | osu.Game.Extensions.CollectionExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Extensions.DrawableExtensions | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Extensions.DrawableExtensions _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Extensions.LanguageExtensions | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Extensions.ModelExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
 | osu.Game.Extensions.NumberFormattingExtensions | 3 | 6/6 | 3 | 0 | 100.0% |
@@ -479,691 +434,691 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Extensions.TaskExtensions | 4 | 7/8 | 3 | 0 | 87.5% |
 | osu.Game.Extensions.TimeDisplayExtensions | 15 | 29/30 | 14 | 0 | 96.7% |
 | osu.Game.Extensions.TypeExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Graphics.DrawableDate _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.ErrorTextFlowContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.GhostIcon.GhostIconDrawNode _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.DrawableDate _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.ErrorTextFlowContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.GhostIcon.GhostIconDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.HSPAColour | 20 | 39/40 | 19 | 0 | 97.5% |
-| osu.Game.Graphics.OnlineAssetCachingStore | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.OnlineAssetCachingStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.OsuColour | 5 | 10/10 | 5 | 0 | 100.0% |
 | osu.Game.Graphics.OsuFont | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Graphics.OsuFontExtensions | 2 | 2/4 | 0 | 0 | 50.0% |
-| osu.Game.Graphics.OsuIcon.OsuIconStore | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.ParticleExplosion _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.ParticleSpewer _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.ParticleSpewer.ParticleSpewerDrawNode _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.ScreenshotManager | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.Backgrounds.Background _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Graphics.Backgrounds.BeatmapBackground _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Backgrounds.BeatmapBackgroundWithStoryboard _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Graphics.Backgrounds.SeasonalBackground _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Backgrounds.SeasonalBackgroundLoader | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.Backgrounds.SkinBackground _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Backgrounds.Triangles _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Graphics.Backgrounds.Triangles.TrianglesDrawNode _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Backgrounds.TrianglesV2 _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Graphics.Backgrounds.TrianglesV2.TrianglesDrawNode _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.Carousel.Carousel _(UI)_ | 95 | 0/190 | 0 | 95 | 0.0% |
-| osu.Game.Graphics.Carousel.Carousel.ScrollContainer _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Graphics.Carousel.Carousel.ScrollContainer.ScrollBar _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.OsuIcon.OsuIconStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.ParticleExplosion _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.ParticleSpewer _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.ParticleSpewer.ParticleSpewerDrawNode _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.ScreenshotManager _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.Backgrounds.Background _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Graphics.Backgrounds.BeatmapBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Backgrounds.BeatmapBackgroundWithStoryboard _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Graphics.Backgrounds.SeasonalBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Backgrounds.SeasonalBackgroundLoader _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.Backgrounds.SkinBackground _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Backgrounds.Triangles _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Graphics.Backgrounds.Triangles.TrianglesDrawNode _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Backgrounds.TrianglesV2 _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Graphics.Backgrounds.TrianglesV2.TrianglesDrawNode _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.Carousel.Carousel _(loại)_ | 95 | 0/190 | 0 | 95 | 0.0% |
+| osu.Game.Graphics.Carousel.Carousel.ScrollContainer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Graphics.Carousel.Carousel.ScrollContainer.ScrollBar _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Graphics.Carousel.CarouselItem | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Graphics.Containers.BeatSyncedContainer _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.Containers.ConstrainedIconContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Containers.ExpandingContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.Containers.HoldToConfirmContainer _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.Containers.LinkFlowContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.Containers.LogoTrackingContainer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Graphics.Containers.OsuClickableContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.Containers.OsuFocusedOverlayContainer _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Graphics.Containers.OsuHoverContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.Containers.OsuRearrangeableListContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.Containers.OsuRearrangeableListItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.Containers.OsuRearrangeableListItem.PlaylistItemHandle _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Containers.OsuScrollContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.Containers.OsuScrollContainer.OsuScrollbar _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.Containers.ParallaxContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.Containers.ScalingContainer _(UI)_ | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Graphics.Containers.ScalingContainer.ScalingDrawSizePreservingFillContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Containers.ScalingContainer.SizeableAlwaysInputContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.Containers.SectionsContainer _(UI)_ | 28 | 0/56 | 0 | 28 | 0.0% |
-| osu.Game.Graphics.Containers.SelectionCycleFillFlowContainer _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Graphics.Containers.ShearAligningWrapper _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Containers.UprightAspectMaintainingContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.Containers.UserDimContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Containers.WaveContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Containers.WaveContainer.Wave _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.OsuMarkdownContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.BeatSyncedContainer _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.Containers.ConstrainedIconContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.ExpandingContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.Containers.HoldToConfirmContainer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.Containers.LinkFlowContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.Containers.LogoTrackingContainer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Graphics.Containers.OsuClickableContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.Containers.OsuFocusedOverlayContainer _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Graphics.Containers.OsuHoverContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Containers.OsuRearrangeableListContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.Containers.OsuRearrangeableListItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Containers.OsuRearrangeableListItem.PlaylistItemHandle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.OsuScrollContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Containers.OsuScrollContainer.OsuScrollbar _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.Containers.ParallaxContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.Containers.ScalingContainer _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Graphics.Containers.ScalingContainer.ScalingDrawSizePreservingFillContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.ScalingContainer.SizeableAlwaysInputContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.Containers.SectionsContainer _(loại)_ | 28 | 0/56 | 0 | 28 | 0.0% |
+| osu.Game.Graphics.Containers.SelectionCycleFillFlowContainer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Graphics.Containers.ShearAligningWrapper _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.UprightAspectMaintainingContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Containers.UserDimContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Containers.WaveContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Containers.WaveContainer.Wave _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.OsuMarkdownContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Graphics.Containers.Markdown.OsuMarkdownContainerOptions | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.OsuMarkdownStyledAlert _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.OsuMarkdownStyledAlert.StyledAlertTextFlowContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.OsuMarkdownTableCell _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.OsuMarkdownTextFlowContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteBacklink _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteLink _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteTooltip.FootnoteMarkdownContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Cursor.GlobalCursorDisplay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.Cursor.MenuCursorContainer _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Graphics.Cursor.OsuTooltipContainer.OsuTooltip _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.OsuMarkdownStyledAlert _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.OsuMarkdownStyledAlert.StyledAlertTextFlowContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.OsuMarkdownTableCell _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.OsuMarkdownTextFlowContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteBacklink _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteLink _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Containers.Markdown.Footnotes.OsuMarkdownFootnoteTooltip.FootnoteMarkdownContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Cursor.GlobalCursorDisplay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.Cursor.MenuCursorContainer _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Graphics.Cursor.OsuTooltipContainer.OsuTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Graphics.OpenGL.Vertices.PositionAndColourVertex | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Sprites.LogoAnimation _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode.LogoAnimationVertex _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.Sprites.TruncatingSpriteText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.BackButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.BarGraph _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.BarGraph.BarGraphDrawNode _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.BarGraph.BarsInfo _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.BreadcrumbControl _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.BreadcrumbControl.BreadcrumbTabItem _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.CommaSeparatedScoreCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.DialogButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.DrawableOsuMenuItem _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.UserInterface.DrawableStatefulMenuItem.ToggleTextContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.ExpandableSlider _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.ExpandingBar _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.ExternalLinkButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.FPSCounter _(UI)_ | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Graphics.UserInterface.FPSCounterTooltip _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.FocusedTextBox _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Graphics.UserInterface.HistoryTextBox _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Graphics.UserInterface.Hotkey | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Graphics.UserInterface.HotkeyDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverClickSounds | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverSampleDebounceComponent | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.HoverSounds | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.LineGraph _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.LoadingButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.LoadingLayer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.LoadingSpinner _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Graphics.UserInterface.LoadingSpinner.LoadingSpinnerBeatSyncer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.Nub _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuAnimatedButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuButton _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuCheckbox _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuContextMenu _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuDropdown _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownHeader _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem.Content _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuMenu _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuMenuSamples | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuPasswordTextBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuSliderBar _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTabControl _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTabControl.OsuTabItem _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTabControlCheckbox _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTabDropdown _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTabDropdown.OsuTabDropdownHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTextBox _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTextBox.OsuCaret _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.OsuTextBox.OsuCaret.CaretBeatSyncedContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.PageTabControl.PageTabItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.PercentageCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.RangeSlider.BoundSlider _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterface.RangeSlider.LowerBoundSlider _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.RangeSlider.UpperBoundSlider _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.RollingCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.RoundedSliderBar _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterface.ScoreCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.SearchTextBox _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.SectionHeader _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterface.SegmentedGraph _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentManager _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentedGraphDrawNode _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShearedButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShearedNub _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShearedRangeSlider.BoundSliderBar _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShearedSliderBar _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShearedToggleButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.ShowMoreButton.ChevronIcon _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.StarCounter _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.Sprites.LogoAnimation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.Sprites.LogoAnimation.LogoAnimationDrawNode.LogoAnimationVertex _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.Sprites.TruncatingSpriteText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.BackButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.BarGraph _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.BarGraph.BarGraphDrawNode _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.BarGraph.BarsInfo _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.BreadcrumbControl _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.BreadcrumbControl.BreadcrumbTabItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.CommaSeparatedScoreCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.DialogButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.DrawableOsuMenuItem _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.UserInterface.DrawableStatefulMenuItem.ToggleTextContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.ExpandableSlider _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.ExpandingBar _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.ExternalLinkButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.FPSCounter _(loại)_ | 27 | 0/54 | 0 | 27 | 0.0% |
+| osu.Game.Graphics.UserInterface.FPSCounterTooltip _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.FocusedTextBox _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Graphics.UserInterface.HistoryTextBox _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Graphics.UserInterface.Hotkey _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Graphics.UserInterface.HotkeyDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.HoverClickSounds _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.HoverSampleDebounceComponent _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.HoverSounds _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.LineGraph _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.LoadingButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.LoadingLayer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.LoadingSpinner _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Graphics.UserInterface.LoadingSpinner.LoadingSpinnerBeatSyncer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.Nub _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuAnimatedButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuButton _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuCheckbox _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuContextMenu _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuDropdown _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownHeader _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuDropdown.OsuDropdownMenu.DrawableOsuDropdownMenuItem.Content _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuMenu _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuMenuSamples _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuPasswordTextBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuSliderBar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTabControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTabControl.OsuTabItem _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTabControlCheckbox _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTabDropdown _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTabDropdown.OsuTabDropdownHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTextBox _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTextBox.OsuCaret _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.OsuTextBox.OsuCaret.CaretBeatSyncedContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.PageTabControl.PageTabItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.PercentageCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.RangeSlider.BoundSlider _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterface.RangeSlider.LowerBoundSlider _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.RangeSlider.UpperBoundSlider _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.RollingCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.RoundedSliderBar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterface.ScoreCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.SearchTextBox _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.SectionHeader _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterface.SegmentedGraph _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentManager _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Graphics.UserInterface.SegmentedGraph.SegmentedGraphDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShearedButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShearedNub _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShearedRangeSlider.BoundSliderBar _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShearedSliderBar _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShearedToggleButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.ShowMoreButton.ChevronIcon _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.StarCounter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Graphics.UserInterface.StatefulMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Graphics.UserInterface.ToggleMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.TwoLayerButton _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.TwoLayerButton.BouncingIcon _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterface.PageSelector.PageSelector _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterface.PageSelector.PageSelectorPageButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterface.PageSelector.PageSelectorPrevNextButton _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.ColourDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.ColourPalette _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormButton.Button _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormCheckBox _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormColourPalette _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormControlBackground _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormDropdown.FormDropdownHeader _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormFieldCaption _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormFileSelector _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormFileSelector.FileChooserPopover _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormNumberBox.InnerNumberBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormPasswordTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormPasswordTextBox.InnerPasswordBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormSliderBar _(UI)_ | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormSliderBar.InnerSlider _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FormTextBox _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.LabelledDrawable _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.OsuFileSelector.OsuDirectoryListingFile _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.OsuPopover _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.OsuSwatchColourPicker _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.ReportDialog _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.RoundedButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.ShearedDropdown _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.ShearedDropdown.ShearedDropdownHeader _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.SwitchButton _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FileSelection.HiddenFilesToggleCheckbox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FileSelection.OsuDirectorySelectorBreadcrumbDisplay.OsuBreadcrumbDisplayDirectory _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Graphics.UserInterfaceV2.FileSelection.OsuDirectorySelectorDirectory _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.IO.HardLinkHelper | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.IO.LineBufferedReader | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.IO.MigratableStorage | 21 | 38/42 | 17 | 0 | 90.5% |
-| osu.Game.IO.OsuStorage | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.IO.StableStorage | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.IO.WrappedStorage | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.IO.Archives.ArchiveReader | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.IO.Archives.ZipArchiveReader | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Graphics.UserInterface.TwoLayerButton _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.TwoLayerButton.BouncingIcon _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterface.PageSelector.PageSelector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterface.PageSelector.PageSelectorPageButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterface.PageSelector.PageSelectorPrevNextButton _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.ColourDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.ColourPalette _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormButton.Button _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormCheckBox _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormColourPalette _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormControlBackground _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormDropdown.FormDropdownHeader _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormFieldCaption _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormFileSelector _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormFileSelector.FileChooserPopover _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormNumberBox.InnerNumberBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormPasswordTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormPasswordTextBox.InnerPasswordBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormSliderBar _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormSliderBar.InnerSlider _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FormTextBox _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.LabelledDrawable _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.OsuFileSelector.OsuDirectoryListingFile _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.OsuPopover _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.OsuSwatchColourPicker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.ReportDialog _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.RoundedButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.ShearedDropdown _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.ShearedDropdown.ShearedDropdownHeader _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.SwitchButton _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FileSelection.HiddenFilesToggleCheckbox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FileSelection.OsuDirectorySelectorBreadcrumbDisplay.OsuBreadcrumbDisplayDirectory _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Graphics.UserInterfaceV2.FileSelection.OsuDirectorySelectorDirectory _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.IO.HardLinkHelper _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.IO.LineBufferedReader _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.IO.MigratableStorage _(loại)_ | 21 | 38/42 | 17 | 0 | 90.5% |
+| osu.Game.IO.OsuStorage _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.IO.StableStorage _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.IO.WrappedStorage _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.IO.Archives.ArchiveReader _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.IO.Archives.ZipArchiveReader _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.IO.Legacy.SerializationReader | 13 | 26/26 | 13 | 0 | 100.0% |
-| osu.Game.IO.Legacy.SerializationWriter | 11 | 22/22 | 11 | 0 | 100.0% |
-| osu.Game.IO.Serialization.Converters.TypedListConverter | 7 | 14/14 | 7 | 0 | 100.0% |
-| osu.Game.IPC.ArchiveImportIPCChannel | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.IPC.OsuSchemeLinkIPCChannel | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.IO.Legacy.SerializationWriter _(loại)_ | 11 | 22/22 | 11 | 0 | 100.0% |
+| osu.Game.IO.Serialization.Converters.TypedListConverter _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
+| osu.Game.IPC.ArchiveImportIPCChannel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.IPC.OsuSchemeLinkIPCChannel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.IPC.WebSocketChannel | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.IPC.WebSocketServer | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Input.ConfineMouseTracker | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Input.IdleTracker | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Input.RealmKeyBindingStore | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Input.TouchInputInterceptor | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Input.Bindings.DatabasedKeyBindingContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Input.Bindings.GlobalActionContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Input.Bindings.RealmKeyBinding | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Input.Handlers.ReplayInputHandler.ReplayState | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Input.ConfineMouseTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Input.IdleTracker _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Input.RealmKeyBindingStore _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Input.TouchInputInterceptor _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Input.Bindings.DatabasedKeyBindingContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Input.Bindings.GlobalActionContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Input.Bindings.RealmKeyBinding _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Input.Handlers.ReplayInputHandler.ReplayState _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Localisation.ResourceManagerLocalisationStore | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Models.RealmUser | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.BeatmapDownloadTracker | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Online.FriendPresenceNotifier | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Online.HubClientConnector | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.LocalUserStatisticsProvider | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Online.OnlineStatusNotifier | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Online.OnlineViewContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.PersistentEndpointClientConnector | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Online.PollingComponent _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Online.ScoreDownloadTracker | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Online.SignalRUnionWorkaroundResolver | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.TrustedDomainOnlineStore | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.UserStatisticsWatcher | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Online.API.APIAccess _(UI)_ | 48 | 0/96 | 0 | 48 | 0.0% |
-| osu.Game.Online.API.APIDownloadRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.APIMessagesRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.APIMod | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Online.API.APIMod.ModSettingsEqualityComparer | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.APIRequest | 18 | 17/36 | 7 | 8 | 47.2% |
-| osu.Game.Online.API.DummyAPIAccess | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Online.API.LocalUserState | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Online.API.ModSettingsDictionaryFormatter | 2 | 3/4 | 1 | 0 | 75.0% |
-| osu.Game.Online.API.OAuth | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Online.API.OAuth.OAuthError | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.OAuthToken | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Online.API.Requests.ChatAckRequest | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.CommentPostRequest | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.CommentVoteRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.DownloadBeatmapSetRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetBeatmapRequest | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetBeatmapSetRequest | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetBeatmapsRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetCommentsRequest | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetNewsRequest | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetScoresRequest | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.GetUpdatesRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUserRankingsRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUserScoresRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.GetUsersRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.LookupUsersRequest | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.PatchBeatmapPackageRequest | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.PutBeatmapSetRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.ReplaceBeatmapPackageRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.SearchBeatmapSetsRequest | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.VerifySessionRequest | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmap | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmap.APIRuleset | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIBeatmapSet | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.APIKudosuHistory | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIMenuContent | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Online.API.Requests.Responses.APIMenuImage | 12 | 23/24 | 11 | 0 | 95.8% |
-| osu.Game.Online.API.Requests.Responses.APIUpdateStream | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.API.Requests.Responses.APIUser | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.CommentBundle | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.API.Requests.Responses.SoloScoreInfo | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Chat.Channel | 11 | 22/22 | 11 | 0 | 100.0% |
-| osu.Game.Online.Chat.ChannelManager _(UI)_ | 73 | 0/146 | 0 | 73 | 0.0% |
-| osu.Game.Online.Chat.ClosedChannel | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Online.Chat.DrawableLinkCompiler _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.DrawableLinkCompiler.LinkHoverSounds _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.ExternalLinkOpener | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Chat.Link | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Chat.Message | 7 | 14/14 | 7 | 0 | 100.0% |
+| osu.Game.Online.BeatmapDownloadTracker _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Online.FriendPresenceNotifier _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Online.HubClientConnector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.LocalUserStatisticsProvider _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Online.OnlineStatusNotifier _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Online.OnlineViewContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.PersistentEndpointClientConnector _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Online.PollingComponent _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Online.ScoreDownloadTracker _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Online.SignalRUnionWorkaroundResolver _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.TrustedDomainOnlineStore _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.UserStatisticsWatcher _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Online.API.APIAccess _(loại)_ | 48 | 0/96 | 0 | 48 | 0.0% |
+| osu.Game.Online.API.APIDownloadRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.APIMessagesRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.APIMod _(loại)_ | 9 | 18/18 | 9 | 0 | 100.0% |
+| osu.Game.Online.API.APIMod.ModSettingsEqualityComparer _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.APIRequest _(loại)_ | 18 | 17/36 | 7 | 8 | 47.2% |
+| osu.Game.Online.API.DummyAPIAccess _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Online.API.LocalUserState _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Online.API.ModSettingsDictionaryFormatter _(loại)_ | 2 | 3/4 | 1 | 0 | 75.0% |
+| osu.Game.Online.API.OAuth _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Online.API.OAuth.OAuthError _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.OAuthToken _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Online.API.Requests.ChatAckRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.CommentPostRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.CommentVoteRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.DownloadBeatmapSetRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.GetBeatmapRequest _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.GetBeatmapSetRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.GetBeatmapsRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.GetCommentsRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.GetNewsRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.GetScoresRequest _(loại)_ | 9 | 18/18 | 9 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.GetUpdatesRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.GetUserRankingsRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.GetUserScoresRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.GetUsersRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.LookupUsersRequest _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.PatchBeatmapPackageRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.PutBeatmapSetRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.ReplaceBeatmapPackageRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.SearchBeatmapSetsRequest _(loại)_ | 14 | 28/28 | 14 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.VerifySessionRequest _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.Responses.APIBeatmap _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.Responses.APIBeatmap.APIRuleset _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.Responses.APIBeatmapSet _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.Responses.APIKudosuHistory _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.Responses.APIMenuContent _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
+| osu.Game.Online.API.Requests.Responses.APIMenuImage _(loại)_ | 12 | 23/24 | 11 | 0 | 95.8% |
+| osu.Game.Online.API.Requests.Responses.APIUpdateStream _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.API.Requests.Responses.APIUser _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.Responses.CommentBundle _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.API.Requests.Responses.SoloScoreInfo _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.Chat.Channel _(loại)_ | 11 | 22/22 | 11 | 0 | 100.0% |
+| osu.Game.Online.Chat.ChannelManager _(loại)_ | 73 | 0/146 | 0 | 73 | 0.0% |
+| osu.Game.Online.Chat.ClosedChannel _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Online.Chat.DrawableLinkCompiler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Chat.DrawableLinkCompiler.LinkHoverSounds _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Chat.ExternalLinkOpener _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Online.Chat.Link _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.Chat.Message _(loại)_ | 7 | 14/14 | 7 | 0 | 100.0% |
 | osu.Game.Online.Chat.MessageFormatter | 19 | 36/38 | 17 | 0 | 94.7% |
-| osu.Game.Online.Chat.MessageNotifier | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Online.Chat.NowPlayingCommand | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Online.Chat.StandAloneChatDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Chat.StandAloneChatDisplay.ChatTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.WatchCommand | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Chat.WebSocketChatClient | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Online.Leaderboards.Leaderboard _(UI)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardManager | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScore _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScore.RankLabel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScoreTooltip _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScoreTooltip.ModCell _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Leaderboards.LeaderboardScores | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Online.Leaderboards.UpdateableRank _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Online.Leaderboards.UserTopScoreContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Matchmaking.MatchmakingPool | 7 | 13/14 | 6 | 0 | 92.9% |
-| osu.Game.Online.Metadata.MetadataClient | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Metadata.MetadataClient.UserPresenceWatchToken | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Metadata.OnlineMetadataClient | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerClient | 37 | 0/74 | 0 | 37 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerClientExtensions | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoom | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomExtensions | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomSettings | 11 | 22/22 | 11 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MultiplayerRoomUser | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.OnlineMultiplayerClient | 37 | 0/74 | 0 | 37 | 0.0% |
-| osu.Game.Online.Multiplayer.ServerShutdownNotification _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Multiplayer.StandardMatchRoomState | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoomState | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoundList | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserComparer | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserList | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayCardItem | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayDamageInfo | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayRoomState | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Online.Multiplayer.MatchTypes.TeamVersus.TeamVersusRoomState | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.DummyNotificationsClient | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClient | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClientConnector | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Rooms.BeatmapAvailability | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Rooms.GetRoomsRequest | 3 | 6/6 | 3 | 0 | 100.0% |
-| osu.Game.Online.Rooms.IndexPlaylistScoresRequest | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Rooms.JoinRoomRequest | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Rooms.MultiplayerPlaylistItem | 15 | 29/30 | 14 | 0 | 96.7% |
-| osu.Game.Online.Rooms.MultiplayerScore | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Online.Rooms.PlaylistExtensions | 3 | 4/6 | 2 | 1 | 66.7% |
-| osu.Game.Online.Rooms.PlaylistItem | 8 | 16/16 | 8 | 0 | 100.0% |
-| osu.Game.Online.Rooms.Room | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Online.Rooms.RoomExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Online.Spectator.OnlineSpectatorClient | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorClient | 31 | 0/62 | 0 | 31 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorScoreProcessor | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Online.Spectator.SpectatorState | 6 | 12/12 | 6 | 0 | 100.0% |
-| osu.Game.Online.Spectator.SpectatorUser | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Overlays.AccountCreationOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.AfToggleSection.ToggleSettings _(UI)_ | 40 | 0/80 | 0 | 40 | 0.0% |
-| osu.Game.Overlays.BeatmapListingOverlay _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.BeatmapSetOverlay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSetOverlay.CommentsSection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.ChangelogOverlay _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.ChatOverlay _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.DashboardOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.DialogOverlay _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Overlays.FirstRunSetupOverlay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.FullscreenOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.KudosuTable _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.MarqueeContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.MarqueeContainer.MarqueeFlow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.MedalAnimation _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.MedalOverlay _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Overlays.MusicController _(UI)_ | 66 | 0/132 | 0 | 66 | 0.0% |
-| osu.Game.Overlays.NewsOverlay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.NotificationOverlay _(UI)_ | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Overlays.NotificationOverlayToastTray _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.NowPlayingOverlay _(UI)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Overlays.NowPlayingOverlay.DragContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.OnScreenDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.OnlineOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.OverlayPanelDisplayStyleControl _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.OverlayPanelDisplayStyleControl.PanelDisplayTabItem _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.OverlayRulesetTabItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.OverlayScrollContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.OverlayScrollContainer.ScrollBackButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.OverlaySidebar.SidebarScrollContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.OverlaySortTabControl.TabButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.OverlayStreamItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.OverlayTabControl.OverlayTabItem _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.RankingsOverlay _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.RevertToDefaultButton _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Overlays.SettingsOverlay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.SettingsPanel _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.SettingsSearchTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.SettingsToolboxGroup _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Overlays.TabbableOnlineOverlay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.UserProfileOverlay _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Overlays.UserProfileOverlay.ProfileSectionTabControl.ProfileSectionTabItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.VolumeOverlay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.WikiOverlay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.WizardOverlay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.WizardOverlay.WizardFooterContent _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.AccountCreation.ScreenEntry _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Overlays.AccountCreation.ScreenWarning _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingCardSizeTabControl.TabItem _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingFilterControl _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingSearchControl _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingSearchControl.BeatmapSearchTextBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingSortTabControl _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapListingSortTabControl.BeatmapTabButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchFilterRow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchFilterRow.BeatmapSearchFilter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchGeneralFilterRow.FeaturedArtistsTabItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchGeneralFilterRow.RecommendedDifficultyTabItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchMultipleSelectionFilterRow.MultipleSelectionFilter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchMultipleSelectionFilterRow.MultipleSelectionFilterTabItem _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.BeatmapSearchRulesetFilterRow.RulesetFilter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapListing.FilterTabItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.AdvancedStats _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.AdvancedStats.StatisticRow _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.AuthorInfo _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BasicStats _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BeatmapAvailability _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BeatmapPicker _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BeatmapPicker.DifficultySelectorButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BeatmapRulesetTabItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.BeatmapSetHeaderContent _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Details _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.FailRetryGraph _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.LeaderboardModSelector _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.LeaderboardModSelector.ModButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSection _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionGenre _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionLanguage _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionMapperTags _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionNominators _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionSource _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.MetadataSectionUserTags _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.SuccessRate _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.UserRatings _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Buttons.FavouriteButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Buttons.HeaderDownloadButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Buttons.PlayButton _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Buttons.PreviewButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Scores.ScoreTable _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Scores.ScoreTable.StatisticText _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Scores.ScoreTableRowBackground _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Scores.ScoresContainer _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Overlays.BeatmapSet.Scores.TopScoreStatisticsSection _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogEntry _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogHeader _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogListing _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogMarkdownContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogSingleBuild _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogSingleBuild.NavigationIconButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Changelog.ChangelogUpdateStreamItem _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelScrollContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Chat.ChatLine _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Overlays.Chat.ChatOverlayTopBar _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Chat.ChatOverlayTopBar.DragArea _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Chat.ChatTextBar _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Chat.ChatTextBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Chat.DrawableChannel _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Overlays.Chat.DrawableChatUsername _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelList.ChannelList _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelList.ChannelList.ChannelGroup _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelList.ChannelList.ChannelGroup.ChannelListItemFlow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelList.ChannelListItem _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.Chat.ChannelList.ChannelListItemMentionPill _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Chat.Listing.ChannelListingItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Comments.CommentAuthorLine _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Comments.CommentAuthorLine.ParentUsername _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Comments.CommentEditor _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.Comments.CommentMarkdownContainer.CommentMarkdownTextFlowContainer.CommentMarkdownImage.CommentImageContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Comments.CommentsContainer _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Overlays.Comments.CommentsContainer.NewCommentEditor _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Comments.CommentsHeader.ShowDeletedButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Comments.DeletedCommentsCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Comments.DrawableComment _(UI)_ | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Overlays.Comments.ReplyCommentEditor _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Comments.VotePill _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.Comments.Buttons.ChevronButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Comments.Buttons.CommentRepliesButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline.CurrentlyOnlineDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline.OnlineUserPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList.UserWithRankLookupCache _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Dashboard.Friends.FriendDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.Friends.FriendOnlineStreamControl _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.Friends.FriendsList _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.Friends.FriendsList.FilterableUserPanel _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Dashboard.Friends.UserListToolbar _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Dashboard.Home.DashboardBeatmapPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.UserSearch.UserPanelList _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Dashboard.UserSearch.UserSearchDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Dialog.PopupDialog _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Overlays.Dialog.PopupDialogDangerousButton.DangerousConfirmContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ProgressRoundedButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenBeatmaps _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable.ImportCheckbox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable.StableLocatorLabelledTextBox _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenUIScale.DependencyIsolationContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.FirstRunSetup.ScreenWelcome.LanguageSelectionFlow.LanguageButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Login.LoginForm _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Login.LoginPanel _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Login.SecondFactorAuthForm _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Login.UserDropdown _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.MedalSplash.DrawableMedal _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Mods.AddPresetButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.AddPresetPopover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.BeatmapAttributeTooltip _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.BeatmapAttributesDisplay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Mods.EditPresetPopover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.IncompatibilityDisplayingModPanel _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Mods.IncompatibilityDisplayingTooltip _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Mods.ModButtonTooltip _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.ModColumn _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Overlays.Mods.ModColumn.ToggleAllCheckbox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.ModCustomisationHeader _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.ModCustomisationPanel _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Mods.ModCustomisationPanel.FocusGrabbingContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.ModPanel _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Mods.ModPresetColumn _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.Mods.ModPresetPanel _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.ModPresetRow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.ModPresetTooltip _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Mods.ModSearchContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectColumn _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectFooterContent _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectOverlay _(UI)_ | 51 | 0/102 | 0 | 51 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectOverlay.ColumnDimContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectOverlay.ColumnScrollContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Mods.ModSelectPanel _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Online.Chat.MessageNotifier _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Online.Chat.NowPlayingCommand _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Online.Chat.StandAloneChatDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Online.Chat.StandAloneChatDisplay.ChatTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Chat.WatchCommand _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Chat.WebSocketChatClient _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Online.Leaderboards.Leaderboard _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardManager _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardScore _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardScore.RankLabel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardScoreTooltip _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardScoreTooltip.ModCell _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Leaderboards.LeaderboardScores _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Online.Leaderboards.UpdateableRank _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Online.Leaderboards.UserTopScoreContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Matchmaking.MatchmakingPool _(loại)_ | 7 | 13/14 | 6 | 0 | 92.9% |
+| osu.Game.Online.Metadata.MetadataClient _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Online.Metadata.MetadataClient.UserPresenceWatchToken _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Metadata.OnlineMetadataClient _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Online.Multiplayer.MultiplayerClient _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Online.Multiplayer.MultiplayerClientExtensions _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Online.Multiplayer.MultiplayerRoom _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MultiplayerRoomExtensions _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MultiplayerRoomSettings _(loại)_ | 11 | 22/22 | 11 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MultiplayerRoomUser _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.OnlineMultiplayerClient _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Online.Multiplayer.ServerShutdownNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Multiplayer.StandardMatchRoomState _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoomState _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingRoundList _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserComparer _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.Matchmaking.MatchmakingUserList _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayCardItem _(loại)_ | 4 | 7/8 | 3 | 0 | 87.5% |
+| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayDamageInfo _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.RankedPlay.RankedPlayRoomState _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Online.Multiplayer.MatchTypes.TeamVersus.TeamVersusRoomState _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Notifications.WebSocket.DummyNotificationsClient _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClient _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Online.Notifications.WebSocket.WebSocketNotificationsClientConnector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Rooms.BeatmapAvailability _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.Rooms.GetRoomsRequest _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Online.Rooms.IndexPlaylistScoresRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Rooms.JoinRoomRequest _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Rooms.MultiplayerPlaylistItem _(loại)_ | 15 | 29/30 | 14 | 0 | 96.7% |
+| osu.Game.Online.Rooms.MultiplayerScore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Online.Rooms.PlaylistExtensions _(loại)_ | 3 | 4/6 | 2 | 1 | 66.7% |
+| osu.Game.Online.Rooms.PlaylistItem _(loại)_ | 8 | 16/16 | 8 | 0 | 100.0% |
+| osu.Game.Online.Rooms.Room _(loại)_ | 5 | 10/10 | 5 | 0 | 100.0% |
+| osu.Game.Online.Rooms.RoomExtensions _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Online.Spectator.OnlineSpectatorClient _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Online.Spectator.SpectatorClient _(loại)_ | 31 | 0/62 | 0 | 31 | 0.0% |
+| osu.Game.Online.Spectator.SpectatorScoreProcessor _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Online.Spectator.SpectatorState _(loại)_ | 6 | 12/12 | 6 | 0 | 100.0% |
+| osu.Game.Online.Spectator.SpectatorUser _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Overlays.AccountCreationOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.AfToggleSection.ToggleSettings _(loại)_ | 40 | 0/80 | 0 | 40 | 0.0% |
+| osu.Game.Overlays.BeatmapListingOverlay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.BeatmapSetOverlay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSetOverlay.CommentsSection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.ChangelogOverlay _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Overlays.ChatOverlay _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.DashboardOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.DialogOverlay _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Overlays.FirstRunSetupOverlay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.FullscreenOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.KudosuTable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.MarqueeContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.MarqueeContainer.MarqueeFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.MedalAnimation _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.MedalOverlay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Overlays.MusicController _(loại)_ | 66 | 0/132 | 0 | 66 | 0.0% |
+| osu.Game.Overlays.NewsOverlay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.NotificationOverlay _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Overlays.NotificationOverlayToastTray _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.NowPlayingOverlay _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Overlays.NowPlayingOverlay.DragContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.OnScreenDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.OnlineOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.OverlayPanelDisplayStyleControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.OverlayPanelDisplayStyleControl.PanelDisplayTabItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.OverlayRulesetTabItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.OverlayScrollContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.OverlayScrollContainer.ScrollBackButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.OverlaySidebar.SidebarScrollContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.OverlaySortTabControl.TabButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.OverlayStreamItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.OverlayTabControl.OverlayTabItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.RankingsOverlay _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.RevertToDefaultButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Overlays.SettingsOverlay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.SettingsPanel _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.SettingsSearchTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.SettingsToolboxGroup _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Overlays.TabbableOnlineOverlay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.UserProfileOverlay _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Overlays.UserProfileOverlay.ProfileSectionTabControl.ProfileSectionTabItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.VolumeOverlay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.WikiOverlay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.WizardOverlay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.WizardOverlay.WizardFooterContent _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.AccountCreation.ScreenEntry _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Overlays.AccountCreation.ScreenWarning _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingCardSizeTabControl.TabItem _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingFilterControl _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingSearchControl _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingSearchControl.BeatmapSearchTextBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingSortTabControl _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapListingSortTabControl.BeatmapTabButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchFilterRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchFilterRow.BeatmapSearchFilter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchGeneralFilterRow.FeaturedArtistsTabItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchGeneralFilterRow.RecommendedDifficultyTabItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchMultipleSelectionFilterRow.MultipleSelectionFilter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchMultipleSelectionFilterRow.MultipleSelectionFilterTabItem _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.BeatmapSearchRulesetFilterRow.RulesetFilter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapListing.FilterTabItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.AdvancedStats _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.AdvancedStats.StatisticRow _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.AuthorInfo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BasicStats _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BeatmapAvailability _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BeatmapPicker _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BeatmapPicker.DifficultySelectorButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BeatmapRulesetTabItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.BeatmapSetHeaderContent _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Details _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.FailRetryGraph _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.LeaderboardModSelector _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.LeaderboardModSelector.ModButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSection _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionGenre _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionLanguage _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionMapperTags _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionNominators _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionSource _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.MetadataSectionUserTags _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.SuccessRate _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.UserRatings _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Buttons.FavouriteButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Buttons.HeaderDownloadButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Buttons.PlayButton _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Buttons.PreviewButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Scores.ScoreTable _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Scores.ScoreTable.StatisticText _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Scores.ScoreTableRowBackground _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Scores.ScoresContainer _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Overlays.BeatmapSet.Scores.TopScoreStatisticsSection _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogEntry _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogHeader _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogListing _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogMarkdownContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogSingleBuild _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogSingleBuild.NavigationIconButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Changelog.ChangelogUpdateStreamItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelScrollContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Chat.ChatLine _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Overlays.Chat.ChatOverlayTopBar _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Chat.ChatOverlayTopBar.DragArea _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Chat.ChatTextBar _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Chat.ChatTextBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Chat.DrawableChannel _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Overlays.Chat.DrawableChatUsername _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelList.ChannelList _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelList.ChannelList.ChannelGroup _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelList.ChannelList.ChannelGroup.ChannelListItemFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelList.ChannelListItem _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.Chat.ChannelList.ChannelListItemMentionPill _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Chat.Listing.ChannelListingItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Comments.CommentAuthorLine _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Comments.CommentAuthorLine.ParentUsername _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Comments.CommentEditor _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.Comments.CommentMarkdownContainer.CommentMarkdownTextFlowContainer.CommentMarkdownImage.CommentImageContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Comments.CommentsContainer _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Overlays.Comments.CommentsContainer.NewCommentEditor _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Comments.CommentsHeader.ShowDeletedButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Comments.DeletedCommentsCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Comments.DrawableComment _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Overlays.Comments.ReplyCommentEditor _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Comments.VotePill _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.Comments.Buttons.ChevronButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Comments.Buttons.CommentRepliesButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Dashboard.CurrentlyOnline.CurrentlyOnlineDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Dashboard.CurrentlyOnline.OnlineUserPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Overlays.Dashboard.CurrentlyOnline.RealtimeUserList.UserWithRankLookupCache _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Dashboard.Friends.FriendDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.Friends.FriendOnlineStreamControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.Friends.FriendsList _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.Friends.FriendsList.FilterableUserPanel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Dashboard.Friends.UserListToolbar _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Dashboard.Home.DashboardBeatmapPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.UserSearch.UserPanelList _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Dashboard.UserSearch.UserSearchDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Dialog.PopupDialog _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Overlays.Dialog.PopupDialogDangerousButton.DangerousConfirmContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ProgressRoundedButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenBeatmaps _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable.ImportCheckbox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenImportFromStable.StableLocatorLabelledTextBox _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenUIScale.DependencyIsolationContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.FirstRunSetup.ScreenWelcome.LanguageSelectionFlow.LanguageButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Login.LoginForm _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Login.LoginPanel _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Login.SecondFactorAuthForm _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Login.UserDropdown _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.MedalSplash.DrawableMedal _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Mods.AddPresetButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.AddPresetPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.BeatmapAttributeTooltip _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.BeatmapAttributesDisplay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Mods.EditPresetPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.IncompatibilityDisplayingModPanel _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Mods.IncompatibilityDisplayingTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Mods.ModButtonTooltip _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.ModColumn _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Overlays.Mods.ModColumn.ToggleAllCheckbox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.ModCustomisationHeader _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.ModCustomisationPanel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Mods.ModCustomisationPanel.FocusGrabbingContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.ModPanel _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Mods.ModPresetColumn _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.Mods.ModPresetPanel _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.ModPresetRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.ModPresetTooltip _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Mods.ModSearchContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectColumn _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectFooterContent _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectOverlay _(loại)_ | 51 | 0/102 | 0 | 51 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectOverlay.ColumnDimContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectOverlay.ColumnScrollContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Mods.ModSelectPanel _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
 | osu.Game.Overlays.Mods.ModState | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Overlays.Mods.RankingInformationDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Mods.SelectAllModsButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Mods.ShearedOverlayContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Mods.UserModSelectOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Mods.VerticalAttributeDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Mods.Input.ClassicModHotkeyHandler | 13 | 26/26 | 13 | 0 | 100.0% |
-| osu.Game.Overlays.Mods.Input.SequentialModHotkeyHandler | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Overlays.Music.MusicKeyBindingHandler | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Music.PlaylistItem _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Music.PlaylistOverlay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.News.NewsCard _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.News.NewsHeader _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.News.NewsPostBackground _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.News.Displays.ArticleListing _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.MonthSection _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.MonthSection.DropdownHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.MonthSection.PostsContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.NewsSidebar _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.YearsPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.News.Sidebar.YearsPanel.YearButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Notifications.Notification _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.Notifications.Notification.DragContainer _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.Notifications.Notification.NotificationLight _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Notifications.NotificationSection _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Notifications.ProgressNotification _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Notifications.ProgressNotification.ProgressBar _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Notifications.SimpleNotification _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.OSD.TrackedSettingToast _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.OSD.TrackedSettingToast.OptionLight _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.ProfileProcessingNotice _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.UserGraph _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Profile.UserGraph.UserGraphTooltip _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.BadgeHeaderContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.BannerHeaderContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.BottomHeaderContainer _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Overlays.Profile.Header.TopHeaderContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.DailyChallengeStatsDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.DailyChallengeStatsTooltip _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.DrawableBadge _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ExtendedDetails _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.FollowersButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.GlobalRankDisplay _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.GroupBadge _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.GroupBadgeFlow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.LevelBadge _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.MainDetails _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.MatchmakingStatsDisplay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.MatchmakingStatsTooltip _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.MessageUserButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.PreviousUsernamesDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ProfilePopoverAction _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ProfileRulesetSelector _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ProfileRulesetTabItem _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ProfileValueDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.RankGraph _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.SupporterIcon _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.ToggleCoverButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.TotalPlayTime _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.UserActionsButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Header.Components.UserActionsButton.UserActionPopover _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.PaginatedProfileSubsection _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.ProfileItemContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.ProfileSubsection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.ProfileSubsectionHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Beatmaps.PaginatedBeatmapContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Historical.ChartProfileSubsection _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Historical.ProfileLineChart _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Ranks.DrawableProfileScore _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Ranks.DrawableProfileWeightedScore _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Profile.Sections.Ranks.PaginatedScoreContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Rankings.CountryFilter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.CountryPill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.RankingsOverlayHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.SpotlightsLayout _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.Tables.CountriesTable.CountryName _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.Tables.RankingsTable.HeaderText _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Rankings.Tables.UserBasedTable _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.OutlinedTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.RulesetSettingsSubsection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsButtonV2 _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsFooter.BuildDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsItem _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsItemV2 _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsNote _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsNumberBox.NumberControl _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsRevertToDefaultButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsSection _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsSidebar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsSidebar.BackButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsSubsection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SettingsTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SidebarButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.SidebarIconButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.DebugSection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.GeneralSection _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.InputSection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.InputSubsection _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.InputSubsection.ToggleableHeader _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.OnlineSection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.SkinSection _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.SkinSection.DeleteSkinButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.SkinSection.ExportSkinButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.SkinSection.RenameSkinButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Audio.AudioDevicesSettings _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Audio.AudioDevicesSettings.AudioDeviceDropdown _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Audio.AudioOffsetAdjustControl _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.DebugSettings.BatchImportSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.DebugSettings.MemorySettings _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Gameplay.AudioSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Gameplay.InputSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.General.UpdateSettings _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings _(UI)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings.DisplayListComparer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings.ResolutionDropdown _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.RendererSettings _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.RendererSettings.RendererDropdown _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Graphics.VideoSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.KeyBindingConflictPopover _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.KeyBindingConflictPopover.ConflictingKeyBindingPreview _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.KeyBindingRow _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.KeyBindingRow.KeyButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.KeyBindingsSubsection _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.MouseSettings _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.RotationPresetButtons _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.RotationPresetButtons.RotationButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.TabletAreaSelection _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Input.TabletSettings _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.CollectionsSettings _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.DirectorySelectScreen _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.GeneralSettings _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.MigrationRunScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.MigrationSelectScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.ModPresetSettings _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.Maintenance.StableDirectorySelectScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.UserInterface.GeneralSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Settings.Sections.UserInterface.MainMenuSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.SkinEditor.AnchorOriginVisualiser _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.SkinEditor.ExternalEditOverlay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinBlueprint _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinBlueprintContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinComponentToolbox _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinComponentToolbox.DependencyBorrowingContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinComponentToolbox.ToolboxComponentButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditor _(UI)_ | 32 | 0/64 | 0 | 32 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditorChangeHandler | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditorOverlay _(UI)_ | 28 | 0/56 | 0 | 28 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditorOverlay.EndlessPlayer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinEditorSceneLibrary _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinSelectionHandler _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinSelectionRotationHandler | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.SkinEditor.SkinSelectionScaleHandler | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Overlays.Toolbar.AnalogClockDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Toolbar.ClockDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Toolbar.DigitalClockDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Overlays.Toolbar.Toolbar _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Toolbar.Toolbar.ToolbarBackground _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarClock _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarMusicButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarNotificationButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarNotificationButton.CountCircle _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarOverlayToggleButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarRulesetSelector _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarRulesetTabButton.RulesetButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Toolbar.ToolbarUserButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Toolbar.TransientUserStatisticsUpdateDisplay _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Overlays.Toolbar.TransientUserStatisticsUpdateDisplay.Statistic _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Volume.GlobalScrollAdjustsVolume _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Volume.MasterVolumeMeter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Volume.MuteButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Volume.VolumeMeter _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiHeader _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiHeader.ShowOnGitHubButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiMainPage _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiPanelContainer.WikiPanelHeading _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiSidebar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiTableOfContents _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Wiki.WikiTableOfContents.TableOfContentsEntry _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Wiki.Markdown.WikiMarkdownContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Overlays.Wiki.Markdown.WikiMarkdownImageBlock.BlockMarkdownImage.BlockImageContainer.ImageSprite _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Overlays.Wiki.Markdown.WikiNoticeContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Mods.RankingInformationDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Mods.SelectAllModsButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Mods.ShearedOverlayContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Mods.UserModSelectOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Mods.VerticalAttributeDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Mods.Input.ClassicModHotkeyHandler _(loại)_ | 13 | 26/26 | 13 | 0 | 100.0% |
+| osu.Game.Overlays.Mods.Input.SequentialModHotkeyHandler _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Overlays.Music.MusicKeyBindingHandler _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Music.PlaylistItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Music.PlaylistOverlay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.News.NewsCard _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.News.NewsHeader _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.News.NewsPostBackground _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.News.Displays.ArticleListing _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.MonthSection _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.MonthSection.DropdownHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.MonthSection.PostsContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.NewsSidebar _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.YearsPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.News.Sidebar.YearsPanel.YearButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Notifications.Notification _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.Notifications.Notification.DragContainer _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.Notifications.Notification.NotificationLight _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Notifications.NotificationSection _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Notifications.ProgressNotification _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Notifications.ProgressNotification.ProgressBar _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Notifications.SimpleNotification _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.OSD.TrackedSettingToast _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Overlays.OSD.TrackedSettingToast.OptionLight _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.ProfileProcessingNotice _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.UserGraph _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Profile.UserGraph.UserGraphTooltip _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.BadgeHeaderContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.BannerHeaderContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.BottomHeaderContainer _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Overlays.Profile.Header.TopHeaderContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.DailyChallengeStatsDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.DailyChallengeStatsTooltip _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.DrawableBadge _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ExtendedDetails _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.FollowersButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.GlobalRankDisplay _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.GroupBadge _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.GroupBadgeFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.LevelBadge _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.MainDetails _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.MatchmakingStatsDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.MatchmakingStatsTooltip _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.MessageUserButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.PreviousUsernamesDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ProfilePopoverAction _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ProfileRulesetSelector _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ProfileRulesetTabItem _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ProfileValueDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.RankGraph _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.SupporterIcon _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.ToggleCoverButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.TotalPlayTime _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.UserActionsButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Header.Components.UserActionsButton.UserActionPopover _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.PaginatedProfileSubsection _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.ProfileItemContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.ProfileSubsection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.ProfileSubsectionHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Beatmaps.PaginatedBeatmapContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Historical.ChartProfileSubsection _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Historical.ProfileLineChart _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Ranks.DrawableProfileScore _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Ranks.DrawableProfileWeightedScore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Profile.Sections.Ranks.PaginatedScoreContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Rankings.CountryFilter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.CountryPill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.RankingsOverlayHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.SpotlightsLayout _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.Tables.CountriesTable.CountryName _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.Tables.RankingsTable.HeaderText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Rankings.Tables.UserBasedTable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.OutlinedTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.RulesetSettingsSubsection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsButtonV2 _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsFooter.BuildDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsItem _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsItemV2 _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsNote _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsNumberBox.NumberControl _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsRevertToDefaultButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsSection _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsSidebar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsSidebar.BackButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsSubsection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SettingsTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SidebarButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.SidebarIconButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.DebugSection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.GeneralSection _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.InputSection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.InputSubsection _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.InputSubsection.ToggleableHeader _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.OnlineSection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.SkinSection _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.SkinSection.DeleteSkinButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.SkinSection.ExportSkinButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.SkinSection.RenameSkinButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Audio.AudioDevicesSettings _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Audio.AudioDevicesSettings.AudioDeviceDropdown _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Audio.AudioOffsetAdjustControl _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.DebugSettings.BatchImportSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.DebugSettings.MemorySettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Gameplay.AudioSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Gameplay.InputSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.General.UpdateSettings _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings.DisplayListComparer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.LayoutSettings.ResolutionDropdown _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.RendererSettings _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.RendererSettings.RendererDropdown _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Graphics.VideoSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.KeyBindingConflictPopover _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.KeyBindingConflictPopover.ConflictingKeyBindingPreview _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.KeyBindingRow _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.KeyBindingRow.KeyButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.KeyBindingsSubsection _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.MouseSettings _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.RotationPresetButtons _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.RotationPresetButtons.RotationButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.TabletAreaSelection _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Input.TabletSettings _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.CollectionsSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.DirectorySelectScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.GeneralSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.MigrationRunScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.MigrationSelectScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.ModPresetSettings _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.Maintenance.StableDirectorySelectScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.UserInterface.GeneralSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Settings.Sections.UserInterface.MainMenuSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.SkinEditor.AnchorOriginVisualiser _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.SkinEditor.ExternalEditOverlay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinBlueprint _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinBlueprintContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinComponentToolbox _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinComponentToolbox.DependencyBorrowingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinComponentToolbox.ToolboxComponentButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinEditor _(loại)_ | 32 | 0/64 | 0 | 32 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinEditorChangeHandler _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinEditorOverlay _(loại)_ | 28 | 0/56 | 0 | 28 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinEditorOverlay.EndlessPlayer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinEditorSceneLibrary _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinSelectionHandler _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinSelectionRotationHandler _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.SkinEditor.SkinSelectionScaleHandler _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Overlays.Toolbar.AnalogClockDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Toolbar.ClockDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Toolbar.DigitalClockDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Overlays.Toolbar.Toolbar _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Toolbar.Toolbar.ToolbarBackground _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarClock _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarMusicButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarNotificationButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarNotificationButton.CountCircle _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarOverlayToggleButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarRulesetSelector _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarRulesetTabButton.RulesetButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Toolbar.ToolbarUserButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Toolbar.TransientUserStatisticsUpdateDisplay _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Overlays.Toolbar.TransientUserStatisticsUpdateDisplay.Statistic _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Volume.GlobalScrollAdjustsVolume _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Volume.MasterVolumeMeter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Volume.MuteButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Volume.VolumeMeter _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiHeader _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiHeader.ShowOnGitHubButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiMainPage _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiPanelContainer.WikiPanelHeading _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiSidebar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiTableOfContents _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Wiki.WikiTableOfContents.TableOfContentsEntry _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Wiki.Markdown.WikiMarkdownContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Overlays.Wiki.Markdown.WikiMarkdownImageBlock.BlockMarkdownImage.BlockImageContainer.ImageSprite _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Overlays.Wiki.Markdown.WikiNoticeContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Replays.Legacy.LegacyReplayFrame | 9 | 18/18 | 9 | 0 | 100.0% |
 | osu.Game.Rulesets.RealmRulesetStore | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Ruleset | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.RulesetConfigCache | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.RulesetConfigCache _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.RulesetInfo | 12 | 12/24 | 3 | 3 | 50.0% |
-| osu.Game.Rulesets.RulesetSelector _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Rulesets.RulesetSelector _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.RulesetStore | 13 | 16/26 | 4 | 1 | 61.5% |
-| osu.Game.Rulesets.Configuration.RulesetConfigManager | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Configuration.RulesetConfigManager _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Difficulty.DifficultyCalculator | 11 | 20/22 | 9 | 0 | 90.9% |
 | osu.Game.Rulesets.Difficulty.Preprocessing.DifficultyHitObject | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Difficulty.Skills.HarmonicSkill | 4 | 8/8 | 4 | 0 | 100.0% |
@@ -1171,34 +1126,34 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Rulesets.Difficulty.Skills.VariableLengthStrainSkill | 11 | 21/22 | 10 | 0 | 95.5% |
 | osu.Game.Rulesets.Difficulty.Utils.DiffUtils | 10 | 20/20 | 10 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.BeatmapVerifierContext | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.Edit.ComposerDistanceSnapProvider | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Rulesets.Edit.ComposerDistanceSnapProvider.DistanceSpacingToast _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Edit.DrawableEditorRulesetWrapper _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Edit.ComposerDistanceSnapProvider _(loại)_ | 27 | 0/54 | 0 | 27 | 0.0% |
+| osu.Game.Rulesets.Edit.ComposerDistanceSnapProvider.DistanceSpacingToast _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Edit.DrawableEditorRulesetWrapper _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Rulesets.Edit.EditorTimestampParser | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.ExpandableButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Edit.ExpandableSpriteText _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Edit.ExpandingToolboxContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Edit.ExpandingToolboxContainer.OffsetMaintainingScrollContainer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Edit.HitObjectComposer _(UI)_ | 81 | 0/162 | 0 | 81 | 0.0% |
-| osu.Game.Rulesets.Edit.HitObjectCompositionToolButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Edit.HitObjectPlacementBlueprint _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Edit.HitObjectSelectionBlueprint _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Edit.PlacementBlueprint _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Rulesets.Edit.ScrollingHitObjectComposer _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Rulesets.Edit.SelectionBlueprint _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Edit.ExpandableButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Edit.ExpandableSpriteText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Edit.ExpandingToolboxContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Edit.ExpandingToolboxContainer.OffsetMaintainingScrollContainer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Edit.HitObjectComposer _(loại)_ | 81 | 0/162 | 0 | 81 | 0.0% |
+| osu.Game.Rulesets.Edit.HitObjectCompositionToolButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Edit.HitObjectPlacementBlueprint _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Rulesets.Edit.HitObjectSelectionBlueprint _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Edit.PlacementBlueprint _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Rulesets.Edit.ScrollingHitObjectComposer _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Rulesets.Edit.SelectionBlueprint _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckAbnormalDifficultySettings | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckAudioInVideo | 4 | 7/8 | 3 | 0 | 87.5% |
-| osu.Game.Rulesets.Edit.Checks.CheckAudioQuality | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Rulesets.Edit.Checks.CheckBackgroundQuality | 9 | 3/18 | 1 | 7 | 16.7% |
+| osu.Game.Rulesets.Edit.Checks.CheckAudioQuality _(loại)_ | 6 | 11/12 | 5 | 0 | 91.7% |
+| osu.Game.Rulesets.Edit.Checks.CheckBackgroundQuality _(loại)_ | 9 | 3/18 | 1 | 7 | 16.7% |
 | osu.Game.Rulesets.Edit.Checks.CheckBreaks | 7 | 13/14 | 6 | 0 | 92.9% |
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects.IssueTemplateAlmostConcurrent | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckConcurrentObjects.IssueTemplateConcurrent | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.Checks.CheckDelayedHitsounds | 17 | 12/34 | 5 | 10 | 35.3% |
+| osu.Game.Rulesets.Edit.Checks.CheckDelayedHitsounds _(loại)_ | 17 | 12/34 | 5 | 10 | 35.3% |
 | osu.Game.Rulesets.Edit.Checks.CheckDrainLength | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckFewHitsounds | 18 | 34/36 | 17 | 1 | 94.4% |
 | osu.Game.Rulesets.Edit.Checks.CheckFilePresence | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.Checks.CheckHitsoundsFormat | 9 | 10/18 | 4 | 3 | 55.6% |
+| osu.Game.Rulesets.Edit.Checks.CheckHitsoundsFormat _(loại)_ | 9 | 10/18 | 4 | 3 | 55.6% |
 | osu.Game.Rulesets.Edit.Checks.CheckInconsistentAudio | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckInconsistentMetadata | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckInconsistentSettings | 3 | 6/6 | 3 | 0 | 100.0% |
@@ -1211,26 +1166,26 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Rulesets.Edit.Checks.CheckPreviewTime.IssueTemplatePreviewTimeConflict | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckSongFormat | 4 | 5/8 | 2 | 1 | 62.5% |
 | osu.Game.Rulesets.Edit.Checks.CheckTitleMarkers | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.Checks.CheckTooShortAudioFiles | 5 | 3/10 | 1 | 3 | 30.0% |
+| osu.Game.Rulesets.Edit.Checks.CheckTooShortAudioFiles _(loại)_ | 5 | 3/10 | 1 | 3 | 30.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckUnsnappedObjects | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckUnsnappedObjects.IssueTemplateUnsnap | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Edit.Checks.CheckUnusedAudioAtEnd | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Rulesets.Edit.Checks.CheckUnusedAudioAtEnd _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckVideoResolution | 5 | 6/10 | 2 | 1 | 60.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckVideoUsage | 10 | 20/20 | 10 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckZeroByteFiles | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.CheckZeroLengthObjects | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Edit.Checks.Components.AudioCheckUtils | 4 | 5/8 | 2 | 1 | 62.5% |
 | osu.Game.Rulesets.Edit.Checks.Components.ResourcesCheckUtils | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Judgements.DefaultJudgementPiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Judgements.DrawableJudgement _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.Judgements.DefaultJudgementPiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Judgements.DrawableJudgement _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
 | osu.Game.Rulesets.Judgements.JudgementResult | 2 | 1/4 | 0 | 1 | 25.0% |
-| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl.DifficultyBindableWithCurrent _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl.SliderControl _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl.DifficultyBindableWithCurrent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mods.DifficultyAdjustSettingsControl.SliderControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mods.DifficultyBindable | 12 | 24/24 | 12 | 0 | 100.0% |
-| osu.Game.Rulesets.Mods.HiddenComboSlider _(UI)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mods.HiddenComboSlider _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.IMod | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mods.MetronomeBeat _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.Mods.MetronomeBeat _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Rulesets.Mods.Mod | 16 | 27/32 | 12 | 1 | 84.4% |
 | osu.Game.Rulesets.Mods.ModAccuracyChallenge | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.ModAdaptiveSpeed | 11 | 0/22 | 0 | 11 | 0.0% |
@@ -1238,23 +1193,23 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Rulesets.Mods.ModDifficultyAdjust | 10 | 14/20 | 7 | 3 | 70.0% |
 | osu.Game.Rulesets.Mods.ModDoubleTime | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModEasyWithExtraLives | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.Mods.ModFlashlight.Flashlight _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.Mods.ModFlashlight.Flashlight.FlashlightDrawNode _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.Mods.ModFlashlight.PlayfieldDrawInfoTracker | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mods.ModFlashlight.Flashlight _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Rulesets.Mods.ModFlashlight.Flashlight.FlashlightDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.Mods.ModFlashlight.PlayfieldDrawInfoTracker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Rulesets.Mods.ModHalfTime | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModMuted | 6 | 2/12 | 1 | 5 | 16.7% |
-| osu.Game.Rulesets.Mods.ModNightcore.NightcoreBeatContainer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Rulesets.Mods.ModNightcore.NightcoreBeatContainer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Rulesets.Mods.ModNoScope | 2 | 2/4 | 1 | 1 | 50.0% |
 | osu.Game.Rulesets.Mods.ModPerfect | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Rulesets.Mods.ModPreset | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mods.ModPreset _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.ModRateAdjust | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModSuddenDeath | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Mods.ModTimeRamp | 5 | 8/10 | 3 | 0 | 80.0% |
 | osu.Game.Rulesets.Mods.ModWindDown | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.ModWindUp | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Mods.ModWithVisibilityAdjustment | 7 | 4/14 | 2 | 5 | 28.6% |
-| osu.Game.Rulesets.Mods.MuteComboSlider _(UI)_ | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Mods.RateAdjustModHelper | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Rulesets.Mods.MuteComboSlider _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Rulesets.Mods.RateAdjustModHelper _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Rulesets.Objects.BarLineGenerator | 8 | 16/16 | 8 | 0 | 100.0% |
 | osu.Game.Rulesets.Objects.BezierConverter | 33 | 64/66 | 31 | 0 | 97.0% |
 | osu.Game.Rulesets.Objects.HitObject | 7 | 13/14 | 6 | 0 | 92.9% |
@@ -1264,20 +1219,20 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Rulesets.Objects.SliderEventGenerator | 8 | 16/16 | 8 | 0 | 100.0% |
 | osu.Game.Rulesets.Objects.SliderPath | 50 | 91/100 | 41 | 0 | 91.0% |
 | osu.Game.Rulesets.Objects.SliderPathExtensions | 13 | 21/26 | 8 | 0 | 80.8% |
-| osu.Game.Rulesets.Objects.Drawables.DrawableHitObject _(UI)_ | 38 | 0/76 | 0 | 38 | 0.0% |
+| osu.Game.Rulesets.Objects.Drawables.DrawableHitObject _(loại)_ | 38 | 0/76 | 0 | 38 | 0.0% |
 | osu.Game.Rulesets.Objects.Legacy.ConvertHitObjectParser | 73 | 139/146 | 66 | 0 | 95.2% |
 | osu.Game.Rulesets.Objects.Legacy.ConvertHitObjectParser.FileHitSampleInfo | 4 | 3/8 | 1 | 2 | 37.5% |
 | osu.Game.Rulesets.Objects.Legacy.ConvertHitObjectParser.LegacyHitSampleInfo | 11 | 14/22 | 5 | 2 | 63.6% |
 | osu.Game.Rulesets.Objects.Legacy.LegacyRulesetExtensions | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Objects.Pooling.HitObjectEntryManager | 8 | 15/16 | 7 | 0 | 93.8% |
-| osu.Game.Rulesets.Objects.Pooling.PoolableDrawableWithLifetime _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Rulesets.Objects.Pooling.PooledDrawableWithLifetimeContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.Objects.Pooling.PoolableDrawableWithLifetime _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Rulesets.Objects.Pooling.PooledDrawableWithLifetimeContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Rulesets.Objects.Types.HasPathWithRepeatsExtensions | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Rulesets.Objects.Types.HasRepeatsExtensions | 3 | 5/6 | 2 | 0 | 83.3% |
+| osu.Game.Rulesets.Objects.Types.HasRepeatsExtensions _(loại)_ | 3 | 5/6 | 2 | 0 | 83.3% |
 | osu.Game.Rulesets.Objects.Types.IHasComboInformation | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Rulesets.Objects.Types.PathType | 5 | 3/10 | 1 | 3 | 30.0% |
 | osu.Game.Rulesets.Replays.AutoGenerator | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Rulesets.Replays.FramedReplayInputHandler | 24 | 43/48 | 19 | 0 | 89.6% |
+| osu.Game.Rulesets.Replays.FramedReplayInputHandler _(loại)_ | 24 | 43/48 | 19 | 0 | 89.6% |
 | osu.Game.Rulesets.Scoring.AccumulatingHealthProcessor | 2 | 3/4 | 1 | 0 | 75.0% |
 | osu.Game.Rulesets.Scoring.DrainingHealthProcessor | 16 | 27/32 | 13 | 2 | 84.4% |
 | osu.Game.Rulesets.Scoring.HealthProcessor | 8 | 16/16 | 8 | 0 | 100.0% |
@@ -1289,853 +1244,853 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Rulesets.Scoring.LegacyDrainingHealthProcessor | 14 | 24/28 | 11 | 1 | 85.7% |
 | osu.Game.Rulesets.Scoring.ScoreMultiplierCalculator | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Rulesets.Scoring.ScoreProcessor | 33 | 63/66 | 30 | 0 | 95.5% |
-| osu.Game.Rulesets.UI.DrawableRuleset _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependencies | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackSampleStore | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackTextureStore | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.DrawableRulesetDependenciesProvidingContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.FrameStabilityContainer _(UI)_ | 34 | 0/68 | 0 | 34 | 0.0% |
-| osu.Game.Rulesets.UI.GameplaySampleTriggerSource _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.UI.HitObjectContainer _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.UI.JudgementPooler _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.ModIcon _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Rulesets.UI.ModSwitchSmall _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.UI.ModSwitchTiny _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.UI.ModTooltip _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Rulesets.UI.Playfield _(UI)_ | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Rulesets.UI.ReplayRecorder | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Rulesets.UI.RulesetInputManager _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Rulesets.UI.RulesetInputManager.ReplayStateReset _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Rulesets.UI.Scrolling.DrawableScrollingRuleset _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Rulesets.UI.Scrolling.ScrollingHitObjectContainer _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Rulesets.UI.DrawableRuleset _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Rulesets.UI.DrawableRulesetDependencies _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackSampleStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.UI.DrawableRulesetDependencies.FallbackTextureStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.UI.DrawableRulesetDependenciesProvidingContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.UI.FrameStabilityContainer _(loại)_ | 34 | 0/68 | 0 | 34 | 0.0% |
+| osu.Game.Rulesets.UI.GameplaySampleTriggerSource _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.UI.HitObjectContainer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.UI.JudgementPooler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.UI.ModIcon _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Rulesets.UI.ModSwitchSmall _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.UI.ModSwitchTiny _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.UI.ModTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Rulesets.UI.Playfield _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Rulesets.UI.ReplayRecorder _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Rulesets.UI.RulesetInputManager _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Rulesets.UI.RulesetInputManager.ReplayStateReset _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Rulesets.UI.Scrolling.DrawableScrollingRuleset _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Rulesets.UI.Scrolling.ScrollingHitObjectContainer _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Rulesets.UI.Scrolling.Algorithms.SequentialScrollAlgorithm | 6 | 11/12 | 5 | 0 | 91.7% |
-| osu.Game.Scoring.LegacyDatabasedScore | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Scoring.ScoreImporter | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Scoring.LegacyDatabasedScore _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Scoring.ScoreImporter _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Scoring.ScoreInfo | 11 | 15/22 | 6 | 2 | 68.2% |
 | osu.Game.Scoring.ScoreManager | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Scoring.Legacy.LegacyReplaySoloScoreInfo | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Scoring.Legacy.LegacyReplaySoloScoreInfo _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Scoring.Legacy.LegacyScoreDecoder | 36 | 63/72 | 27 | 0 | 87.5% |
 | osu.Game.Scoring.Legacy.LegacyScoreEncoder | 6 | 11/12 | 5 | 0 | 91.7% |
 | osu.Game.Scoring.Legacy.ScoreInfoExtensions | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Screens.BackgroundScreen _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.BackgroundScreenStack _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Loader _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Loader.ShaderPrecompiler _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OsuScreen _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Screens.BackgroundScreen _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.BackgroundScreenStack _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Loader _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Loader.ShaderPrecompiler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OsuScreen _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
 | osu.Game.Screens.OsuScreenDependencies | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OsuScreenStack _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.ScreenWhiteBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Backgrounds.BackgroundScreenBeatmap _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Backgrounds.BackgroundScreenBeatmap.DimmableBackground _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Backgrounds.BackgroundScreenCustom _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Backgrounds.BackgroundScreenDefault _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Backgrounds.EditorBackgroundScreen _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OsuScreenStack _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.ScreenWhiteBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Backgrounds.BackgroundScreenBeatmap _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Backgrounds.BackgroundScreenBeatmap.DimmableBackground _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Backgrounds.BackgroundScreenCustom _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Backgrounds.BackgroundScreenDefault _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Backgrounds.EditorBackgroundScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Edit.BackgroundDimMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.BindableBeatDivisor | 11 | 22/22 | 11 | 0 | 100.0% |
-| osu.Game.Screens.Edit.BookmarkController | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.BottomBar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Editor _(UI)_ | 123 | 0/246 | 0 | 123 | 0.0% |
+| osu.Game.Screens.Edit.BookmarkController _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.BottomBar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Editor _(loại)_ | 123 | 0/246 | 0 | 123 | 0.0% |
 | osu.Game.Screens.Edit.EditorBeatmap | 12 | 12/24 | 4 | 4 | 50.0% |
 | osu.Game.Screens.Edit.EditorBeatmapProcessor | 17 | 32/34 | 15 | 0 | 94.1% |
-| osu.Game.Screens.Edit.EditorBeatmapSkin | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.EditorBeatmapSkin _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Edit.EditorBeatmapSkin.SampleSet | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.EditorChangeHandler | 11 | 21/22 | 10 | 0 | 95.5% |
-| osu.Game.Screens.Edit.EditorClock _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.EditorClock.TransformSeek _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.EditorLoader _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.EditorSkinProvidingContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.ExternalEditScreen _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.EditorClock _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Screens.Edit.EditorClock.TransformSeek _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.EditorLoader _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.EditorSkinProvidingContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.ExternalEditScreen _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
 | osu.Game.Screens.Edit.LegacyEditorBeatmapPatcher | 24 | 32/48 | 12 | 4 | 66.7% |
 | osu.Game.Screens.Edit.TransactionalCommitComponent | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Screens.Edit.WaveformOpacityMenuItem | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.EditorToolButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.Components.FormSampleSet _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Components.FormSampleSet.SampleButton _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Components.PlaybackControl _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Components.PlaybackControl.PlaybackTabControl.PlaybackTabItem _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Components.TimeInfoContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Components.TimeInfoContainer.TimestampControl _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.EditorToolButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.Components.FormSampleSet _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.FormSampleSet.SampleButton _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Components.PlaybackControl _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.PlaybackControl.PlaybackTabControl.PlaybackTabItem _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Components.TimeInfoContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Components.TimeInfoContainer.TimestampControl _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
 | osu.Game.Screens.Edit.Components.Menus.DifficultyMenuItem | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Components.Menus.EditorMenuBar.DrawableEditorBarMenuItem _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Components.RadioButtons.EditorRadioButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Components.RadioButtons.EditorRadioButtonCollection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.DrawableTernaryButton _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton.ColourPickerButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton.ComboColourPalettePopover _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.SampleBankTernaryButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.SampleBankTernaryButton.InlineDrawableTernaryButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Components.TernaryButtons.SampleSetTernaryButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.BookmarkPart.BookmarkVisualisation _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.ControlPointPart _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.ControlPointVisualisation _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.GroupVisualisation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.KiaiPart _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.MarkerPart _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.PreviewTimePart _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.TimelinePart _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.ComposeScreen _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Edit.Compose.HitObjectUsageEventBuffer | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.CustomDivisorPopover _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar.Marker _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar.Tick _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.Menus.EditorMenuBar.DrawableEditorBarMenuItem _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.RadioButtons.EditorRadioButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.RadioButtons.EditorRadioButtonCollection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.DrawableTernaryButton _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton.ColourPickerButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.NewComboTernaryButton.ComboColourPalettePopover _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.SampleBankTernaryButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.SampleBankTernaryButton.InlineDrawableTernaryButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Components.TernaryButtons.SampleSetTernaryButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.BookmarkPart.BookmarkVisualisation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.ControlPointPart _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.ControlPointVisualisation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.GroupVisualisation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.KiaiPart _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.MarkerPart _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.PreviewTimePart _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Components.Timelines.Summary.Parts.TimelinePart _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.ComposeScreen _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Edit.Compose.HitObjectUsageEventBuffer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.CustomDivisorPopover _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar.Marker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatDivisorControl.TickSliderBar.Tick _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.Edit.Compose.Components.BeatDivisorPresetCollection | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatSnapGrid _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BeatSnapGrid.DrawableGridLine _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.BlueprintContainer _(UI)_ | 55 | 0/110 | 0 | 55 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.CircularDistanceSnapGrid _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.CircularDistanceSnapGrid.Ring _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.CircularPositionSnapGrid _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.ComposeBlueprintContainer _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.DistanceSnapGrid _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.DragBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.DragBox.BoxWithBorders _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.EditorBlueprintContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.EditorSelectionHandler _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.HitObjectInspector _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.HitObjectOrderedSelectionContainer _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.LinedPositionSnapGrid _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.PlacementStateManager | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.PositionSnapGrid _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBox _(UI)_ | 37 | 0/74 | 0 | 37 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBoxButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBoxControl _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBoxDragHandleContainer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBoxRotationHandle _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionBoxScaleHandle _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.SelectionHandler _(UI)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.CentreMarker.VerticalTriangles.VerticalTrianglesDrawNode _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.DifficultyPointPiece.DifficultyEditPopover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece.NodeSampleEditPopover _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.SampleEditPopover _(UI)_ | 37 | 0/74 | 0 | 37 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.VolumeControl _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.VolumeControl.VolumeTextBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.SliderVelocityInspector _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.Timeline _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineArea _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer _(UI)_ | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer.SelectableAreaBackground _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer.TimelineSelectionBlueprintContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBreak.DragHandle _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBreakDisplay _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineHitObjectBlueprint _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineHitObjectBlueprint.DragArea _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineSelectionHandler _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineTickDisplay _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineTimingChangeDisplay _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.ZoomableScrollContainer _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Edit.Compose.Components.Timeline.ZoomableScrollContainer.TransformZoom _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.GameplayTest.EditorPlayer _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.Edit.Setup.ColoursSection _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Edit.Setup.DesignSection _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Setup.FormBeatmapFileSelector.BeatmapFileChooserPopover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Setup.FormSampleSetChooser _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Edit.Setup.FormSampleSetChooser.NewSampleSetPopover _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Setup.LabelledFileChooser _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Setup.LabelledTextBoxWithPopover.PopoverTextBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Setup.MetadataSection _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Setup.ResourcesSection _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Screens.Edit.Setup.SetupScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Setup.SetupScreenBackgroundPreview _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Setup.SetupScreenHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Setup.SetupScreenVideoPreview _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Submission.BeatmapSubmissionOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Submission.BeatmapSubmissionScreen _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.Edit.Submission.ScreenSubmissionSettings _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Submission.SubmissionBeatmapExporter | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Submission.SubmissionStageProgress _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Edit.Timing.ControlPointList _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Edit.Timing.ControlPointTable.ControlGroupAttributes _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Timing.ControlPointTable.ControlPointRowList _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Timing.ControlPointTable.DrawableControlGroup _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Timing.DiscreteAdjustmentControl _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Timing.DiscreteAdjustmentControl.IncrementBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Timing.EffectSection _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Timing.FormDiscreteAdjustmentControl _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.Edit.Timing.GroupSection _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Edit.Timing.IndeterminateSliderWithTextBoxInput _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Timing.LabelledTimeSignature.TimeSignatureBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Timing.MetronomeDisplay _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.Edit.Timing.MetronomeDisplay.MetronomeTick _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Timing.RepeatingButtonBehaviour | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Timing.Section _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl.SliderVelocityPresetTernaryButton _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Timing.TapButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Edit.Timing.TapTimingControl _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Edit.Timing.TimingScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Edit.Timing.TimingSection _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatSnapGrid _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BeatSnapGrid.DrawableGridLine _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.BlueprintContainer _(loại)_ | 55 | 0/110 | 0 | 55 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.CircularDistanceSnapGrid _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.CircularDistanceSnapGrid.Ring _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.CircularPositionSnapGrid _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.ComposeBlueprintContainer _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.DistanceSnapGrid _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.DragBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.DragBox.BoxWithBorders _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.EditorBlueprintContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.EditorSelectionHandler _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.HitObjectInspector _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.HitObjectOrderedSelectionContainer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.LinedPositionSnapGrid _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.PlacementStateManager _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.PositionSnapGrid _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBox _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBoxButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBoxControl _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBoxDragHandleContainer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBoxRotationHandle _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionBoxScaleHandle _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.SelectionHandler _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.CentreMarker.VerticalTriangles.VerticalTrianglesDrawNode _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.DifficultyPointPiece.DifficultyEditPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.NodeSamplePointPiece.NodeSampleEditPopover _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.SampleEditPopover _(loại)_ | 37 | 0/74 | 0 | 37 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.VolumeControl _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.SamplePointPiece.VolumeControl.VolumeTextBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.SliderVelocityInspector _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.Timeline _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer.SelectableAreaBackground _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBlueprintContainer.TimelineSelectionBlueprintContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBreak.DragHandle _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineBreakDisplay _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineHitObjectBlueprint _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineHitObjectBlueprint.DragArea _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineSelectionHandler _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineTickDisplay _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.TimelineTimingChangeDisplay _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.ZoomableScrollContainer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Edit.Compose.Components.Timeline.ZoomableScrollContainer.TransformZoom _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.GameplayTest.EditorPlayer _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.Edit.Setup.ColoursSection _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Edit.Setup.DesignSection _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Setup.FormBeatmapFileSelector.BeatmapFileChooserPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Setup.FormSampleSetChooser _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Edit.Setup.FormSampleSetChooser.NewSampleSetPopover _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Setup.LabelledFileChooser _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Setup.LabelledTextBoxWithPopover.PopoverTextBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Setup.MetadataSection _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Setup.ResourcesSection _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Screens.Edit.Setup.SetupScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Setup.SetupScreenBackgroundPreview _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Setup.SetupScreenHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Setup.SetupScreenVideoPreview _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Submission.BeatmapSubmissionOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Submission.BeatmapSubmissionScreen _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.Edit.Submission.ScreenSubmissionSettings _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Submission.SubmissionBeatmapExporter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Submission.SubmissionStageProgress _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Edit.Timing.ControlPointList _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Edit.Timing.ControlPointTable.ControlGroupAttributes _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Timing.ControlPointTable.ControlPointRowList _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Timing.ControlPointTable.DrawableControlGroup _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Timing.DiscreteAdjustmentControl _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Timing.DiscreteAdjustmentControl.IncrementBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Timing.EffectSection _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Timing.FormDiscreteAdjustmentControl _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.Edit.Timing.GroupSection _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Edit.Timing.IndeterminateSliderWithTextBoxInput _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Timing.LabelledTimeSignature.TimeSignatureBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Timing.MetronomeDisplay _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.Edit.Timing.MetronomeDisplay.MetronomeTick _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Timing.RepeatingButtonBehaviour _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Timing.Section _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Screens.Edit.Timing.SliderVelocityAdjustmentControl.SliderVelocityPresetTernaryButton _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Timing.TapButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Edit.Timing.TapTimingControl _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Edit.Timing.TimingScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Edit.Timing.TimingSection _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Screens.Edit.Timing.TimingSectionAdjustments | 5 | 10/10 | 5 | 0 | 100.0% |
-| osu.Game.Screens.Edit.Timing.WaveformComparisonDisplay _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Edit.Timing.WaveformComparisonDisplay.WaveformRow _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Timing.RowAttributes.EffectRowAttribute _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Edit.Timing.RowAttributes.TimingRowAttribute _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Edit.Verify.IssueList _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Edit.Verify.IssueTable.DrawableIssue _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Edit.Verify.VisibilitySection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Footer.ScreenFooter _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.Footer.ScreenFooter.BackReceptor _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Footer.ScreenFooterButton _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Footer.ScreenStackFooter _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Footer.ScreenStackFooter.ScreenStackTracker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Import.FileImportScreen _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Menu.ButtonArea _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Menu.ButtonArea.ButtonAreaBackground _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.ButtonSystem _(UI)_ | 34 | 0/68 | 0 | 34 | 0.0% |
-| osu.Game.Screens.Menu.ConfirmExitDialog _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Menu.DailyChallengeButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Menu.FlowContainerWithOrigin _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.HoldToExitGameOverlay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Menu.IntroCircles _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Menu.IntroScreen _(UI)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.Menu.IntroSequence _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.IntroTriangles _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Menu.IntroTriangles.TrianglesIntroSequence.GlitchingTriangles _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Menu.IntroTriangles.TrianglesIntroSequence.GlitchingTriangles.OutlineTriangle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.IntroWelcome _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Menu.IntroWelcome.WelcomeIntroSequence _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.KiaiMenuFountains _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Menu.LogoVisualisation _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Menu.LogoVisualisation.VisualisationDrawNode _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Menu.MainMenu _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.Menu.MainMenuButton _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Screens.Menu.MenuLogoVisualisation _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.MenuSideFlashes _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Menu.MenuTipDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.OnlineMenuBanner _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Menu.OnlineMenuBanner.MenuImage _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Menu.OsuLogo _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.Menu.SongTicker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Menu.StarFountainSounds _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Menu.StorageErrorDialog _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Menu.SupporterDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylist _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.CompletionIcon _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.OwnerAvatar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.PlaylistDownloadButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.FooterButtonFreeMods _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.FooterButtonFreestyle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.FreeModSelectOverlay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Header _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Header.MultiHeaderTitle _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Timing.WaveformComparisonDisplay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Edit.Timing.WaveformComparisonDisplay.WaveformRow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Timing.RowAttributes.EffectRowAttribute _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Edit.Timing.RowAttributes.TimingRowAttribute _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Edit.Verify.IssueList _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Edit.Verify.IssueTable.DrawableIssue _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Edit.Verify.VisibilitySection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Footer.ScreenFooter _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.Footer.ScreenFooter.BackReceptor _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Footer.ScreenFooterButton _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Footer.ScreenStackFooter _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Footer.ScreenStackFooter.ScreenStackTracker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Import.FileImportScreen _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Menu.ButtonArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Menu.ButtonArea.ButtonAreaBackground _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.ButtonSystem _(loại)_ | 34 | 0/68 | 0 | 34 | 0.0% |
+| osu.Game.Screens.Menu.ConfirmExitDialog _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Menu.DailyChallengeButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Menu.FlowContainerWithOrigin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.HoldToExitGameOverlay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Menu.IntroCircles _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Menu.IntroScreen _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Screens.Menu.IntroSequence _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.IntroTriangles _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Menu.IntroTriangles.TrianglesIntroSequence.GlitchingTriangles _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Menu.IntroTriangles.TrianglesIntroSequence.GlitchingTriangles.OutlineTriangle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.IntroWelcome _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Menu.IntroWelcome.WelcomeIntroSequence _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.KiaiMenuFountains _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Menu.LogoVisualisation _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Menu.LogoVisualisation.VisualisationDrawNode _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Menu.MainMenu _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.Menu.MainMenuButton _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Screens.Menu.MenuLogoVisualisation _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.MenuSideFlashes _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Menu.MenuTipDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.OnlineMenuBanner _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Menu.OnlineMenuBanner.MenuImage _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Menu.OsuLogo _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.Menu.SongTicker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Menu.StarFountainSounds _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Menu.StorageErrorDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Menu.SupporterDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylist _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.CompletionIcon _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.OwnerAvatar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DrawableRoomPlaylistItem.PlaylistDownloadButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.FooterButtonFreeMods _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.OnlinePlay.FooterButtonFreestyle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.FreeModSelectOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Header _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Header.MultiHeaderTitle _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Screens.OnlinePlay.OngoingOperationTracker | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.OnlinePlayBeatmapAvailabilityTracker _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.OnlinePlay.OnlinePlayFreestyleSelect _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.OnlinePlayScreen _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.OnlinePlay.OnlinePlaySubScreenStack _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.BeatmapTitle _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.DisableableTabControl _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.DisableableTabControl.DisableableTabItem _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.OnlinePlayBackgroundScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.OnlinePlayBackgroundScreen.OnlineBeatmapBackground _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.ParticipantCountDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.ParticipantsDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.ParticipantsList _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.PlaylistHeader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.ReadyButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.RoomLocalUserInfo _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Components.StarRatingRangeDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallenge _(UI)_ | 23 | 0/46 | 0 | 23 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeCarousel _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeCarousel.NavigationDot _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeEventFeed _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeEventFeed.NewScoreEventRow _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeIntro _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeLeaderboard _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeScoreBreakdown _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeScoreBreakdown.Bar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeTimeRemainingRing _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeTotalsDisplay.TotalRollingCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.DailyChallenge.NewDailyChallengeNotification _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.LoungeBackgroundScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.LoungeListingPoller _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.LoungeRoomPanel _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.LoungeSubScreen _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.DrawableRoomParticipantsList _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.DrawableRoomParticipantsList.HiddenUserCount _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.EndDateInfo.EndDatePart _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.FreestyleStatusPill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.MatchTypePill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.PlaylistCountPill _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.QueueModePill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RankRangePill _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomListing _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel.RoomNameLine _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel.RoomStatusText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomSpecialCategoryPill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomStatusPill _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.RoomModSelectOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.UserModSelectButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.Components.CreateRoomButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.Components.MatchChatDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.Components.MatchLeaderboard _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Match.Components.RoomSettingsOverlay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlayBottomOrnament _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Intro.ScreenIntro _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingAvatar _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingChatDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingSubScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanel _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay.PlayerPanelCell _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay.PlayerPanelCellContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.ScreenMatchmaking _(UI)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.ScreenMatchmaking.ScreenStack _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.CurrentRoundDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.StageSegment _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.StatusText _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.TimerText _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid.PanelGridContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid.SplitEasingFunction _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContent.AvatarOverlay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContentBeatmap _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContentRandom _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanelRandom _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.SubScreenBeatmapSelect _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.Gameplay.ScreenGameplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.Results.SubScreenResults _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Match.RoundResults.SubScreenRoundResults _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation.MovingAvatar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector.SelectorButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.OnlinePlayBeatmapAvailabilityTracker _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.OnlinePlay.OnlinePlayFreestyleSelect _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.OnlinePlayScreen _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.OnlinePlay.OnlinePlaySubScreenStack _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.BeatmapTitle _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.DisableableTabControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.DisableableTabControl.DisableableTabItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.OnlinePlayBackgroundScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.OnlinePlayBackgroundScreen.OnlineBeatmapBackground _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.ParticipantCountDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.ParticipantsDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.ParticipantsList _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.PlaylistHeader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.ReadyButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.RoomLocalUserInfo _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Components.StarRatingRangeDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallenge _(loại)_ | 23 | 0/46 | 0 | 23 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeCarousel _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeCarousel.NavigationDot _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeEventFeed _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeEventFeed.NewScoreEventRow _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeIntro _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeLeaderboard _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeScoreBreakdown _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeScoreBreakdown.Bar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeTimeRemainingRing _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.DailyChallengeTotalsDisplay.TotalRollingCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.DailyChallenge.NewDailyChallengeNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.LoungeBackgroundScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.LoungeListingPoller _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.LoungeRoomPanel _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.LoungeSubScreen _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.DrawableRoomParticipantsList _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.DrawableRoomParticipantsList.HiddenUserCount _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.EndDateInfo.EndDatePart _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.FreestyleStatusPill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.MatchTypePill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.PlaylistCountPill _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.QueueModePill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RankRangePill _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomListing _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel.RoomNameLine _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomPanel.RoomStatusText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomSpecialCategoryPill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Lounge.Components.RoomStatusPill _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.RoomModSelectOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.UserModSelectButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.Components.CreateRoomButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.Components.MatchChatDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.Components.MatchLeaderboard _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Match.Components.RoomSettingsOverlay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlayBottomOrnament _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Intro.ScreenIntro _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingAvatar _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingChatDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.MatchmakingSubScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanel _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay.PlayerPanelCell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.PlayerPanelOverlay.PlayerPanelCellContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.ScreenMatchmaking _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.ScreenMatchmaking.ScreenStack _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.CurrentRoundDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.StageSegment _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.StatusText _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.StageDisplay.TimerText _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid.PanelGridContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.BeatmapSelectGrid.SplitEasingFunction _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContent.AvatarOverlay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContentBeatmap _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanel.CardContentRandom _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.MatchmakingSelectPanelRandom _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.BeatmapSelect.SubScreenBeatmapSelect _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.Gameplay.ScreenGameplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.Results.SubScreenResults _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Match.RoundResults.SubScreenRoundResults _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.CloudVisualisation.MovingAvatar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.PoolSelector.SelectorButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController.BackgroundQueueNotification _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RankedPlayMatchPanel _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph _(UI)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.HorizontalLine _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.PointPath _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.RatingDistributionGraphTooltip _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.VerticalLine _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.ScreenQueue _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.ScreenQueue.SelectionButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.DiscardScreen _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.EndedScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen.DifficultyDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen.MetadataWedge _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.HamburgerMenu.Popover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.OpponentPickScreen _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.PickScreen _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBackgroundScreen _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBeatmapAvailabilityTracker _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.QueueController.BackgroundQueueNotification _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RankedPlayMatchPanel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.HorizontalLine _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.PointPath _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.RatingDistributionGraphTooltip _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.RatingDistributionGraph.VerticalLine _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.ScreenQueue _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.Queue.ScreenQueue.SelectionButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.DiscardScreen _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.EndedScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen.DifficultyDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.GameplayWarmupScreen.MetadataWedge _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.HamburgerMenu.Popover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.OpponentPickScreen _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.PickScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBackgroundScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayBeatmapAvailabilityTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayCardWithPlaylistItem | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayMatchInfo | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayScreen _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayStageOverlay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlaySubScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.ResultsScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.ResultsScreen.MainPanel _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.CardDetailsOverlay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.DrawableUserTag _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.UserTagSection _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer.PulseContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer.RippleVisualization _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.AttributeRow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.CardColours _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.StarsDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.SongPreviewParticleContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.BackgroundMusicManager _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.CardFlow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay.BubbleChatHistory _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay.BubbleChatHistory.MessageBubble _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayCornerPiece _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayScoreCounter _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayScoreCounter.CounterDigit _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayStageDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayUserDisplay _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayUserDisplay.HealthBar _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards _(UI)_ | 26 | 0/52 | 0 | 26 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.CardContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.HandCard _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayPlayer | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayRecorder | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.OpponentHandOfCards _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards _(UI)_ | 30 | 0/60 | 0 | 30 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards.PlayerHandCard _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro.IntroScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro.StarRatingSequence _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.CreateMultiplayerMatchButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.GameplayChatDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.GameplayMatchScoreDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Multiplayer _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerBeatmapAvailabilityTracker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerLoungeSubScreen _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchFreestyleSelect _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSongSelect _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSubScreen _(UI)_ | 77 | 0/154 | 0 | 77 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSubScreen.AddItemButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayerLoader _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPositionDisplay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPositionDisplay.PositionCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomBackgroundScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomPanel _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomSounds _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerSkipOverlay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerSkipOverlay.Button _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerTeamResultsScreen _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerUserModDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MatchStartControl _(UI)_ | 43 | 0/86 | 0 | 43 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerCountdownButton _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerMatchSettingsOverlay.CreateOrUpdateButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerMatchSettingsOverlay.MatchSettings _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerReadyButton _(UI)_ | 28 | 0/56 | 0 | 28 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerSpectateButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerUserModSelectOverlay _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylist _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylistTabControl _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylistTabControl.QueueTabItem _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerQueueList.QueuePlaylistItem _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantPanel _(UI)_ | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantPanel.StyleDisplayIcon _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantsList _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantsListHeader _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.StateDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.TeamDisplay _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.MultiSpectatorPlayer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.MultiSpectatorScreen _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerArea _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid.Cell _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayMatchInfo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayScreen _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlayStageOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.RankedPlaySubScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.ResultsScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.ResultsScreen.MainPanel _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.CardDetailsOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.DrawableUserTag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.CardDetailsOverlayContainer.UserTagSection _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer.PulseContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCard.SongPreviewContainer.RippleVisualization _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.AttributeRow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.CardColours _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.RankedPlayCardContent.StarsDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Card.SongPreviewParticleContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.BackgroundMusicManager _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.CardFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay.BubbleChatHistory _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayChatDisplay.BubbleChatHistory.MessageBubble _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayCornerPiece _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayScoreCounter _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayScoreCounter.CounterDigit _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayStageDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayUserDisplay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Components.RankedPlayUserDisplay.HealthBar _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards _(loại)_ | 26 | 0/52 | 0 | 26 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.CardContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandOfCards.HandCard _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.HandReplayRecorder _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.OpponentHandOfCards _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards _(loại)_ | 30 | 0/60 | 0 | 30 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Hand.PlayerHandOfCards.PlayerHandCard _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro.IntroScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Matchmaking.RankedPlay.Intro.StarRatingSequence _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.CreateMultiplayerMatchButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.GameplayChatDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.GameplayMatchScoreDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Multiplayer _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerBeatmapAvailabilityTracker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerLoungeSubScreen _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchFreestyleSelect _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSongSelect _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSubScreen _(loại)_ | 77 | 0/154 | 0 | 77 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerMatchSubScreen.AddItemButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayerLoader _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPositionDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPositionDisplay.PositionCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomBackgroundScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomPanel _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerRoomSounds _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerSkipOverlay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerSkipOverlay.Button _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerTeamResultsScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerUserModDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MatchStartControl _(loại)_ | 43 | 0/86 | 0 | 43 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerCountdownButton _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerMatchSettingsOverlay.CreateOrUpdateButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerMatchSettingsOverlay.MatchSettings _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerReadyButton _(loại)_ | 28 | 0/56 | 0 | 28 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerSpectateButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.MultiplayerUserModSelectOverlay _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylist _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylistTabControl _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerPlaylistTabControl.QueueTabItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Match.Playlist.MultiplayerQueueList.QueuePlaylistItem _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantPanel _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantPanel.StyleDisplayIcon _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantsList _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.ParticipantsListHeader _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.StateDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Participants.TeamDisplay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.MultiSpectatorPlayer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.MultiSpectatorScreen _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerArea _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.PlayerGrid.Cell _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorPlayerClock | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Screens.OnlinePlay.Multiplayer.Spectate.SpectatorSyncManager | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.AddPlaylistToCollectionButton _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen.PanelListLoadingSpinner _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemScoreResultsScreen _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsLoungeSubScreen _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsPlayer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsReadyButton _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomFooter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSettingsOverlay.MatchSettings _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSettingsPlaylist _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSubScreen _(UI)_ | 45 | 0/90 | 0 | 45 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomUpdater _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsSongSelect _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsSongSelect.PlaylistTray _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.ArgonKeyCounter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.BeatmapMetadataDisplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.BeatmapMetadataDisplay.MetadataLineInfo _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.BreakOverlay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.BreakTracker | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.ComboEffects _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Play.DelayedResumeOverlay _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Play.DimmableStoryboard _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Play.FailAnimationContainer _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Play.GameplayClockContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Play.GameplayClockExtensions | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.GameplayMenuOverlay _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Screens.Play.GameplayScrollWheelHandling _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.AddPlaylistToCollectionButton _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemResultsScreen.PanelListLoadingSpinner _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistItemScoreResultsScreen _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsLoungeSubScreen _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsReadyButton _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomFooter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSettingsOverlay.MatchSettings _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSettingsPlaylist _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomSubScreen _(loại)_ | 45 | 0/90 | 0 | 45 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsRoomUpdater _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsSongSelect _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.OnlinePlay.Playlists.PlaylistsSongSelect.PlaylistTray _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.ArgonKeyCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.BeatmapMetadataDisplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.BeatmapMetadataDisplay.MetadataLineInfo _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.BreakOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.BreakTracker _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.ComboEffects _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Play.DelayedResumeOverlay _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Play.DimmableStoryboard _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Play.FailAnimationContainer _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Play.GameplayClockContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Play.GameplayClockExtensions _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.GameplayMenuOverlay _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Screens.Play.GameplayScrollWheelHandling _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Screens.Play.GameplayState | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Screens.Play.HUDOverlay _(UI)_ | 40 | 0/80 | 0 | 40 | 0.0% |
-| osu.Game.Screens.Play.HotkeyExitOverlay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HotkeyRetryOverlay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.KiaiGameplayFountains _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.LetterboxOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.MasterGameplayClockContainer _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.Play.HUDOverlay _(loại)_ | 40 | 0/80 | 0 | 40 | 0.0% |
+| osu.Game.Screens.Play.HotkeyExitOverlay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HotkeyRetryOverlay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.KiaiGameplayFountains _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.LetterboxOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.MasterGameplayClockContainer _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
 | osu.Game.Screens.Play.OffsetCorrectionClock | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.PauseOverlay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.Player _(UI)_ | 105 | 0/210 | 0 | 105 | 0.0% |
-| osu.Game.Screens.Play.PlayerLoader _(UI)_ | 47 | 0/94 | 0 | 47 | 0.0% |
-| osu.Game.Screens.Play.PlayerLoaderDisclaimer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.PlayerTouchInputDetector | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Play.ReplayFailIndicator _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.ReplayPlayer _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.ReplayPlayerLoader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.RoomSubmittingPlayer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.SaveFailedScoreButton _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Play.ScreenSuspensionHandler | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.ScrollingMessage _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.SkipOverlay _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Play.SkipOverlay.Button _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.SkipOverlay.FadeContainer _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.SoloPlayer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.SoloSpectatorPlayer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.SoloSpectatorScreen _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Play.SpectatorPlayer _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Play.SpectatorPlayerLoader _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.SpectatorResultsScreen _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.SquareGraph _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Play.SquareGraph.Column _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Play.SubmittingPlayer _(UI)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.Play.Break.BreakInfoLine _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonAccuracyCounter.ArgonAccuracyTextComponent _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonComboCounter _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText.GlyphStore _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonHealthDisplay _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonPerformancePointsCounter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonScoreCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonSongProgress _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonSongProgressBar _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonSongProgressGraph _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonUnstableRateCounter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonWedgePiece _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultHealthDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultKeyCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultKeyCounterDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultRankDisplay _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultSongProgress _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultSongProgressBar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.DefaultSongProgressGraph _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.DrawableGameplayLeaderboard _(UI)_ | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Screens.Play.HUD.DrawableGameplayLeaderboardScore _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.Play.HUD.FailingLayer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.HealthDisplay _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.Play.HUD.HoldForMenuButton _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Play.HUD.HoldForMenuButton.HoldButton _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.Play.PauseOverlay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.Player _(loại)_ | 105 | 0/210 | 0 | 105 | 0.0% |
+| osu.Game.Screens.Play.PlayerLoader _(loại)_ | 47 | 0/94 | 0 | 47 | 0.0% |
+| osu.Game.Screens.Play.PlayerLoaderDisclaimer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.PlayerTouchInputDetector _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Play.ReplayFailIndicator _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.ReplayPlayer _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Play.ReplayPlayerLoader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.RoomSubmittingPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.SaveFailedScoreButton _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Play.ScreenSuspensionHandler _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.ScrollingMessage _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.SkipOverlay _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Play.SkipOverlay.Button _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.SkipOverlay.FadeContainer _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.SoloPlayer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.SoloSpectatorPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.SoloSpectatorScreen _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Play.SpectatorPlayer _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Play.SpectatorPlayerLoader _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.SpectatorResultsScreen _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.SquareGraph _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Play.SquareGraph.Column _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Play.SubmittingPlayer _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Screens.Play.Break.BreakInfoLine _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonAccuracyCounter.ArgonAccuracyTextComponent _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonComboCounter _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonCounterTextComponent.ArgonCounterSpriteText.GlyphStore _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonHealthDisplay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonPerformancePointsCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonScoreCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonSongProgress _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonSongProgressBar _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonSongProgressGraph _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonUnstableRateCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonWedgePiece _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultHealthDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultKeyCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultKeyCounterDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultRankDisplay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultSongProgress _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultSongProgressBar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.DefaultSongProgressGraph _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.DrawableGameplayLeaderboard _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Screens.Play.HUD.DrawableGameplayLeaderboardScore _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.Play.HUD.FailingLayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.HealthDisplay _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.Play.HUD.HoldForMenuButton _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Play.HUD.HoldForMenuButton.HoldButton _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
 | osu.Game.Screens.Play.HUD.InputTrigger | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.KeyCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.KeyCounterActionTrigger | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.KeyCounterDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.KeyCounterKeyboardTrigger | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.KeyCounterMouseTrigger | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.MatchScoreDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Play.HUD.MatchScoreDisplay.MatchScoreCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ModDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.HUD.ModFlowDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.PerformancePointsCounter _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Play.HUD.PlayerAvatar _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.PlayerFlag _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.PlayerTeamFlag _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.ReplayOverlay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.ReplaySettingsOverlay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.HUD.SkinnableModDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.SongProgress _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.HUD.SongProgressBar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.SongProgressInfo _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Play.HUD.SpectatorList _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Play.HUD.UnstableRateCounter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar.ArgonBarPathDrawNode _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.ClicksPerSecond.ClicksPerSecondController | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.HitErrorMeters.BarHitErrorMeter _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter.JudgementFlow _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.HUD.HitErrorMeters.HitErrorMeter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Play.HUD.HitErrorMeters.LegacyBarHitErrorMeter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.KeyCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.KeyCounterActionTrigger _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.KeyCounterDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.KeyCounterKeyboardTrigger _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.KeyCounterMouseTrigger _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.MatchScoreDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Play.HUD.MatchScoreDisplay.MatchScoreCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.ModDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.HUD.ModFlowDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.PerformancePointsCounter _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Play.HUD.PlayerAvatar _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.PlayerFlag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.PlayerTeamFlag _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.ReplayOverlay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.ReplaySettingsOverlay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.HUD.SkinnableModDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.SongProgress _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.HUD.SongProgressBar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.SongProgressInfo _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Play.HUD.SpectatorList _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Play.HUD.UnstableRateCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.HUD.ArgonHealthDisplayParts.ArgonHealthDisplayBar.ArgonBarPathDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.ClicksPerSecond.ClicksPerSecondController _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.HitErrorMeters.BarHitErrorMeter _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.HUD.HitErrorMeters.ColourHitErrorMeter.JudgementFlow _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.HUD.HitErrorMeters.HitErrorMeter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Play.HUD.HitErrorMeters.LegacyBarHitErrorMeter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
 | osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCountController | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounterDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.GameplayLeaderboardScore | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.MultiSpectatorLeaderboardProvider _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Play.Leaderboards.MultiplayerLeaderboardProvider _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.HUD.JudgementCounter.JudgementCounterDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards.GameplayLeaderboardScore _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards.MultiSpectatorLeaderboardProvider _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Play.Leaderboards.MultiplayerLeaderboardProvider _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.PlaylistsGameplayLeaderboardProvider | 14 | 0/28 | 0 | 14 | 0.0% |
 | osu.Game.Screens.Play.Leaderboards.SoloGameplayLeaderboardProvider | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.Play.PlayerSettings.BeatmapOffsetControl _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Screens.Play.PlayerSettings.InputSettings _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Play.PlayerSettings.PlaybackSettings _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.AspectContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.CollectionButton _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.FavouriteButton _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Ranking.ReplayDownloadButton _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Ranking.ResultsScreen _(UI)_ | 35 | 0/70 | 0 | 35 | 0.0% |
-| osu.Game.Screens.Ranking.ResultsScreen.VerticalScrollContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Ranking.RetryButton _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.ScorePanel _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Ranking.ScorePanelList _(UI)_ | 27 | 0/54 | 0 | 27 | 0.0% |
-| osu.Game.Screens.Ranking.ScorePanelList.Scroll _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.ScorePanelTrackingContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.SoloResultsScreen _(UI)_ | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Screens.Ranking.UserTag | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl _(UI)_ | 17 | 0/34 | 0 | 17 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover.DrawableAddableTag _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover.GroupFlow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl.DrawableUserTag _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Ranking.UserTagControl.DrawableUserTag.VoteCountText _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Ranking.Contracted.ContractedPanelMiddleContent _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Contracted.ContractedPanelTopContent _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.ExpandedPanelMiddleContent _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.ExpandedPanelMiddleContent.ClickableMetadata _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.ExpandedPanelTopContent _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.PlayedOnText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.TotalScoreCounter _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.Accuracy.AccuracyCircle _(UI)_ | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.Accuracy.RankText _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.Statistics.ComboStatistic _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.Statistics.CounterStatistic _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Expanded.Statistics.PerformanceStatistic _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.AverageHitError _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.HitEventTimingDistributionGraph _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.HitEventTimingDistributionGraph.Bar _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.PerformanceBreakdownChart _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.SimpleStatisticItem _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.SimpleStatisticTable _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.StatisticItemContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.StatisticItemHeader _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.StatisticsPanel _(UI)_ | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.AccuracyChangeRow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.GlobalRankChangeRow _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.MaximumComboChangeRow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.OverallRanking _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.PerformancePointsChangeRow _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.RankedScoreChangeRow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.RankingChangeRow _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Ranking.Statistics.User.TotalScoreChangeRow _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapCarousel _(UI)_ | 141 | 0/282 | 0 | 141 | 0.0% |
+| osu.Game.Screens.Play.PlayerSettings.BeatmapOffsetControl _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Screens.Play.PlayerSettings.InputSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Play.PlayerSettings.PlaybackSettings _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.AspectContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.CollectionButton _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.FavouriteButton _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Ranking.ReplayDownloadButton _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Ranking.ResultsScreen _(loại)_ | 35 | 0/70 | 0 | 35 | 0.0% |
+| osu.Game.Screens.Ranking.ResultsScreen.VerticalScrollContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Ranking.RetryButton _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.ScorePanel _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Ranking.ScorePanelList _(loại)_ | 27 | 0/54 | 0 | 27 | 0.0% |
+| osu.Game.Screens.Ranking.ScorePanelList.Scroll _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.ScorePanelTrackingContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.SoloResultsScreen _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Screens.Ranking.UserTag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl _(loại)_ | 17 | 0/34 | 0 | 17 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover.DrawableAddableTag _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl.AddTagsPopover.GroupFlow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl.DrawableUserTag _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Ranking.UserTagControl.DrawableUserTag.VoteCountText _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Ranking.Contracted.ContractedPanelMiddleContent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Contracted.ContractedPanelTopContent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.ExpandedPanelMiddleContent _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.ExpandedPanelMiddleContent.ClickableMetadata _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.ExpandedPanelTopContent _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.PlayedOnText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.TotalScoreCounter _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.Accuracy.AccuracyCircle _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.Accuracy.RankText _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.Statistics.ComboStatistic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.Statistics.CounterStatistic _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Expanded.Statistics.PerformanceStatistic _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.AverageHitError _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.HitEventTimingDistributionGraph _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.HitEventTimingDistributionGraph.Bar _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.PerformanceBreakdownChart _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.SimpleStatisticItem _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.SimpleStatisticTable _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.StatisticItemContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.StatisticItemHeader _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.StatisticsPanel _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.AccuracyChangeRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.GlobalRankChangeRow _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.MaximumComboChangeRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.OverallRanking _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.PerformancePointsChangeRow _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.RankedScoreChangeRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.RankingChangeRow _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Ranking.Statistics.User.TotalScoreChangeRow _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapCarousel _(loại)_ | 141 | 0/282 | 0 | 141 | 0.0% |
 | osu.Game.Screens.Select.BeatmapCarouselFilterGrouping | 49 | 94/98 | 46 | 1 | 95.9% |
 | osu.Game.Screens.Select.BeatmapCarouselFilterMatching | 70 | 136/140 | 66 | 0 | 97.1% |
 | osu.Game.Screens.Select.BeatmapCarouselFilterSorting | 14 | 28/28 | 14 | 0 | 100.0% |
-| osu.Game.Screens.Select.BeatmapDetailsArea _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapDetailsArea.Header _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Select.BeatmapDetailsArea.WedgeSelector.TabItem _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore _(UI)_ | 33 | 0/66 | 0 | 33 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.DateAndStatisticsPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.ModsPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.PerformanceStatisticRow _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.RankLabel _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardScore.ScoreComponentLabel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapLeaderboardWedge _(UI)_ | 31 | 0/62 | 0 | 31 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable.GraphDrawNode _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.MetadataDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.RatingSpreadDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.SuccessRateDisplay _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.TagsLine _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.TagsLine.TagsOverflowPopover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapMetadataWedge.UserRatingDisplay _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.DifficultyDisplay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.DifficultyStatisticsDisplay _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.FavouriteButton _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.HeartIcon _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.Statistic _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticDifficulty _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticPlayCount _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticPlayCount.PlayCountTooltip _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.CollectionDropdown _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.CollectionDropdown.DrawableCollectionMenuItem _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.FilterControl _(UI)_ | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Screens.Select.FilterControl.DifficultyRangeSlider _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Select.FilterControl.DifficultyRangeSlider.DifficultyBoundSliderBar _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.FilterControl.GroupModeDropdown _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.FilterControl.ScopedBeatmapSetDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Screens.Select.FilterControl.SongSelectSearchTextBox.InnerTextBox _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Select.BeatmapDetailsArea _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapDetailsArea.Header _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Select.BeatmapDetailsArea.WedgeSelector.TabItem _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore _(loại)_ | 33 | 0/66 | 0 | 33 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.DateAndStatisticsPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.ModsPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.LeaderboardScoreTooltip.PerformanceStatisticRow _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.RankLabel _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardScore.ScoreComponentLabel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapLeaderboardWedge _(loại)_ | 31 | 0/62 | 0 | 31 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.FailRetryDisplay.GraphDrawable.GraphDrawNode _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.MetadataDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.RatingSpreadDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.SuccessRateDisplay _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.TagsLine _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.TagsLine.TagsOverflowPopover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapMetadataWedge.UserRatingDisplay _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.DifficultyDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.DifficultyStatisticsDisplay _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.FavouriteButton _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.HeartIcon _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.Statistic _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticDifficulty _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticPlayCount _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.BeatmapTitleWedge.StatisticPlayCount.PlayCountTooltip _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.CollectionDropdown _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.CollectionDropdown.DrawableCollectionMenuItem _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.FilterControl _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Screens.Select.FilterControl.DifficultyRangeSlider _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Select.FilterControl.DifficultyRangeSlider.DifficultyBoundSliderBar _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.FilterControl.GroupModeDropdown _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.FilterControl.ScopedBeatmapSetDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Screens.Select.FilterControl.SongSelectSearchTextBox.InnerTextBox _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
 | osu.Game.Screens.Select.FilterCriteria | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Screens.Select.FilterCriteria.OptionalRange | 17 | 31/34 | 14 | 0 | 91.2% |
 | osu.Game.Screens.Select.FilterCriteria.OptionalTextFilter | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Screens.Select.FilterQueryParser | 66 | 116/132 | 50 | 0 | 87.9% |
-| osu.Game.Screens.Select.FooterButtonMods _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.FooterButtonMods.ModCountText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.FooterButtonOptions _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.FooterButtonOptions.Popover _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Select.FooterButtonRandom _(UI)_ | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Select.LeftSideInteractionContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Select.ModSpeedHotkeyHandler | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Select.NoResultsPlaceholder _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.Panel _(UI)_ | 19 | 0/38 | 0 | 19 | 0.0% |
-| osu.Game.Screens.Select.Panel.PulsatingBox _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Select.PanelBeatmap _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Screens.Select.PanelBeatmapSet _(UI)_ | 11 | 0/22 | 0 | 11 | 0.0% |
-| osu.Game.Screens.Select.PanelBeatmapSet.SpreadDisplay _(UI)_ | 29 | 0/58 | 0 | 29 | 0.0% |
-| osu.Game.Screens.Select.PanelBeatmapStandalone _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Select.PanelBeatmapStandalone.SpreadDisplay _(UI)_ | 25 | 0/50 | 0 | 25 | 0.0% |
-| osu.Game.Screens.Select.PanelGroup _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Screens.Select.PanelGroupRankDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.PanelGroupRankedStatus _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Select.PanelGroupStarDifficulty _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.PanelLocalRankDisplay _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Select.PanelSetBackground _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.PanelUpdateBeatmapButton _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Select.RealmPopulatingOnlineLookupSource | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Screens.Select.SoloSongSelect _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Screens.Select.SongSelect _(UI)_ | 88 | 0/176 | 0 | 88 | 0.0% |
-| osu.Game.Screens.Select.SongSelectTouchInputDetector | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Screens.Spectate.SpectatorScreen _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Screens.Utility.ButtonWithKeyBind _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Utility.CircleGameplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Utility.CircleGameplay.SampleHitCircle _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Screens.Utility.LatencyArea _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Utility.LatencyCertifierScreen _(UI)_ | 20 | 0/40 | 0 | 20 | 0.0% |
-| osu.Game.Screens.Utility.ScrollingGameplay _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Screens.Utility.ScrollingGameplay.SampleNote _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Screens.Utility.SampleComponents.LatencyCursorContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Screens.Utility.SampleComponents.LatencyCursorContainer.LatencyCursor _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Screens.Utility.SampleComponents.LatencyMovableBox _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Seasonal.IntroChristmas _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Seasonal.IntroChristmas.TrianglesIntroSequence _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Seasonal.IntroChristmas.TrianglesIntroSequence.GlitchingTriangles _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Seasonal.MainMenuSeasonalLighting _(UI)_ | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Seasonal.OsuLogoChristmas _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Seasonal.SeasonalMenuSideFlashes _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ArgonProSkin | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ArgonSkin | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Skinning.BeatmapSkinProvidingContainer _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Skinning.FontAdjustableSkinComponent.WeightDropdown.DropdownControl _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.GlobalSkinnableContainerLookup | 9 | 17/18 | 8 | 0 | 94.4% |
-| osu.Game.Skinning.ISerialisableDrawable | 2 | 2/4 | 0 | 0 | 50.0% |
-| osu.Game.Skinning.LegacyBeatmapSkin | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.LegacyColourCompatibility | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacyDefaultComboCounter _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Skinning.LegacyHealthDisplay _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.LegacyHealthDisplay.LegacyFill _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacyHealthDisplay.LegacyMarker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.LegacyHealthDisplay.LegacyNewStyleMarker _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacyHealthDisplay.LegacyOldStyleMarker _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.LegacyJudgementPieceNew _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.LegacyJudgementPieceOld _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Skinning.LegacyKeyCounter _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.LegacyKeyCounterDisplay _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Skinning.LegacyKiaiFlashingDrawable _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacyManiaSkinDecoder | 10 | 20/20 | 10 | 0 | 100.0% |
-| osu.Game.Skinning.LegacyPerformancePointsCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.LegacyRankDisplay _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Skinning.LegacySkin | 39 | 0/78 | 0 | 39 | 0.0% |
-| osu.Game.Skinning.LegacySkinDecoder | 4 | 8/8 | 4 | 0 | 100.0% |
-| osu.Game.Skinning.LegacySkinEncoder | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Skinning.LegacySkinExtensions | 15 | 0/30 | 0 | 15 | 0.0% |
-| osu.Game.Skinning.LegacySkinExtensions.SkinnableTextureAnimation _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.LegacySkinTransformer | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Skinning.LegacySongProgress _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacySpriteText _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.LegacySpriteText.LegacyGlyphStore _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Skinning.LegacyTextureLoaderStore | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.MaxDimensionLimitedTextureLoaderStore | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.PausableSkinnableSound _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Skinning.PoolableSkinnableSample _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Skinning.RealmBackedResourceStore | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.ResourceStoreBackedSkin | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.RetroSkin | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.RulesetSkinProvidingContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Skinning.SerialisableDrawableExtensions | 9 | 16/18 | 7 | 0 | 88.9% |
-| osu.Game.Skinning.SerialisedDrawableInfo | 7 | 8/14 | 4 | 3 | 57.1% |
-| osu.Game.Skinning.Skin | 24 | 0/48 | 0 | 24 | 0.0% |
-| osu.Game.Skinning.SkinConfiguration | 2 | 4/4 | 2 | 0 | 100.0% |
-| osu.Game.Skinning.SkinImporter | 13 | 0/26 | 0 | 13 | 0.0% |
-| osu.Game.Skinning.SkinInfo | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.SkinManager | 22 | 0/44 | 0 | 22 | 0.0% |
-| osu.Game.Skinning.SkinProvidingContainer _(UI)_ | 18 | 0/36 | 0 | 18 | 0.0% |
-| osu.Game.Skinning.SkinProvidingContainer.DisableableSkinSource _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.SkinReloadableDrawable _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.SkinnableContainer _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.SkinnableDrawable _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Skinning.SkinnableSound _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Skinning.SkinnableSprite _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Skinning.SkinnableSprite.SpriteSelectorControl _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Skinning.SkinnableSpriteText _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Skinning.TrianglesSkin | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Skinning.Components.ArgonJudgementCounter _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Skinning.Components.ArgonJudgementCounterDisplay _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Skinning.Components.BeatmapAttributeText _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.Components.BigBlackBox _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.Components.PlayerName _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Skinning.Triangles.TrianglesPerformancePointsCounter _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Skinning.Triangles.TrianglesUnstableRateCounter _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Select.FooterButtonMods _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.FooterButtonMods.ModCountText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.FooterButtonOptions _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.FooterButtonOptions.Popover _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Select.FooterButtonRandom _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Select.LeftSideInteractionContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Select.ModSpeedHotkeyHandler _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Select.NoResultsPlaceholder _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.Panel _(loại)_ | 19 | 0/38 | 0 | 19 | 0.0% |
+| osu.Game.Screens.Select.Panel.PulsatingBox _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Select.PanelBeatmap _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Screens.Select.PanelBeatmapSet _(loại)_ | 11 | 0/22 | 0 | 11 | 0.0% |
+| osu.Game.Screens.Select.PanelBeatmapSet.SpreadDisplay _(loại)_ | 29 | 0/58 | 0 | 29 | 0.0% |
+| osu.Game.Screens.Select.PanelBeatmapStandalone _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Select.PanelBeatmapStandalone.SpreadDisplay _(loại)_ | 25 | 0/50 | 0 | 25 | 0.0% |
+| osu.Game.Screens.Select.PanelGroup _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Screens.Select.PanelGroupRankDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.PanelGroupRankedStatus _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Select.PanelGroupStarDifficulty _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.PanelLocalRankDisplay _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Select.PanelSetBackground _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.PanelUpdateBeatmapButton _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Select.RealmPopulatingOnlineLookupSource _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Screens.Select.SoloSongSelect _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Screens.Select.SongSelect _(loại)_ | 88 | 0/176 | 0 | 88 | 0.0% |
+| osu.Game.Screens.Select.SongSelectTouchInputDetector _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Screens.Spectate.SpectatorScreen _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Screens.Utility.ButtonWithKeyBind _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Utility.CircleGameplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Utility.CircleGameplay.SampleHitCircle _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Screens.Utility.LatencyArea _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Utility.LatencyCertifierScreen _(loại)_ | 20 | 0/40 | 0 | 20 | 0.0% |
+| osu.Game.Screens.Utility.ScrollingGameplay _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Screens.Utility.ScrollingGameplay.SampleNote _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Screens.Utility.SampleComponents.LatencyCursorContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Screens.Utility.SampleComponents.LatencyCursorContainer.LatencyCursor _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Screens.Utility.SampleComponents.LatencyMovableBox _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Seasonal.IntroChristmas _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Seasonal.IntroChristmas.TrianglesIntroSequence _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Seasonal.IntroChristmas.TrianglesIntroSequence.GlitchingTriangles _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Seasonal.MainMenuSeasonalLighting _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Seasonal.OsuLogoChristmas _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Seasonal.SeasonalMenuSideFlashes _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.ArgonProSkin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.ArgonSkin _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Skinning.BeatmapSkinProvidingContainer _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Skinning.FontAdjustableSkinComponent.WeightDropdown.DropdownControl _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.GlobalSkinnableContainerLookup _(loại)_ | 9 | 17/18 | 8 | 0 | 94.4% |
+| osu.Game.Skinning.ISerialisableDrawable _(loại)_ | 2 | 2/4 | 0 | 0 | 50.0% |
+| osu.Game.Skinning.LegacyBeatmapSkin _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Skinning.LegacyColourCompatibility _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacyDefaultComboCounter _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Skinning.LegacyHealthDisplay _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.LegacyHealthDisplay.LegacyFill _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacyHealthDisplay.LegacyMarker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.LegacyHealthDisplay.LegacyNewStyleMarker _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacyHealthDisplay.LegacyOldStyleMarker _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.LegacyJudgementPieceNew _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.LegacyJudgementPieceOld _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Skinning.LegacyKeyCounter _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Skinning.LegacyKeyCounterDisplay _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Skinning.LegacyKiaiFlashingDrawable _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacyManiaSkinDecoder _(loại)_ | 10 | 20/20 | 10 | 0 | 100.0% |
+| osu.Game.Skinning.LegacyPerformancePointsCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.LegacyRankDisplay _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Skinning.LegacySkin _(loại)_ | 39 | 0/78 | 0 | 39 | 0.0% |
+| osu.Game.Skinning.LegacySkinDecoder _(loại)_ | 4 | 8/8 | 4 | 0 | 100.0% |
+| osu.Game.Skinning.LegacySkinEncoder _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Skinning.LegacySkinExtensions _(loại)_ | 15 | 0/30 | 0 | 15 | 0.0% |
+| osu.Game.Skinning.LegacySkinExtensions.SkinnableTextureAnimation _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.LegacySkinTransformer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Skinning.LegacySongProgress _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacySpriteText _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.LegacySpriteText.LegacyGlyphStore _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Skinning.LegacyTextureLoaderStore _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Skinning.MaxDimensionLimitedTextureLoaderStore _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.PausableSkinnableSound _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Skinning.PoolableSkinnableSample _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Skinning.RealmBackedResourceStore _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.ResourceStoreBackedSkin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.RetroSkin _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.RulesetSkinProvidingContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Skinning.SerialisableDrawableExtensions _(loại)_ | 9 | 16/18 | 7 | 0 | 88.9% |
+| osu.Game.Skinning.SerialisedDrawableInfo _(loại)_ | 7 | 8/14 | 4 | 3 | 57.1% |
+| osu.Game.Skinning.Skin _(loại)_ | 24 | 0/48 | 0 | 24 | 0.0% |
+| osu.Game.Skinning.SkinConfiguration _(loại)_ | 2 | 4/4 | 2 | 0 | 100.0% |
+| osu.Game.Skinning.SkinImporter _(loại)_ | 13 | 0/26 | 0 | 13 | 0.0% |
+| osu.Game.Skinning.SkinInfo _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.SkinManager _(loại)_ | 22 | 0/44 | 0 | 22 | 0.0% |
+| osu.Game.Skinning.SkinProvidingContainer _(loại)_ | 18 | 0/36 | 0 | 18 | 0.0% |
+| osu.Game.Skinning.SkinProvidingContainer.DisableableSkinSource _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.SkinReloadableDrawable _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.SkinnableContainer _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Skinning.SkinnableDrawable _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Skinning.SkinnableSound _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Skinning.SkinnableSprite _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Skinning.SkinnableSprite.SpriteSelectorControl _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Skinning.SkinnableSpriteText _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Skinning.TrianglesSkin _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Skinning.Components.ArgonJudgementCounter _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Skinning.Components.ArgonJudgementCounterDisplay _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Skinning.Components.BeatmapAttributeText _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.Components.BigBlackBox _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.Components.PlayerName _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Skinning.Triangles.TrianglesPerformancePointsCounter _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Skinning.Triangles.TrianglesUnstableRateCounter _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Storyboards.Storyboard | 4 | 8/8 | 4 | 0 | 100.0% |
 | osu.Game.Storyboards.StoryboardExtensions | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Storyboards.StoryboardSprite | 10 | 17/20 | 8 | 1 | 85.0% |
-| osu.Game.Storyboards.Commands.StoryboardBlendingParametersCommand | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Storyboards.Commands.StoryboardBlendingParametersCommand _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Storyboards.Commands.StoryboardCommand | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Storyboards.Commands.StoryboardCommandGroup | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Storyboards.Commands.StoryboardFlipHCommand | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Storyboards.Commands.StoryboardFlipVCommand | 1 | 0/2 | 0 | 1 | 0.0% |
 | osu.Game.Storyboards.Commands.StoryboardLoopingGroup.StoryboardLoopingCommand | 2 | 0/4 | 0 | 2 | 0.0% |
 | osu.Game.Storyboards.Commands.StoryboardTriggerGroup | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboard _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboard.StoryboardResourceLookupStore _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardAnimation _(UI)_ | 14 | 0/28 | 0 | 14 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardLayer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardLayer.LayerElementContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardSample _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardSprite _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardVideo _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Storyboards.Drawables.DrawableStoryboardVideo.DrawableVideo _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Storyboards.Drawables.StoryboardTriggerController | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Storyboards.Drawables.StoryboardTriggerController.HitSampleTriggerDefinition | 21 | 0/42 | 0 | 21 | 0.0% |
-| osu.Game.Tests.CleanRunHeadlessGameHost | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.FlakyTestAttribute | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.PollingChatClient | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Beatmaps.BeatmapConversionTest | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Tests.Beatmaps.HitObjectSampleTest _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Tests.Beatmaps.HitObjectSampleTest.SkinSourceDependencyContainer _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest.TestBeatmapSkin _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest.TestSkin _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Beatmaps.TestBeatmap | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Tests.Visual.EditorClockTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.EditorSavingTestScene _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tests.Visual.EditorTestScene _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Visual.EditorTestScene.TestEditor _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.LegacyReplayPlaybackTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.ModFailConditionTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.ModFailConditionTestScene.ModFailConditionTestPlayer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Visual.ModTestScene _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Visual.ModTestScene.ModTestPlayer _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Visual.OsuGameTestScene _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Tests.Visual.OsuGridTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.OsuManualInputManagerTestScene _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tests.Visual.OsuTestScene _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Tests.Visual.OsuTestScene.ClockBackedTestWorkingBeatmap _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.OsuTestScene.ClockBackedTestWorkingBeatmap.TrackVirtualManual _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tests.Visual.PlacementBlueprintTestScene _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Visual.PlayerTestScene _(UI)_ | 12 | 0/24 | 0 | 12 | 0.0% |
-| osu.Game.Tests.Visual.RateAdjustedBeatmapTestScene _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Visual.ReplayStabilityTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.ScreenTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.ScrollingTestContainer _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Visual.SkinnableTestScene _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.SkinnableTestScene.TestLegacySkin _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tests.Visual.TestPlayer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tests.Visual.TestUserLookupCache | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Tests.Visual.Gameplay.ScoringTestScene _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.GraphContainer _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.GraphContainer.GraphTooltip _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.LegendEntry _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Tests.Visual.Metadata.TestMetadataClient | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Tests.Visual.Multiplayer.TestMultiplayerClient | 45 | 0/90 | 0 | 45 | 0.0% |
-| osu.Game.Tests.Visual.OnlinePlay.OnlinePlayTestScene _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Tests.Visual.OnlinePlay.OnlinePlayTestSceneDependencies | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Tests.Visual.OnlinePlay.TestRoomRequestsHandler | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Tests.Visual.Spectator.TestSpectatorClient | 9 | 0/18 | 0 | 9 | 0.0% |
-| osu.Game.Updater.MobileUpdateNotifier _(UI)_ | 8 | 0/16 | 0 | 8 | 0.0% |
-| osu.Game.Updater.NoActionUpdateManager _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Updater.UpdateManager _(UI)_ | 6 | 0/12 | 0 | 6 | 0.0% |
-| osu.Game.Updater.UpdateManager.UpdateAvailableNotification _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Updater.UpdateManager.UpdateDownloadProgressNotification _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Updater.UpdateManager.UpdateReadyNotification _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.ConfirmBlockActionDialog _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.ExtendedUserPanel _(UI)_ | 10 | 0/20 | 0 | 10 | 0.0% |
-| osu.Game.Users.IUser | 3 | 6/6 | 3 | 0 | 100.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboard _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboard.StoryboardResourceLookupStore _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardAnimation _(loại)_ | 14 | 0/28 | 0 | 14 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardLayer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardLayer.LayerElementContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardSample _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardSprite _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardVideo _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Storyboards.Drawables.DrawableStoryboardVideo.DrawableVideo _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Storyboards.Drawables.StoryboardTriggerController _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Storyboards.Drawables.StoryboardTriggerController.HitSampleTriggerDefinition _(loại)_ | 21 | 0/42 | 0 | 21 | 0.0% |
+| osu.Game.Tests.CleanRunHeadlessGameHost _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.FlakyTestAttribute _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.PollingChatClient _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Beatmaps.BeatmapConversionTest _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Tests.Beatmaps.HitObjectSampleTest _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Tests.Beatmaps.HitObjectSampleTest.SkinSourceDependencyContainer _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest.TestBeatmapSkin _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.Beatmaps.LegacyBeatmapSkinColourTest.TestSkin _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Beatmaps.TestBeatmap _(loại)_ | 1 | 2/2 | 1 | 0 | 100.0% |
+| osu.Game.Tests.Visual.EditorClockTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.EditorSavingTestScene _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tests.Visual.EditorTestScene _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.Visual.EditorTestScene.TestEditor _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.LegacyReplayPlaybackTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.ModFailConditionTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.ModFailConditionTestScene.ModFailConditionTestPlayer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Visual.ModTestScene _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Visual.ModTestScene.ModTestPlayer _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Visual.OsuGameTestScene _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Tests.Visual.OsuGridTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.OsuManualInputManagerTestScene _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tests.Visual.OsuTestScene _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Tests.Visual.OsuTestScene.ClockBackedTestWorkingBeatmap _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.OsuTestScene.ClockBackedTestWorkingBeatmap.TrackVirtualManual _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tests.Visual.PlacementBlueprintTestScene _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Visual.PlayerTestScene _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Tests.Visual.RateAdjustedBeatmapTestScene _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.Visual.ReplayStabilityTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.ScreenTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.ScrollingTestContainer _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.Visual.SkinnableTestScene _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.SkinnableTestScene.TestLegacySkin _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tests.Visual.TestPlayer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tests.Visual.TestUserLookupCache _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Tests.Visual.Gameplay.ScoringTestScene _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.GraphContainer _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.GraphContainer.GraphTooltip _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.Gameplay.ScoringTestScene.LegendEntry _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Tests.Visual.Metadata.TestMetadataClient _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Tests.Visual.Multiplayer.TestMultiplayerClient _(loại)_ | 45 | 0/90 | 0 | 45 | 0.0% |
+| osu.Game.Tests.Visual.OnlinePlay.OnlinePlayTestScene _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Tests.Visual.OnlinePlay.OnlinePlayTestSceneDependencies _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Tests.Visual.OnlinePlay.TestRoomRequestsHandler _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Tests.Visual.Spectator.TestSpectatorClient _(loại)_ | 9 | 0/18 | 0 | 9 | 0.0% |
+| osu.Game.Updater.MobileUpdateNotifier _(loại)_ | 8 | 0/16 | 0 | 8 | 0.0% |
+| osu.Game.Updater.NoActionUpdateManager _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Updater.UpdateManager _(loại)_ | 6 | 0/12 | 0 | 6 | 0.0% |
+| osu.Game.Updater.UpdateManager.UpdateAvailableNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Updater.UpdateManager.UpdateDownloadProgressNotification _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Updater.UpdateManager.UpdateReadyNotification _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.ConfirmBlockActionDialog _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.ExtendedUserPanel _(loại)_ | 10 | 0/20 | 0 | 10 | 0.0% |
+| osu.Game.Users.IUser _(loại)_ | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.EditingBeatmap | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.InLobby | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.SpectatingUser | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Users.UserActivity.WatchingReplay | 1 | 2/2 | 1 | 0 | 100.0% |
-| osu.Game.Users.UserBrickPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.UserCoverBackground.Cover _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.UserGridPanel _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.UserListPanel _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Users.UserPanel _(UI)_ | 16 | 0/32 | 0 | 16 | 0.0% |
-| osu.Game.Users.UserRankPanel _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Users.Drawables.ClickableAvatar _(UI)_ | 5 | 0/10 | 0 | 5 | 0.0% |
-| osu.Game.Users.Drawables.ClickableTeamFlag _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Users.Drawables.ClickableUsername _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
-| osu.Game.Users.Drawables.DrawableAvatar _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Users.Drawables.DrawableFlag _(UI)_ | 2 | 0/4 | 0 | 2 | 0.0% |
-| osu.Game.Users.Drawables.DrawableTeamFlag _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.Drawables.UpdateableAvatar _(UI)_ | 4 | 0/8 | 0 | 4 | 0.0% |
-| osu.Game.Users.Drawables.UpdateableFlag _(UI)_ | 1 | 0/2 | 0 | 1 | 0.0% |
-| osu.Game.Users.Drawables.UpdateableTeamFlag _(UI)_ | 7 | 0/14 | 0 | 7 | 0.0% |
-| osu.Game.Users.Drawables.UserCardTooltip _(UI)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Users.UserBrickPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.UserCoverBackground.Cover _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.UserGridPanel _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.UserListPanel _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Users.UserPanel _(loại)_ | 16 | 0/32 | 0 | 16 | 0.0% |
+| osu.Game.Users.UserRankPanel _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Users.Drawables.ClickableAvatar _(loại)_ | 5 | 0/10 | 0 | 5 | 0.0% |
+| osu.Game.Users.Drawables.ClickableTeamFlag _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Users.Drawables.ClickableUsername _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
+| osu.Game.Users.Drawables.DrawableAvatar _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Users.Drawables.DrawableFlag _(loại)_ | 2 | 0/4 | 0 | 2 | 0.0% |
+| osu.Game.Users.Drawables.DrawableTeamFlag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.Drawables.UpdateableAvatar _(loại)_ | 4 | 0/8 | 0 | 4 | 0.0% |
+| osu.Game.Users.Drawables.UpdateableFlag _(loại)_ | 1 | 0/2 | 0 | 1 | 0.0% |
+| osu.Game.Users.Drawables.UpdateableTeamFlag _(loại)_ | 7 | 0/14 | 0 | 7 | 0.0% |
+| osu.Game.Users.Drawables.UserCardTooltip _(loại)_ | 3 | 0/6 | 0 | 3 | 0.0% |
 | osu.Game.Utils.BindableValueAccessor | 6 | 12/12 | 6 | 0 | 100.0% |
 | osu.Game.Utils.ColourUtils | 3 | 6/6 | 3 | 0 | 100.0% |
 | osu.Game.Utils.FileUtils | 4 | 8/8 | 4 | 0 | 100.0% |
@@ -2153,7 +2108,7 @@ Loại 8799 điều kiện trong type UI (dẫn xuất từ `osu.Framework.Graph
 | osu.Game.Utils.OrdinalSortByCaseStringComparer | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Utils.Period | 1 | 2/2 | 1 | 0 | 100.0% |
 | osu.Game.Utils.PeriodTracker | 9 | 18/18 | 9 | 0 | 100.0% |
-| osu.Game.Utils.SentryLogger | 12 | 0/24 | 0 | 12 | 0.0% |
+| osu.Game.Utils.SentryLogger _(loại)_ | 12 | 0/24 | 0 | 12 | 0.0% |
 | osu.Game.Utils.TernaryStateUtils | 2 | 4/4 | 2 | 0 | 100.0% |
 | osu.Game.Utils.ZipUtils | 1 | 2/2 | 1 | 0 | 100.0% |
 
