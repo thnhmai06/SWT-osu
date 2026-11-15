@@ -82,6 +82,14 @@ dotnet $TOOL report --maps /tmp/map-A.json,/tmp/map-B.json --hits /tmp/hits --ou
 
 `--hide-skipped true` bỏ hẳn các điều kiện thuộc nhóm DI/Database/type không dựng được khỏi mọi bảng (không liệt kê trong báo cáo); dùng khi nhóm này nằm ngoài phạm vi kiểm thử.
 
+### Liệt kê phần bị loại (dùng cho branch coverage logic thuần)
+
+```bash
+dotnet $TOOL list-excluded --project <Production>/<Production>.csproj --out /tmp/ex-<Production>.json
+```
+
+Chỉ đọc, không ghi đè mã nguồn. Dùng đúng `selfReason`/`reasonOfMember` của `instrument` nên cùng một phân loại với cột `Exclusion`. JSON gồm `Files` (mọi file đã quét, đường dẫn tính từ thư mục cha của project) và `Spans` (`File`, `StartLine`, `EndLine`, `Group`, `Kind` = `type` cho loại cả type hoặc `member`). `Group` giữ tiền tố `~` cho nhóm bị ẩn khi `--hide-skipped true`. `tools/branch_coverage_report.py --exclude` dùng file này để tách branch coverage logic thuần.
+
 Kết quả: `condition-coverage.md` (phương pháp + bảng solution/project) và `condition-coverage-<assembly>.md`
 (bảng namespace, type, method và danh sách điều kiện còn thiếu cho từng project).
 
