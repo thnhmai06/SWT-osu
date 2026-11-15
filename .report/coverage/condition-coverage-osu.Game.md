@@ -10,7 +10,7 @@ Tổng: 48 | 95/96 | 47 | 0 | 99.0%
 
 ## Namespace — chỉ tính logic thuần
 
-Loại 48 điều kiện phụ thuộc ngoài (UI: 0, Input: 0, Host/IO: 0, Database/Online: 48, DI: 0, TestInfra: 0). Còn lại: 0 | 0/0 | 0 | 0 | 0.0%
+Loại 48 điều kiện phụ thuộc ngoài (UI: 0, Input: 0, Host/IO: 48, Database/Online: 0, DI: 0, TestInfra: 0). Còn lại: 0 | 0/0 | 0 | 0 | 0.0%
 
 | Namespace | Điều kiện | Outcome đã phủ | Phủ đủ cả T/F | Chưa được đánh giá | Condition coverage |
 |---|---|---|---|---|---|
