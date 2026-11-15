@@ -77,8 +77,10 @@ CONDCOV_DIR=/tmp/hits dotnet test <TestProject>.csproj --no-build
 
 # 3) báo cáo
 dotnet $TOOL report --maps /tmp/map-A.json,/tmp/map-B.json --hits /tmp/hits --out .report/coverage \
-                    --title "Condition coverage — ..." [--scope '<regex trên Namespace.Type.Member>']
+                    --title "Condition coverage — ..." [--scope '<regex trên Namespace.Type.Member>'] [--hide-skipped true]
 ```
+
+`--hide-skipped true` bỏ hẳn các điều kiện thuộc nhóm DI/Database/type không dựng được khỏi mọi bảng (không liệt kê trong báo cáo); dùng khi nhóm này nằm ngoài phạm vi kiểm thử.
 
 Kết quả: `condition-coverage.md` (phương pháp + bảng solution/project) và `condition-coverage-<assembly>.md`
 (bảng namespace, type, method và danh sách điều kiện còn thiếu cho từng project).
