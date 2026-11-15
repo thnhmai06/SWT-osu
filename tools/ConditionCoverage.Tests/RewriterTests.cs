@@ -205,4 +205,52 @@ public class RewriterTests
         Assert.That(reason("OneEasyCtor"), Is.Empty, "có ctor không cần thứ ngoài thì dựng được");
         Assert.That(reason("Util"), Is.Empty);
     }
+
+    [Test]
+    public void ListExcludedSpansResolveToTheSameReasonAsConditions()
+    {
+        const string code = """
+                            namespace Realms { public class RealmObject { } }
+                            namespace osu.Framework.Platform { public class Storage { public bool Exists; } }
+                            namespace osu.Framework.Allocation { public class ResolvedAttribute : System.Attribute { } }
+                            namespace Game
+                            {
+                                public class Box : osu.Framework.Graphics.Drawable
+                                {
+                                    public bool A(bool x, bool y) => x && y;
+                                    public class Inner { public bool B(bool x, bool y) => x || y; }
+                                }
+                                public class Mixed
+                                {
+                                    public bool Pure(bool x, bool y) => x && y;
+                                    public bool UsesHost(osu.Framework.Platform.Storage s, bool y) => s.Exists && y;
+                                }
+                                public class Stored : Realms.RealmObject { public bool M(bool a, bool b) => a && b; }
+                                public class NeedsStorage { public NeedsStorage(osu.Framework.Platform.Storage s) { } public bool M(bool a, bool b) => a && b; }
+                            }
+                            """;
+        var tree = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest));
+        var comp = CSharpCompilation.Create("Snippet", [tree], refs, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var model = comp.GetSemanticModel(tree);
+
+        var registry = new Registry("Snippet");
+        ConditionRewriter.Rewrite(model, "Snippet.cs", registry);
+        var spans = ConditionRewriter.ListExcluded(model, "Snippet.cs");
+
+        string resolve(int line)
+        {
+            var hit = spans.Where(sp => sp.StartLine <= line && line <= sp.EndLine).ToList();
+            foreach (string kind in new[] { "type", "member" })
+            {
+                var k = hit.Where(sp => sp.Kind == kind).OrderBy(sp => sp.EndLine - sp.StartLine).FirstOrDefault();
+                if (k != null) return k.Group;
+            }
+
+            return "";
+        }
+
+        Assert.That(registry.Conditions, Is.Not.Empty);
+        foreach (var c in registry.Conditions)
+            Assert.That(resolve(c.Line), Is.EqualTo(c.Exclusion), $"{c.Type}.{c.Member}");
+    }
 }

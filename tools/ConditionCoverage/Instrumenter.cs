@@ -48,4 +48,37 @@ public static class Instrumenter
         Console.WriteLine($"{asm}: {files} file, {reg.Decisions.Count} decision, {reg.Conditions.Count} condition");
         return map;
     }
+
+    /// <summary>Quét project (chỉ đọc) và ghi JSON các type/member bị loại, dùng cùng bộ lọc file với <see cref="RunAsync"/>.</summary>
+    public static async Task<ExcludedMap> ListExcludedAsync(string csproj, string outPath, string? root)
+    {
+        using var ws = MSBuildWorkspace.Create(new Dictionary<string, string> { ["Configuration"] = "Debug" });
+        ws.RegisterWorkspaceFailedHandler(e => { if (e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure && !e.Diagnostic.Message.Contains("known")) Console.Error.WriteLine("  [ws] " + e.Diagnostic.Message); });
+
+        var project = await ws.OpenProjectAsync(Path.GetFullPath(csproj));
+        string projDir = Path.GetDirectoryName(project.FilePath)!;
+        string rootDir = Path.GetFullPath(root ?? Path.Combine(projDir, ".."));
+        var map = new ExcludedMap { Assembly = project.AssemblyName };
+
+        foreach (var doc in project.Documents)
+        {
+            string? path = doc.FilePath;
+            if (path == null || !path.StartsWith(projDir + Path.DirectorySeparatorChar) || !path.EndsWith(".cs")) continue;
+
+            string rel = Path.GetRelativePath(projDir, path).Replace('\\', '/');
+            if (rel.StartsWith("obj/") || rel.StartsWith("bin/") || rel.EndsWith(".g.cs") || rel.EndsWith(".Designer.cs")) continue;
+
+            var model = await doc.GetSemanticModelAsync();
+            if (model == null) continue;
+
+            string repoRel = Path.GetRelativePath(rootDir, path).Replace('\\', '/');
+            map.Files.Add(repoRel);
+            map.Spans.AddRange(ConditionRewriter.ListExcluded(model, repoRel));
+        }
+
+        map.Files.Sort(StringComparer.Ordinal);
+        File.WriteAllText(outPath, JsonSerializer.Serialize(map));
+        Console.WriteLine($"{map.Assembly}: {map.Files.Count} file, {map.Spans.Count} span bị loại");
+        return map;
+    }
 }
